@@ -35,14 +35,13 @@ from bennu.core import (
 )
 # Backwards compatibility
 from bennu.core.session import ExplorationSession as SessionState
-from bennu.agent.orchestrator import BennuAgent
 
 __all__ = [
     # Version
     "__version__",
     # Core models
     "Annotation",
-    "AnnotationSource", 
+    "AnnotationSource",
     "AnomalyHit",
     "ComparisonResult",
     "GenomicRegion",
@@ -66,6 +65,13 @@ __all__ = [
     "Strand",
     # Session
     "SessionState",
-    # Agent
+    # Agent (lazy-loaded)
     "BennuAgent",
 ]
+
+
+def __getattr__(name):
+    if name == "BennuAgent":
+        from bennu.agent.orchestrator import BennuAgent
+        return BennuAgent
+    raise AttributeError(f"module 'bennu' has no attribute {name}")

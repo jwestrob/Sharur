@@ -1,0 +1,35 @@
+name: sharur
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  # Python
+  - python=3.11
+  - pip
+
+  # Compiled scientific libs (conda-forge)
+  - numpy<2.0            # pyTMHMM needs numpy 1.x ABI
+  - scipy
+  - pandas
+  - pyarrow
+  - h5py
+  - matplotlib
+
+  # Bioinformatics CLI tools (bioconda)
+  - prodigal
+  - diamond
+  - hmmer
+  - quast
+  - minced
+  - gecco
+  - dbcan               # run_dbcan / dbCAN HMMdb
+  - kalign3             # multiple sequence alignment
+  - foldseek
+
+  # Document generation (conda-forge)
+  - pandoc
+
+  # pip-only packages
+  - pip:
+      - -e ".[all]"

@@ -133,6 +133,8 @@ The predicate system is what makes Sharur more than a database wrapper. Annotati
 
 This lets agents ask functional questions ("find electron-bifurcating hydrogenases") instead of remembering accession numbers.
 
+The predicate system is a project very much in progress; there are tens of thousands of accessions that need to be described. Around 2-3,000 have been tagged so far. Pull requests to add more predicate tags to our system are more than welcome; they require careful attention and review. Please notify if you find any errors in classification among the predicate system. 
+
 ## Ingest pipeline
 
 | Stage | Tool | Output |
