@@ -12,7 +12,6 @@ so we subclass dsp.modules.gpt3.GPT3 to get the LM interface that DSPy expects.
 
 from __future__ import annotations
 
-import os
 from typing import Any, Optional
 
 import dsp
