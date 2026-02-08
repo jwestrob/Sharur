@@ -132,6 +132,7 @@ This lets agents ask functional questions ("find electron-bifurcating hydrogenas
 | 02 | DFAST (optional) | QC and taxonomic classification |
 | 03 | Prodigal | Gene calling (.faa, .gff) |
 | 04 | Astra | PFAM, KEGG, HydDB, DefenseFinder annotations |
+| 04 (opt-in) | Astra + VOGdb | Viral orthologous groups (`--databases ... VOGdb`) |
 | 05a | GECCO | Biosynthetic gene clusters |
 | 05b | dbCAN | CAZyme annotations |
 | 05c | minced | CRISPR arrays |
