@@ -129,9 +129,9 @@ def run_astra_scan(
         help="Number of threads to use"
     ),
     databases: List[str] = typer.Option(
-        ["PFAM", "KOFAM", "HydDB"],
+        ["PFAM", "KOFAM", "HydDB", "DefenseFinder"],
         "--databases", "-d",
-        help="Databases to scan against (PFAM, KOFAM, HydDB, etc.)"
+        help="Databases to scan against (PFAM, KOFAM, HydDB, DefenseFinder, VOGdb, etc.)"
     ),
     use_cutoffs: bool = typer.Option(
         True,

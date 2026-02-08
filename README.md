@@ -131,12 +131,14 @@ This lets agents ask functional questions ("find electron-bifurcating hydrogenas
 | 01 | QUAST | Assembly quality metrics |
 | 02 | DFAST (optional) | QC and taxonomic classification |
 | 03 | Prodigal | Gene calling (.faa, .gff) |
-| 04 | Astra | PFAM, KEGG, HydDB, VOGdb annotations |
+| 04 | Astra | PFAM, KEGG, HydDB, DefenseFinder annotations |
 | 05a | GECCO | Biosynthetic gene clusters |
 | 05b | dbCAN | CAZyme annotations |
 | 05c | minced | CRISPR arrays |
 | 06 | ESM2 | Protein embeddings (320-dim) |
 | 07 | Builder | DuckDB knowledge base + predicates |
+
+Stage 07 also runs **hydrogenase subgroup classification** when HydDB annotations are present: DIAMOND search against the HydDB reference database assigns NiFe/FeFe subgroups (e.g., Group 1a, Group 4e), with PF00374 validation to filter Complex I false positives. Results are written as predicates (`nife_group1`, `fefe_groupB`, etc.). See `scripts/classify_hydrogenases.py` for details.
 
 ## Development
 
