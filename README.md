@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" alt="Sharur logo" width="256">
+</p>
+
 # Bennu
 
 > A data plane for agent-driven metagenomic discovery
