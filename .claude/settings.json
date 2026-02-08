@@ -1,0 +1,54 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/check-python.sh",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  },
+  "skills": {
+    "explore": {
+      "description": "Curiosity-driven exploration of Bennu metagenomic data. Find surprising loci, test hypotheses, build narratives. Use with --focus metabolism|phage|defense|novel",
+      "file": "skills/explore.md"
+    },
+    "survey": {
+      "description": "Systematic, comprehensive survey with rigorous documentation. Produces genome profiles, findings.jsonl, figures, and final report.",
+      "file": "skills/survey.md"
+    },
+    "literature": {
+      "description": "Search scientific literature for information about proteins, domains, pathways. Usage: /literature DUF3683",
+      "file": "skills/literature.md"
+    },
+    "q": {
+      "description": "Quick ad-hoc query. Fast answers, no ceremony. Usage: /q giant unannotated proteins",
+      "file": "skills/query.md"
+    },
+    "characterize": {
+      "description": "Deep characterization pipeline for unknown proteins: context + structure + foldseek + literature → hypothesis",
+      "file": "skills/characterize.md"
+    },
+    "pathway": {
+      "description": "Check metabolic pathway completeness using KEGG annotations. Usage: /pathway Wood-Ljungdahl",
+      "file": "skills/pathway.md"
+    },
+    "defense": {
+      "description": "Analyze defense systems: CRISPR-Cas, R-M, toxin-antitoxin, anti-phage mechanisms",
+      "file": "skills/defense.md"
+    },
+    "compare": {
+      "description": "Comparative genomics between genomes or groups. Usage: /compare GENOME_A GENOME_B",
+      "file": "skills/compare.md"
+    },
+    "metabolism": {
+      "description": "Analyze energy and carbon metabolism: hydrogenases, electron transport, carbon fixation, fermentation",
+      "file": "skills/metabolism.md"
+    }
+  }
+}

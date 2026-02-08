@@ -1,0 +1,580 @@
+# Agent Knowledge Base (CLAUDE.md / AGENTS.md)
+
+**Audience:** All AI agents working on Bennu (Claude Code, Codex, Antigravity, etc.)
+
+This file provides shared context, canonical tools, and best practices for agent-driven metagenomic analysis.
+
+**Quick Start:**
+- **Data organization:** `DATA_ORGANIZATION.md`
+- **Canonical report generator:** `scripts/generate_viral_genome_report.py`
+- **Skills (Claude Code):** `.claude/skills/*.md`
+- **Validation protocols:** `.claude/skills/_validation_protocols.md`
+
+## Project Overview
+
+Bennu is an agent-driven metagenomic exploration system. It's a data plane that makes large metagenomic datasets navigable by AI agents.
+
+## Key Documentation
+
+| Document | Purpose |
+|----------|---------|
+| `QUICKSTART.md` | **NEW DATASET INGESTION (START HERE)** |
+| `DATA_ORGANIZATION.md` | Data directory structure, archival procedures |
+| `src/ingest/README.md` | Ingestion pipeline stages (00-07) documentation |
+| `.claude/skills/_validation_protocols.md` | Shared validation protocols for all analysis skills |
+
+## Skills & Workflows (Claude Code)
+
+**Location:** `.claude/skills/*.md`
+
+| Skill | Purpose | Key Outputs |
+|-------|---------|-------------|
+| `explore.md` | Curiosity-driven discovery, locus exploration | findings.jsonl, neighborhood figures |
+| `survey.md` | Systematic comprehensive survey | genome_profiles.tsv, comparative analysis |
+| `characterize.md` | Single protein/locus characterization + batch structural analysis | Detailed functional analysis, structure predictions |
+| `defense.md` | Defense system identification | CRISPR, RM, CBASS inventories |
+| `metabolism.md` | Metabolic pathway reconstruction | Pathway completeness, gaps |
+| `compare.md` | Cross-genome comparative analysis | Synteny, orthology |
+| `literature.md` | Systematic literature/database research for functional ambiguity | Domain characterization, Foldseek hit interpretation, pathway context |
+
+**Critical Guidelines in Skills:**
+- Use canonical report generator: `scripts/generate_viral_genome_report.py`
+- Scientific rigor: No hyperbole, evidence-calibrated claims
+- Data organization: Standard directory structure for report compatibility
+- MAG interpretation: "Not detected" not "absent"
+
+**For non-Claude Code agents:** Reference the workflows in these files, but execute using your native tooling.
+
+---
+
+## Standard Analysis Workflow
+
+**CRITICAL: Always include independent review at the end of analysis.**
+
+### Three-Tier Architecture
+
+```
+Coordinator
+│
+├── 1. Survey (systematic coverage)
+│   └── Spawns topic subagents: metabolic, defense, surface, etc.
+│
+├── 2. Explore (hypothesis-driven discovery)
+│   └── Reads survey → generates hypotheses → spawns testing subagents
+│
+└── 3. Review (independent validation)
+    └── Validates claims, catches errors, performs follow-ups
+```
+
+### Review Agent Responsibilities
+
+**Goal**: Independent validation that strengthens confidence in findings and catches gaps before publication.
+
+1. **Validate protein counts with direct queries**
+   ```sql
+   SELECT COUNT(DISTINCT a.protein_id) as n_proteins,
+          COUNT(DISTINCT p.bin_id) as n_genomes
+   FROM annotations a
+   JOIN proteins p ON a.protein_id = p.protein_id
+   WHERE a.accession = 'PF12345'
+   ```
+
+2. **Cross-check PFAM functions using predicates**
+   ```python
+   radical_sam = b.search_by_predicates(has=['radical_sam'])
+   ```
+
+3. **Verify statistical tests** — re-run independently, check effect sizes not just p-values
+
+4. **Assess assembly quality for absence claims** — high-quality (<50 contigs) vs fragmented (>200 contigs)
+
+5. **Perform missing analyses** — HydDB, CheckM2, pathway completeness as needed
+
+6. **Publication readiness assessment** — specific blocking issues + actionable fixes
+
+### Proper PFAM Function Verification
+
+**Use predicates and names, not accession memory.**
+
+```python
+# GOOD: Search by semantic predicate
+radical_sam_proteins = b.search_by_predicates(has=['radical_sam'])
+
+# GOOD: Validate function against database name
+result = b.store.execute("""
+    SELECT accession, name, COUNT(*)
+    FROM annotations WHERE accession = 'PF04055'
+    GROUP BY accession, name
+""").fetchone()
+print(f"{result[0]} = {result[1]}")  # PF04055 = Radical_SAM
+
+# AVOID: Relying on accession-to-function memory
+```
+
+**For pathway claims**, verify multiple components and confirm PFAM names match expected enzymes.
+
+### Context-First Analysis Protocol
+
+**The domain tells you the fold. The neighbors tell you the function.**
+
+When a PFAM domain or KO averages >10 hits per genome, it is a **superfamily-level annotation** — treat as structural info, not functional evidence.
+
+```python
+# 1. Co-annotation check
+co_annots = b.store.execute("""
+    SELECT a2.source, a2.accession, a2.name, COUNT(DISTINCT a1.protein_id) as n
+    FROM annotations a1
+    JOIN annotations a2 ON a1.protein_id = a2.protein_id
+    WHERE a1.accession = 'K23108' AND a2.accession != 'K23108'
+    GROUP BY a2.source, a2.accession, a2.name
+    ORDER BY n DESC LIMIT 10
+""").fetchall()
+
+# 2. Neighborhood with ALL annotation sources
+result = b.get_neighborhood(protein_id, window=5, all_annotations=True)
+
+# 3. KEGG REST API for pathway context
+# curl -s https://rest.kegg.jp/link/module/ko:K23108
+```
+
+**Claim escalation:** "Contains domain X" → "Functions as Y" (co-annotations + neighborhood) → "Encodes pathway Z" (multiple markers + co-localization) → "Phylum performs W" (all above + conservation).
+
+---
+
+## Canonical Tools
+
+### Report Generation
+**Script:** `scripts/generate_viral_genome_report.py` (37KB, proven generator)
+**Use for:** Comprehensive viral genome reports with locus diagrams
+**Do NOT:** Create new report generators from scratch
+
+### Hydrogenase Classification
+**Script:** `scripts/classify_hydrogenases.py`
+**Requires:** HydDB HMMs via Astra, DIAMOND database (`data/reference/hyddb/HydDB_all.dmnd`)
+**Output:** Subgroup-level classification (NiFe Group 1-4, FeFe A-C)
+**Note:** Pipeline uses PF00374 filter (validates Groups 1-3, rejects all Group 4). Agents must run neighborhood-based curation to rescue Group 4 — see skill specs.
+
+### Embedding Visualization
+**Script:** `scripts/visualize_embeddings.py`
+**Requires:** `umap-learn`, `plotly` (interactive) or `matplotlib` (static)
+**Usage:** `python scripts/visualize_embeddings.py --db data/DATASET/bennu.duckdb --output figures/umap.html --color-by genome`
+**Color modes:** `genome` (by bin_id), `predicate` (highlight specific predicate), `annotation` (by PFAM/KEGG name)
+
+### Local Foldseek
+**Binary:** Auto-detected via `which foldseek`
+**Database path:** `~/.foldseek/{db_name}/{db_name}` (e.g. `~/.foldseek/pdb100/pdb100`)
+**Behavior:** `search_foldseek()` tries local binary first (`prefer_local=True` by default), falls back to web API for databases not installed locally. Local search is faster and has no rate limits.
+
+### Visualization
+**Bennu operators:** `b.visualize_neighborhood()`, `b.visualize_domains()`
+**Multi-source locus script:** `scripts/plot_locus_multisource.py`
+**Do NOT:** Create matplotlib code from scratch when operators exist
+
+---
+
+## Check for Functional Detail (IMPORTANT)
+
+**Don't stop at generic predicates — drill into subgroup-level detail when available.**
+
+### Hydrogenases
+If you see `hydrogenase` or `hydrogen_metabolism` predicates, **check for subgroup predicates**:
+- `nife_group1`–`nife_group4`, `mbh_hydrogenase`, `ech_hydrogenase`
+- `fefe_groupA`, `fefe_groupB`, `fefe_groupC`
+- Group 3 vs Group 4 reveals uptake vs evolution, respiratory vs fermentative
+
+### CRISPR Systems
+`crispr_associated` or `cas_domain` → check `type_i_crispr`, `type_ii_crispr`, `type_iii_crispr`, effectors (`cas3`, `cas9`, `cas10`), and `loci` table for CRISPR arrays.
+
+### Defense Systems
+`defense_system` → check DefenseFinder source annotations for specific system types (RM, CBASS, BREX, DISARM, etc.)
+
+### CAZy Enzymes
+`carbohydrate_active` → check `cazy:GH5`, `cazy:GT2`, etc. GH families reveal substrate specificity.
+
+**Why this matters:** "41 genomes have hydrogenases" tells you nothing. "5 have Group 4 energy-conserving, 6 have Group 3 F420-reducing" reveals metabolic diversity.
+
+---
+
+## Key Files
+
+| File | Purpose |
+|------|---------|
+| `PREDICATE_PLAN.md` | Predicate system design and status |
+| `bennu/predicates/vocabulary.py` | All predicate definitions |
+| `bennu/predicates/generator.py` | Main predicate computation |
+| `bennu/predicates/mappings/` | PFAM/KEGG/CAZy/VOGdb → predicate mappings |
+| `bennu/predicates/topology.py` | TM helix prediction wrapper (pyTMHMM) |
+| `bennu/operators/structure.py` | ESM3 structure prediction |
+| `bennu/operators/foldseek.py` | Foldseek structural homology search |
+| `bennu/operators/manifest.py` | Analysis manifest for session continuity |
+| `bennu/reports/template.py` | PDF report generation with themes |
+
+## Analysis Manifest System
+
+Each dataset has a `manifest.json` for session continuity:
+
+```python
+from bennu.operators import Bennu
+b = Bennu("data/YOUR_DATASET/bennu.duckdb")
+
+print(b.resume())  # Status, findings, structures, recent activity
+
+# Auto-tracking: structures and figures are automatically recorded
+b.predict_structure("protein_id")
+b.visualize_neighborhood("protein_id", title="My Figure", legend="Caption text")
+
+# Manual updates
+b.manifest.log_session("exploration", "Completed CRISPR locus analysis")
+b.manifest.save()
+```
+
+**Migration:** `python scripts/migrate_to_manifest.py data/my_dataset/`
+
+**Report from manifest:**
+```python
+from bennu.reports import generate_report_from_manifest, BennuReport
+generate_report_from_manifest("data/my_dataset/manifest.json", "output.pdf", theme="viral")
+```
+
+## Quick Reference: Structure Prediction & Foldseek
+
+```python
+b = Bennu("data/YOUR_DATASET/bennu.duckdb")
+
+# Predict structure (requires ESM_API_KEY env var)
+result = b.predict_structure("protein_id", output_path="structures/protein.pdb")
+
+# Search structure against databases
+b.list_foldseek_databases()  # afdb50, afdb-swissprot, pdb100
+hits = b.search_foldseek("structures/protein.pdb", databases=["afdb50", "pdb100"], top_k=10)
+
+# Convenience: search for protein (uses existing PDB if available)
+hits = b.search_foldseek_for_protein("protein_id")
+```
+
+**Interpreting results:**
+- TM-score > 0.5: Similar fold, likely related function
+- TM-score > 0.7: High confidence homology
+- pdb100 hits: Known structures with experimental validation
+- afdb50 hits: AlphaFold predictions, check UniProt
+
+### All-Atom Folding with Ligands (ESM3 Forge API)
+
+**Status:** Not yet implemented in Bennu operators. The Forge API supports all-atom folding with ligands via `/api/v1/fold_all_atom` (proteins, DNA, RNA, ligands, covalent bonds). See API docs for `ProteinInput`, `LigandInput`, and `covalent_bonds` parameters.
+
+**Alternatives:** AlphaFold3, RoseTTAFold All-Atom, AlphaFill (post-hoc enrichment).
+
+## Astra Annotation Pipeline
+
+Astra manages pre-installed HMM databases for annotation searches.
+
+**Location:** `~/astra/` (source), installed via pyenv shim
+
+**Installed databases** (`~/.config/Astra/`): PFAM, KOFAM, VOGdb, HydDB, DefenseFinder, CRISPRCasFinder, CANT-HYD
+
+```bash
+astra search --installed_hmms DefenseFinder --threads 12 \
+    --prot_in <directory_with_faa_files> \
+    --outdir <output_directory> \
+    --cut_ga
+```
+
+**Notes:**
+- `--prot_in` expects a **directory** containing `.faa` files, not a single file
+- Output: `<outdir>/<database>_hits_df.tsv` (tab-separated)
+- `--cut_ga` uses gathering thresholds (recommended)
+- For single files: `mkdir source/ && cp proteins.faa source/`
+
+## Testing
+
+```bash
+python -m pytest tests/test_operators/test_predicate_generator.py -v
+python -c "from bennu.predicates.vocabulary import ALL_PREDICATES, list_categories; print(f'Total: {len(ALL_PREDICATES)}'); print(f'Categories: {list_categories()}')"
+python -c "from bennu.predicates.mappings.pfam_map import PFAM_TO_PREDICATES, PFAM_PATTERNS; print(f'Direct: {len(PFAM_TO_PREDICATES)}, Patterns: {len(PFAM_PATTERNS)}')"
+```
+
+---
+
+## Predicate System Design Principles
+
+- **Gene-level vs Locus-level**: Components get gene-level tags; system calls require clustering
+- **Tiered predicates**: Generic domain → specific system (e.g., `cas_domain` → `crispr_associated`)
+- **Biological accuracy**: Ferredoxins are electron carriers, not substrate indicators
+- **Pathway completeness**: Single markers don't prove pathway function
+- **Carbon fixation**: RuBisCO without PRK is NOT Calvin cycle (likely nucleotide salvage). `calvin_cycle` requires PRK.
+- **Methanogenesis**: Only MCR complex triggers; H4MPT enzymes alone are insufficient
+- **Topology**: pyTMHMM integration (optional: `pip install bennu[topology]`). TMbed planned for signal peptide prediction.
+
+### PFAM Mapping Scaling
+
+To avoid growing `pfam_map.py` indefinitely:
+- Extension file: `data/reference/pfam_predicate_map.tsv` (PFAM_ID_OR_NAME \t pred1,pred2,... \t optional_note)
+- `pfam_map.py` loads and merges this at import time
+- Bulk expansions go in the TSV, curated core mappings stay in Python
+
+---
+
+## Code Standards & Best Practices
+
+### Report Generation
+
+**Two report scripts — use the right one:**
+
+| Script | Purpose | When to use |
+|--------|---------|-------------|
+| `scripts/generate_exploration_report.py` | Auto-generated survey/exploration report | After `/survey` or `/explore` completes |
+| `scripts/generate_paper_report.py` | Hand-curated paper-style report | Publication-quality output with narrative sections |
+
+**Never create ad-hoc PDF generation** — always adapt existing report generators.
+
+**Report filename convention:** Use ONE consistent filename per dataset: `data/DATASET_NAME/COMPREHENSIVE_REPORT.pdf`. Do not create versioned or dated filenames.
+
+**Report writing guidelines:**
+- Avoid sensationalized framing — no "Mystery - Resolved" sections
+- TnpB classification — report as transposases unless clearly within a CRISPR/Cas locus
+- Use neutral, factual language
+
+### Visualization
+
+**When modifying existing plotting code, make targeted edits only.** Read the script first, understand the layout, change only what was requested.
+
+**Use Bennu's visualization operators:**
+```python
+b.visualize_neighborhood(protein_id, window=12, output_path="output.png")
+```
+
+**Multi-source locus diagrams:**
+```bash
+python scripts/plot_locus_multisource.py \
+    --db data/dataset/bennu.duckdb \
+    --protein PROTEIN_ID \
+    --window 12 \
+    --output figures/locus.png \
+    --title "Custom Title"
+```
+
+Features: Multi-source annotation priority (Foldseek > DefenseFinder > PADLOC > PFAM/KEGG/VOGdb), clean label boxes, gene numbers below track, absolute genome coordinates, CRISPR array detection.
+
+**Custom implementations** should use `dna_features_viewer` with `annotate_inline=False`, gene numbers below the track, absolute coordinates on x-axis. Color by functional category, not annotation source. For ambiguous annotations (Cas12f vs TnpB), use honest labels.
+
+### Database Queries
+
+```python
+# Use 'name' column for domain names, not 'annotation_id'
+# Use 'score' column, not 'bitscore'
+# Always COUNT(DISTINCT protein_id) for protein counts — repeat domains inflate COUNT(*)
+
+# Prefer Bennu operators over raw DuckDB:
+b.search("unannotated AND giant")
+b.get_neighborhood(protein_id, window=10)
+b.get_neighborhood(protein_id, window=5, all_annotations=True)
+```
+
+### External Data Lookup
+
+**Research PDB hits via WebFetch** — don't guess protein functions:
+```python
+WebFetch("https://www.rcsb.org/structure/5fms", "What is the protein function?")
+```
+
+---
+
+## Biological Interpretation Guidelines
+
+### MAG Interpretation
+
+**Cardinal Rule: Absence of evidence ≠ evidence of absence**
+
+MAGs are inherently incomplete. A missing gene does NOT mean the organism lacks it.
+
+| Contigs | Fragmentation | How to Interpret Absence |
+|---------|---------------|--------------------------|
+| <50 | Low | Reasonably reliable |
+| 50-200 | Moderate | Include caveats |
+| >200 | High | "Not detected" only |
+| genes/contig <5 | Very high | Many genes likely missing |
+
+**Language:** "No hydrogenases were detected in this MAG (N contigs)" — NOT "Genome X lacks hydrogenases."
+
+**Comparative claims:** Before saying "A has X but B doesn't", verify B isn't just more fragmented.
+
+### Giant Protein Annotation Recovery
+
+**Standard PFAM bitscore cutoffs are LENGTH-BIASED.** Giant proteins (>1000 aa) often show zero hits. E-values are NOT length-biased — use them instead.
+
+```bash
+# For proteins >1000 aa with 0 standard hits
+hmmsearch --domE 1e-5 ~/.config/Astra/PFAM/Pfam-A.hmm giant_protein.faa
+```
+
+**When to apply:** >1000 aa with 0 hits, >2000 aa with <3 hits, before reporting any giant protein as "unannotated."
+
+**E-value interpretation:** ≤1e-10 high confidence; 1e-10 to 1e-5 moderate (meaningful for giants); 1e-5 to 1e-3 weak (check for repeat patterns).
+
+**Common giant protein architectures:** Big_13/Big_3_3/Big_8 (adhesins), TPR/HEAT/WD40 (scaffolds), Beta_helix (autotransporters), ANK (signaling), Cadherin/FN3 (adhesion).
+
+### Hydrogenase Classification
+
+**Primary source: HydDB HMMs** — use HydDB over PFAM for hydrogenase typing.
+
+#### Two-Layer Validation
+
+**Layer 1 — Pipeline (automated, `classify_hydrogenases.py`):**
+- PF00374 (NiFeSe_Hases) validates NiFe Groups 1-3
+- PF00346/PF00329 without PF00374 → rejected as Complex I
+- **LIMITATION:** Rejects all Group 4 NiFe (Hyf/Hyc/Mbh/Ech diverged too far for PF00374)
+
+**Layer 2 — Agent curation (neighborhood-based):**
+For unvalidated HydDB NiFe hits, check ±8 gene neighborhood:
+
+| Evidence | KEGG KOs | Verdict |
+|----------|----------|---------|
+| Hyf (hydrogenase-4) | K12136-K12145 | Real Group 4f |
+| Hyc (formate hydrogenlyase) | K15828-K15833 | Real Group 4 |
+| Maturation (HypA-F, HycI) | K04651-K04656, K03605 | Real hydrogenase |
+| Complex I (nuoA-N) | K00330-K00343 | False positive |
+| No evidence either way | — | Reject conservatively |
+
+#### Key PFAM Domains
+
+| Domain | Accession | Meaning |
+|--------|-----------|---------|
+| NiFeSe_Hases | PF00374 | NiFe large subunit (Groups 1-3 only) |
+| Fe_hyd_lg_C | PF02906 | FeFe hydrogenase large subunit |
+| Ni_hydr_CYTB | PF01292 | Cytochrome b — NOT a hydrogenase |
+| Complex1_49kDa | PF00346 | NADH dehydrogenase — FALSE POSITIVE without neighborhood |
+
+#### Subgroups
+
+| NiFe Group | Function | Key Predicates |
+|------------|----------|----------------|
+| 1a-1l | Respiratory uptake | `nife_group1`, `uptake_hydrogenase` |
+| 2a-2e | Cytoplasmic H2 sensors | `nife_group2`, `h2_sensor` |
+| 3a-3d | Bidirectional, cofactor-coupled | `nife_group3`, `bidirectional_hydrogenase` |
+| 4a-4i | Energy-conserving, H2-evolving | `nife_group4`, `mbh_hydrogenase`, `ech_hydrogenase` |
+
+| FeFe Group | Function | Key Predicates |
+|------------|----------|----------------|
+| A1-A4 | Monomeric fermentative | `fefe_groupA` |
+| B | Electron-bifurcating | `fefe_groupB`, `bifurcating_hydrogenase` |
+| C1-C3 | Sensory/regulatory | `fefe_groupC` |
+
+### Cytochrome Validation
+
+**Always validate respiratory system claims, especially "lacks cytochromes."**
+
+Three detection methods:
+1. **Predicates:** `b.search_by_predicates(has=["cytochrome"])`
+2. **Annotations:** `WHERE LOWER(name) LIKE '%cytochrome%'`
+3. **Sequence motifs:** CxxCH heme-binding motif (`re.search(r'C..CH', seq)`)
+
+If all three find nothing AND genome is high-quality (<50 contigs), absence is plausible. Otherwise, state uncertainty.
+
+---
+
+## Scientific Rigor
+
+**Under-promise, over-deliver.** Rigorous, conservative science is more impressive than hyperbolic claims.
+
+**Forbidden language:** "confirms/proves/demonstrates" (unless truly definitive), "unprecedented/first ever/groundbreaking", "paradigm-shifting/revolutionary", "Nature/Science-tier discovery"
+
+**Required language:** "suggests/indicates/supports", "consistent with/compatible with", "to our knowledge" (after verification), "provides evidence for"
+
+| Evidence | Appropriate Language |
+|----------|---------------------|
+| Sequence annotation | "annotated as", "contains domain" |
+| Structural homology | "structural similarity suggests" |
+| Genomic context | "co-located with", "may indicate" |
+| Literature | "similar to", "consistent with" |
+| Experimental | "demonstrates", "confirms" (OK!) |
+
+**Common errors:** Domain presence ≠ function proof. MAG absence ≠ biological absence. Single marker ≠ pathway presence. Transposase ≠ mobile element proof (could be Cas12f). "First in analysis" ≠ "first ever."
+
+---
+
+## Subagent Strategies
+
+### Sub-Agent Protocol
+- Sub-agents are **leaf agents** — they should NOT spawn further agents
+- Provide full context in the prompt (don't assume they know prior conversation)
+- Each sub-agent produces a discrete output (markdown report, JSONL findings)
+- Parent agent synthesizes outputs from all sub-agents
+
+### Background Tasks
+```python
+result = Task(subagent_type="general-purpose", prompt="...", run_in_background=True)
+# Returns immediately with task_id; use TaskOutput(task_id) to check
+```
+
+### Practical Tips
+- **Parallel genome browser agents** work well (quarters or groups)
+- **JSONL for findings** — easy to append, merge, and process
+- **DuckDB write locks** — run subagents SEQUENTIALLY if they write to the database
+- **Check database schema** before writing queries (`DESCRIBE table_name`)
+- **Research external data** via WebFetch — don't guess PDB functions
+- **Don't create new visualization code** when operators exist
+- **Don't create ad-hoc report generators** — adapt existing ones
+
+---
+
+## Large Dataset Performance (>50k proteins)
+
+**Rules:**
+1. **Never** `b.search("")` on large datasets — use `b.total_proteins()` or specific predicates
+2. **Always** check `len(result)` before iterating
+3. **Always** use `[:10]` or `[:100]` limits when iterating
+4. **Combine** specific predicates (AND/OR) to narrow results
+5. **Aggregate** in SQL, not Python loops
+6. **Limit** to 20-30 visualizations per analysis
+7. **If query takes >5 seconds**, stop and refine
+
+```python
+# BAD
+all_proteins = b.search("")
+for pid in all_proteins: ...
+
+# GOOD
+targets = b.search("hydrogenase AND membrane_protein")
+for pid in targets[:10]: ...
+
+# GOOD — SQL aggregation
+stats = b.store.execute("""
+    SELECT COUNT(*) as total, AVG(length) as avg_size, MAX(length) as max_size
+    FROM proteins
+""").fetchone()
+```
+
+---
+
+## Standard Directory Structure
+
+```
+data/{dataset_name}/
+├── bennu.duckdb                # Core database
+├── manifest.json               # Analysis state
+├── source/                     # Input files (.faa)
+├── annotations/                # Annotation results (pfam.tsv, kegg.tsv, etc.)
+├── embeddings/                 # ESM2 embeddings (LanceDB)
+├── structures/                 # ESM3 PDBs + Foldseek results
+├── exploration/                # Exploration outputs
+├── survey/                     # Survey outputs
+├── reports/                    # Generated reports
+└── figures/                    # Top-level figures
+```
+
+## Archives
+
+| Dataset | Date | Location | Size |
+|---------|------|----------|------|
+| Altiarchaeota (63 genomes) | 2026-02-03 | `data/archives/altiarchaeota_2026-02-03/` | 789 MB |
+| Thorarchaeota/Heimdall | 2026-02-03 | `data/archives/thorarchaeota_2026-02-03/` | ~50 MB |
+| Heimdall Megavirus | 2026-02-04 | `data/archives/heimdall_megavirus_2026-02-04/` | 16 MB |
+| BioFrame DSL (retired) | 2026-02-07 | `data/archives/bioframe_2026-02-07/` | — |
+
+## TODO
+
+- [x] **Census phase in `/survey`** — Mandatory annotation inventory before subagent spawning (replaces planned `/atlas` skill)
+- [x] **Validation protocol consolidation** — Shared `_validation_protocols.md` referenced by all skills
+- [x] **Schema versioning** — `bennu/storage/migrations.py` with version tracking
+- [x] **Literature skill enhancement** — 6 structured research protocols (domain, Foldseek, KEGG, lineage, defense, protein family)
+- [ ] **Pipeline orchestration + Sharur rename** (deferred)

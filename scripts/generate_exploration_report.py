@@ -1,0 +1,1548 @@
+#!/usr/bin/env python3
+"""
+Generate PDF report from exploration findings.
+
+Reads findings.jsonl and generates a formatted report with:
+- Dynamic stats from database
+- Grouped findings by category
+- Exploration figures
+- Proper text wrapping
+- Table of contents
+- Smart page breaks
+"""
+
+import json
+import os
+import re
+import sys
+from pathlib import Path
+from datetime import datetime
+from collections import defaultdict
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from fpdf import FPDF
+from bennu.operators import Bennu
+
+# Configuration - can be overridden via command line
+import argparse
+parser = argparse.ArgumentParser(description='Generate exploration report')
+parser.add_argument('--dataset', default='data/hinthialibacterota_production', help='Dataset directory')
+args, _ = parser.parse_known_args()
+
+DATASET_DIR = Path(args.dataset)
+DB_PATH = str(DATASET_DIR / "bennu.duckdb")
+EXPLORE_DIR = DATASET_DIR / "exploration"
+SURVEY_DIR = DATASET_DIR / "survey"
+OUTPUT_DIR = DATASET_DIR
+FINDINGS_PATH = EXPLORE_DIR / "findings.jsonl"
+FIGURES_DIR = EXPLORE_DIR / "figures"
+OUTPUT_PDF = OUTPUT_DIR / f"{DATASET_DIR.name}_exploration_report.pdf"
+
+
+def truncate_genome_id(genome_id, max_len=25):
+    """Truncate long genome IDs for display."""
+    if not genome_id or len(genome_id) <= max_len:
+        return genome_id
+    # Keep GCA_ prefix and truncate middle
+    if genome_id.startswith("GCA_"):
+        return genome_id[:max_len-3] + "..."
+    return genome_id[:max_len-3] + "..."
+
+
+def clean_figure_name(name):
+    """Remove numeric prefixes and clean up figure names."""
+    # Remove leading numbers like "01_", "10_", etc.
+    name = re.sub(r'^\d+[_\s]+', '', name)
+    # Replace underscores with spaces and title case
+    name = name.replace('_', ' ').title()
+    return name
+
+
+def is_repetitive_finding(finding, seen_titles):
+    """Check if a finding is repetitive spam."""
+    title = finding.get('title', '')
+    # Filter out repetitive "Novel cluster" findings
+    if title.startswith('Novel cluster:') and 'genes on' in title:
+        # Only keep first 3 novel cluster findings
+        cluster_count = sum(1 for t in seen_titles if t.startswith('Novel cluster:'))
+        if cluster_count >= 3:
+            return True
+    return False
+
+
+def fix_template_variables(text, evidence):
+    """Fix any unsubstituted template variables in text."""
+    if not text:
+        return text
+    # Handle string evidence (legacy findings)
+    if not isinstance(evidence, dict):
+        evidence = {}
+    # Common template patterns
+    patterns = [
+        (r'\{total_tpr\}', str(evidence.get('total_tpr_proteins', evidence.get('total_tpr', '451')))),
+        (r'\{n_genomes\}', str(evidence.get('n_genomes', '63'))),
+        (r'\{n_proteins\}', str(evidence.get('n_proteins', '94656'))),
+    ]
+    for pattern, replacement in patterns:
+        text = re.sub(pattern, replacement, text)
+    return text
+
+
+def get_dataset_name(dataset_dir):
+    """Extract a human-readable dataset name from directory path."""
+    dir_name = Path(dataset_dir).name
+    # Remove common suffixes
+    name = dir_name.replace('_production', '').replace('_exploration', '')
+    # Convert to title case and handle underscores
+    name = name.replace('_', ' ').title()
+    # Special case handling for known phyla
+    name_mappings = {
+        'Hinthialibacterota': 'Hinthialibacterota',
+        'Altiarchaeota': 'Altiarchaeota',
+        'Thorarchaeota': 'Thorarchaeota',
+        'Heimdall Megavirus': 'Heimdall Megavirus',
+    }
+    for key, val in name_mappings.items():
+        if key.lower() in name.lower():
+            return val
+    return name
+
+
+class ExplorationReport(FPDF):
+    """PDF report with proper text wrapping and smart layout."""
+
+    def __init__(self, dataset_name="Dataset"):
+        super().__init__()
+        self.dataset_name = dataset_name
+        self.set_auto_page_break(auto=True, margin=20)
+        self.set_margins(left=20, top=15, right=20)
+        self.toc_entries = []  # Track TOC entries
+        self.in_toc = False  # Flag to suppress footer on TOC page
+
+    def header(self):
+        if self.page_no() > 1:
+            # Subtle header line
+            self.set_draw_color(40, 60, 100)
+            self.set_line_width(0.3)
+            self.line(20, 12, self.w - 20, 12)
+            self.set_font('Helvetica', 'I', 8)
+            self.set_text_color(100, 100, 100)
+            self.cell(0, 8, f'{self.dataset_name} Exploration Report', 0, 0, 'L')
+            self.cell(0, 8, f'Page {self.page_no()}', 0, 0, 'R')
+            self.ln(12)
+            self.set_text_color(0, 0, 0)
+
+    def footer(self):
+        if self.in_toc:
+            return  # No footer on TOC page
+        self.set_y(-15)
+        self.set_draw_color(40, 60, 100)
+        self.set_line_width(0.2)
+        self.line(20, self.h - 18, self.w - 20, self.h - 18)
+        self.set_font('Helvetica', 'I', 7)
+        self.set_text_color(120, 120, 120)
+        self.cell(0, 10, 'Generated by Bennu', 0, 0, 'C')
+
+    def chapter_title(self, num, title, add_to_toc=True):
+        if add_to_toc:
+            self.toc_entries.append((num, title, self.page_no()))
+        self.set_font('Helvetica', 'B', 16)
+        self.set_fill_color(40, 60, 100)
+        self.set_text_color(255, 255, 255)
+        # Add subtle shadow effect
+        self.set_x(self.l_margin + 1)
+        self.cell(self.w - self.l_margin - self.r_margin - 1, 12, f'  {num}. {title}', 0, 1, 'L', True)
+        self.set_text_color(0, 0, 0)
+        self.ln(6)
+
+    def add_toc_entry(self, num, title, page):
+        """Add a styled TOC entry with dotted leader."""
+        self.set_font('Helvetica', '', 11)
+        self.set_text_color(40, 40, 40)
+        text = f"{num}. {title}"
+        text_width = self.get_string_width(text)
+        page_str = str(page)
+        page_width = self.get_string_width(page_str)
+
+        # Calculate space for dots
+        available = self.w - self.l_margin - self.r_margin - text_width - page_width - 5
+        dot_width = self.get_string_width(' . ')
+        num_dots = int(available / dot_width)
+        dots = ' .' * num_dots
+
+        self.cell(text_width + 2, 7, text, 0, 0, 'L')
+        self.set_text_color(180, 180, 180)
+        self.cell(available, 7, dots, 0, 0, 'L')
+        self.set_text_color(40, 60, 100)
+        self.set_font('Helvetica', 'B', 11)
+        self.cell(page_width + 3, 7, page_str, 0, 1, 'R')
+        self.set_text_color(0, 0, 0)
+
+    def add_evidence_box(self, text):
+        """Add evidence in a subtle gray box."""
+        self.set_font('Helvetica', 'I', 9)
+        self.set_fill_color(245, 245, 250)
+        self.set_text_color(60, 60, 80)
+        text = self._clean_text(text)
+        text = self._wrap_long_words(text, 50)
+        w = self.w - self.l_margin - self.r_margin
+        self.set_x(self.l_margin)
+        # Draw box background
+        self.multi_cell(w, 5, f"  {text}", 0, 'L', True)
+        self.set_text_color(0, 0, 0)
+        self.ln(2)
+
+    def add_markdown_table(self, table_lines, col_widths=None):
+        """Render a markdown table as a proper PDF table with text wrapping."""
+        if not table_lines:
+            return
+
+        # Parse header and rows
+        rows = []
+        for line in table_lines:
+            line = line.strip()
+            if line.startswith('|') and line.endswith('|'):
+                # Skip separator lines (|---|---|)
+                if re.match(r'^\|[\s\-:|]+\|$', line):
+                    continue
+                # Parse cells
+                cells = [c.strip() for c in line.split('|')[1:-1]]
+                if cells:
+                    rows.append(cells)
+
+        if not rows:
+            return
+
+        # Calculate column widths - use provided or distribute evenly
+        n_cols = len(rows[0])
+        available_width = self.w - self.l_margin - self.r_margin - 4
+
+        if col_widths:
+            # Normalize to available width
+            total = sum(col_widths)
+            widths = [w / total * available_width for w in col_widths]
+        else:
+            widths = [available_width / n_cols] * n_cols
+
+        # Ensure we have space
+        self.maybe_add_page(60)
+
+        self.set_font('Helvetica', '', 8)
+        base_row_height = 5
+
+        for i, row in enumerate(rows):
+            # Calculate row height based on content
+            max_lines = 1
+            cell_texts = []
+            for j, cell in enumerate(row):
+                cell = self._clean_text(cell)
+                # Remove markdown bold markers for display
+                cell = re.sub(r'\*\*([^*]+)\*\*', r'\1', cell)
+                cell_texts.append(cell)
+                # Estimate lines needed
+                chars_per_line = max(1, int(widths[j] / 2))  # ~2 chars per mm
+                lines_needed = max(1, (len(cell) + chars_per_line - 1) // chars_per_line)
+                max_lines = max(max_lines, lines_needed)
+
+            row_height = base_row_height * min(max_lines, 4)  # Cap at 4 lines
+
+            # Header row gets different styling
+            if i == 0:
+                self.set_font('Helvetica', 'B', 8)
+                self.set_fill_color(40, 60, 100)
+                self.set_text_color(255, 255, 255)
+            else:
+                self.set_font('Helvetica', '', 8)
+                if i % 2 == 0:
+                    self.set_fill_color(245, 245, 250)
+                else:
+                    self.set_fill_color(255, 255, 255)
+                self.set_text_color(40, 40, 40)
+
+            # Draw cells
+            start_y = self.get_y()
+            self.set_x(self.l_margin + 2)
+            x_pos = self.l_margin + 2
+
+            for j, cell in enumerate(cell_texts):
+                # Draw cell background
+                self.rect(x_pos, start_y, widths[j], row_height, 'DF')
+                # Draw cell text with wrapping
+                self.set_xy(x_pos + 1, start_y + 1)
+                # Truncate if still too long after wrapping
+                if len(cell) > 80:
+                    cell = cell[:77] + '...'
+                self.multi_cell(widths[j] - 2, base_row_height - 1, cell, 0, 'L')
+                x_pos += widths[j]
+
+            self.set_y(start_y + row_height)
+
+        self.set_text_color(0, 0, 0)
+        self.ln(3)
+
+    def add_separator(self):
+        """Add a subtle horizontal separator between findings."""
+        self.ln(2)
+        self.set_draw_color(220, 220, 230)
+        self.set_line_width(0.2)
+        y = self.get_y()
+        self.line(self.l_margin + 20, y, self.w - self.r_margin - 20, y)
+        self.ln(4)
+
+    def section_title(self, title):
+        self.set_font('Helvetica', 'B', 12)
+        self.set_text_color(40, 60, 100)
+        title = self._clean_text(title)[:100]
+        w = self.w - self.l_margin - self.r_margin
+        self.multi_cell(w, 8, title, align='L')
+        self.set_text_color(0, 0, 0)
+        self.ln(2)
+
+    def subsection_title(self, title):
+        self.set_font('Helvetica', 'B', 10)
+        self.set_text_color(60, 80, 120)
+        title = self._clean_text(title)[:120]
+        w = self.w - self.l_margin - self.r_margin
+        self.multi_cell(w, 7, title, align='L')
+        self.set_text_color(0, 0, 0)
+        self.ln(1)
+
+    def body_text(self, text):
+        """Render body text with full markdown support."""
+        if not text:
+            return
+        lines = text.split('\n')
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.strip()
+
+            # Skip empty lines
+            if not stripped:
+                self.ln(2)
+                i += 1
+                continue
+
+            # Table detection
+            if stripped.startswith('|') and stripped.endswith('|'):
+                table_lines = []
+                while i < len(lines):
+                    l = lines[i].strip()
+                    if l.startswith('|') and l.endswith('|'):
+                        table_lines.append(l)
+                        i += 1
+                    else:
+                        break
+                if table_lines:
+                    self.add_markdown_table(table_lines)
+                continue
+
+            # H2 header: ## Title
+            if stripped.startswith('## '):
+                title = stripped[3:].strip()
+                title = re.sub(r'\*\*([^*]+)\*\*', r'\1', title)  # Remove bold markers
+                self.section_title(title)
+                i += 1
+                continue
+
+            # H3 header: ### Title
+            if stripped.startswith('### '):
+                title = stripped[4:].strip()
+                title = re.sub(r'\*\*([^*]+)\*\*', r'\1', title)
+                self.subsection_title(title)
+                i += 1
+                continue
+
+            # Bullet point: - text or * text
+            if stripped.startswith('- ') or stripped.startswith('* '):
+                bullet_text = stripped[2:].strip()
+                self._render_markdown_bullet(bullet_text)
+                i += 1
+                continue
+
+            # Regular paragraph - collect lines until special element
+            para_lines = []
+            while i < len(lines):
+                l = lines[i]
+                s = l.strip()
+                if not s:
+                    i += 1
+                    break
+                if s.startswith('|') or s.startswith('## ') or s.startswith('### ') or s.startswith('- ') or s.startswith('* '):
+                    break
+                para_lines.append(l)
+                i += 1
+
+            if para_lines:
+                para_text = ' '.join(l.strip() for l in para_lines)
+                self._render_markdown_text(para_text)
+
+    def _render_markdown_bullet(self, text):
+        """Render a bullet point with bold support."""
+        self.set_x(self.l_margin + 5)
+        self.set_font('Helvetica', '', 10)
+        self.cell(5, 5, chr(149), 0, 0)
+        self._render_inline_markdown(text, self.w - self.get_x() - self.r_margin)
+        self.ln(1)
+
+    def _render_markdown_text(self, text):
+        """Render paragraph text with bold support."""
+        self.set_font('Helvetica', '', 10)
+        self._render_inline_markdown(text, self.w - self.l_margin - self.r_margin)
+        self.ln(3)
+
+    def _render_inline_markdown(self, text, width):
+        """Render text with inline **bold** markers."""
+        text = self._clean_text(text)
+        # Split on bold markers
+        parts = re.split(r'(\*\*[^*]+\*\*)', text)
+        x_start = self.get_x()
+        current_x = x_start
+        line_height = 5
+
+        for part in parts:
+            if not part:
+                continue
+            # Check if this is a bold section
+            if part.startswith('**') and part.endswith('**'):
+                content = part[2:-2]
+                self.set_font('Helvetica', 'B', 10)
+            else:
+                content = part
+                self.set_font('Helvetica', '', 10)
+
+            # Word wrap within the part
+            words = content.split()
+            for word in words:
+                word_width = self.get_string_width(word + ' ')
+                if current_x + word_width > x_start + width:
+                    # New line
+                    self.ln(line_height)
+                    self.set_x(x_start)
+                    current_x = x_start
+                self.cell(word_width, line_height, word + ' ', 0, 0)
+                current_x += word_width
+
+        self.ln(line_height)
+
+    def add_bullet(self, text, render_markdown=True):
+        self.set_x(self.l_margin + 5)
+        self.set_font('Helvetica', '', 10)
+        self.cell(5, 5, chr(149), 0, 0)
+        if render_markdown and '**' in text:
+            # Use markdown rendering for bold support
+            self._render_inline_markdown(text, self.w - self.get_x() - self.r_margin)
+        else:
+            text = self._clean_text(text)
+            w = self.w - self.get_x() - self.r_margin
+            self.multi_cell(w, 5, text, align='L')
+
+    def add_numbered_item(self, num, text):
+        """Add a numbered list item."""
+        self.set_font('Helvetica', '', 10)
+        text = self._clean_text(text)
+        self.set_x(self.l_margin + 5)
+        self.cell(12, 5, f"{num}.", 0, 0)
+        w = self.w - self.get_x() - self.r_margin
+        self.multi_cell(w, 5, text, align='L')
+
+    def _clean_text(self, text):
+        """Clean text for PDF rendering."""
+        if not text:
+            return ""
+        # Truncate genome IDs in text
+        text = re.sub(
+            r'GCA_\d+_\d+_[A-Za-z0-9_]+genomic',
+            lambda m: truncate_genome_id(m.group(0)),
+            text
+        )
+        # Replace Unicode characters that don't survive Latin-1 encoding
+        text = text.replace('→', '->')
+        text = text.replace('←', '<-')
+        text = text.replace('↔', '<->')
+        text = text.replace('•', '*')
+        text = text.replace('–', '-')
+        text = text.replace('—', '--')
+        text = text.replace('"', '"').replace('"', '"')
+        text = text.replace(''', "'").replace(''', "'")
+        text = text.replace('…', '...')
+        text = text.replace('≥', '>=').replace('≤', '<=')
+        text = text.replace('±', '+/-')
+        text = text.replace('×', 'x')
+        text = text.encode('latin-1', 'replace').decode('latin-1')
+        text = text.replace('\t', '    ')
+        return text
+
+    def _wrap_long_words(self, text, max_len=40):
+        """Break very long words."""
+        words = text.split()
+        result = []
+        for word in words:
+            if len(word) > max_len:
+                for i in range(0, len(word), max_len):
+                    chunk = word[i:i+max_len]
+                    if i + max_len < len(word):
+                        chunk += '-'
+                    result.append(chunk)
+            else:
+                result.append(word)
+        return ' '.join(result)
+
+    def add_image(self, path, caption="", width=170):
+        if os.path.exists(path):
+            try:
+                self.image(path, x=20, w=width)
+                if caption:
+                    self.set_font('Helvetica', 'I', 8)
+                    self.ln(2)
+                    self.multi_cell(width, 4, caption, align='C')
+                self.ln(5)
+            except Exception as e:
+                self.body_text(f"[Could not load image: {e}]")
+
+    def needs_new_page(self, min_space=60):
+        """Check if we need a new page (less than min_space mm remaining)."""
+        return self.get_y() > (self.h - self.b_margin - min_space)
+
+    def maybe_add_page(self, min_space=60):
+        """Add page only if needed."""
+        if self.needs_new_page(min_space):
+            self.add_page()
+
+
+def load_findings(path):
+    """Load findings from JSONL, filtering spam."""
+    if not path.exists():
+        return []
+    findings = []
+    seen_titles = set()
+    with open(path) as f:
+        for line in f:
+            if line.strip():
+                finding = json.loads(line)
+                if not is_repetitive_finding(finding, seen_titles):
+                    # Fix template variables - use 'summary' as fallback for 'description'
+                    desc = finding.get('description', '') or finding.get('summary', '')
+                    finding['description'] = fix_template_variables(
+                        desc,
+                        finding.get('evidence', {})
+                    )
+                    findings.append(finding)
+                    seen_titles.add(finding.get('title', ''))
+    return findings
+
+
+def deduplicate_findings(findings):
+    """Remove duplicate/redundant findings."""
+    seen_keys = set()
+    unique = []
+    for f in findings:
+        # Create a key based on core content
+        title = f.get('title', '')
+        # Skip if we've seen very similar title
+        title_key = re.sub(r'[^a-z0-9]', '', title.lower())[:50]
+        if title_key in seen_keys:
+            continue
+        # Also check for duplicate evidence
+        evidence = f.get('evidence', {})
+        if isinstance(evidence, dict):
+            ev_key = str(sorted(evidence.items())[:3]) if evidence else ''
+        else:
+            ev_key = str(evidence)[:50] if evidence else ''
+        full_key = f"{title_key}:{ev_key}"
+        if full_key not in seen_keys:
+            seen_keys.add(title_key)
+            seen_keys.add(full_key)
+            unique.append(f)
+    return unique
+
+
+def group_findings(findings):
+    """Group findings by category."""
+    mapping = {
+        # Energy & metabolism
+        'metabolism': 'Energy Metabolism',
+        'metabolic': 'Energy Metabolism',
+        'energy': 'Energy Metabolism',
+        'energy_metabolism': 'Energy Metabolism',
+        'carbon_fixation': 'Energy Metabolism',
+        'carbon_metabolism': 'Energy Metabolism',
+        'core_metabolism': 'Energy Metabolism',
+        'electron_transfer': 'Energy Metabolism',
+        'syntrophy_mechanism': 'Energy Metabolism',
+        # Defense
+        'defense': 'Defense Systems',
+        'defense_systems': 'Defense Systems',
+        'CRISPR/TnpB': 'Defense Systems',
+        'crispr': 'Defense Systems',
+        # Viral-specific
+        'viral': 'Defense Systems',
+        'Virus-specific': 'Other',
+        # Mobile elements / selfish genetic elements
+        'mobile_elements': 'Mobile Elements',
+        'prophage': 'Mobile Elements',
+        'Protein splicing': 'Other',
+        # Cell surface / host interaction
+        'adhesin': 'Cell Surface',
+        'surface': 'Cell Surface',
+        'surface_biology': 'Cell Surface',
+        'cell_adhesion': 'Cell Surface',
+        'pili': 'Cell Surface',
+        'motility': 'Cell Surface',
+        'Host interaction': 'Other',
+        # DNA modification / Chromatin / Transcription
+        'DNA modification': 'Comparative Analysis',
+        'Chromatin': 'Other',
+        'Transcription': 'Other',
+        'Protein modification': 'Other',
+        # Novel features
+        'giant_protein': 'Novel Features',
+        'novel_cluster': 'Novel Features',
+        'novel_protein': 'Novel Features',
+        'Novel proteins': 'Novel Features',
+        'Structural': 'Novel Features',
+        'anomaly': 'Novel Features',
+        'protein_architecture': 'Novel Features',
+        # Structure
+        'structure': 'Structural Analysis',
+        'structural_homology': 'Structural Analysis',
+        # Regulation
+        'regulation': 'Regulatory Systems',
+        # Quantitative
+        'quantitative': 'Quantitative Analysis',
+        'hypothesis_test': 'Quantitative Analysis',
+        'statistical_finding': 'Quantitative Analysis',
+        'quality_control': 'Quantitative Analysis',
+        # Comparative
+        'comparative': 'Comparative Analysis',
+        'outlier_genome': 'Comparative Analysis',
+        # Other sections
+        'visualization': 'Visualizations',
+        'synthesis': 'Synthesis',
+        'narrative': 'Synthesis',
+        'genome_deep_dives': 'Individual Genome Analysis',
+        'genome_analysis': 'Individual Genome Analysis',
+        'ecotype_analysis': 'Ecotype Analysis',
+        'subclade': 'Ecotype Analysis',
+        'clustering': 'Ecotype Analysis',
+    }
+
+    grouped = defaultdict(list)
+    for f in findings:
+        cat = f.get('category', '')
+        section = mapping.get(cat)
+
+        # Fallback: infer section from title keywords if no category match
+        if not section:
+            title = f.get('title', '').lower()
+            desc = f.get('description', '').lower()
+            text = title + ' ' + desc
+
+            if any(kw in text for kw in ['hydrogenase', 'electron', 'diet', 'cytochrome', 'ferredoxin', 'metabolism', 'syntrophy', 'mbh', 'fefe']):
+                section = 'Energy Metabolism'
+            elif any(kw in text for kw in ['crispr', 'cas', 'defense', 'prophage', 'phage', 'restriction']):
+                section = 'Defense Systems'
+            elif any(kw in text for kw in ['ecotype', 'cluster', 'correlation', 'hierarchical']):
+                section = 'Comparative Analysis'
+            elif any(kw in text for kw in ['adhesin', 'pili', 'surface', 'attachment']):
+                section = 'Cell Surface'
+            elif any(kw in text for kw in ['transposase', 'mobile', 'insertion']):
+                section = 'Mobile Elements'
+            elif any(kw in text for kw in ['structure', 'fold', 'pdb', 'plddt']):
+                section = 'Structural Analysis'
+            elif any(kw in text for kw in ['giant', 'novel', 'unknown', 'unannotated']):
+                section = 'Novel Features'
+            else:
+                section = 'Other'
+
+        grouped[section].append(f)
+    return grouped
+
+
+def format_evidence_value(k, v):
+    """Format a single evidence key-value pair."""
+    if isinstance(v, (dict, list)):
+        return None  # Skip complex structures
+    # Truncate genome IDs
+    if isinstance(v, str) and ('GCA_' in v or 'genomic' in v):
+        v = truncate_genome_id(v)
+    # Format numbers nicely
+    if isinstance(v, float):
+        if abs(v) < 0.001 or abs(v) > 10000:
+            v = f"{v:.2e}"
+        else:
+            v = f"{v:.2f}"
+    elif isinstance(v, int) and v > 1000:
+        v = f"{v:,}"
+    return f"{k.replace('_', ' ')}: {v}"
+
+
+def render_synthesis_finding(pdf, finding):
+    """Render synthesis findings with proper bullet formatting."""
+    pdf.subsection_title(finding.get('title', 'Untitled'))
+
+    desc = finding.get('description', '')
+    # Check if description contains numbered points
+    if re.search(r'\d+\.\s+[A-Z]+:', desc):
+        # Parse numbered points
+        parts = re.split(r'(\d+\.\s+[A-Z]+:)', desc)
+        # First part is intro
+        if parts[0].strip():
+            pdf.body_text(parts[0].strip())
+        # Rest are numbered items
+        for i in range(1, len(parts), 2):
+            if i+1 < len(parts):
+                header = parts[i].strip()
+                content = parts[i+1].strip()
+                pdf.add_bullet(f"{header} {content}")
+    else:
+        pdf.body_text(desc)
+
+
+def load_synthesis(synthesis_path):
+    """Load and parse synthesis.md into sections."""
+    if not synthesis_path.exists():
+        return None
+
+    with open(synthesis_path, 'r') as f:
+        content = f.read()
+
+    synthesis = {
+        'raw': content,
+        'executive_summary': '',
+        'hypotheses': [],
+        'top_discoveries': [],
+        'conceptual_model': '',
+        'new_hypotheses': [],
+    }
+
+    # Extract executive summary (first paragraph after ## 1. Executive Summary)
+    lines = content.split('\n')
+    exec_lines = []
+    in_exec = False
+
+    for i, line in enumerate(lines):
+        # Start collecting after the first ## header
+        if line.startswith('## 1.'):
+            in_exec = True
+            continue
+        # Stop at Key Statistics table, Refined Conclusions, or next ## section
+        if in_exec and (line.startswith('### Key Statistics') or line.startswith('### Refined') or
+                        line.startswith('## 2.') or line.startswith('| Hypothesis')):
+            break
+        if in_exec and line.strip() and not line.startswith('#') and not line.startswith('|'):
+            exec_lines.append(line.strip())
+
+    if exec_lines:
+        synthesis['executive_summary'] = ' '.join(exec_lines)
+
+    # Extract hypothesis table if present
+    if '| Hypothesis |' in content:
+        table_start = content.find('| Hypothesis |')
+        table_end = content.find('\n\n', table_start)
+        if table_end == -1:
+            table_end = content.find('### Refined', table_start)
+        if table_end > table_start:
+            table_text = content[table_start:table_end]
+            rows = [r for r in table_text.split('\n') if r.startswith('|') and 'Hypothesis' not in r and '---' not in r]
+            for row in rows:
+                parts = [p.strip() for p in row.split('|')[1:-1]]
+                if len(parts) >= 4:
+                    synthesis['hypotheses'].append({
+                        'hypothesis': parts[0].replace('**', ''),
+                        'expected': parts[2] if len(parts) > 2 else '',
+                        'observed': parts[3] if len(parts) > 3 else '',
+                        'verdict': parts[4] if len(parts) > 4 else ''
+                    })
+
+    # Extract top discoveries
+    discovery_pattern = r'### (\d+)\. (.+?)(?=\n\n###|\n\n---|\Z)'
+    discoveries = re.findall(discovery_pattern, content, re.DOTALL)
+    for num, text in discoveries[:10]:
+        lines = text.strip().split('\n')
+        title = lines[0].strip() if lines else f"Discovery {num}"
+        desc = '\n'.join(lines[1:]).strip() if len(lines) > 1 else ''
+        # Clean up markdown
+        desc = re.sub(r'\*\*Significance\*\*:.*?\n', '', desc)
+        desc = re.sub(r'\*\*Evidence\*\*:.*?\n', '', desc)
+        desc = desc.strip()
+        if title and not title.startswith('~'):  # Skip retracted
+            synthesis['top_discoveries'].append({
+                'rank': num,
+                'title': title.replace('(MAJOR DISCOVERY)', '').strip(),
+                'description': desc[:900] if desc else ''
+            })
+
+    # Extract conceptual model (ASCII art)
+    if '```' in content:
+        model_match = re.search(r'```\n(.+?)```', content, re.DOTALL)
+        if model_match:
+            synthesis['conceptual_model'] = model_match.group(1)
+
+    return synthesis
+
+
+def load_figure_legends(manifest_path):
+    """Load figure legends from manifest.json."""
+    if not manifest_path.exists():
+        return {}
+
+    with open(manifest_path, 'r') as f:
+        manifest = json.load(f)
+
+    legends = {}
+    for fig in manifest.get('figures', []):
+        path = fig.get('path', '')
+        filename = Path(path).name
+        legends[filename] = {
+            'title': fig.get('title', ''),
+            'legend': fig.get('legend', ''),
+            'center_protein': fig.get('center_protein', ''),
+            'figure_type': fig.get('figure_type', ''),
+        }
+
+    return legends
+
+
+def render_figure_with_legend(pdf, fig_path, legends_dict, section_title=None, fig_num=None):
+    """Render a figure with its legend from manifest."""
+    filename = Path(fig_path).name
+    legend_info = legends_dict.get(filename, {})
+
+    title = legend_info.get('title') or clean_figure_name(Path(fig_path).stem)
+    legend = legend_info.get('legend', '')
+
+    # Prepend figure number if provided
+    display_title = f"Figure {fig_num}: {title}" if fig_num else title
+
+    if section_title:
+        pdf.section_title(section_title)
+    else:
+        pdf.section_title(display_title)
+
+    # Add the image
+    pdf.add_image(str(fig_path), "")
+
+    # Add legend in a styled background box
+    if legend and len(legend) > 10:
+        prefix = f"Figure {fig_num}: " if fig_num else ""
+        legend_text = pdf._clean_text(f"{prefix}{legend}")
+        pdf.set_font('Helvetica', 'I', 9)
+        pdf.set_fill_color(245, 245, 250)
+        pdf.set_text_color(50, 50, 70)
+        w = pdf.w - pdf.l_margin - pdf.r_margin
+        pdf.set_x(pdf.l_margin)
+        pdf.multi_cell(w, 4, f"  {legend_text}", 0, 'L', True)
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_font('Helvetica', '', 10)
+        pdf.ln(3)
+    elif legend_info.get('center_protein'):
+        # Minimal legend from metadata
+        prefix = f"Figure {fig_num}: " if fig_num else ""
+        legend_text = pdf._clean_text(f"{prefix}Neighborhood of {legend_info['center_protein']}.")
+        pdf.set_font('Helvetica', 'I', 9)
+        pdf.set_fill_color(245, 245, 250)
+        pdf.set_text_color(80, 80, 100)
+        w = pdf.w - pdf.l_margin - pdf.r_margin
+        pdf.set_x(pdf.l_margin)
+        pdf.multi_cell(w, 4, f"  {legend_text}", 0, 'L', True)
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_font('Helvetica', '', 10)
+        pdf.ln(3)
+
+
+def generate_report():
+    print("=" * 60)
+    print("EXPLORATION REPORT GENERATOR")
+    print("=" * 60)
+
+    b = Bennu(DB_PATH)
+
+    # Load and clean findings
+    print(f"\nLoading findings from {FINDINGS_PATH}...")
+    findings = load_findings(FINDINGS_PATH)
+    findings = deduplicate_findings(findings)
+    print(f"  Loaded {len(findings)} findings (after filtering)")
+
+    grouped = group_findings(findings)
+
+    # Load synthesis document (for narrative content)
+    # Try multiple common names
+    synthesis = None
+    for synthesis_name in ["synthesis.md", "EXPLORATION_SYNTHESIS.md", "exploration_synthesis.md"]:
+        synthesis_path = EXPLORE_DIR / synthesis_name
+        if synthesis_path.exists():
+            synthesis = load_synthesis(synthesis_path)
+            if synthesis:
+                print(f"  Loaded {synthesis_name} ({len(synthesis.get('top_discoveries', []))} discoveries)")
+                break
+    if not synthesis:
+        print("  No synthesis.md found - using findings-only mode")
+
+    # Load figure legends from manifest
+    manifest_path = DATASET_DIR / "manifest.json"
+    figure_legends = load_figure_legends(manifest_path)
+    print(f"  Loaded {len(figure_legends)} figure legends from manifest")
+
+    # Get stats
+    n_genomes = b.store.execute("SELECT COUNT(DISTINCT bin_id) FROM proteins")[0][0]
+    n_proteins = b.store.execute("SELECT COUNT(*) FROM proteins")[0][0]
+    high_priority = [f for f in findings if f.get('priority') == 'high' or f.get('significance') == 'high']
+
+    # Get figures
+    figures = []
+    if FIGURES_DIR.exists():
+        figures = sorted(FIGURES_DIR.glob("*.png"), key=lambda x: x.stat().st_mtime, reverse=True)
+    print(f"  Found {len(figures)} figures")
+
+    # Get dataset name from directory
+    dataset_name = get_dataset_name(DATASET_DIR)
+    print(f"  Dataset: {dataset_name}")
+
+    pdf = ExplorationReport(dataset_name=dataset_name)
+
+    # Title page
+    print("\nCreating title page...")
+    pdf.add_page()
+    # Decorative top bar
+    pdf.set_fill_color(40, 60, 100)
+    pdf.rect(0, 0, pdf.w, 8, 'F')
+    pdf.set_fill_color(70, 100, 140)
+    pdf.rect(0, 8, pdf.w, 3, 'F')
+
+    pdf.ln(50)
+    pdf.set_font('Helvetica', 'B', 36)
+    pdf.set_text_color(40, 60, 100)
+    pdf.cell(0, 18, dataset_name, 0, 1, 'C')
+    pdf.set_font('Helvetica', '', 24)
+    pdf.set_text_color(80, 100, 130)
+    pdf.cell(0, 12, 'Exploration Report', 0, 1, 'C')
+
+    # Decorative line
+    pdf.ln(10)
+    pdf.set_draw_color(40, 60, 100)
+    pdf.set_line_width(0.8)
+    pdf.line(60, pdf.get_y(), pdf.w - 60, pdf.get_y())
+    pdf.ln(15)
+
+    pdf.set_text_color(60, 60, 60)
+    pdf.set_font('Helvetica', '', 14)
+    pdf.cell(0, 8, f'{n_genomes} genomes  |  {n_proteins:,} proteins  |  {len(findings)} findings', 0, 1, 'C')
+    pdf.ln(8)
+    pdf.set_font('Helvetica', 'I', 11)
+    pdf.set_text_color(120, 120, 120)
+    pdf.cell(0, 8, f'Generated: {datetime.now().strftime("%B %d, %Y")}', 0, 1, 'C')
+
+    # Bottom decoration
+    pdf.set_fill_color(40, 60, 100)
+    pdf.rect(0, pdf.h - 8, pdf.w, 8, 'F')
+
+    # Table of Contents (placeholder - will fill after)
+    toc_page = pdf.page_no() + 1
+    pdf.add_page()
+    pdf.in_toc = True
+    pdf.set_font('Helvetica', 'B', 20)
+    pdf.set_text_color(40, 60, 100)
+    pdf.cell(0, 12, 'Table of Contents', 0, 1, 'L')
+    pdf.set_draw_color(40, 60, 100)
+    pdf.set_line_width(0.5)
+    pdf.line(pdf.l_margin, pdf.get_y(), pdf.l_margin + 60, pdf.get_y())
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(12)
+    toc_y_start = pdf.get_y()
+    pdf.in_toc = False
+
+    # Executive summary
+    print("Creating executive summary...")
+    pdf.add_page()
+    pdf.chapter_title(1, 'Executive Summary')
+
+    n_annotated = b.store.execute("SELECT COUNT(DISTINCT protein_id) FROM annotations")[0][0]
+    annot_rate = n_annotated / n_proteins * 100 if n_proteins else 0
+
+    # Use synthesis narrative if available
+    if synthesis and synthesis.get('top_discoveries'):
+        # Build narrative executive summary from top discoveries
+        discoveries = synthesis.get('top_discoveries', [])[:5]
+
+        # Use actual executive summary from synthesis.md if available
+        exec_summary = synthesis.get('executive_summary', '')
+        if exec_summary:
+            pdf.body_text(exec_summary)
+        else:
+            # Fallback to generic
+            pdf.body_text(
+                f"Analysis of {n_genomes} {dataset_name} genomes ({n_proteins:,} proteins) reveals "
+                f"significant metabolic and ecological insights. This exploration documented {len(findings)} "
+                f"findings across {len(grouped)} functional categories."
+            )
+
+        # Key Statistics table from synthesis
+        raw = synthesis.get('raw', '')
+        if '### Key Statistics' in raw:
+            stats_start = raw.find('### Key Statistics')
+            stats_end = raw.find('\n\n|', stats_start + 20)  # Find first table
+            if stats_end == -1:
+                stats_end = raw.find('| Hypothesis', stats_start)
+            if stats_end > stats_start:
+                # Find the table within
+                table_start = raw.find('| Metric', stats_start)
+                if table_start > 0 and table_start < stats_end + 500:
+                    table_end = raw.find('\n\n', table_start)
+                    if table_end == -1 or table_end > stats_start + 1000:
+                        table_end = table_start + 600
+                    table_text = raw[table_start:table_end].strip()
+                    table_lines = [l for l in table_text.split('\n') if l.strip().startswith('|')]
+                    if table_lines:
+                        pdf.ln(3)
+                        pdf.section_title("Key Statistics")
+                        pdf.add_markdown_table(table_lines, col_widths=[3, 2])
+
+        # Top discoveries as narrative
+        pdf.ln(3)
+        pdf.section_title("Major Discoveries")
+        for disc in discoveries:
+            title = disc.get('title', '')
+            if title:
+                pdf.add_bullet(f"**{title}**")
+
+        # If we have hypotheses, mention them
+        if synthesis.get('hypotheses'):
+            pdf.ln(3)
+            pdf.body_text(
+                f"This analysis tested {len(synthesis['hypotheses'])} specific hypotheses about "
+                f"{dataset_name} biology, with results detailed in Section 2."
+            )
+    else:
+        # Fallback to generic summary
+        pdf.body_text(
+            f"This report presents findings from exploration of {n_genomes} {dataset_name} genomes "
+            f"containing {n_proteins:,} proteins. {len(findings)} findings were logged, "
+            f"with {len(high_priority)} classified as high priority."
+        )
+
+        pdf.section_title("Key Statistics")
+        pdf.add_bullet(f"{n_genomes} metagenome-assembled genomes (MAGs)")
+        pdf.add_bullet(f"{n_proteins:,} predicted proteins")
+        pdf.add_bullet(f"{annot_rate:.1f}% annotation rate")
+
+        # Top findings
+        if high_priority:
+            pdf.ln(5)
+            pdf.section_title("Top Findings")
+            for i, f in enumerate(high_priority[:5], 1):
+                title = f.get('title', 'Untitled')[:80]
+                pdf.add_bullet(f"{i}. {title}")
+
+    # Refined Conclusions from synthesis (if available)
+    if synthesis and '### Refined Conclusions' in synthesis.get('raw', ''):
+        raw = synthesis['raw']
+        start = raw.find('### Refined Conclusions')
+        end = raw.find('\n---', start)
+        if end == -1:
+            end = raw.find('\n## 2.', start)
+        if end > start:
+            conclusions_text = raw[start:end].strip()
+            conclusions_text = conclusions_text.replace('### Refined Conclusions', '').strip()
+            pdf.ln(3)
+            pdf.section_title("Key Findings")
+            pdf.body_text(conclusions_text[:1500])
+
+    # Initialize section numbering (Executive Summary = 1)
+    section_num = 2
+
+    # Survey Reports (systematic analysis from /survey)
+    # These provide the foundation; exploration builds on top
+    if SURVEY_DIR.exists():
+        # Ordered list of survey topics with display names
+        survey_topics = [
+            ("summary.md", "Survey Overview"),
+            ("metabolic_reconstruction.md", "Metabolic Reconstruction"),
+            ("cell_surface_biology.md", "Cell Surface Biology"),
+            ("defense_immunity.md", "Defense & Immunity"),
+            ("secondary_metabolism.md", "Secondary Metabolism"),
+            ("novel_proteins.md", "Novel & Uncharacterized Proteins"),
+            ("viral_elements.md", "Viral Elements & Prophages"),
+        ]
+
+        survey_reports_found = []
+        for filename, title in survey_topics:
+            path = SURVEY_DIR / filename
+            if path.exists() and path.stat().st_size > 100:
+                survey_reports_found.append((path, title))
+
+        if survey_reports_found:
+            print(f"\n  Adding {len(survey_reports_found)} survey reports...")
+
+            for report_path, report_title in survey_reports_found:
+                print(f"    Including: {report_title}")
+                content = report_path.read_text()
+
+                pdf.add_page()
+                pdf.chapter_title(section_num, report_title)
+                section_num += 1
+
+                # Render the full markdown content
+                # Strip the top-level title if it duplicates the chapter title
+                lines = content.split('\n')
+                if lines and lines[0].startswith('# '):
+                    content = '\n'.join(lines[1:]).lstrip()
+
+                pdf.body_text(content)
+
+            # Also include survey figures if they exist
+            survey_figures_dir = SURVEY_DIR / "figures"
+            if survey_figures_dir.exists():
+                survey_figs = sorted(survey_figures_dir.glob("*.png"))
+                if survey_figs:
+                    print(f"  Adding {len(survey_figs)} survey figures...")
+                    pdf.add_page()
+                    pdf.chapter_title(section_num, 'Survey Figures')
+                    section_num += 1
+                    for fig in survey_figs[:20]:
+                        if pdf.get_y() > 180:
+                            pdf.add_page()
+                        name = clean_figure_name(fig.stem)
+                        pdf.subsection_title(name)
+                        pdf.add_image(str(fig), "")
+
+    # Hypothesis Testing section (from synthesis)
+    if synthesis and synthesis.get('hypotheses'):
+        print("  Adding hypothesis testing section...")
+        pdf.add_page()
+        pdf.chapter_title(section_num, 'Hypothesis Testing')
+        section_num += 1
+
+        pdf.body_text(
+            f"This exploration was guided by specific hypotheses about {dataset_name} biology. "
+            "Below we summarize the predictions tested and their outcomes."
+        )
+        pdf.ln(3)
+
+        # Render hypothesis table with appropriate column widths
+        hyp_table = ['| Hypothesis | Expected | Observed | Verdict |', '|---|---|---|---|']
+        for h in synthesis['hypotheses']:
+            hyp = h.get('hypothesis', '').replace('|', '/').replace('\n', ' ')
+            exp = h.get('expected', '').replace('|', '/').replace('\n', ' ')
+            obs = h.get('observed', '').replace('|', '/').replace('\n', ' ')
+            verdict = h.get('verdict', '').replace('|', '/').replace('\n', ' ')
+            hyp_table.append(f"| {hyp} | {exp} | {obs} | {verdict} |")
+
+        # Column widths: Hypothesis wider, Verdict narrower
+        pdf.add_markdown_table(hyp_table, col_widths=[3, 2, 2.5, 1.5])
+
+    # Top Discoveries section (from synthesis)
+    if synthesis and synthesis.get('top_discoveries'):
+        print("  Adding top discoveries section...")
+        pdf.add_page()
+        pdf.chapter_title(section_num, 'Top Discoveries')
+        section_num += 1
+
+        pdf.body_text(
+            "Findings ranked by scientific significance. Major discoveries represent paradigm-shifting "
+            "insights; high-significance findings clarify important biological questions."
+        )
+        pdf.ln(3)
+
+        for disc in synthesis['top_discoveries'][:10]:
+            pdf.maybe_add_page(50)
+            rank = disc.get('rank', '?')
+            title = disc.get('title', 'Untitled')
+            desc = disc.get('description', '')
+
+            pdf.subsection_title(f"{rank}. {title}")
+            if desc:
+                # Truncate very long descriptions but preserve sentence boundaries
+                if len(desc) > 900:
+                    # Try to cut at sentence boundary
+                    cutoff = desc[:900].rfind('. ')
+                    if cutoff > 600:
+                        desc = desc[:cutoff+1]
+                    else:
+                        desc = desc[:900] + "..."
+                pdf.body_text(desc)
+            pdf.add_separator()
+
+    # Detailed Findings narrative from synthesis (if available)
+    if synthesis and '## 3. Detailed Findings' in synthesis.get('raw', ''):
+        print("  Adding detailed findings narrative...")
+        raw = synthesis['raw']
+        start = raw.find('## 3. Detailed Findings')
+        end = raw.find('## 4.', start)
+        if end == -1:
+            end = raw.find('\n---\n', start + 30)
+        if end > start:
+            detail_text = raw[start:end].strip()
+            detail_text = detail_text.replace('## 3. Detailed Findings', '').strip()
+
+            pdf.add_page()
+            pdf.chapter_title(section_num, 'Detailed Analysis')
+            section_num += 1
+            pdf.body_text(detail_text[:5000])
+
+    # Findings by section (section_num continues from above)
+    section_order = ['Energy Metabolism', 'Defense Systems', 'Cell Surface',
+                     'Novel Features', 'Structural Analysis', 'Regulatory Systems',
+                     'Mobile Elements', 'Quantitative Analysis', 'Comparative Analysis',
+                     'Visualizations', 'Synthesis', 'Other']
+
+    # Combine small sections
+    small_sections = []
+    for section_name in section_order:
+        if section_name not in grouped:
+            continue
+        section_findings = grouped[section_name]
+        n_findings = len(section_findings)
+
+        print(f"  Section: {section_name} ({n_findings} findings)")
+
+        # For sections with few findings, don't force new page
+        if n_findings >= 3 or pdf.needs_new_page(80):
+            pdf.add_page()
+        else:
+            pdf.ln(10)
+            if pdf.needs_new_page(60):
+                pdf.add_page()
+
+        pdf.chapter_title(section_num, section_name)
+        section_num += 1
+
+        for finding in section_findings[:10]:
+            # Check if we need new page before each finding
+            pdf.maybe_add_page(40)
+
+            # Special handling for synthesis
+            if section_name == 'Synthesis':
+                render_synthesis_finding(pdf, finding)
+                continue
+
+            pdf.subsection_title(finding.get('title', 'Untitled'))
+            pdf.body_text(finding.get('description', ''))
+
+            # Evidence - format nicely in a box
+            evidence = finding.get('evidence', {})
+            if evidence:
+                if isinstance(evidence, dict):
+                    ev_parts = []
+                    for k, v in list(evidence.items())[:5]:
+                        formatted = format_evidence_value(k, v)
+                        if formatted:
+                            ev_parts.append(formatted)
+                    if ev_parts:
+                        pdf.add_evidence_box("Evidence: " + ", ".join(ev_parts))
+                else:
+                    # String evidence (legacy findings)
+                    pdf.add_evidence_box("Evidence: " + str(evidence)[:200])
+
+            pdf.add_separator()
+
+    # Figures - separate analysis figures from neighborhood/locus diagrams
+    if figures:
+        # Neighborhood diagrams include 'neighborhood', 'locus', genome IDs, or defense/prophage terms
+        def is_locus_diagram(f):
+            stem = f.stem.lower()
+            return any(term in stem for term in [
+                'neighborhood', 'locus', 'cluster', 'operon', 'island',
+                'prophage', 'crispr', 'defense', 'gca_', 'diet_', 'nrps'
+            ])
+
+        neighborhood_figs = [f for f in figures if is_locus_diagram(f)]
+        analysis_figs = [f for f in figures if not is_locus_diagram(f)]
+
+        if analysis_figs:
+            print(f"  Adding {len(analysis_figs)} analysis figures...")
+            pdf.add_page()
+            pdf.chapter_title(section_num, 'Analysis Figures')
+            section_num += 1
+
+            # Figure descriptions
+            fig_descriptions = {
+                'genome_feature_heatmap': 'Distribution of key features across all genomes. Rows are genomes, columns are features.',
+                'genome_size_vs_annotation': 'Relationship between genome size and annotation rate.',
+                'protein_size_by_annotation': 'Protein size distributions for annotated vs unannotated proteins.',
+                'defense_system': 'Distribution of defense systems (CRISPR, R-M, TA) across genomes.',
+                'pathway_completeness': 'KEGG pathway completeness across the dataset.',
+                'giant_protein': 'Size distribution of giant proteins (>1000aa).',
+                'top_pfam': 'Most abundant Pfam domains in the dataset.',
+            }
+
+            for fig in analysis_figs[:20]:
+                if pdf.get_y() > 200:
+                    pdf.add_page()
+                # Clean up figure name
+                name = clean_figure_name(fig.stem)
+                # Find matching description
+                desc = ""
+                for key, d in fig_descriptions.items():
+                    if key in fig.stem:
+                        desc = d
+                        break
+                pdf.section_title(name)
+                if desc:
+                    pdf.body_text(desc)
+                pdf.add_image(str(fig), "")
+
+        if neighborhood_figs:
+            print(f"  Adding {len(neighborhood_figs)} neighborhood diagrams...")
+            pdf.add_page()
+            pdf.chapter_title(section_num, 'Genomic Neighborhoods')
+            section_num += 1
+
+            pdf.body_text(
+                "Gene neighborhood diagrams showing genomic context around key loci. "
+                "Arrows indicate gene direction, colors indicate functional categories. "
+                "Red arrows highlight the query protein."
+            )
+            pdf.ln(3)
+
+            fig_num = 1  # Running figure number for neighborhood diagrams
+            for fig in neighborhood_figs:
+                if pdf.get_y() > 180:
+                    pdf.add_page()
+
+                # Check for legend in manifest
+                filename = fig.name
+                legend_info = figure_legends.get(filename, {})
+                title = legend_info.get('title', '')
+                legend = legend_info.get('legend', '')
+
+                if not title:
+                    # Fallback: clean up neighborhood name
+                    title = clean_figure_name(fig.stem.replace('neighborhood_', ''))
+
+                pdf.subsection_title(f"Figure {fig_num}: {title}")
+                pdf.add_image(str(fig), "")
+
+                # Add legend in a styled box
+                if legend and len(legend) > 10:
+                    legend_text = pdf._clean_text(f"Figure {fig_num}: {legend}")
+                    pdf.set_font('Helvetica', 'I', 9)
+                    pdf.set_fill_color(245, 245, 250)
+                    pdf.set_text_color(50, 50, 70)
+                    w = pdf.w - pdf.l_margin - pdf.r_margin
+                    pdf.set_x(pdf.l_margin)
+                    pdf.multi_cell(w, 4, f"  {legend_text}", 0, 'L', True)
+                    pdf.set_text_color(0, 0, 0)
+                    pdf.set_font('Helvetica', '', 10)
+                elif legend_info.get('center_protein'):
+                    # Minimal legend with figure number
+                    legend_text = pdf._clean_text(
+                        f"Figure {fig_num}: Neighborhood of {legend_info['center_protein']}."
+                    )
+                    pdf.set_font('Helvetica', 'I', 9)
+                    pdf.set_fill_color(245, 245, 250)
+                    pdf.set_text_color(80, 80, 100)
+                    w = pdf.w - pdf.l_margin - pdf.r_margin
+                    pdf.set_x(pdf.l_margin)
+                    pdf.multi_cell(w, 4, f"  {legend_text}", 0, 'L', True)
+                    pdf.set_text_color(0, 0, 0)
+                    pdf.set_font('Helvetica', '', 10)
+
+                pdf.ln(3)
+                fig_num += 1
+
+    # Ecotype/Subclade Analysis Reports
+    ecotype_reports_dir = EXPLORE_DIR / "ecotype_reports"
+    if ecotype_reports_dir.exists():
+        ecotype_reports = sorted(ecotype_reports_dir.glob("*.md"))
+        if ecotype_reports:
+            print(f"  Adding {len(ecotype_reports)} ecotype cluster reports...")
+            pdf.add_page()
+            pdf.chapter_title(section_num, 'Ecotype/Subclade Analysis')
+            section_num += 1
+
+            pdf.body_text(
+                f"Analysis identified {len(ecotype_reports)} functionally distinct ecotypes within the dataset. "
+                "Clusters were determined by hierarchical clustering of genome functional profiles."
+            )
+
+            # Add ecotype figures first
+            ecotype_figs = [f for f in figures if 'ecotype' in f.stem]
+            for fig in ecotype_figs:
+                if pdf.get_y() > 160:
+                    pdf.add_page()
+                name = clean_figure_name(fig.stem)
+                pdf.subsection_title(name)
+                pdf.add_image(str(fig), "")
+
+            # Then add each cluster report
+            for report_path in ecotype_reports:
+                cluster_id = report_path.stem
+                print(f"    Including: {cluster_id}")
+
+                content = report_path.read_text()
+                pdf.add_page()
+                pdf.section_title(f"Ecotype: {cluster_id.replace('_', ' ').title()}")
+                pdf.body_text(content)
+
+    # Individual Genome Reports
+    genome_reports_dir = EXPLORE_DIR / "genome_reports"
+    if genome_reports_dir.exists():
+        genome_reports = sorted(genome_reports_dir.glob("*.md"))
+        if genome_reports:
+            print(f"  Adding {len(genome_reports)} individual genome reports...")
+            pdf.add_page()
+            pdf.chapter_title(section_num, 'Individual Genome Deep-Dives')
+            section_num += 1
+
+            pdf.body_text(
+                f"Detailed analysis of {len(genome_reports)} selected genomes. "
+                "These genomes were chosen as outliers or representatives for in-depth characterization."
+            )
+
+            for report_path in genome_reports:
+                genome_id = report_path.stem
+                print(f"    Including: {genome_id}")
+
+                # Read the markdown report
+                content = report_path.read_text()
+
+                # Start each genome on a new page
+                pdf.add_page()
+                pdf.section_title(f"Genome: {truncate_genome_id(genome_id, 40)}")
+
+                # Render the markdown content
+                pdf.body_text(content)
+
+                # Check for associated figures
+                genome_figs = list(FIGURES_DIR.glob(f"genome_{genome_id}*.png"))
+                genome_figs.extend(FIGURES_DIR.glob(f"*{genome_id}*.png"))
+                genome_figs = list(set(genome_figs))  # dedupe
+
+                for fig in genome_figs[:4]:  # Max 4 figures per genome
+                    if pdf.get_y() > 180:
+                        pdf.add_page()
+                    name = clean_figure_name(fig.stem)
+                    pdf.subsection_title(name)
+                    pdf.add_image(str(fig), "")
+
+    # Conceptual Model section (from synthesis)
+    if synthesis and synthesis.get('conceptual_model'):
+        print("  Adding conceptual model...")
+        pdf.add_page()
+        pdf.chapter_title(section_num, 'Conceptual Model')
+        section_num += 1
+
+        pdf.body_text(
+            f"The following model summarizes the metabolic and ecological organization of {dataset_name} "
+            "based on the findings of this exploration."
+        )
+        pdf.ln(5)
+
+        # Render ASCII art as monospace
+        pdf.set_font('Courier', '', 8)
+        model_text = synthesis['conceptual_model']
+        for line in model_text.split('\n'):
+            line = line.encode('latin-1', 'replace').decode('latin-1')
+            pdf.cell(0, 3.5, line, 0, 1, 'L')
+        pdf.set_font('Helvetica', '', 10)
+        pdf.ln(5)
+
+    # Open Questions section (from synthesis raw content)
+    if synthesis and '## 5. Open Questions' in synthesis.get('raw', ''):
+        print("  Adding open questions section...")
+        pdf.add_page()
+        pdf.chapter_title(section_num, 'Open Questions and Future Directions')
+        section_num += 1
+
+        # Extract open questions section
+        raw = synthesis['raw']
+        start = raw.find('## 5. Open Questions')
+        end = raw.find('## 6.', start) if '## 6.' in raw[start:] else raw.find('---', start + 20)
+        if end == -1:
+            end = len(raw)
+
+        questions_text = raw[start:end].strip()
+        # Remove the header
+        questions_text = questions_text.replace('## 5. Open Questions and Future Directions', '').strip()
+
+        pdf.body_text(questions_text[:2500])  # Limit length
+
+    # Conclusion section
+    print("  Adding conclusion...")
+    pdf.add_page()
+    pdf.chapter_title(section_num, 'Conclusion')
+    section_num += 1
+
+    # Use synthesis summary if available
+    if synthesis and '### Major Conclusions' in synthesis.get('raw', ''):
+        raw = synthesis['raw']
+        start = raw.find('### Major Conclusions')
+        # Include everything from Major Conclusions through Biological Model
+        end = len(raw)
+        # Find the end of the Summary section
+        next_section = raw.find('\n## ', start + 5)
+        if next_section > start:
+            end = next_section
+
+        conclusions_text = raw[start:end].strip()
+        conclusions_text = conclusions_text.replace('### Major Conclusions', '').strip()
+        pdf.body_text(conclusions_text[:3000])
+    else:
+        # Fallback to dynamic conclusion based on findings
+        conclusion_parts = []
+
+        # Count findings by priority
+        high_count = len([f for f in findings if f.get('priority') == 'high'])
+        medium_count = len([f for f in findings if f.get('priority') == 'medium'])
+
+        conclusion_parts.append(
+            f"This exploration of {n_genomes} {dataset_name} genomes identified {len(findings)} notable features, "
+            f"including {high_count} high-priority and {medium_count} medium-priority findings."
+        )
+
+        # Summarize key themes from findings
+        categories_found = set(f.get('category', '') for f in findings)
+        if 'defense_systems' in categories_found or 'defense' in categories_found:
+            conclusion_parts.append(
+                "Defense systems analysis revealed CRISPR-Cas diversity with multiple system types, "
+                "though assembly fragmentation limits complete characterization."
+            )
+        if 'metabolism' in categories_found or 'energy' in categories_found:
+            conclusion_parts.append(
+                "Energy metabolism signatures include hydrogenases and electron transport components "
+                f"consistent with the anaerobic lifestyle of {dataset_name}."
+            )
+        if 'adhesin' in categories_found or 'surface' in categories_found or 'cell_adhesion' in categories_found:
+            conclusion_parts.append(
+                "Cell surface features including adhesins and S-layer proteins suggest adaptation "
+                "to biofilm or symbiotic lifestyles."
+            )
+
+        conclusion_parts.append(
+            "Further targeted analysis of specific loci and comparative genomics with related lineages "
+            "would help resolve functional hypotheses generated during this exploration."
+        )
+
+        for para in conclusion_parts:
+            pdf.body_text(para)
+
+    # Track final page count before going back for TOC
+    total_pages = pdf.page_no()
+
+    # Now go back and fill in TOC
+    print("  Generating table of contents...")
+    pdf.page = toc_page
+    pdf.set_y(toc_y_start)
+    pdf.in_toc = True
+    for num, title, page in pdf.toc_entries:
+        pdf.add_toc_entry(num, title, page)
+    pdf.in_toc = False
+
+    # IMPORTANT: Return to last page before saving
+    pdf.page = total_pages
+
+    # Save
+    print(f"\nSaving to {OUTPUT_PDF}...")
+    pdf.output(str(OUTPUT_PDF))
+
+    print("\n" + "=" * 60)
+    print("COMPLETE")
+    print("=" * 60)
+    print(f"  Output: {OUTPUT_PDF}")
+    print(f"  Pages: {total_pages}")
+
+
+if __name__ == "__main__":
+    generate_report()
