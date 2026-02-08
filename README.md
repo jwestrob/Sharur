@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" alt="Sharur logo" width="256">
+  <img src="assets/logo.png" alt="Sharur logo" width="480">
 </p>
 
 # Sharur
