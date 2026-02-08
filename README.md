@@ -8,7 +8,7 @@
 >
 > — [*Ninurta's exploits*](https://etcsl.orinst.ox.ac.uk/cgi-bin/etcsl.cgi?text=t.1.6.2&charenc=j#), c. 1900 BCE
 
-In Sumerian mythology, Sharur is the sentient mace of the god Ninurta. It flies ahead to scout the unknown, gathers intelligence, and reports back to its master. It speaks, reasons, and counsels — a weapon that loved the lord.
+In Sumerian mythology, Sharur is the sentient mace of the god Ninurta. It flies ahead to scout the unknown, gathers intelligence, and reports back what it finds.
 
 > A data plane for agent-driven metagenomic discovery
 
