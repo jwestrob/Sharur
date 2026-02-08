@@ -20,36 +20,18 @@ conda env create -f environment.yml
 conda activate sharur
 ```
 
-The `environment.yml` installs Bennu in editable mode with all optional extras via `pip install -e ".[all]"`.
+The `environment.yml` installs Bennu in editable mode with all dependencies plus dev tools via `pip install -e ".[dev]"`.
+
+All runtime dependencies (torch, transformers, matplotlib, dspy-ai, biopython, plotly, reportlab, jupyter, etc.) are installed by default with a bare `pip install -e "."`. The only optional extra is `[dev]` for testing and linting tools (pytest, ruff, mypy).
 
 ### Minimal install (no conda)
 
-If you only need the core Python library without bioinformatics CLI tools:
+If you only need the Python library without bioinformatics CLI tools:
 
 ```bash
-pip install -e "."
+pip install -e "."        # all runtime deps
+pip install -e ".[dev]"   # + pytest, ruff, mypy
 ```
-
-Or with specific extras:
-
-```bash
-pip install -e ".[viz,structure]"
-```
-
-## Optional Extras
-
-| Extra | Packages | Use case |
-|-------|----------|----------|
-| `topology` | pyTMHMM | Transmembrane helix prediction |
-| `ml` | torch, transformers, h5py, scipy | ESM2 embeddings, ML workflows |
-| `viz` | matplotlib, dna-features-viewer, plotly | Locus diagrams, UMAP plots |
-| `structure` | biopython, esm | ESM3 structure prediction |
-| `agent` | dspy-ai | BennuAgent orchestrator (DSPy) |
-| `reports` | reportlab | PDF report generation |
-| `ingest` | biopython | GFF/FASTA parsing for ingestion |
-| `dev` | pytest, ruff, mypy, etc. | Development and testing |
-| `notebooks` | jupyter, ipywidgets, matplotlib | Jupyter notebook workflows |
-| `all` | All of the above | Full installation |
 
 ## External Tools (not in conda)
 
@@ -124,7 +106,7 @@ Managed by Astra. After installing Astra, databases are stored at `~/.config/Ast
 Run these commands to confirm everything is installed correctly:
 
 ```bash
-# Core Python import (should work WITHOUT dspy-ai)
+# Core Python import
 python -c "from bennu.operators import Bennu; print('Core import: OK')"
 
 # pyTMHMM (requires numpy <2.0)
@@ -168,11 +150,11 @@ device = torch.device("cpu")
 
 ### `import bennu` fails with dspy-ai error
 
-This should be fixed — `dspy-ai` is no longer a core dependency. If you still see it:
+`BennuAgent` is lazy-imported via `__getattr__`, so `import bennu` should work even if dspy-ai has issues. If you still see errors:
 
 1. Verify you're on the latest code (`git pull`)
 2. Reinstall: `pip install -e "."`
-3. Check that `bennu/__init__.py` uses `__getattr__` for `BennuAgent`
+3. If dspy-ai itself fails to install, core Bennu functionality still works — only `from bennu import BennuAgent` requires it
 
 ### DuckDB version conflicts
 
