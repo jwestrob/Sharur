@@ -4,6 +4,12 @@
 
 # Sharur
 
+> *The weapon which loved the lord, obedient to its master — it spun around the horizon of heaven to find out what was happening, and joyfully it reported the message.*
+>
+> — [*Ninurta's exploits*](https://etcsl.orinst.ox.ac.uk/cgi-bin/etcsl.cgi?text=t.1.6.2&charenc=j#), c. 1900 BCE
+
+In Sumerian mythology, Sharur is the sentient mace of the god Ninurta. It flies ahead to scout the unknown, gathers intelligence, and reports back to its master. It speaks, reasons, and counsels — a weapon that loved the lord.
+
 > A data plane for agent-driven metagenomic discovery
 
 Sharur makes large metagenomic datasets navigable by AI agents. It combines a DuckDB relational store, LanceDB vector store, and a functional predicate system into an operator framework that agents (Claude Code, Codex, etc.) use to search, characterize, and compare proteins across hundreds of genomes.
