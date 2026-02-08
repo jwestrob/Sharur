@@ -1,175 +1,170 @@
-# 🪶 Bennu
+# Bennu
 
-> Agent-driven metagenomic discovery system
+> A data plane for agent-driven metagenomic discovery
 
-Bennu is an LLM-powered interface for exploring metagenomic datasets. Ask natural language questions and get structured, reproducible answers.
+Bennu makes large metagenomic datasets navigable by AI agents. It combines a DuckDB relational store, LanceDB vector store, and a functional predicate system into an operator framework that agents (Claude Code, Codex, etc.) use to search, characterize, and compare proteins across hundreds of genomes.
 
-## Features
+## What it does
 
-- **Natural language queries**: "Find hydrogenases in Archaea", "What's weird in Bin_023?"
-- **Multi-turn exploration**: Build on previous results, save working sets, track hypotheses
-- **Multiple search modes**: Annotations, taxonomy, embedding similarity, spatial proximity
-- **Reproducible**: Full provenance tracking, export to notebooks
+Given a set of metagenome-assembled genomes (MAGs), Bennu:
 
-## Quick Start
+1. **Ingests** proteins, annotations (PFAM, KEGG, HydDB, VOGdb, CAZy, DefenseFinder), CRISPR arrays, biosynthetic gene clusters, and ESM2 embeddings into a unified database
+2. **Computes predicates** -- functional tags derived from annotation combinations (e.g., `nife_group3`, `crispr_associated`, `giant_unannotated`) that make semantic search possible
+3. **Exposes operators** that agents call to explore the data: search by predicate, navigate genomic neighborhoods, find similar proteins by embedding, detect loci, export results
 
-### Install
+Agents bring the reasoning; Bennu brings the data access.
+
+## Quick start
 
 ```bash
-git clone https://github.com/jacobwestroberts/bennu
-cd bennu
+git clone https://github.com/jwestrob/Sharur.git
+cd Sharur
 pip install -e ".[dev]"
 ```
 
-### Run an agent (DuckDB)
+### Ingest a dataset
 
-Python:
+```bash
+python scripts/ingest.py \
+  --input-dir /path/to/genomes \
+  --data-dir data/my_dataset \
+  --output data/my_dataset/bennu.duckdb \
+  --force
+```
+
+This runs Prodigal, Astra (PFAM/KEGG/HydDB), GECCO, dbCAN, minced, ESM2 embeddings, and builds the DuckDB knowledge base. See [`QUICKSTART.md`](QUICKSTART.md) for manual step-by-step instructions.
+
+### Use the operators
+
 ```python
-from bennu import BennuAgent, ExplorationSession
+from bennu.operators import Bennu
 
-session = ExplorationSession(db_path="data/bennu.duckdb")
-agent = BennuAgent(session)  # heuristic routing if no LM configured
-print(agent.process("Find proteins with PF00142"))
+b = Bennu("data/my_dataset/bennu.duckdb")
+
+# Predicate search
+hydrogenases = b.search("nife_group3 AND bidirectional_hydrogenase")
+giants = b.search("giant AND unannotated")
+defense = b.search("crispr_associated OR restriction_modification")
+
+# Genomic neighborhood (with all annotation sources)
+b.get_neighborhood(protein_id, window=10, all_annotations=True)
+
+# Embedding similarity
+similar = b.find_similar(protein_id, k=20)
+
+# Structure prediction + remote homology
+b.predict_structure(protein_id)
+hits = b.search_foldseek_for_protein(protein_id)
+
+# Export
+b.export_fasta(protein_ids, "output.faa")
 ```
 
-CLI (one-shot ask):
-```bash
-bennu ask --db data/bennu.duckdb "Find proteins with PF00142"
-# or equivalently
-python -m bennu.cli ask "Find proteins with PF00142" --db data/bennu.duckdb
+### Use with Claude Code
+
+Bennu ships with skill specs in `.claude/skills/` that give Claude Code structured workflows for metagenomic analysis:
+
 ```
-Requires `OPENAI_API_KEY` in the environment (optional `BENNU_LM_MODEL`, default `gpt-5-mini-2025-08-07`).
-
-### Build the knowledge base (ingest)
-
-Pipeline runner (tools by default):
-```bash
-python scripts/ingest.py --input-dir dummy_dataset --data-dir data --output data/bennu.duckdb --force
-```
-*DFAST is optional; CRISPR uses `minced` if available. Embeddings and vector store are built by default.*
-
-Stage 07 builder (manual):
-```bash
-python -m src.ingest.07_build_knowledge_base --data-dir data --output data/bennu.duckdb --force
-```
-
-Expected stage dirs: `stage02_dfast_qc` (optional), `stage03_prodigal`, `stage04_astra`, `stage05a_gecco`, `stage05b_dbcan`, `stage05c_crispr` (may be empty), `stage06_embeddings`.
-
-## Installation
-
-```bash
-# From source
-git clone https://github.com/jacobwestroberts/bennu
-cd bennu
-pip install -e ".[dev]"
+/survey    # Systematic comprehensive survey of a dataset
+/explore   # Curiosity-driven hypothesis testing
+/defense   # Defense system inventory
+/metabolism # Metabolic pathway reconstruction
+/literature # Literature search for functional claims
+/characterize # Deep-dive on unknown proteins
 ```
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Exploration Session                       │
-│  Working sets • Focus stack • Hypotheses • Provenance       │
-└─────────────────────────────────────────────────────────────┘
-                              │
-┌─────────────────────────────────────────────────────────────┐
-│                      DSPy Agent                              │
-│  Router → Parameter Extraction → Execution → Synthesis      │
-└─────────────────────────────────────────────────────────────┘
-                              │
-┌─────────────────────────────────────────────────────────────┐
-│                      Tool Layer                              │
-│  find_proteins • get_context • detect_loci • find_similar   │
-│  find_anomalies • compare_across • manage_sets • export     │
-└─────────────────────────────────────────────────────────────┘
-                              │
-┌─────────────────────────────────────────────────────────────┐
-│                      Data Layer                              │
-│  DuckDB (relational) + LanceDB (vectors)                   │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│                   Agent (Claude Code, etc.)              │
+│  Skills • Workflows • Multi-turn reasoning              │
+└────────────────────────┬────────────────────────────────┘
+                         │
+┌────────────────────────┴────────────────────────────────┐
+│                    Operator Layer                        │
+│  search • navigate • similarity • export • structure    │
+│  predicates • visualization • introspection             │
+└────────────────────────┬────────────────────────────────┘
+                         │
+┌────────────────────────┴────────────────────────────────┐
+│                     Data Layer                           │
+│  DuckDB (proteins, annotations, loci, predicates)       │
+│  LanceDB (ESM2 embeddings, similarity search)           │
+└─────────────────────────────────────────────────────────┘
 ```
 
-## Key Documents
+## Project structure
 
-| Document | Purpose |
-|----------|---------|
-| [`CLAUDE.md`](CLAUDE.md) | **Agent knowledge base** - tools, patterns, protocols |
-| [`QUICK_REFERENCE.md`](QUICK_REFERENCE.md) | Critical patterns and SQL snippets |
-| [`DATA_ORGANIZATION.md`](DATA_ORGANIZATION.md) | Data directory structure |
+```
+├── bennu/                 # Core package
+│   ├── core/              # Data models, session state, types
+│   ├── storage/           # DuckDB store, vector store, schema, migrations
+│   ├── operators/         # Search, navigation, similarity, export, visualization
+│   ├── predicates/        # Functional predicate system + PFAM/KEGG/CAZy/VOG mappings
+│   └── reports/           # PDF report generation
+├── src/ingest/            # Ingestion pipeline (stages 00-07)
+├── scripts/               # Reusable CLI utilities
+├── tests/                 # Unit and integration tests
+├── .claude/skills/        # Claude Code skill specifications
+├── CLAUDE.md              # Agent knowledge base (protocols, patterns, tools)
+└── pyproject.toml
+```
+
+## Predicate system
+
+The predicate system is what makes Bennu more than a database wrapper. Annotations are mapped to functional predicates via curated rules:
+
+- **PFAM**: 2000+ domain-to-predicate mappings + regex patterns
+- **KEGG**: KO-to-predicate mappings for metabolic functions
+- **CAZy**: Carbohydrate-active enzyme families
+- **VOGdb**: Viral orthologous groups
+- **Computed**: `giant` (>1000 aa), `unannotated` (no hits), `membrane_protein` (TM helices)
+
+This lets agents ask functional questions ("find electron-bifurcating hydrogenases") instead of remembering accession numbers.
+
+## Ingest pipeline
+
+| Stage | Tool | Output |
+|-------|------|--------|
+| 00 | Prepare inputs | Organized genome/protein files |
+| 01 | QUAST | Assembly quality metrics |
+| 02 | DFAST (optional) | QC and taxonomic classification |
+| 03 | Prodigal | Gene calling (.faa, .gff) |
+| 04 | Astra | PFAM, KEGG, HydDB, VOGdb annotations |
+| 05a | GECCO | Biosynthetic gene clusters |
+| 05b | dbCAN | CAZyme annotations |
+| 05c | minced | CRISPR arrays |
+| 06 | ESM2 | Protein embeddings (320-dim) |
+| 07 | Builder | DuckDB knowledge base + predicates |
 
 ## Development
 
 ```bash
-# Install dev dependencies
 pip install -e ".[dev]"
-
-# Run tests
-pytest
-
-# Format code
-black bennu/ tests/
-ruff check --fix bennu/ tests/
-
-# Type check
-mypy bennu/
+pytest tests/ --override-ini addopts=""
 ```
 
-## Project Structure
+## Key documents
 
-```
-bennu/
-├── bennu/
-│   ├── core/           # Data models, session state
-│   ├── storage/        # DuckDB store, vector store, schema
-│   ├── tools/          # DSPy agent tools
-│   ├── agent/          # DSPy signatures and orchestrator
-│   ├── operators/      # Bennu operators (search, navigate, visualize)
-│   ├── predicates/     # Functional predicate system
-│   └── reports/        # PDF report generation
-├── tests/
-├── scripts/            # CLI utilities
-├── examples/           # Notebooks
-└── CLAUDE.md           # Agent knowledge base
-```
-
-## Tools
-
-| Tool | Description |
-|------|-------------|
-| `find_proteins` | Multi-modal search by domain, function, taxonomy, similarity |
-| `get_genomic_context` | Neighborhood around a protein with ASCII visualization |
-| `detect_loci` | Find prophages, BGCs, CRISPR arrays, operons |
-| `find_similar` | Embedding similarity at protein or locus level |
-| `find_anomalies` | Statistical outliers on pre-computed metrics |
-| `compare_across` | Cross-genome feature comparisons |
-| `manage_sets` | Create and manipulate working sets |
-| `export` | Export to FASTA, GFF, TSV, JSON |
-
-## Data Requirements
-
-Bennu expects:
-- **Proteins** with genomic coordinates and annotations
-- **ESM2 embeddings** (320-dim) for similarity search
-
-See [scripts/load_metagenome.py](scripts/load_metagenome.py) for data loading utilities.
+| Document | Purpose |
+|----------|---------|
+| [`CLAUDE.md`](CLAUDE.md) | Agent knowledge base -- tools, patterns, protocols |
+| [`QUICKSTART.md`](QUICKSTART.md) | Step-by-step dataset ingestion guide |
+| [`QUICK_REFERENCE.md`](QUICK_REFERENCE.md) | SQL patterns and operator cheatsheet |
+| [`DATA_ORGANIZATION.md`](DATA_ORGANIZATION.md) | Data directory conventions |
 
 ## Citation
 
-If you use Bennu in your research, please cite:
-
 ```bibtex
-@software{bennu2024,
+@software{bennu2025,
   author = {West-Roberts, Jacob},
   title = {Bennu: Agent-driven metagenomic discovery},
-  year = {2024},
-  url = {https://github.com/jacobwestroberts/bennu}
+  year = {2025},
+  url = {https://github.com/jwestrob/Sharur}
 }
 ```
 
 ## License
 
 MIT
-
----
-
-*Named after the ancient Egyptian deity associated with creation and rebirth, and the OSIRIS-REx asteroid.*
