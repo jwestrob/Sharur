@@ -2,21 +2,21 @@
   <img src="assets/logo.png" alt="Sharur logo" width="256">
 </p>
 
-# Bennu
+# Sharur
 
 > A data plane for agent-driven metagenomic discovery
 
-Bennu makes large metagenomic datasets navigable by AI agents. It combines a DuckDB relational store, LanceDB vector store, and a functional predicate system into an operator framework that agents (Claude Code, Codex, etc.) use to search, characterize, and compare proteins across hundreds of genomes.
+Sharur makes large metagenomic datasets navigable by AI agents. It combines a DuckDB relational store, LanceDB vector store, and a functional predicate system into an operator framework that agents (Claude Code, Codex, etc.) use to search, characterize, and compare proteins across hundreds of genomes.
 
 ## What it does
 
-Given a set of metagenome-assembled genomes (MAGs), Bennu:
+Given a set of metagenome-assembled genomes (MAGs), Sharur:
 
 1. **Ingests** proteins, annotations (PFAM, KEGG, HydDB, VOGdb, CAZy, DefenseFinder), CRISPR arrays, biosynthetic gene clusters, and ESM2 embeddings into a unified database
 2. **Computes predicates** -- functional tags derived from annotation combinations (e.g., `nife_group3`, `crispr_associated`, `giant_unannotated`) that make semantic search possible
 3. **Exposes operators** that agents call to explore the data: search by predicate, navigate genomic neighborhoods, find similar proteins by embedding, detect loci, export results
 
-Agents bring the reasoning; Bennu brings the data access.
+Agents bring the reasoning; Sharur brings the data access.
 
 ## Quick start
 
@@ -66,7 +66,7 @@ b.export_fasta(protein_ids, "output.faa")
 
 ### Use with Claude Code
 
-Bennu ships with skill specs in `.claude/skills/` that give Claude Code structured workflows for metagenomic analysis:
+Sharur ships with skill specs in `.claude/skills/` that give Claude Code structured workflows for metagenomic analysis:
 
 ```
 /survey    # Systematic comprehensive survey of a dataset
@@ -117,7 +117,7 @@ Bennu ships with skill specs in `.claude/skills/` that give Claude Code structur
 
 ## Predicate system
 
-The predicate system is what makes Bennu more than a database wrapper. Annotations are mapped to functional predicates via curated rules:
+The predicate system is what makes Sharur more than a database wrapper. Annotations are mapped to functional predicates via curated rules:
 
 - **PFAM**: 2000+ domain-to-predicate mappings + regex patterns
 - **KEGG**: KO-to-predicate mappings for metabolic functions
@@ -164,9 +164,9 @@ pytest tests/ --override-ini addopts=""
 ## Citation
 
 ```bibtex
-@software{bennu2025,
+@software{sharur2025,
   author = {West-Roberts, Jacob},
-  title = {Bennu: Agent-driven metagenomic discovery},
+  title = {Sharur: Agent-driven metagenomic discovery},
   year = {2025},
   url = {https://github.com/jwestrob/Sharur}
 }
