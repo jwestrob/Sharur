@@ -6,7 +6,7 @@
 
 > *The weapon which loved the lord, obedient to its master — it spun around the horizon of heaven to find out what was happening, and joyfully it reported the message.*
 >
-> — [*Ninurta's exploits*](https://etcsl.orinst.ox.ac.uk/cgi-bin/etcsl.cgi?text=t.1.6.2&charenc=j#), Sumerian
+> — [*Ninurta's exploits*](https://etcsl.orinst.ox.ac.uk/cgi-bin/etcsl.cgi?text=t.1.6.2&charenc=j#) (Lugal-e), Sumerian, c. 2100 BCE
 
 In Sumerian mythology, Sharur is the sentient mace of the god Ninurta. It flies ahead to scout the unknown, gathers intelligence, and reports back what it finds.
 
