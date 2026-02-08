@@ -6,16 +6,15 @@ Two-stage classification:
 1. HMM search with HydDB profiles (via Astra) - identifies hydrogenase class (NiFe, FeFe, Fe)
 2. DIAMOND search against HydDB reference - assigns subgroup (e.g., Group_1a, Group_4e)
 
-Validation:
-- NiFe hydrogenases require NiFeSe_Hases (PF00374) PFAM domain
-- FeFe hydrogenases require Fe_hyd_lg_C (PF02906) or Fe_hyd_SSU (PF02256)
-- Complex I false positives (PF00346/PF00329 without NiFeSe_Hases) are filtered
+All DIAMOND-classified hits receive subgroup predicates. PFAM domains are
+recorded as metadata but do NOT gate predicate assignment — this avoids
+silently dropping Group 4 NiFe hydrogenases (Hyf/Hyc/Mbh/Ech), which
+diverged too far from the NiFeSe_Hases domain (PF00374).
 
-NOTE: This script handles automated pipeline validation only. Group 4 NiFe
-hydrogenases (Hyf/Hyc/Mbh/Ech) lack PF00374 and will be rejected here.
-Neighborhood-based curation to rescue these is done by survey/explore agents
-as part of their analysis workflow — see .claude/skills/survey.md and
-.claude/skills/explore.md for the hydrogenase curation protocol.
+Hits that lack PFAM corroboration or show Complex I markers are tagged
+with `hyddb_needs_curation` so agents can prioritize neighborhood-based
+validation during analysis. See .claude/skills/survey.md for the
+hydrogenase curation protocol.
 
 Usage:
     python scripts/classify_hydrogenases.py --db data/my_dataset/bennu.duckdb
@@ -285,7 +284,7 @@ def classify_hydrogenases(
     if verbose:
         print(f"DIAMOND classified {len(diamond_results)} proteins")
 
-    # Build results with validation
+    # Build results — classify all hits, flag those needing curation
     results = []
     for _, row in hyddb_proteins.iterrows():
         pid = row['protein_id']
@@ -297,33 +296,34 @@ def classify_hydrogenases(
         subgroup = diamond.get('subgroup', 'unknown')
         pident = diamond.get('pident', 0)
 
-        # Validate with PFAM
+        # Check PFAM context (informational, not gating)
         domains = pfam_domains.get(pid, set())
         has_nifese = 'PF00374' in domains  # NiFeSe_Hases
         has_fe_hyd = 'PF02906' in domains or 'PF02256' in domains  # Fe_hyd domains
         has_complex1 = 'PF00346' in domains or 'PF00329' in domains  # Complex I
 
-        # Determine validation status
+        # Determine confidence level — all hits get classified,
+        # but some are flagged for agent-level neighborhood curation
         if hmm_type == 'NiFe':
             if has_nifese:
-                validated = True
-                validation_note = "Validated by NiFeSe_Hases domain"
-            elif has_complex1:
-                validated = False
-                validation_note = "Complex I false positive (no NiFeSe_Hases)"
+                needs_curation = False
+                pfam_note = "Corroborated by NiFeSe_Hases (PF00374)"
+            elif has_complex1 and not has_nifese:
+                needs_curation = True
+                pfam_note = "Likely Complex I — has PF00346/PF00329 without PF00374"
             else:
-                validated = False
-                validation_note = "Missing NiFeSe_Hases domain"
+                needs_curation = True
+                pfam_note = "No PF00374 — likely Group 4 or needs neighborhood check"
         elif hmm_type == 'FeFe':
             if has_fe_hyd:
-                validated = True
-                validation_note = "Validated by Fe_hyd domain"
+                needs_curation = False
+                pfam_note = "Corroborated by Fe_hyd domain (PF02906/PF02256)"
             else:
-                validated = False
-                validation_note = "Missing Fe_hyd domain"
+                needs_curation = True
+                pfam_note = "No Fe_hyd domain — needs neighborhood check"
         else:  # Fe_only
-            validated = True  # Fe-only are rare, trust HMM
-            validation_note = "Fe-only (rare, trusted)"
+            needs_curation = False
+            pfam_note = "Fe-only (rare, trusted)"
 
         results.append({
             'protein_id': pid,
@@ -331,8 +331,8 @@ def classify_hydrogenases(
             'hmm_score': hmm_score,
             'subgroup': subgroup,
             'diamond_pident': pident,
-            'validated': validated,
-            'validation_note': validation_note,
+            'needs_curation': needs_curation,
+            'pfam_note': pfam_note,
             'has_nifese_hases': has_nifese,
             'has_fe_hyd': has_fe_hyd,
             'has_complex1': has_complex1,
@@ -345,21 +345,20 @@ def classify_hydrogenases(
         print("\n=== CLASSIFICATION SUMMARY ===")
         print(f"\nBy HMM type:")
         print(results_df.groupby('hmm_type')['protein_id'].count())
-        print(f"\nValidation status:")
-        print(results_df.groupby(['hmm_type', 'validated'])['protein_id'].count())
-        print(f"\nSubgroups (validated only):")
-        validated_df = results_df[results_df['validated']]
-        print(validated_df.groupby(['hmm_type', 'subgroup'])['protein_id'].count().head(20))
+        print(f"\nCuration status:")
+        print(results_df.groupby(['hmm_type', 'needs_curation'])['protein_id'].count())
+        print(f"\nSubgroups (all classified):")
+        print(results_df.groupby(['hmm_type', 'subgroup'])['protein_id'].count().head(30))
+        n_curation = results_df['needs_curation'].sum()
+        if n_curation > 0:
+            print(f"\n{n_curation} hits flagged for agent neighborhood curation")
 
-    # Update predicates if requested
+    # Update predicates if requested — ALL hits get subgroup predicates
     if update_predicates:
         if verbose:
             print("\nUpdating predicates...")
 
         for _, row in results_df.iterrows():
-            if not row['validated']:
-                continue
-
             pid = row['protein_id']
             subgroup = row['subgroup']
             hmm_type = row['hmm_type']
@@ -371,6 +370,10 @@ def classify_hydrogenases(
 
             # Add subgroup direct access predicate
             new_predicates.append(f"hyddb_subgroup:{subgroup}")
+
+            # Flag hits that need agent-level neighborhood curation
+            if row['needs_curation']:
+                new_predicates.append("hyddb_needs_curation")
 
             # Get current predicates
             current = db.execute("""

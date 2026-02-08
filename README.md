@@ -139,7 +139,7 @@ This lets agents ask functional questions ("find electron-bifurcating hydrogenas
 | 06 | ESM2 | Protein embeddings (320-dim) |
 | 07 | Builder | DuckDB knowledge base + predicates |
 
-Stage 07 also runs **hydrogenase subgroup classification** when HydDB annotations are present: DIAMOND search against the HydDB reference database assigns NiFe/FeFe subgroups (e.g., Group 1a, Group 4e), with PF00374 validation to filter Complex I false positives. Results are written as predicates (`nife_group1`, `fefe_groupB`, etc.). See `scripts/classify_hydrogenases.py` for details.
+Stage 07 also runs **hydrogenase subgroup classification** when HydDB annotations are present: DIAMOND search against the HydDB reference database assigns NiFe/FeFe subgroups (e.g., Group 1a, Group 4e). All classified hits receive subgroup predicates (`nife_group1`, `fefe_groupB`, etc.). Hits lacking PFAM corroboration (including all Group 4 NiFe) are tagged `hyddb_needs_curation` for agent-level neighborhood validation. See `scripts/classify_hydrogenases.py`.
 
 ## Development
 

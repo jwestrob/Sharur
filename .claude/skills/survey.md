@@ -464,13 +464,20 @@ b.store.execute("SELECT COUNT(DISTINCT protein_id) FROM annotations WHERE access
 
 ## Hydrogenase Curation Protocol
 
-HydDB produces ~44% false positives for NiFe (Complex I cross-hits). The pipeline's `classify_hydrogenases.py` applies a conservative PF00374-based filter that catches Groups 1-3 but **systematically rejects all Group 4 NiFe hydrogenases** (Hyf/Hyc/Mbh/Ech) because they diverged too far to retain the NiFeSe_Hases domain.
+The pipeline classifies all HydDB hits with DIAMOND subgroup assignments and tags them with subgroup predicates (`nife_group1` through `nife_group4`, `fefe_groupA` through `fefe_groupC`). Hits that lack PFAM corroboration are tagged `hyddb_needs_curation` — these include legitimate Group 4 NiFe hydrogenases (Hyf/Hyc/Mbh/Ech) AND Complex I false positives that share HMM similarity.
 
-**When the survey finds hydrogenases, you MUST run neighborhood-based curation:**
+**When the survey finds hydrogenases, curate the flagged hits by neighborhood:**
 
-1. Start with pipeline-validated counts (`nife_hydrogenase` predicate) as a baseline
-2. Pull the unvalidated HydDB NiFe hits that were rejected by the pipeline
-3. For each unvalidated hit, check ±8 genes for discriminating markers:
+```python
+# Step 1: Get all hydrogenases and the subset needing curation
+all_hyddb = b.search_by_predicates(has=["nife_group4"])  # or broader: ["nife_hydrogenase"]
+needs_curation = b.search_by_predicates(has=["hyddb_needs_curation"])
+
+# Step 2: For each flagged hit, check ±8 genes
+for pid in needs_curation[:30]:  # cap to avoid runaway loops
+    nbr = b.get_neighborhood(pid, window=8, all_annotations=True)
+    # Inspect neighbor KOs and PFAMs, log verdict
+```
 
 **Hydrogenase evidence** (any → likely real):
 - KEGG: K12136-K12145 (hyfA-J), K15828-K15833 (hycB-G)
@@ -482,20 +489,7 @@ HydDB produces ~44% false positives for NiFe (Complex I cross-hits). The pipelin
 - KEGG: K00330-K00343 (nuoA-N)
 - PFAM: PF00346, PF00329 (Complex1_49kDa, Complex1_30kDa) on neighbors
 
-```python
-# Step 1: Get pipeline-validated and unvalidated counts
-validated = b.search_by_predicates(has=["nife_hydrogenase"])
-all_hyddb = b.search_by_predicates(has=["hyddb:NiFe"])
-unvalidated = [p for p in all_hyddb if p not in set(validated)]
-
-# Step 2: For each unvalidated hit, check neighborhood
-for pid in unvalidated:
-    nbr = b.get_neighborhood(pid, window=8, all_annotations=True)
-    # Look for Hyf/Hyc KOs vs nuo KOs in neighbors
-    # Log verdict and evidence for each protein
-```
-
-**Report both counts:** "97 NiFe hydrogenases validated by PF00374, plus N rescued by neighborhood curation (Group 4 Hyf/Hyc), excluding M Complex I false positives."
+**Report with curation context:** "N NiFe hydrogenases classified (X Group 1-3 corroborated by PF00374, Y Group 4 confirmed by neighborhood markers, Z rejected as Complex I false positives)."
 
 ---
 

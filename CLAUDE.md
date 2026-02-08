@@ -152,7 +152,7 @@ result = b.get_neighborhood(protein_id, window=5, all_annotations=True)
 **Script:** `scripts/classify_hydrogenases.py`
 **Requires:** HydDB HMMs via Astra, DIAMOND database (`data/reference/hyddb/HydDB_all.dmnd`)
 **Output:** Subgroup-level classification (NiFe Group 1-4, FeFe A-C)
-**Note:** Pipeline uses PF00374 filter (validates Groups 1-3, rejects all Group 4). Agents must run neighborhood-based curation to rescue Group 4 — see skill specs.
+**Note:** Pipeline classifies all HydDB hits and assigns subgroup predicates. Hits lacking PFAM corroboration are tagged `hyddb_needs_curation` for agent neighborhood curation — see skill specs.
 
 ### Embedding Visualization
 **Script:** `scripts/visualize_embeddings.py`
@@ -417,15 +417,12 @@ hmmsearch --domE 1e-5 ~/.config/Astra/PFAM/Pfam-A.hmm giant_protein.faa
 
 **Primary source: HydDB HMMs** — use HydDB over PFAM for hydrogenase typing.
 
-#### Two-Layer Validation
+#### Pipeline + Agent Curation
 
-**Layer 1 — Pipeline (automated, `classify_hydrogenases.py`):**
-- PF00374 (NiFeSe_Hases) validates NiFe Groups 1-3
-- PF00346/PF00329 without PF00374 → rejected as Complex I
-- **LIMITATION:** Rejects all Group 4 NiFe (Hyf/Hyc/Mbh/Ech diverged too far for PF00374)
+**Pipeline (`classify_hydrogenases.py`):** Classifies all HydDB hits via DIAMOND, assigns subgroup predicates (Groups 1-4, FeFe A-C). Hits with PFAM corroboration (PF00374 for NiFe, PF02906/PF02256 for FeFe) are high-confidence. Hits without are tagged `hyddb_needs_curation`.
 
-**Layer 2 — Agent curation (neighborhood-based):**
-For unvalidated HydDB NiFe hits, check ±8 gene neighborhood:
+**Agent curation (neighborhood-based):**
+For `hyddb_needs_curation` hits, check ±8 gene neighborhood:
 
 | Evidence | KEGG KOs | Verdict |
 |----------|----------|---------|
