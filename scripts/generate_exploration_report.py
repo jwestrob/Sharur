@@ -1107,6 +1107,42 @@ def generate_report():
                         pdf.subsection_title(name)
                         pdf.add_image(str(fig), "")
 
+    # Standalone Analysis Reports (from exploration directory)
+    # These are produced by specialized skill agents (defense, metabolism, pathway, etc.)
+    if EXPLORE_DIR.exists():
+        analysis_topics = [
+            ("defense_analysis.md", "Defense Systems Analysis"),
+            ("kegg_analysis.md", "KEGG Metabolic Analysis"),
+            ("pathway_analysis.md", "Pathway Completeness Analysis"),
+            ("compare_analysis.md", "Comparative Genomic Analysis"),
+        ]
+
+        for filename, title in analysis_topics:
+            path = EXPLORE_DIR / filename
+            if path.exists() and path.stat().st_size > 100:
+                print(f"    Including analysis report: {title}")
+                content = path.read_text()
+
+                pdf.add_page()
+                pdf.chapter_title(section_num, title)
+                section_num += 1
+
+                # Strip the top-level title if present
+                lines = content.split('\n')
+                if lines and lines[0].startswith('# '):
+                    content = '\n'.join(lines[1:]).lstrip()
+
+                # Truncate very long reports to avoid PDF bloat
+                if len(content) > 15000:
+                    # Try to cut at a section boundary
+                    cutoff = content[:15000].rfind('\n## ')
+                    if cutoff > 10000:
+                        content = content[:cutoff] + '\n\n[Report truncated for PDF. See full markdown file.]'
+                    else:
+                        content = content[:15000] + '\n\n[Report truncated for PDF. See full markdown file.]'
+
+                pdf.body_text(content)
+
     # Hypothesis Testing section (from synthesis)
     if synthesis and synthesis.get('hypotheses'):
         print("  Adding hypothesis testing section...")

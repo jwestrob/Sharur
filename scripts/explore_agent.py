@@ -27,20 +27,20 @@ from sharur.operators import Sharur
 DEFAULT_DB = "data/sharur.duckdb"
 
 # Global Sharur instance (initialized lazily)
-_bennu = None
+_sharur = None
 
 
-def get_bennu(db_path: str = DEFAULT_DB) -> Sharur:
+def get_sharur(db_path: str = DEFAULT_DB) -> Sharur:
     """Get or create Sharur instance."""
-    global _bennu
-    if _bennu is None:
-        _bennu = Sharur(db_path)
-    return _bennu
+    global _sharur
+    if _sharur is None:
+        _sharur = Sharur(db_path)
+    return _sharur
 
 
 def overview(db_path: str = DEFAULT_DB):
     """Get dataset overview."""
-    b = get_bennu(db_path)
+    b = get_sharur(db_path)
     result = b.overview()
     print(result.data)
     return result
@@ -48,7 +48,7 @@ def overview(db_path: str = DEFAULT_DB):
 
 def search(has=None, lacks=None, limit=20, db_path: str = DEFAULT_DB):
     """Search proteins by predicates."""
-    b = get_bennu(db_path)
+    b = get_sharur(db_path)
     result = b.search_by_predicates(has=has, lacks=lacks, limit=limit)
     print(result.data)
     return result
@@ -56,7 +56,7 @@ def search(has=None, lacks=None, limit=20, db_path: str = DEFAULT_DB):
 
 def neighborhood(protein_id, window=10, db_path: str = DEFAULT_DB):
     """Get genomic neighborhood around a protein."""
-    b = get_bennu(db_path)
+    b = get_sharur(db_path)
     result = b.get_neighborhood(protein_id, window=window)
     print(result.data)
     return result
@@ -64,7 +64,7 @@ def neighborhood(protein_id, window=10, db_path: str = DEFAULT_DB):
 
 def protein(protein_id, db_path: str = DEFAULT_DB):
     """Get protein details."""
-    b = get_bennu(db_path)
+    b = get_sharur(db_path)
     result = b.get_protein(protein_id, verbosity=2)
     print(result.data)
     return result
@@ -72,7 +72,7 @@ def protein(protein_id, db_path: str = DEFAULT_DB):
 
 def genomes(limit=10, db_path: str = DEFAULT_DB):
     """List genomes."""
-    b = get_bennu(db_path)
+    b = get_sharur(db_path)
     result = b.list_genomes(limit=limit)
     print(result.data)
     return result
@@ -80,7 +80,7 @@ def genomes(limit=10, db_path: str = DEFAULT_DB):
 
 def proteins_on_contig(contig_id, limit=100, db_path: str = DEFAULT_DB):
     """List proteins on a specific contig."""
-    b = get_bennu(db_path)
+    b = get_sharur(db_path)
     result = b.list_proteins(contig_id=contig_id, limit=limit)
     print(result.data)
     return result
@@ -88,7 +88,7 @@ def proteins_on_contig(contig_id, limit=100, db_path: str = DEFAULT_DB):
 
 def contigs(genome_id=None, limit=20, db_path: str = DEFAULT_DB):
     """List contigs, optionally filtered by genome."""
-    b = get_bennu(db_path)
+    b = get_sharur(db_path)
     result = b.list_contigs(genome_id=genome_id, limit=limit)
     print(result.data)
     return result
@@ -140,7 +140,7 @@ FOCUS_SEARCHES = {
 
 def run_focused_exploration(focus: str = "general", db_path: str = DEFAULT_DB):
     """Run exploration with a specific focus area."""
-    b = get_bennu(db_path)
+    b = get_sharur(db_path)
 
     print("=" * 70)
     print(f"BENNU EXPLORATION: {focus.upper()}")
@@ -199,7 +199,7 @@ def run_focused_exploration(focus: str = "general", db_path: str = DEFAULT_DB):
 
 def browse_contig(contig_id: str, window_size: int = 15, db_path: str = DEFAULT_DB):
     """Browse a contig window-by-window."""
-    b = get_bennu(db_path)
+    b = get_sharur(db_path)
 
     print("=" * 70)
     print(f"BROWSING CONTIG: {contig_id}")

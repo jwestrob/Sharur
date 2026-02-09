@@ -217,7 +217,11 @@ print(f"{result[0]} = {result[1]}")  # PF04055 = Radical_SAM
 
 **The domain tells you the fold. The neighbors tell you the function.**
 
-When a PFAM domain or KO averages >10 hits per genome, it is a **superfamily-level annotation** — treat as structural info, not functional evidence.
+**Superfamily awareness applies to ALL HMM-based annotation sources** (PFAM, KEGG, DefenseFinder, VOGdb, CAZy). When any accession averages >10 hits per genome, it likely describes a protein fold, not a specific function. Even below that threshold, if a claimed function appears in >50% of genomes, ask whether that prevalence makes biological sense.
+
+Before reporting any HMM-based functional claim, run two checks:
+(1) **Co-annotation**: what other domains do these proteins carry? The additional domains often reveal the actual function.
+(2) **Genome context**: pick 3-5 examples and examine the ±8 gene neighborhood for preserved synteny, diagnostic domain fusions, or pathway-specific neighbors that support the claimed function.
 
 ```python
 # 1. Co-annotation check
