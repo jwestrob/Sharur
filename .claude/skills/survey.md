@@ -659,13 +659,32 @@ Generate **separate reports for major topics** (easier to navigate than one gian
     - Major discoveries in machine-readable format
     - Each line is a JSON object with: title, category, description, evidence, significance
 
-After survey completion, link significant findings to hypotheses:
+### Hypothesis Tracking & Provenance
+
+Log analytical steps and link findings to hypotheses for cross-session persistence:
 
 ```python
-b.add_evidence(hypothesis_id, "Survey: NiFe distribution", f"{n} genomes positive", True, 0.7)
+# Log key survey steps with provenance chaining
+e1 = b.log_provenance("Census: annotation sources", f"{len(source_census)} sources loaded")
+e2 = b.log_provenance("Hydrogenase inventory", f"{n_hydro} NiFe in {n_genomes_hydro} genomes", parent_ids=[e1.entry_id])
+e3 = b.log_provenance("ETC completeness check", "Complex III/IV absent in 38/41", parent_ids=[e1.entry_id])
+
+# Propose hypotheses discovered during the survey
+h = b.propose_hypothesis("Lineage is obligately syntrophic based on incomplete ETC")
+
+# Link evidence from survey analyses
+b.add_evidence(h.hypothesis_id, "Survey: NiFe distribution", f"{n} genomes positive", True, 0.7)
+b.add_evidence(h.hypothesis_id, "Survey: ETC gaps", "Missing Complex III and IV in 38/41", True, 0.9)
+
+# Review all hypotheses
+print(b.hypothesis_summary())
+print(b.list_hypotheses())
+
+# Render provenance DAG for the paper
+b.render_provenance(title="Survey Analysis", output_path="figures/survey_provenance.mermaid")
 ```
 
-Use `b.propose_hypothesis()` to register new hypotheses discovered during the survey. These persist across sessions and appear in `b.resume()`.
+Hypotheses persist across sessions and appear in `b.resume()`.
 
 ---
 

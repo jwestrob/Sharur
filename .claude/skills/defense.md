@@ -398,3 +398,28 @@ for i, dt1 in enumerate(defense_types):
         """).fetchone()[0]
         print(f"  {dt1} + {dt2}: {both} genomes")
 ```
+
+### Hypothesis Tracking & Provenance
+
+Log analytical steps and register defense-related hypotheses:
+
+```python
+# Log key analytical steps with provenance chaining
+e1 = b.log_provenance("Defense inventory", f"{n_crispr} CRISPR, {n_rm} RM, {n_ta} TA systems")
+e2 = b.log_provenance("Defense load calculation", f"Mean {mean_pct:.1f}% of proteome", parent_ids=[e1.entry_id])
+e3 = b.log_provenance("Co-occurrence analysis", "CRISPR + RM co-occur in 80% of genomes", parent_ids=[e1.entry_id])
+
+# Propose hypotheses about defense strategy
+h = b.propose_hypothesis("Heavy defense investment indicates constant phage pressure in syntrophic niche")
+b.add_evidence(h.hypothesis_id, "Defense load", f"{mean_pct:.1f}% mean defense proteome", True, 0.8)
+b.add_evidence(h.hypothesis_id, "CRISPR universality", f"Type I-C in {n_crispr_genomes}/{n_genomes} genomes", True, 0.7)
+
+# Review all hypotheses
+print(b.hypothesis_summary())
+print(b.list_hypotheses())
+
+# Render provenance DAG
+b.render_provenance(title="Defense Analysis", output_path="figures/defense_provenance.mermaid")
+```
+
+Hypotheses persist across sessions — `b.resume()` shows active hypotheses automatically.

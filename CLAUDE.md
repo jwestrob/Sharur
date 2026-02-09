@@ -51,7 +51,7 @@ Bennu is an agent-driven metagenomic exploration system. It's a data plane that 
 
 **CRITICAL: Always include independent review at the end of analysis.**
 
-### Three-Tier Architecture
+### Four-Phase Architecture
 
 ```
 Coordinator
@@ -62,11 +62,58 @@ Coordinator
 ├── 2. Explore (hypothesis-driven discovery)
 │   └── Reads survey → generates hypotheses → spawns testing subagents
 │
-└── 3. Review (independent validation)
-    └── Validates claims, catches errors, performs follow-ups
+├── 3. Deepen (targeted follow-up on findings)
+│   └── Coordinator reads all findings, identifies gaps, dispatches specialists
+│
+└── 4. Review (independent validation)
+    └── Validates claims, catches errors, assesses publication readiness
 ```
 
 Use `b.propose_hypothesis()` and `b.add_evidence()` to track analytical reasoning across sessions. Hypotheses persist in `exploration/hypotheses.json` and appear in `b.resume()` output. Use `b.render_provenance()` to generate Mermaid DAG figures for publications.
+
+### Deepen Phase (Coordinator-Driven)
+
+**Goal**: Turn preliminary findings into well-supported, publication-ready results. Unlike Explore (which follows its own curiosity), Deepen is the coordinator making deliberate decisions about what needs more evidence.
+
+**Workflow:**
+
+1. **Read all findings** from Survey and Explore (`findings.jsonl`, `genome_profiles.tsv`, `exploration_state.json`)
+2. **Gap analysis** — identify:
+   - Findings with weak evidence (single annotation, no neighborhood context)
+   - Unknown proteins that deserve characterization
+   - Metabolic claims missing pathway completeness checks
+   - Defense systems needing detailed inventory
+   - Novel findings lacking literature context
+3. **Dispatch targeted subagents** based on gaps:
+
+```python
+# Characterize key unknowns — structure + foldseek + literature
+Task(subagent_type="general-purpose",
+     prompt="Characterize protein X: predict structure, run foldseek, search literature...",
+     run_in_background=True)
+
+# Verify metabolic pathway claims
+Task(subagent_type="general-purpose",
+     prompt="Check completeness of Wood-Ljungdahl pathway across all genomes...",
+     run_in_background=True)
+
+# Literature search on novel findings
+Task(subagent_type="general-purpose",
+     prompt="Search literature for precedents of [finding]...",
+     run_in_background=True)
+
+# Defense system deep-dive
+Task(subagent_type="general-purpose",
+     prompt="Complete defense system inventory: CRISPR typing, RM specificity...",
+     run_in_background=True)
+```
+
+4. **Synthesize** — integrate subagent results back into findings, update hypotheses, write narrative
+
+**Key principle:** The coordinator decides what's worth investing in. Not every finding needs deepening. Deepen is the "what would a reviewer ask?" step — focus effort on:
+- Findings likely to be headline results
+- Claims that reviewers will challenge
+- Unknowns that could change the story
 
 ### Review Agent Responsibilities
 

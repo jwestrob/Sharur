@@ -217,9 +217,21 @@ finding = {
 with open(EXPLORE_DIR / "findings.jsonl", "a") as f:
     f.write(json.dumps(finding) + "\n")
 
-# Also register as a persistent hypothesis if the characterization yields a functional prediction
+# Log the analytical provenance chain
+e1 = b.log_provenance(f"Domain search for {protein_id}", f"{len(domains)} domain hits")
+e2 = b.log_provenance(f"Foldseek search for {protein_id}", "Top hit: 3GW6 tail fiber (E=1.2e-15)", parent_ids=[e1.entry_id])
+e3 = b.log_provenance(f"Neighborhood analysis for {protein_id}", "Co-located with phage structural genes", parent_ids=[e1.entry_id])
+
+# Register as a persistent hypothesis if the characterization yields a functional prediction
 h = b.propose_hypothesis(f"{protein_id} functions as [predicted function]")
 b.add_evidence(h.hypothesis_id, "Foldseek structural homology", "TM-score 0.72 to tail fiber", True, 0.7)
+b.add_evidence(h.hypothesis_id, "Genomic context", "Adjacent to phage tail genes", True, 0.6)
+
+# Review hypothesis state
+print(b.hypothesis_summary())
+
+# Render provenance DAG
+b.render_provenance(title=f"Characterization: {protein_id}", output_path=f"figures/{protein_id}_provenance.mermaid")
 ```
 
 ---

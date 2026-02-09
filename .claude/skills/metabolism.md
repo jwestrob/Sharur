@@ -280,9 +280,29 @@ Based on metabolic gene content:
 - pathway_completeness.png: Heatmap of pathway presence
 ```
 
-Register metabolic lifestyle hypotheses for cross-session tracking:
+### Hypothesis Tracking & Provenance
+
+Register metabolic lifestyle hypotheses and log the analytical steps that led to them:
 
 ```python
+# Log key analytical steps with provenance chaining
+e1 = b.log_provenance("ETC complex inventory", "Complex I: 41, II: 38, III: 3, IV: 2, V: 41")
+e2 = b.log_provenance("Terminal acceptor scan", "Only 2/41 genomes have cytochrome oxidase", parent_ids=[e1.entry_id])
+e3 = b.log_provenance("Hydrogenase subtyping", "39/41 have Group 4 Mbh energy-conserving", parent_ids=[e1.entry_id])
+
+# Propose hypothesis based on accumulated evidence
 h = b.propose_hypothesis("Lineage is obligately syntrophic based on incomplete electron transport chain")
+
+# Link evidence to hypothesis
 b.add_evidence(h.hypothesis_id, "ETC analysis", "Missing Complex III and IV in 38/41 genomes", True, 0.9)
+b.add_evidence(h.hypothesis_id, "Hydrogenase profile", "Universal Group 4 Mbh = H2-evolving", True, 0.85)
+
+# Review all hypotheses
+print(b.hypothesis_summary())
+print(b.list_hypotheses())
+
+# Render provenance DAG for the paper
+b.render_provenance(title="Metabolic Analysis", output_path="figures/metabolism_provenance.mermaid")
 ```
+
+Hypotheses persist across sessions — `b.resume()` shows active hypotheses automatically.
