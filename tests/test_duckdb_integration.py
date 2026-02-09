@@ -45,7 +45,7 @@ def test_build_and_query_duckdb(tmp_path):
         stage06_dir=DATA_DIR / "stage06_embeddings",
     )
 
-    db_path = tmp_path / "bennu.duckdb"
+    db_path = tmp_path / "sharur.duckdb"
     builder = KnowledgeBaseBuilder(outputs, db_path, force=True)
     stats = builder.build()
 

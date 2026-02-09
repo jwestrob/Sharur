@@ -91,7 +91,7 @@ checks, verify neighborhood context with b.get_neighborhood(pid, window=5, all_a
 and only claim specific function if supported by pathway-specific markers. Check accession
 names in the database before reporting.**
 
-Dataset: data/hinthialibacterota_v3/bennu.duckdb
+Dataset: data/hinthialibacterota_v3/sharur.duckdb
 
 Your task: Write a comprehensive metabolic_reconstruction.md report covering:
 - Energy metabolism (respiration, fermentation, electron carriers)
@@ -101,7 +101,7 @@ Your task: Write a comprehensive metabolic_reconstruction.md report covering:
 
 Output: Write to data/hinthialibacterota_v3/survey/metabolic_reconstruction.md
 
-Use the Bennu operators to query. Synthesize, don't just enumerate. See /Users/jacob/Documents/Sandbox/Bennu2/bennu/.claude/skills/survey.md for detailed guidance on each area."""
+Use the Sharur operators to query. Synthesize, don't just enumerate. See /Users/jacob/Documents/Sandbox/Bennu2/bennu/.claude/skills/survey.md for detailed guidance on each area."""
 )
 
 # Wait for it to complete, then spawn next subagent for cell_surface_biology.md, etc.
@@ -785,10 +785,10 @@ Use all three methods before claiming cytochrome absence. If all three find noth
 ## Example Workflow
 
 ```python
-from bennu.operators import Bennu
+from sharur.operators import Sharur
 from pathlib import Path
 
-b = Bennu("data/YOUR_DATASET/bennu.duckdb")
+b = Sharur("data/YOUR_DATASET/sharur.duckdb")
 output_dir = Path("data/YOUR_DATASET/survey")
 output_dir.mkdir(exist_ok=True)
 

@@ -2,23 +2,23 @@
 
 import pytest
 
-from bennu.operators.navigation import (
+from sharur.operators.navigation import (
     list_genomes,
     list_proteins,
     get_genome,
     get_protein,
     get_neighborhood,
 )
-from bennu.operators.base import BennuResult
+from sharur.operators.base import SharurResult
 
 
 class TestListGenomes:
     """Tests for list_genomes() operator."""
 
     def test_returns_bennu_result(self, store):
-        """list_genomes() should return a BennuResult."""
+        """list_genomes() should return a SharurResult."""
         result = list_genomes(store)
-        assert isinstance(result, BennuResult)
+        assert isinstance(result, SharurResult)
 
     def test_returns_all_genomes(self, store):
         """list_genomes() should return all genomes by default."""
@@ -63,9 +63,9 @@ class TestListProteins:
     """Tests for list_proteins() operator."""
 
     def test_returns_bennu_result(self, store):
-        """list_proteins() should return a BennuResult."""
+        """list_proteins() should return a SharurResult."""
         result = list_proteins(store)
-        assert isinstance(result, BennuResult)
+        assert isinstance(result, SharurResult)
 
     def test_returns_all_proteins(self, store):
         """list_proteins() should return all proteins by default."""
@@ -103,9 +103,9 @@ class TestGetGenome:
     """Tests for get_genome() operator."""
 
     def test_returns_bennu_result(self, store):
-        """get_genome() should return a BennuResult."""
+        """get_genome() should return a SharurResult."""
         result = get_genome(store, "bin_001")
-        assert isinstance(result, BennuResult)
+        assert isinstance(result, SharurResult)
 
     def test_genome_not_found(self, store):
         """get_genome() should handle missing genome."""
@@ -129,9 +129,9 @@ class TestGetProtein:
     """Tests for get_protein() operator."""
 
     def test_returns_bennu_result(self, store):
-        """get_protein() should return a BennuResult."""
+        """get_protein() should return a SharurResult."""
         result = get_protein(store, "prot_001")
-        assert isinstance(result, BennuResult)
+        assert isinstance(result, SharurResult)
 
     def test_protein_not_found(self, store):
         """get_protein() should handle missing protein."""
@@ -155,9 +155,9 @@ class TestGetNeighborhood:
     """Tests for get_neighborhood() operator."""
 
     def test_returns_bennu_result(self, store):
-        """get_neighborhood() should return a BennuResult."""
+        """get_neighborhood() should return a SharurResult."""
         result = get_neighborhood(store, "prot_003")  # Middle of contig_001
-        assert isinstance(result, BennuResult)
+        assert isinstance(result, SharurResult)
 
     def test_protein_not_found(self, store):
         """get_neighborhood() should handle missing protein."""

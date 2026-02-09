@@ -88,7 +88,7 @@ def test_ingest_smoke(tmp_path):
         stage06_dir=data_dir / "stage06_embeddings",
     )
 
-    db_path = data_dir / "bennu.duckdb"
+    db_path = data_dir / "sharur.duckdb"
     builder = KnowledgeBaseBuilder(outputs, db_path, force=True)
     stats = builder.build()
 

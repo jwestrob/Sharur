@@ -3,8 +3,8 @@
 import duckdb
 import pytest
 
-from bennu.storage.migrations import get_current_version, run_migrations
-from bennu.storage.schema import SCHEMA, SCHEMA_VERSION
+from sharur.storage.migrations import get_current_version, run_migrations
+from sharur.storage.schema import SCHEMA, SCHEMA_VERSION
 
 
 @pytest.fixture
@@ -65,7 +65,7 @@ def test_schema_version_constant():
 
 def test_duckdb_store_runs_migrations():
     """DuckDBStore._initialize_schema runs migrations on fresh DB."""
-    from bennu.storage.duckdb_store import DuckDBStore
+    from sharur.storage.duckdb_store import DuckDBStore
 
     store = DuckDBStore()  # in-memory
     # Accessing .conn triggers _initialize_schema

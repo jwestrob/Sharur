@@ -3,13 +3,13 @@
 
 Usage:
     python scripts/visualize_embeddings.py \
-        --db data/DATASET/bennu.duckdb \
+        --db data/DATASET/sharur.duckdb \
         --output figures/embedding_umap.html \
         --color-by genome \
         --limit 10000
 
     python scripts/visualize_embeddings.py \
-        --db data/DATASET/bennu.duckdb \
+        --db data/DATASET/sharur.duckdb \
         --output figures/embedding_umap.png \
         --color-by predicate \
         --predicate hydrogenase \
@@ -30,7 +30,7 @@ import numpy as np
 
 
 def load_embeddings(db_path: str, limit: int = 10000) -> tuple[np.ndarray, list[str]]:
-    """Load ESM2 embeddings from LanceDB alongside the Bennu database.
+    """Load ESM2 embeddings from LanceDB alongside the Sharur database.
 
     Returns (embeddings_array, protein_ids).
     """
@@ -257,7 +257,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Visualize ESM2 protein embeddings using UMAP"
     )
-    parser.add_argument("--db", required=True, help="Path to bennu.duckdb")
+    parser.add_argument("--db", required=True, help="Path to sharur.duckdb")
     parser.add_argument("--output", required=True, help="Output path (.html or .png)")
     parser.add_argument(
         "--color-by",

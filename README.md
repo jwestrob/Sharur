@@ -38,7 +38,7 @@ pip install -e ".[dev]"
 python scripts/ingest.py \
   --input-dir /path/to/genomes \
   --data-dir data/my_dataset \
-  --output data/my_dataset/bennu.duckdb \
+  --output data/my_dataset/sharur.duckdb \
   --force
 ```
 
@@ -47,9 +47,9 @@ This runs Prodigal, Astra (PFAM/KEGG/HydDB), GECCO, dbCAN, minced, ESM2 embeddin
 ### Use the operators
 
 ```python
-from bennu.operators import Bennu
+from sharur.operators import Sharur
 
-b = Bennu("data/my_dataset/bennu.duckdb")
+b = Sharur("data/my_dataset/sharur.duckdb")
 
 # Predicate search
 hydrogenases = b.search("nife_group3 AND bidirectional_hydrogenase")

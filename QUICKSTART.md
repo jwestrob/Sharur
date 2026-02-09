@@ -1,13 +1,13 @@
-# Bennu Quickstart: New Dataset Ingestion
+# Sharur Quickstart: New Dataset Ingestion
 
-**Goal:** Go from raw protein FASTA to exploration-ready Bennu database in ~30 minutes.
+**Goal:** Go from raw protein FASTA to exploration-ready Sharur database in ~30 minutes.
 
 ---
 
 ## Prerequisites
 
 ### Software
-- Python 3.8+ with Bennu installed (`pip install -e .`)
+- Python 3.8+ with Sharur installed (`pip install -e .`)
 - [Astra](https://github.com/Dreycey/Astra) annotation tool
 - HMM databases installed via Astra:
   - `PFAM` (Pfam-A domains)
@@ -87,20 +87,20 @@ rm -r data/${DATASET}/source/proteins_dir
 
 ---
 
-## Step 2: Ingest into Bennu Database
+## Step 2: Ingest into Sharur Database
 
 ```bash
 # Import proteins
 python scripts/ingest_protein_fasta.py \
   --fasta data/${DATASET}/source/proteins.faa.gz \
-  --output data/${DATASET}/bennu.duckdb
+  --output data/${DATASET}/sharur.duckdb
 
 # Import PFAM annotations
 python -c "
 import duckdb
 import pandas as pd
 
-db = duckdb.connect('data/${DATASET}/bennu.duckdb')
+db = duckdb.connect('data/${DATASET}/sharur.duckdb')
 pfam = pd.read_csv('data/${DATASET}/annotations/pfam_results/PFAM_hits_df.tsv', sep='\t')
 pfam.columns = ['protein_id', 'annotation_id', 'evalue', 'score', 'bias']  # Adjust if needed
 db.execute('INSERT INTO annotations SELECT * FROM pfam')
@@ -112,7 +112,7 @@ python -c "
 import duckdb
 import pandas as pd
 
-db = duckdb.connect('data/${DATASET}/bennu.duckdb')
+db = duckdb.connect('data/${DATASET}/sharur.duckdb')
 kegg = pd.read_csv('data/${DATASET}/annotations/kofam_results/KOFAM_hits_df.tsv', sep='\t')
 kegg.columns = ['protein_id', 'annotation_id', 'evalue', 'score', 'bias']
 db.execute('INSERT INTO annotations SELECT * FROM kegg')
@@ -130,8 +130,8 @@ db.close()
 
 ```bash
 python -c "
-from bennu.operators import Bennu
-b = Bennu('data/${DATASET}/bennu.duckdb')
+from sharur.operators import Sharur
+b = Sharur('data/${DATASET}/sharur.duckdb')
 print('Generating predicates from annotations...')
 b.regenerate_predicates()  # Uses PFAM, KEGG, HydDB, VOGdb
 print(f'Generated {len(b.list_predicates())} unique predicates')
@@ -146,7 +146,7 @@ print(f'Generated {len(b.list_predicates())} unique predicates')
 
 ```bash
 python src/ingest/06_esm2_embeddings.py \
-  data/${DATASET}/bennu.duckdb \
+  data/${DATASET}/sharur.duckdb \
   data/${DATASET}/embeddings/
 ```
 
@@ -160,8 +160,8 @@ python src/ingest/06_esm2_embeddings.py \
 
 ```bash
 python -c "
-from bennu.operators import Bennu
-b = Bennu('data/${DATASET}/bennu.duckdb')
+from sharur.operators import Sharur
+b = Sharur('data/${DATASET}/sharur.duckdb')
 
 print(f'Total proteins: {b.total_proteins()}')
 print(f'Annotated: {len(b.search(\"confident_hit\"))} proteins')
@@ -197,9 +197,9 @@ If using Claude Code:
 ### Option B: Programmatic Analysis
 
 ```python
-from bennu.operators import Bennu
+from sharur.operators import Sharur
 
-b = Bennu('data/my_dataset_production/bennu.duckdb')
+b = Sharur('data/my_dataset_production/sharur.duckdb')
 
 # Find interesting proteins
 giants = b.search("giant AND unannotated")
@@ -222,7 +222,7 @@ similar = b.find_similar(giants[0], k=20)
 cp scripts/generate_viral_genome_report.py scripts/generate_${DATASET}_report.py
 
 # Edit ONLY these in the top section:
-# - DB_PATH = "data/${DATASET}/bennu.duckdb"
+# - DB_PATH = "data/${DATASET}/sharur.duckdb"
 # - DATA_DIR = Path("data/${DATASET}")
 # - Update organism name in headers/titles
 # DO NOT change OUTPUT_PDF - it uses standard "COMPREHENSIVE_REPORT.pdf"
@@ -288,7 +288,7 @@ See `AGENTS.md` for full agent workflows and canonical tools.
 After completion, you should have:
 ```
 data/my_dataset_production/
-├── bennu.duckdb              # Core database (10-100 MB)
+├── sharur.duckdb              # Core database (10-100 MB)
 ├── source/
 │   └── proteins.faa.gz       # Original input
 ├── annotations/

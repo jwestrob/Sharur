@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Thin orchestration CLI for Bennu ingest stages (00→07).
+Thin orchestration CLI for Sharur ingest stages (00→07).
 
 Two modes:
 - fast (default): synthesize minimal stage outputs from contig FASTAs (no external tools)
@@ -214,7 +214,7 @@ def _synthesize_pipeline(raw_dir: Path, data_dir: Path) -> None:
 def run(
     input_dir: Annotated[Path, typer.Option("--input-dir", "-i", help="Raw genomes (.fna/.fa/.fasta)")] = Path("dummy_dataset"),
     data_dir: Annotated[Path, typer.Option("--data-dir", "-d", help="Working directory for stage outputs")] = Path("data"),
-    output: Annotated[Path, typer.Option("--output", "-o", help="Destination DuckDB path")] = Path("data/bennu.duckdb"),
+    output: Annotated[Path, typer.Option("--output", "-o", help="Destination DuckDB path")] = Path("data/sharur.duckdb"),
     mode: Annotated[str, typer.Option("--mode", "-m", help="tools (real pipeline) or fast (synthetic smoke)")] = "tools",
     force: Annotated[bool, typer.Option("--force", help="Overwrite existing DuckDB")] = False,
     skip_quast: Annotated[bool, typer.Option(help="Skip Stage 01 (QUAST)")] = False,
@@ -228,7 +228,7 @@ def run(
     dry_run: Annotated[bool, typer.Option(help="Plan commands without executing or building DB")] = False,
 ) -> None:
     """
-    Build a Bennu DuckDB. Default is the real tool chain; use --mode fast only for test smoke.
+    Build a Sharur DuckDB. Default is the real tool chain; use --mode fast only for test smoke.
     """
     data_dir.mkdir(parents=True, exist_ok=True)
     stages = StagePaths.from_root(data_dir)

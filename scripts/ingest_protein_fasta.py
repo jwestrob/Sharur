@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Direct protein FASTA ingestion for Bennu.
+Direct protein FASTA ingestion for Sharur.
 
 For datasets where proteins are already called (no Prodigal needed).
 Parses Prodigal-style FASTA headers with coordinates.
@@ -112,11 +112,11 @@ def ingest_proteins(
     force: bool = False,
 ) -> dict:
     """
-    Ingest protein FASTA into Bennu DuckDB.
+    Ingest protein FASTA into Sharur DuckDB.
 
     Returns stats dict.
     """
-    from bennu.storage.schema import SCHEMA
+    from sharur.storage.schema import SCHEMA
 
     if db_path.exists() and not force:
         raise FileExistsError(f"Database exists: {db_path}. Use --force to overwrite.")
@@ -207,12 +207,12 @@ app = typer.Typer(no_args_is_help=True, add_completion=False)
 @app.command()
 def main(
     fasta: Path = typer.Argument(..., help="Protein FASTA file (.faa or .faa.gz)"),
-    output: Path = typer.Option(Path("data/bennu.duckdb"), "--output", "-o", help="Output DuckDB path"),
+    output: Path = typer.Option(Path("data/sharur.duckdb"), "--output", "-o", help="Output DuckDB path"),
     genome_name: str = typer.Option(None, "--name", "-n", help="Genome name (default: from FASTA)"),
     force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing database"),
 ):
     """
-    Ingest a protein FASTA directly into Bennu DuckDB.
+    Ingest a protein FASTA directly into Sharur DuckDB.
 
     For use with pre-called proteins (no Prodigal step needed).
     Annotations must be added separately.

@@ -30,8 +30,8 @@ You are analyzing metabolic capabilities in a metagenomic dataset. Focus on ener
 ### Step 1: Overview
 
 ```python
-from bennu.operators import Bennu
-b = Bennu("data/DATASET/bennu.duckdb")
+from sharur.operators import Sharur
+b = Sharur("data/DATASET/sharur.duckdb")
 
 # Key metabolic predicates
 metabolic_predicates = [

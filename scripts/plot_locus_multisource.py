@@ -5,7 +5,7 @@ Generate publication-quality gene neighborhood diagrams with multi-source annota
 Annotation priority: Foldseek structural > DefenseFinder > PADLOC > PFAM/KEGG/VOGdb
 
 Usage:
-    python plot_locus_multisource.py --db data/dataset/bennu.duckdb --protein PROTEIN_ID --window 10 --output figure.png
+    python plot_locus_multisource.py --db data/dataset/sharur.duckdb --protein PROTEIN_ID --window 10 --output figure.png
 """
 
 import argparse
@@ -290,7 +290,7 @@ def plot_locus(
     Generate gene neighborhood diagram with multi-source annotation.
 
     Args:
-        db_path: Path to bennu.duckdb
+        db_path: Path to sharur.duckdb
         protein_id: Center protein ID
         window: Genes on each side
         output_path: Output PNG path
@@ -492,7 +492,7 @@ def plot_locus(
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--db', required=True, help='Path to bennu.duckdb')
+    parser.add_argument('--db', required=True, help='Path to sharur.duckdb')
     parser.add_argument('--protein', required=True, help='Center protein ID')
     parser.add_argument('--window', type=int, default=10, help='Genes on each side (default: 10)')
     parser.add_argument('--output', help='Output PNG path')

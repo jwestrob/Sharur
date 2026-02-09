@@ -29,8 +29,8 @@ You are analyzing defense systems in a metagenomic dataset. Provide a comprehens
 ### Step 1: Run Built-in CRISPR Analysis
 
 ```python
-from bennu.operators import Bennu
-b = Bennu("data/DATASET/bennu.duckdb")
+from sharur.operators import Sharur
+b = Sharur("data/DATASET/sharur.duckdb")
 
 # Comprehensive CRISPR-Cas analysis
 print(b.analyze_crispr_systems())

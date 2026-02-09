@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DB_PATH = REPO_ROOT / "data" / "bennu.duckdb"
+DB_PATH = REPO_ROOT / "data" / "sharur.duckdb"
 
 
 @pytest.mark.integration
@@ -14,7 +14,7 @@ def test_cli_ask_runs_with_db():
     cmd = [
         "python",
         "-m",
-        "bennu.cli",
+        "sharur.cli",
         "ask",
         "--db",
         str(DB_PATH),

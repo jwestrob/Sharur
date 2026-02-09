@@ -2,8 +2,8 @@
 
 import pytest
 
-from bennu.predicates.registry import PredicateRegistry, PredicateDefinition, get_registry, reset_registry
-from bennu.predicates.evaluator import evaluate_predicate, compute_predicates_for_protein, compute_all_predicates
+from sharur.predicates.registry import PredicateRegistry, PredicateDefinition, get_registry, reset_registry
+from sharur.predicates.evaluator import evaluate_predicate, compute_predicates_for_protein, compute_all_predicates
 
 
 class TestPredicateRegistry:

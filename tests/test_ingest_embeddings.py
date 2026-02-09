@@ -30,7 +30,7 @@ def test_embeddings_manifest_updates_stats(tmp_path):
         stage05c_dir=tmp_path / "stage05c_crispr",
         stage06_dir=stage06,
     )
-    db_path = tmp_path / "bennu.duckdb"
+    db_path = tmp_path / "sharur.duckdb"
     builder = KnowledgeBaseBuilder(outputs, db_path, force=True)
     stats = builder.build()
     assert stats["embeddings"] == 5

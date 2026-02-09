@@ -1,6 +1,6 @@
 # Agent Knowledge Base (CLAUDE.md / AGENTS.md)
 
-**Audience:** All AI agents working on Bennu (Claude Code, Codex, Antigravity, etc.)
+**Audience:** All AI agents working on Sharur (Claude Code, Codex, Antigravity, etc.)
 
 This file provides shared context, canonical tools, and best practices for agent-driven metagenomic analysis.
 
@@ -12,7 +12,7 @@ This file provides shared context, canonical tools, and best practices for agent
 
 ## Project Overview
 
-Bennu is an agent-driven metagenomic exploration system. It's a data plane that makes large metagenomic datasets navigable by AI agents.
+Sharur is an agent-driven metagenomic exploration system. It's a data plane that makes large metagenomic datasets navigable by AI agents.
 
 ## Key Documentation
 
@@ -51,7 +51,7 @@ Bennu is an agent-driven metagenomic exploration system. It's a data plane that 
 
 **CRITICAL: Always include independent review at the end of analysis.**
 
-### Four-Phase Architecture
+### Five-Phase Architecture
 
 ```
 Coordinator
@@ -65,9 +65,60 @@ Coordinator
 ├── 3. Deepen (targeted follow-up on findings)
 │   └── Coordinator reads all findings, identifies gaps, dispatches specialists
 │
-└── 4. Review (independent validation)
-    └── Validates claims, catches errors, assesses publication readiness
+├── 4. Review (independent validation)
+│   └── Validates claims, catches errors, assesses publication readiness
+│
+└── 5. Literature & Manuscript (MANDATORY before any manuscript is finalized)
+    ├── Draft manuscript with [CITE: topic] placeholders (NO training-memory citations)
+    ├── Run literature agent (`/literature manuscript`) — this is NOT optional
+    ├── Literature agent verifies/finds citations with provenance
+    └── Apply citation corrections, re-render PDF
 ```
+
+### Manuscript Citation Policy (CRITICAL — BLOCKING REQUIREMENT)
+
+**DO NOT include literature citations in manuscript drafts from training memory.**
+**DO NOT finalize or deliver a manuscript PDF without running the literature agent.**
+
+The literature agent is a **mandatory** step in manuscript production, not an optional polish.
+A manuscript without literature-agent-verified citations is incomplete and must not be
+presented as finished work.
+
+When drafting a manuscript (MANUSCRIPT.md or equivalent):
+1. Write all data-derived claims normally (these come from database queries)
+2. For any claim that requires a literature citation, insert a placeholder: `[CITE: topic]`
+   - Example: `"...obligate syntrophs with hydrogenotrophic partners [CITE: syntrophic metabolism review]"`
+3. **Run the literature agent** (`/literature manuscript`) on the draft — **this step is not optional**:
+   - Replace all `[CITE: ...]` placeholders with verified citations
+   - Find additional references the draft missed
+   - Verify any comparative claims ("largest known", "first reported", etc.)
+   - Check for missing key references (the user's own prior work, landmark studies in the field)
+   - Output: `literature_citations.jsonl` (structured provenance) + `citation_report.md` (human-readable audit)
+4. Apply corrections from the citation report to the manuscript
+5. Only after the literature agent completes and corrections are applied should the final PDF be rendered
+
+**Rationale:** LLM training data citations are unreliable -- wrong years, wrong authors,
+confabulated papers, misattributed findings. In the Omnitrophota manuscript, training-memory
+citations produced a wrong journal, wrong author list, wrong title (Moreira et al. 2021),
+a factual error (GGDEF:EAL "1:1" baseline), and missed the first author's own preprint.
+The literature agent performs real-time web searches and records provenance (URL, quote,
+verification status) for every citation, creating an auditable trail.
+
+### Manuscript Changelog (REQUIRED)
+
+Every dataset with a manuscript must have a `MANUSCRIPT_CHANGELOG.md` alongside `MANUSCRIPT.md`.
+When editing the manuscript, **always** append an entry to the changelog documenting:
+
+1. **What changed** — specific before/after for each edit
+2. **Why it changed** — the evidence, author feedback, or review finding that motivated it
+3. **Lessons learned** — if the edit reveals a systemic issue (e.g., inflated claims, missing prior work)
+
+This applies to all edits: citation corrections, factual fixes, interpretive reframing, figure updates,
+and language tightening. The changelog creates a traceable editorial history that the author can review
+and that future agents can consult to understand why the manuscript says what it says.
+
+**Format:** Number revisions sequentially (Rev 0, Rev 1, ...) with date and summary table.
+See `data/omni_production/MANUSCRIPT_CHANGELOG.md` for the reference example.
 
 Use `b.propose_hypothesis()` and `b.add_evidence()` to track analytical reasoning across sessions. Hypotheses persist in `exploration/hypotheses.json` and appear in `b.resume()` output. Use `b.render_provenance()` to generate Mermaid DAG figures for publications.
 
@@ -206,7 +257,7 @@ result = b.get_neighborhood(protein_id, window=5, all_annotations=True)
 ### Embedding Visualization
 **Script:** `scripts/visualize_embeddings.py`
 **Requires:** `umap-learn`, `plotly` (interactive) or `matplotlib` (static)
-**Usage:** `python scripts/visualize_embeddings.py --db data/DATASET/bennu.duckdb --output figures/umap.html --color-by genome`
+**Usage:** `python scripts/visualize_embeddings.py --db data/DATASET/sharur.duckdb --output figures/umap.html --color-by genome`
 **Color modes:** `genome` (by bin_id), `predicate` (highlight specific predicate), `annotation` (by PFAM/KEGG name)
 
 ### Local Foldseek
@@ -215,7 +266,7 @@ result = b.get_neighborhood(protein_id, window=5, all_annotations=True)
 **Behavior:** `search_foldseek()` tries local binary first (`prefer_local=True` by default), falls back to web API for databases not installed locally. Local search is faster and has no rate limits.
 
 ### Visualization
-**Bennu operators:** `b.visualize_neighborhood()`, `b.visualize_domains()`
+**Sharur operators:** `b.visualize_neighborhood()`, `b.visualize_domains()`
 **Multi-source locus script:** `scripts/plot_locus_multisource.py`
 **Do NOT:** Create matplotlib code from scratch when operators exist
 
@@ -249,24 +300,24 @@ If you see `hydrogenase` or `hydrogen_metabolism` predicates, **check for subgro
 | File | Purpose |
 |------|---------|
 | `PREDICATE_PLAN.md` | Predicate system design and status |
-| `bennu/predicates/vocabulary.py` | All predicate definitions |
-| `bennu/predicates/generator.py` | Main predicate computation |
-| `bennu/predicates/mappings/` | PFAM/KEGG/CAZy/VOGdb → predicate mappings |
-| `bennu/predicates/topology.py` | TM helix prediction wrapper (pyTMHMM) |
-| `bennu/operators/structure.py` | ESM3 structure prediction |
-| `bennu/operators/foldseek.py` | Foldseek structural homology search |
-| `bennu/operators/manifest.py` | Analysis manifest for session continuity |
-| `bennu/core/hypothesis_registry.py` | Persistent cross-session hypothesis store |
-| `bennu/core/provenance_renderer.py` | Mermaid DAG renderer for provenance figures |
-| `bennu/reports/template.py` | PDF report generation with themes |
+| `sharur/predicates/vocabulary.py` | All predicate definitions |
+| `sharur/predicates/generator.py` | Main predicate computation |
+| `sharur/predicates/mappings/` | PFAM/KEGG/CAZy/VOGdb → predicate mappings |
+| `sharur/predicates/topology.py` | TM helix prediction wrapper (pyTMHMM) |
+| `sharur/operators/structure.py` | ESM3 structure prediction |
+| `sharur/operators/foldseek.py` | Foldseek structural homology search |
+| `sharur/operators/manifest.py` | Analysis manifest for session continuity |
+| `sharur/core/hypothesis_registry.py` | Persistent cross-session hypothesis store |
+| `sharur/core/provenance_renderer.py` | Mermaid DAG renderer for provenance figures |
+| `sharur/reports/template.py` | PDF report generation with themes |
 
 ## Analysis Manifest System
 
 Each dataset has a `manifest.json` for session continuity:
 
 ```python
-from bennu.operators import Bennu
-b = Bennu("data/YOUR_DATASET/bennu.duckdb")
+from sharur.operators import Sharur
+b = Sharur("data/YOUR_DATASET/sharur.duckdb")
 
 print(b.resume())  # Status, findings, structures, hypotheses, recent activity
 
@@ -283,14 +334,14 @@ b.manifest.save()
 
 **Report from manifest:**
 ```python
-from bennu.reports import generate_report_from_manifest, BennuReport
+from sharur.reports import generate_report_from_manifest, SharurReport
 generate_report_from_manifest("data/my_dataset/manifest.json", "output.pdf", theme="viral")
 ```
 
 ## Quick Reference: Hypothesis Tracking & Provenance
 
 ```python
-b = Bennu("data/YOUR_DATASET/bennu.duckdb")
+b = Sharur("data/YOUR_DATASET/sharur.duckdb")
 
 # Propose a hypothesis (persists to exploration/hypotheses.json)
 h = b.propose_hypothesis("Group 4 NiFe hydrogenases are energy-conserving")
@@ -319,7 +370,7 @@ mermaid = b.render_provenance(title="Analysis DAG", output_path="figures/provena
 ## Quick Reference: Structure Prediction & Foldseek
 
 ```python
-b = Bennu("data/YOUR_DATASET/bennu.duckdb")
+b = Sharur("data/YOUR_DATASET/sharur.duckdb")
 
 # Predict structure (requires ESM_API_KEY env var)
 result = b.predict_structure("protein_id", output_path="structures/protein.pdb")
@@ -340,7 +391,7 @@ hits = b.search_foldseek_for_protein("protein_id")
 
 ### All-Atom Folding with Ligands (ESM3 Forge API)
 
-**Status:** Not yet implemented in Bennu operators. The Forge API supports all-atom folding with ligands via `/api/v1/fold_all_atom` (proteins, DNA, RNA, ligands, covalent bonds). See API docs for `ProteinInput`, `LigandInput`, and `covalent_bonds` parameters.
+**Status:** Not yet implemented in Sharur operators. The Forge API supports all-atom folding with ligands via `/api/v1/fold_all_atom` (proteins, DNA, RNA, ligands, covalent bonds). See API docs for `ProteinInput`, `LigandInput`, and `covalent_bonds` parameters.
 
 **Alternatives:** AlphaFold3, RoseTTAFold All-Atom, AlphaFill (post-hoc enrichment).
 
@@ -369,8 +420,8 @@ astra search --installed_hmms DefenseFinder --threads 12 \
 
 ```bash
 python -m pytest tests/test_operators/test_predicate_generator.py -v
-python -c "from bennu.predicates.vocabulary import ALL_PREDICATES, list_categories; print(f'Total: {len(ALL_PREDICATES)}'); print(f'Categories: {list_categories()}')"
-python -c "from bennu.predicates.mappings.pfam_map import PFAM_TO_PREDICATES, PFAM_PATTERNS; print(f'Direct: {len(PFAM_TO_PREDICATES)}, Patterns: {len(PFAM_PATTERNS)}')"
+python -c "from sharur.predicates.vocabulary import ALL_PREDICATES, list_categories; print(f'Total: {len(ALL_PREDICATES)}'); print(f'Categories: {list_categories()}')"
+python -c "from sharur.predicates.mappings.pfam_map import PFAM_TO_PREDICATES, PFAM_PATTERNS; print(f'Direct: {len(PFAM_TO_PREDICATES)}, Patterns: {len(PFAM_PATTERNS)}')"
 ```
 
 ---
@@ -383,7 +434,7 @@ python -c "from bennu.predicates.mappings.pfam_map import PFAM_TO_PREDICATES, PF
 - **Pathway completeness**: Single markers don't prove pathway function
 - **Carbon fixation**: RuBisCO without PRK is NOT Calvin cycle (likely nucleotide salvage). `calvin_cycle` requires PRK.
 - **Methanogenesis**: Only MCR complex triggers; H4MPT enzymes alone are insufficient
-- **Topology**: pyTMHMM integration (optional: `pip install bennu[topology]`). TMbed planned for signal peptide prediction.
+- **Topology**: pyTMHMM integration (optional: `pip install sharur[topology]`). TMbed planned for signal peptide prediction.
 
 ### PFAM Mapping Scaling
 
@@ -418,7 +469,7 @@ To avoid growing `pfam_map.py` indefinitely:
 
 **When modifying existing plotting code, make targeted edits only.** Read the script first, understand the layout, change only what was requested.
 
-**Use Bennu's visualization operators:**
+**Use Sharur's visualization operators:**
 ```python
 b.visualize_neighborhood(protein_id, window=12, output_path="output.png")
 ```
@@ -426,7 +477,7 @@ b.visualize_neighborhood(protein_id, window=12, output_path="output.png")
 **Multi-source locus diagrams:**
 ```bash
 python scripts/plot_locus_multisource.py \
-    --db data/dataset/bennu.duckdb \
+    --db data/dataset/sharur.duckdb \
     --protein PROTEIN_ID \
     --window 12 \
     --output figures/locus.png \
@@ -444,7 +495,7 @@ Features: Multi-source annotation priority (Foldseek > DefenseFinder > PADLOC > 
 # Use 'score' column, not 'bitscore'
 # Always COUNT(DISTINCT protein_id) for protein counts — repeat domains inflate COUNT(*)
 
-# Prefer Bennu operators over raw DuckDB:
+# Prefer Sharur operators over raw DuckDB:
 b.search("unannotated AND giant")
 b.get_neighborhood(protein_id, window=10)
 b.get_neighborhood(protein_id, window=5, all_annotations=True)
@@ -604,6 +655,7 @@ result = Task(subagent_type="general-purpose", prompt="...", run_in_background=T
 5. **Aggregate** in SQL, not Python loops
 6. **Limit** to 20-30 visualizations per analysis
 7. **If query takes >5 seconds**, stop and refine
+8. **NEVER use correlated subqueries** — rewrite as JOINs (see below)
 
 ```python
 # BAD
@@ -621,13 +673,67 @@ stats = b.store.execute("""
 """).fetchone()
 ```
 
+### DuckDB Query Patterns for Large Datasets
+
+**CRITICAL: Correlated subqueries destroy performance on >1M row tables.**
+
+DuckDB cannot optimize nested `SELECT` inside `WHERE EXISTS` or `WHERE x = (SELECT ...)` when the outer query is large. These cause per-row subquery execution, eating memory and swap.
+
+```sql
+-- BAD: Correlated subquery — O(n * m), causes swap thrashing on 2.9M proteins
+SELECT su.protein_id,
+    EXISTS (
+        SELECT 1 FROM proteins p2
+        WHERE p2.contig_id = (SELECT contig_id FROM proteins WHERE protein_id = su.protein_id)
+          AND ABS(p2.gene_index - (SELECT gene_index FROM proteins WHERE protein_id = su.protein_id)) BETWEEN 1 AND 3
+    )
+FROM sample_unann su
+
+-- GOOD: Materialize context first, then JOIN
+WITH sample AS (
+    SELECT pp.protein_id, p.contig_id, p.gene_index
+    FROM protein_predicates pp
+    JOIN proteins p ON pp.protein_id = p.protein_id
+    WHERE list_contains(pp.predicates, 'unannotated')
+    ORDER BY RANDOM() LIMIT 500
+)
+SELECT DISTINCT s.protein_id
+FROM sample s
+JOIN proteins p2 ON s.contig_id = p2.contig_id
+    AND ABS(p2.gene_index - s.gene_index) BETWEEN 1 AND 3
+JOIN annotations a ON p2.protein_id = a.protein_id AND a.source = 'pfam'
+```
+
+**General pattern for neighborhood queries:**
+1. **Materialize the seed set** in a CTE with `contig_id` and `gene_index`
+2. **JOIN** to find neighbors (same contig, gene_index ± window)
+3. **JOIN** to annotations/predicates for neighbor features
+4. **Never** put a subquery inside WHERE that references the outer row
+
+**For per-genome cross-tabs:**
+```sql
+-- BAD: Python loop over genomes
+for genome in genomes:
+    count = db.execute(f"SELECT COUNT(*) FROM ... WHERE bin_id = '{genome}'")
+
+-- GOOD: Single GROUP BY query
+SELECT p.bin_id,
+    COUNT(DISTINCT CASE WHEN a.accession = 'K02274' THEN p.protein_id END) as coxI,
+    COUNT(DISTINCT CASE WHEN a.accession = 'K02275' THEN p.protein_id END) as coxII,
+    COUNT(DISTINCT CASE WHEN list_contains(pp.predicates, 'nife_group4') THEN p.protein_id END) as g4_hyd
+FROM proteins p
+LEFT JOIN annotations a ON p.protein_id = a.protein_id
+LEFT JOIN protein_predicates pp ON p.protein_id = pp.protein_id
+GROUP BY p.bin_id
+```
+
 ---
 
 ## Standard Directory Structure
 
 ```
 data/{dataset_name}/
-├── bennu.duckdb                # Core database
+├── sharur.duckdb                # Core database
 ├── manifest.json               # Analysis state
 ├── source/                     # Input files (.faa)
 ├── annotations/                # Annotation results (pfam.tsv, kegg.tsv, etc.)
@@ -638,6 +744,52 @@ data/{dataset_name}/
 ├── reports/                    # Generated reports
 └── figures/                    # Top-level figures
 ```
+
+## Active Datasets
+
+### Omnitrophota (2026-02-08, In Progress)
+
+**Database:** `data/omni_production/bennu.duckdb` (5.3 GB)
+**Scale:** 1,831 MAGs (~1,637 unique), 355,904 contigs, 2,921,111 proteins, 11,249,502 annotations
+
+| Source | Hits |
+|--------|------|
+| PFAM | 4,880,659 |
+| KEGG | 3,940,782 |
+| DefenseFinder | 2,424,782 |
+| HydDB | 3,279 |
+
+**Missing data:** No taxonomy (all "unknown"), no CheckM2, no GC content, no embeddings, no VOGdb/CAZy.
+
+**Emerging model:** Omnitrophota are **sessile, surface-specialist syntrophs** that invest heavily in polysaccharide decoration and use fermentative metabolism to produce acetate and H2 for partners.
+
+**Key findings from Phase 1 (Survey):**
+- Mega-proteins up to 85,804 aa — entire biosynthesis pathways in single ORFs
+- Group 4 NiFe hydrogenases in 74.6% of genomes (H2-evolving, obligate syntrophy)
+- 2.3% of proteome = glycosyltransferases (2-3x normal bacteria)
+- Extreme c-di-GMP signaling density (15+ GGDEF/PilZ per genome)
+- Non-motile (<4% flagella) but universal type IV pili + adhesins
+- Rnf + acetate kinase energy strategy — no canonical respiratory chain
+- 46,646 Radical SAM proteins — dual defense (Viperin) + biosynthetic roles
+- DUF1015 in 85% of genomes — top characterization target
+- 194 duplicate genome pairs detected
+- 13,422 giant unknown proteins (largest unannotated: 39,880 aa)
+
+**Analysis plan:** `data/omni_production/ANALYSIS_PLAN.md`
+**Survey outputs:** `data/omni_production/survey/`
+**Exploration outputs:** `data/omni_production/exploration/`
+
+**Status:** Phase 1 (Survey) complete. Phase 2 (Explore) in progress. Phases 3-4 pending.
+
+### Hinthialibacterota (2026-02-05, Complete)
+
+**Database:** `data/hinthialibacterota_production/bennu.duckdb`
+41 genomes, 184,136 proteins. MANUSCRIPT.md with 30 literature citations. PDF rendered.
+
+### GJALLARVIRUS (2026-02-06, Complete)
+
+**Database:** `data/heimdall_megavirus_production/bennu.duckdb`
+473 kb genome, 588 proteins. Comprehensive report complete.
 
 ## Archives
 
@@ -650,8 +802,7 @@ data/{dataset_name}/
 
 ## TODO
 
-- [x] **Census phase in `/survey`** — Mandatory annotation inventory before subagent spawning (replaces planned `/atlas` skill)
-- [x] **Validation protocol consolidation** — Shared `_validation_protocols.md` referenced by all skills
-- [x] **Schema versioning** — `bennu/storage/migrations.py` with version tracking
-- [x] **Literature skill enhancement** — 6 structured research protocols (domain, Foldseek, KEGG, lineage, defense, protein family)
-- [ ] **Pipeline orchestration + Sharur rename** (deferred)
+- [ ] **Build `/atlas` skill** — Hierarchical annotation census with Context-First protocol baked in
+- [x] **Sharur rename** — completed 2026-02-09
+- [ ] **Omnitrophota: Run CheckM2 + GTDB-Tk** for quality and taxonomy
+- [ ] **Omnitrophota: VOGdb annotations** pending Aksha refactor

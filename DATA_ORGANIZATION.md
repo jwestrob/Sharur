@@ -1,4 +1,4 @@
-# Data Organization for Bennu Analyses
+# Data Organization for Sharur Analyses
 
 This document describes the standard organization for genome analysis projects.
 
@@ -10,7 +10,7 @@ data/
 │   ├── {organism}_{YYYY-MM-DD}/       # Archived with completion date
 │   └── ...
 ├── {organism}_production/              # Active analysis
-│   ├── bennu.duckdb                   # Main database
+│   ├── sharur.duckdb                   # Main database
 │   ├── manifest.json                  # Analysis state and session continuity
 │   │
 │   ├── source/                        # Input files
@@ -88,21 +88,21 @@ mkdir -p data/${NEW_ORGANISM}_production/{source,annotations,embeddings,structur
 # Step 1: Ingest proteins
 python scripts/ingest_protein_fasta.py \
   --fasta /path/to/proteins.faa.gz \
-  --output data/${NEW_ORGANISM}_production/bennu.duckdb
+  --output data/${NEW_ORGANISM}_production/sharur.duckdb
 
 # Step 2: Add annotations (if available)
 # Via Astra pipeline or direct import
 
 # Step 3: Generate predicates
 python -c "
-from bennu.operators import Bennu
-b = Bennu('data/${NEW_ORGANISM}_production/bennu.duckdb')
+from sharur.operators import Sharur
+b = Sharur('data/${NEW_ORGANISM}_production/sharur.duckdb')
 b.regenerate_predicates()
 "
 
 # Step 4: Generate embeddings (ESM2)
 python src/ingest/06_esm2_embeddings.py \
-  data/${NEW_ORGANISM}_production/bennu.duckdb \
+  data/${NEW_ORGANISM}_production/sharur.duckdb \
   data/${NEW_ORGANISM}_production/embeddings/
 ```
 
@@ -121,7 +121,7 @@ python src/ingest/06_esm2_embeddings.py \
 ### 5. What Gets Archived
 
 **Always archive:**
-- `bennu.duckdb` - Main database
+- `sharur.duckdb` - Main database
 - `manifest.json` - Analysis state
 - `exploration/` - All findings and state
 - `reports/` - Synthesis documents
@@ -206,4 +206,4 @@ Datasets created before 2026-02-04 may have the old structure:
 - `*.pdf`, `*.md` reports at root → `reports/`
 - `foldseek_results.tsv` at root → `structures/`
 
-The Bennu code supports both structures for backwards compatibility.
+The Sharur code supports both structures for backwards compatibility.

@@ -1,6 +1,6 @@
 # Explore Skill
 
-Curiosity-driven exploration of Bennu metagenomic data to discover interesting loci, test hypotheses, and build mechanistic models.
+Curiosity-driven exploration of Sharur metagenomic data to discover interesting loci, test hypotheses, and build mechanistic models.
 
 **Run AFTER `/survey` completes** - use survey results to identify questions worth investigating.
 
@@ -139,12 +139,12 @@ Report output: `{DB_DIR}/altiarchaeota_exploration_report.pdf`
 
 ## Prompt
 
-You are exploring a metagenomic database using Bennu. Your mission is to find scientifically interesting loci that warrant further investigation.
+You are exploring a metagenomic database using Sharur. Your mission is to find scientifically interesting loci that warrant further investigation.
 
 **CRITICAL: You must persist all findings to disk as you discover them.** Do not rely on context memory alone.
 
 ### Database Location
-The Bennu database is at: `data/bennu.duckdb` (or specified path)
+The Sharur database is at: `data/sharur.duckdb` (or specified path)
 
 ### Persistence Infrastructure
 
@@ -158,11 +158,11 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, '.')
-from bennu.operators import Bennu
+from sharur.operators import Sharur
 
-# Initialize Bennu
-DB_PATH = "data/altiarchaeota_production/bennu.duckdb"  # Adjust as needed
-b = Bennu(DB_PATH)
+# Initialize Sharur
+DB_PATH = "data/altiarchaeota_production/sharur.duckdb"  # Adjust as needed
+b = Sharur(DB_PATH)
 
 # Set up persistence directory
 EXPLORE_DIR = Path(DB_PATH).parent / "exploration"
@@ -381,7 +381,7 @@ save_state(state)
 update_summary()  # Regenerates exploration_summary.md
 ```
 
-### Core Bennu Operations
+### Core Sharur Operations
 
 ```python
 # Dataset overview (do this once, save key stats to state)
@@ -595,7 +595,7 @@ Task(
 
 **CRITICAL: You are a LEAF AGENT. DO NOT spawn sub-agents or use the Task tool.**
 
-Dataset: data/hinthialibacterota_v3/bennu.duckdb
+Dataset: data/hinthialibacterota_v3/sharur.duckdb
 
 Hypothesis: "Orphan dockerin genomes (dockerin but no cohesin) are obligate syntrophic partners with distinct metabolic features compared to self-assembly genomes."
 

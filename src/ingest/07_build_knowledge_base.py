@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Stage 07: Build Bennu knowledge base (DuckDB) from ingest outputs.
+Stage 07: Build Sharur knowledge base (DuckDB) from ingest outputs.
 
 Lightweight implementation aligned to BENNU_PROJECT_SEED and INGEST_PIPELINE_SEED:
-- Uses Bennu DuckDB schema from bennu.storage.schema.SCHEMA
+- Uses Sharur DuckDB schema from sharur.storage.schema.SCHEMA
 - Ingests bins (stage02), proteins/contigs (stage03), annotations (stage04/dbCAN),
   loci (stage05a/05c when present), and basic feature_store metrics.
 - Skips ELSA/vector store work per current deferral.
@@ -26,8 +26,8 @@ import typer
 from rich.console import Console
 from rich.progress import Progress
 
-from bennu.storage.schema import SCHEMA
-from bennu.predicates.generator import (
+from sharur.storage.schema import SCHEMA
+from sharur.predicates.generator import (
     PredicateGenerator,
     AnnotationRecord,
     ProteinRecord,
@@ -921,7 +921,7 @@ class KnowledgeBaseBuilder:
 # --------------------------------------------------------------------------- #
 def main(
     data_dir: Path = typer.Option(Path("data"), "--data-dir", "-d"),
-    output: Path = typer.Option(Path("data/bennu.duckdb"), "--output", "-o"),
+    output: Path = typer.Option(Path("data/sharur.duckdb"), "--output", "-o"),
     force: bool = typer.Option(False, "--force"),
 ) -> None:
     logging.basicConfig(level=logging.INFO)

@@ -6,8 +6,8 @@ Provides seeded in-memory DuckDB databases for testing.
 
 import pytest
 
-from bennu.storage.duckdb_store import DuckDBStore
-from bennu.operators import Bennu
+from sharur.storage.duckdb_store import DuckDBStore
+from sharur.operators import Sharur
 
 
 @pytest.fixture
@@ -82,9 +82,9 @@ def store():
 
 
 @pytest.fixture
-def bennu(store):
-    """Create Bennu instance with test store."""
-    b = Bennu()
+def sharur(store):
+    """Create Sharur instance with test store."""
+    b = Sharur()
     # Force session creation and inject our test store
     _ = b.session  # Trigger lazy creation
     b._session._db = store

@@ -2,22 +2,22 @@
 
 import pytest
 
-from bennu.predicates.generator import (
+from sharur.predicates.generator import (
     PredicateGenerator,
     AnnotationRecord,
     ProteinRecord,
     generate_predicates_for_proteins,
 )
-from bennu.predicates.vocabulary import (
+from sharur.predicates.vocabulary import (
     get_predicate,
     list_predicates,
     list_categories,
     get_hierarchy,
 )
-from bennu.predicates.mappings.pfam_map import get_predicates_for_pfam
-from bennu.predicates.mappings.kegg_map import get_predicates_for_kegg, get_predicates_for_ec
-from bennu.predicates.mappings.cazy_map import get_predicates_for_cazy
-from bennu.predicates.mappings.vog_map import get_vog_predicates
+from sharur.predicates.mappings.pfam_map import get_predicates_for_pfam
+from sharur.predicates.mappings.kegg_map import get_predicates_for_kegg, get_predicates_for_ec
+from sharur.predicates.mappings.cazy_map import get_predicates_for_cazy
+from sharur.predicates.mappings.vog_map import get_vog_predicates
 
 
 class TestVocabulary:
@@ -554,21 +554,21 @@ class TestTopologyModule:
 
     def test_is_available(self):
         """Should check pyTMHMM availability."""
-        from bennu.predicates.topology import is_available
+        from sharur.predicates.topology import is_available
         # Just check it returns a boolean (pyTMHMM may or may not be installed)
         result = is_available()
         assert isinstance(result, bool)
 
     def test_predict_topology_unavailable(self):
         """Should return None if pyTMHMM not available."""
-        from bennu.predicates.topology import is_available, predict_topology
+        from sharur.predicates.topology import is_available, predict_topology
         if not is_available():
             result = predict_topology("MLALIFVLFFGLLASVLGG")
             assert result is None
 
     def test_topology_prediction_class(self):
         """Should have TopologyPrediction dataclass."""
-        from bennu.predicates.topology import TopologyPrediction
+        from sharur.predicates.topology import TopologyPrediction
         pred = TopologyPrediction(
             sequence_length=100,
             num_tm_helices=2,
@@ -583,7 +583,7 @@ class TestTopologyModule:
 
     def test_get_topology_predicates(self):
         """Should generate predicates from topology prediction."""
-        from bennu.predicates.topology import TopologyPrediction, get_topology_predicates
+        from sharur.predicates.topology import TopologyPrediction, get_topology_predicates
 
         # Multi-pass membrane protein
         pred = TopologyPrediction(

@@ -1,6 +1,6 @@
 # Quick Query Skill
 
-Fast, ad-hoc queries against the Bennu database. No ceremony, just answers.
+Fast, ad-hoc queries against the Sharur database. No ceremony, just answers.
 
 **CRITICAL: You are a leaf agent. DO NOT spawn sub-agents or use the Task tool.**
 
@@ -27,16 +27,16 @@ Fast, ad-hoc queries against the Bennu database. No ceremony, just answers.
 
 ## Prompt
 
-You are running quick queries against a Bennu metagenomic database. Answer the user's question directly and concisely.
+You are running quick queries against a Sharur metagenomic database. Answer the user's question directly and concisely.
 
-**Database**: Use the Bennu instance at `data/{DATASET}/bennu.duckdb` (infer from context or ask).
+**Database**: Use the Sharur instance at `data/{DATASET}/sharur.duckdb` (infer from context or ask).
 
 ### Query Patterns
 
 **Predicate searches:**
 ```python
-from bennu.operators import Bennu
-b = Bennu("data/DATASET/bennu.duckdb")
+from sharur.operators import Sharur
+b = Sharur("data/DATASET/sharur.duckdb")
 
 # Combine predicates with AND logic
 b.search_by_predicates(has=["giant", "unannotated"])

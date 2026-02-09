@@ -29,10 +29,10 @@ You are performing comparative genomic analysis between genomes in a metagenomic
 ### Pairwise Comparison
 
 ```python
-from bennu.operators import Bennu
+from sharur.operators import Sharur
 import pandas as pd
 
-b = Bennu("data/DATASET/bennu.duckdb")
+b = Sharur("data/DATASET/sharur.duckdb")
 
 genome_a = "GENOME_A"
 genome_b = "GENOME_B"

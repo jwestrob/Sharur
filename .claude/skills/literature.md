@@ -21,6 +21,7 @@ Systematic literature and database research to resolve functional ambiguity, int
 /literature organism Hinthialibacterota  # Lineage context
 /literature defense CBASS             # Defense system research
 /literature family "giant adhesin"    # Protein family research
+/literature manuscript data/omni_production/MANUSCRIPT.md  # Verify & find all citations for manuscript
 ```
 
 ---
@@ -284,6 +285,111 @@ Systematic literature and database research to resolve functional ambiguity, int
 - `lineage_distribution`: Whether family is lineage-specific or widespread
 - `key_references`: PMIDs/DOIs
 - `confidence`: high (well-characterized family) / medium (some members characterized) / low (mostly uncharacterized)
+
+---
+
+### Protocol G: Manuscript Citation Research
+
+**When to use:** A manuscript draft exists with claims that need literature citations. This is the primary workflow for turning a data-driven manuscript into a citable publication. Run this BEFORE finalizing any manuscript.
+
+**Input:** Path to manuscript markdown file (e.g., `data/omni_production/MANUSCRIPT.md`)
+
+**Workflow:**
+
+1. **Read the manuscript** and extract every claim that requires a citation:
+   - Explicit placeholders: `[CITE: topic]`
+   - Comparative claims: "largest known", "first reported", "exceeds", "unprecedented"
+   - Background claims: "X is known to...", "previous studies showed..."
+   - Methodological references: tools, databases, algorithms cited by name
+   - Existing citations that need verification
+
+2. **For each claim, perform a targeted search:**
+   ```
+   WebSearch("[specific claim keywords] [organism/domain] [year range]")
+   ```
+   Search at least 2-3 queries per claim to ensure coverage. Prioritize:
+   - Primary research papers over reviews (unless the claim is about general knowledge)
+   - Recent papers (2020+) for fast-moving fields (defense systems, protein structure)
+   - The original discovery paper, not just papers that cite it
+
+3. **For each candidate citation, fetch and verify:**
+   ```
+   WebFetch("[paper URL or DOI]",
+            "What are the key findings? Does this paper support the claim: '[exact claim from manuscript]'?
+             Extract the specific sentence or data point that supports this claim.")
+   ```
+
+4. **Record structured provenance for every citation** (see output format below)
+
+5. **Check for missing citations:**
+   - Search for the study organism/phylum + key findings to find prior work
+   - Search for the authors' own prior publications on this topic
+   - Search for preprints that may not appear in standard searches
+
+6. **Verify existing citations** (if manuscript already has references):
+   - Confirm author names, year, journal, title
+   - Confirm the cited claim actually appears in the paper
+   - Flag any citation that cannot be verified
+
+**Output:** Write to `{dataset_dir}/exploration/literature_citations.jsonl` with one entry per citation:
+
+```json
+{
+  "citation_id": "greening_2016_hydrogenase",
+  "manuscript_claim": "H2 is a widely utilized energy source for microbial growth (Greening et al., 2016)",
+  "claim_location": "Introduction, paragraph 3",
+  "reference": {
+    "authors": "Greening, C., Biswas, A., Carere, C.R., ..., Morales, S.E.",
+    "year": 2016,
+    "title": "Genomic and metagenomic surveys of hydrogenase distribution indicate H2 is a widely utilised energy source for microbial growth and survival",
+    "journal": "The ISME Journal",
+    "volume": "10",
+    "pages": "761-777",
+    "doi": "10.1038/ismej.2015.153"
+  },
+  "verification": {
+    "source_url": "https://doi.org/10.1038/ismej.2015.153",
+    "supporting_quote": "Our results indicate that H2 metabolism is widespread and diversified among microorganisms, suggesting H2 is a widely utilized energy source.",
+    "quote_location": "Abstract",
+    "verified": true,
+    "verification_method": "WebFetch of DOI landing page"
+  },
+  "justification": "Supports the claim that H2 metabolism is central to syntrophic partnerships. Provides the hydrogenase classification framework (Groups 1-4) used throughout our analysis.",
+  "confidence": "high",
+  "notes": ""
+}
+```
+
+**Also output a summary report** to `{dataset_dir}/exploration/citation_report.md`:
+
+```markdown
+# Citation Verification Report
+
+## Verified Citations (N)
+| # | Citation | Claim | Status | Quote |
+|---|----------|-------|--------|-------|
+| 1 | Greening et al. 2016 | H2 widely utilized | VERIFIED | "Our results indicate..." |
+
+## Unverified Citations (N)
+| # | Citation | Issue |
+|---|----------|-------|
+| 1 | Smith et al. 2019 | Paper not found at DOI |
+
+## Missing Citations (N)
+| # | Manuscript Claim | Suggested Citation | Justification |
+|---|-----------------|-------------------|---------------|
+
+## Citation Placeholders Resolved (N)
+| # | Placeholder | Resolved To | Supporting Quote |
+|---|-------------|-------------|-----------------|
+```
+
+**Critical rules:**
+- **NEVER fabricate a citation.** If you can't find a paper to support a claim, say so.
+- **Always include a supporting quote** — the specific sentence or data point from the paper that backs the manuscript's claim. This allows the human author to verify independently.
+- **Flag "from training" citations** — if the manuscript already has a citation and you can verify it, great. If you cannot find it via web search, flag it as `"verified": false, "notes": "Could not locate via web search; may be from LLM training memory"`.
+- **Include DOIs** whenever possible — these are permanent, machine-resolvable identifiers.
+- **Check for the authors' own prior work** — search for `[first author surname] [organism name]` to find directly relevant prior publications that should be cited.
 
 ---
 

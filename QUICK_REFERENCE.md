@@ -1,4 +1,4 @@
-# Bennu Quick Reference Card
+# Sharur Quick Reference Card
 
 ## Critical Patterns
 

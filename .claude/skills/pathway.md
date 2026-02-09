@@ -30,13 +30,13 @@ You are analyzing metabolic pathway completeness in a metagenomic dataset using 
 ### Quick Analysis
 
 ```python
-from bennu.operators import Bennu
+from sharur.operators import Sharur
 from scripts.pathway_completeness import analyze_pathways, PATHWAYS, get_ko_presence, calculate_pathway_completeness
 
-b = Bennu("data/DATASET/bennu.duckdb")
+b = Sharur("data/DATASET/sharur.duckdb")
 
 # Dataset-wide pathway completeness
-results = analyze_pathways("data/DATASET/bennu.duckdb")
+results = analyze_pathways("data/DATASET/sharur.duckdb")
 ```
 
 ### Available Pathways

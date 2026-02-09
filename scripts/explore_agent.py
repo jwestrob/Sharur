@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Agent-driven exploration script for Bennu.
+Agent-driven exploration script for Sharur.
 
 This script provides a structured exploration workflow that an AI agent
 can use to discover interesting loci in metagenomic data.
@@ -21,20 +21,20 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from bennu.operators import Bennu
+from sharur.operators import Sharur
 
 # Default database path
-DEFAULT_DB = "data/bennu.duckdb"
+DEFAULT_DB = "data/sharur.duckdb"
 
-# Global Bennu instance (initialized lazily)
+# Global Sharur instance (initialized lazily)
 _bennu = None
 
 
-def get_bennu(db_path: str = DEFAULT_DB) -> Bennu:
-    """Get or create Bennu instance."""
+def get_bennu(db_path: str = DEFAULT_DB) -> Sharur:
+    """Get or create Sharur instance."""
     global _bennu
     if _bennu is None:
-        _bennu = Bennu(db_path)
+        _bennu = Sharur(db_path)
     return _bennu
 
 
@@ -221,7 +221,7 @@ def browse_contig(contig_id: str, window_size: int = 15, db_path: str = DEFAULT_
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Agent-driven exploration of Bennu metagenomic data"
+        description="Agent-driven exploration of Sharur metagenomic data"
     )
     parser.add_argument(
         "--focus",
@@ -238,7 +238,7 @@ def main():
         "--db",
         type=str,
         default=DEFAULT_DB,
-        help="Path to Bennu database"
+        help="Path to Sharur database"
     )
 
     args = parser.parse_args()

@@ -63,8 +63,8 @@ You are characterizing unknown or poorly annotated proteins from a metagenomic d
 ### Step 1: Gather Context
 
 ```python
-from bennu.operators import Bennu
-b = Bennu("data/DATASET/bennu.duckdb")
+from sharur.operators import Sharur
+b = Sharur("data/DATASET/sharur.duckdb")
 
 # Get protein details
 protein_id = "TARGET_PROTEIN"

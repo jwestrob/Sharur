@@ -17,7 +17,7 @@ validation during analysis. See .claude/skills/survey.md for the
 hydrogenase curation protocol.
 
 Usage:
-    python scripts/classify_hydrogenases.py --db data/my_dataset/bennu.duckdb
+    python scripts/classify_hydrogenases.py --db data/my_dataset/sharur.duckdb
 
 References:
     Søndergaard D, et al. (2016) HydDB: A web tool for hydrogenase classification
@@ -92,7 +92,7 @@ def get_hyddb_reference_path() -> Path:
     candidates = [
         Path(__file__).parent.parent / "data/reference/hyddb",
         Path("data/reference/hyddb"),
-        Path.home() / ".bennu/hyddb",
+        Path.home() / ".sharur/hyddb",
     ]
     for path in candidates:
         if (path / "HydDB_all.dmnd").exists():
@@ -221,10 +221,10 @@ def classify_hydrogenases(
     verbose: bool = True,
 ) -> pd.DataFrame:
     """
-    Classify hydrogenases in a Bennu database.
+    Classify hydrogenases in a Sharur database.
 
     Args:
-        db_path: Path to bennu.duckdb
+        db_path: Path to sharur.duckdb
         threads: Number of threads for DIAMOND
         update_predicates: Whether to update predicates in database
         verbose: Print progress
@@ -411,7 +411,7 @@ def main():
     )
     parser.add_argument(
         "--db", required=True,
-        help="Path to bennu.duckdb"
+        help="Path to sharur.duckdb"
     )
     parser.add_argument(
         "--threads", type=int, default=4,

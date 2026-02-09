@@ -20,7 +20,7 @@ conda env create -f environment.yml
 conda activate sharur
 ```
 
-The `environment.yml` installs Bennu in editable mode with all dependencies plus dev tools via `pip install -e ".[dev]"`.
+The `environment.yml` installs Sharur in editable mode with all dependencies plus dev tools via `pip install -e ".[dev]"`.
 
 All runtime dependencies (torch, transformers, matplotlib, biopython, plotly, reportlab, jupyter, etc.) are installed by default with a bare `pip install -e "."`. The only optional extra is `[dev]` for testing and linting tools (pytest, ruff, mypy).
 
@@ -107,10 +107,10 @@ Run these commands to confirm everything is installed correctly:
 
 ```bash
 # Core Python import
-python -c "from bennu.operators import Bennu; print('Core import: OK')"
+python -c "from sharur.operators import Sharur; print('Core import: OK')"
 
 # pyTMHMM (requires numpy <2.0)
-python -c "from bennu.predicates.topology import is_available; print(f'pyTMHMM: {is_available()}')"
+python -c "from sharur.predicates.topology import is_available; print(f'pyTMHMM: {is_available()}')"
 
 # Bioinformatics CLI tools
 prodigal -v

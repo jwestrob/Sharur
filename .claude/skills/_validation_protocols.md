@@ -1,6 +1,6 @@
 # Shared Validation Protocols
 
-**Required reading for ALL Bennu analysis skills.** These protocols prevent known error classes that have caused false findings and manuscript retractions.
+**Required reading for ALL Sharur analysis skills.** These protocols prevent known error classes that have caused false findings and manuscript retractions.
 
 ---
 

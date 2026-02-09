@@ -7,7 +7,7 @@ def test_ingest_dry_run_plans_all_stages(tmp_path):
     plan = ingest.run(
         input_dir=Path("dummy_dataset"),
         data_dir=tmp_path,
-        output=tmp_path / "bennu.duckdb",
+        output=tmp_path / "sharur.duckdb",
         mode="tools",
         force=False,
         skip_quast=False,

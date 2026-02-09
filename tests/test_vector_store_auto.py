@@ -1,11 +1,11 @@
 from pathlib import Path
 import json
 
-from bennu.core.session import ExplorationSession
+from sharur.core.session import ExplorationSession
 
 
 def test_session_auto_loads_lancedb_if_manifest_present(tmp_path):
-    db_path = tmp_path / "bennu.duckdb"
+    db_path = tmp_path / "sharur.duckdb"
     # create empty duckdb file to satisfy path existence expectation in store
     db_path.touch()
     stage06 = tmp_path / "stage06_embeddings"

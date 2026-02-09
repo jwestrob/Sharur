@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Load additional Astra annotation TSVs into an existing Bennu DuckDB.
+"""Load additional Astra annotation TSVs into an existing Sharur DuckDB.
 
 Usage:
     python scripts/load_additional_annotations.py \
-        --db data/omni_production/bennu.duckdb \
+        --db data/omni_production/sharur.duckdb \
         --tsv data/omni_production/stage04_astra/hyddb_results/HydDB_hits_df.tsv \
         --source hyddb
 
     python scripts/load_additional_annotations.py \
-        --db data/omni_production/bennu.duckdb \
+        --db data/omni_production/sharur.duckdb \
         --tsv data/omni_production/stage04_astra/defensefinder_results/DefenseFinder_hits_df.tsv \
         --source defensefinder
 """
@@ -26,7 +26,7 @@ def load_annotations(db_path: str, tsv_path: str, source: str) -> None:
     df = pd.read_csv(tsv_path, sep="\t")
     print(f"  Raw rows: {len(df):,}")
 
-    # Normalize column names to match Bennu schema
+    # Normalize column names to match Sharur schema
     df = df.rename(columns={
         "sequence_id": "protein_id",
         "hmm_name": "accession",

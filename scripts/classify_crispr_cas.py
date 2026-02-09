@@ -14,7 +14,7 @@ Validation:
 - Signature proteins determine type (Cas3=I, Cas9=II, Cas10=III, Csf=IV, Cas12=V, Cas13=VI)
 
 Usage:
-    python scripts/classify_crispr_cas.py --db data/my_dataset/bennu.duckdb
+    python scripts/classify_crispr_cas.py --db data/my_dataset/sharur.duckdb
 
 Requires:
     - CRISPRCasFinder results in {db_dir}/crisprcasfinder_results/
@@ -522,7 +522,7 @@ def classify_crispr_cas(
     Classify CRISPR-Cas proteins and update predicates.
 
     Args:
-        db_path: Path to bennu.duckdb
+        db_path: Path to sharur.duckdb
         results_dir: Path to CRISPRCasFinder results (default: {db_dir}/crisprcasfinder_results)
         update_predicates: Whether to update predicates in database
         array_distance_kb: Max distance (kb) from CRISPR array for validation
@@ -745,7 +745,7 @@ def main():
     )
     parser.add_argument(
         "--db", required=True,
-        help="Path to bennu.duckdb"
+        help="Path to sharur.duckdb"
     )
     parser.add_argument(
         "--results-dir",

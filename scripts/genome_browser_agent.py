@@ -19,7 +19,7 @@ import duckdb
 from pathlib import Path
 from datetime import datetime
 
-DB_PATH = "data/thorarchaeota_production/bennu.duckdb"
+DB_PATH = "data/thorarchaeota_production/sharur.duckdb"
 FINDINGS_PATH = "data/thorarchaeota_production/genome_browser_findings.jsonl"
 SUMMARY_PATH = "data/thorarchaeota_production/genome_browser_summary.md"
 

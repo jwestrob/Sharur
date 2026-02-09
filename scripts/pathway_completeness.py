@@ -10,7 +10,7 @@ from pathlib import Path
 from collections import defaultdict
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from bennu.operators import Bennu
+from sharur.operators import Sharur
 
 # Key metabolic pathways with their essential KOs
 # Format: pathway_name -> list of (step_name, [required_KOs])
@@ -157,7 +157,7 @@ def calculate_pathway_completeness(ko_set, pathway_steps):
 
 def analyze_pathways(db_path, output_file=None):
     """Analyze pathway completeness across all genomes."""
-    b = Bennu(db_path)
+    b = Sharur(db_path)
 
     # Get all genomes
     genomes = [row[0] for row in b.store.execute("SELECT DISTINCT bin_id FROM proteins")]
@@ -234,7 +234,7 @@ def analyze_pathways(db_path, output_file=None):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Analyze KEGG pathway completeness")
-    parser.add_argument("db_path", help="Path to Bennu database")
+    parser.add_argument("db_path", help="Path to Sharur database")
     parser.add_argument("-o", "--output", help="Output JSON file")
     args = parser.parse_args()
 

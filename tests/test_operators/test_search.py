@@ -2,17 +2,17 @@
 
 import pytest
 
-from bennu.operators.search import search_by_predicates, search_proteins
-from bennu.operators.base import BennuResult
+from sharur.operators.search import search_by_predicates, search_proteins
+from sharur.operators.base import SharurResult
 
 
 class TestSearchByPredicates:
     """Tests for search_by_predicates() operator."""
 
     def test_returns_bennu_result(self, store):
-        """search_by_predicates() should return a BennuResult."""
+        """search_by_predicates() should return a SharurResult."""
         result = search_by_predicates(store, has=["giant"])
-        assert isinstance(result, BennuResult)
+        assert isinstance(result, SharurResult)
 
     def test_unknown_predicate(self, store):
         """search_by_predicates() should error on unknown predicate."""
@@ -60,9 +60,9 @@ class TestSearchProteins:
     """Tests for search_proteins() operator."""
 
     def test_returns_bennu_result(self, store):
-        """search_proteins() should return a BennuResult."""
+        """search_proteins() should return a SharurResult."""
         result = search_proteins(store)
-        assert isinstance(result, BennuResult)
+        assert isinstance(result, SharurResult)
 
     def test_annotation_pattern(self, store):
         """search_proteins() should filter by annotation pattern."""

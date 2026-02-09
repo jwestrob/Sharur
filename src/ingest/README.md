@@ -1,6 +1,6 @@
-# Bennu Ingestion Pipeline
+# Sharur Ingestion Pipeline
 
-This directory contains the staged ingestion pipeline for converting raw genomic data into Bennu-ready databases.
+This directory contains the staged ingestion pipeline for converting raw genomic data into Sharur-ready databases.
 
 ---
 
@@ -9,7 +9,7 @@ This directory contains the staged ingestion pipeline for converting raw genomic
 The ingestion pipeline is organized into numbered stages (00-07). Each stage is independent and can be run individually or as part of a full pipeline.
 
 ```
-Raw Data → Stage 00-04 → Annotations → Stage 06-07 → Bennu Database
+Raw Data → Stage 00-04 → Annotations → Stage 06-07 → Sharur Database
 ```
 
 ---
@@ -125,7 +125,7 @@ python src/ingest/04_astra_scan.py \
 **Model:** `facebook/esm2_t6_8M_UR50D` (320-dimensional embeddings)
 
 **Inputs:**
-- Bennu database (`bennu.duckdb`)
+- Sharur database (`sharur.duckdb`)
 - Protein sequences from database
 
 **Outputs:**
@@ -135,7 +135,7 @@ python src/ingest/04_astra_scan.py \
 **Usage:**
 ```bash
 python src/ingest/06_esm2_embeddings.py \
-  data/my_dataset/bennu.duckdb \
+  data/my_dataset/sharur.duckdb \
   data/my_dataset/embeddings/
 ```
 
@@ -150,14 +150,14 @@ python src/ingest/06_esm2_embeddings.py \
 ---
 
 ### Stage 07: Build Knowledge Base (`07_build_knowledge_base.py`)
-**Purpose:** Consolidate all annotations into Bennu database and generate predicates
+**Purpose:** Consolidate all annotations into Sharur database and generate predicates
 
 **Inputs:**
 - Protein FASTA
 - Annotation TSV files (PFAM, KEGG, HydDB, VOGdb, etc.)
 
 **Outputs:**
-- Complete `bennu.duckdb` with:
+- Complete `sharur.duckdb` with:
   - Proteins table
   - Annotations table
   - Predicates table
@@ -176,7 +176,7 @@ python src/ingest/07_build_knowledge_base.py \
   --pfam data/my_dataset/annotations/pfam_results/PFAM_hits_df.tsv \
   --kegg data/my_dataset/annotations/kofam_results/KOFAM_hits_df.tsv \
   --hyddb data/my_dataset/annotations/hyddb_results/HydDB_hits_df.tsv \
-  --output data/my_dataset/bennu.duckdb
+  --output data/my_dataset/sharur.duckdb
 ```
 
 ---
@@ -267,7 +267,7 @@ See `QUICKSTART.md` for streamlined workflow starting from proteins.
 
 ## Output Database Schema
 
-After ingestion, `bennu.duckdb` contains:
+After ingestion, `sharur.duckdb` contains:
 
 ### Tables
 
@@ -296,7 +296,7 @@ After ingestion, `bennu.duckdb` contains:
 ## Troubleshooting
 
 ### "ModuleNotFoundError: No module named 'bennu'"
-Install Bennu in development mode: `pip install -e .`
+Install Sharur in development mode: `pip install -e .`
 
 ### "Astra command not found"
 Install Astra and ensure it's in PATH: `which astra`

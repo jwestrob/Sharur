@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from bennu.core.types import Evidence, Hypothesis, HypothesisStatus, ProvenanceEntry
-from bennu.core.session import ExplorationSession
-from bennu.core.hypothesis_registry import HypothesisRegistry
-from bennu.core.provenance_renderer import (
+from sharur.core.types import Evidence, Hypothesis, HypothesisStatus, ProvenanceEntry
+from sharur.core.session import ExplorationSession
+from sharur.core.hypothesis_registry import HypothesisRegistry
+from sharur.core.provenance_renderer import (
     _sanitize_label,
     render_provenance_mermaid,
     render_provenance_summary,
@@ -342,7 +342,7 @@ class TestProvenanceRenderer:
         session = ExplorationSession()
         session.log_query("q", [], "r", 10)
 
-        from bennu.core.hypothesis_registry import HypothesisRegistry
+        from sharur.core.hypothesis_registry import HypothesisRegistry
         import tempfile
 
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:

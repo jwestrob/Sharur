@@ -1,5 +1,5 @@
 [project]
-name = "bennu"
+name = "sharur"
 version = "0.1.0"
 description = "Agent-driven metagenomic discovery system"
 readme = "README.md"
@@ -71,14 +71,14 @@ Repository = "https://github.com/jwestrob/Sharur"
 Issues = "https://github.com/jwestrob/Sharur/issues"
 
 [project.scripts]
-bennu = "bennu.cli:main"
+sharur = "sharur.cli:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["bennu"]
+packages = ["sharur"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -87,7 +87,7 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = [
     "-v",
-    "--cov=bennu",
+    "--cov=sharur",
     "--cov-report=term-missing",
     "--cov-report=html:coverage_html",
     "-x",  # Stop on first failure
@@ -98,11 +98,11 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["bennu"]
+source = ["sharur"]
 branch = true
 omit = [
-    "bennu/__main__.py",
-    "bennu/cli.py",
+    "sharur/__main__.py",
+    "sharur/cli.py",
 ]
 
 [tool.coverage.report]
@@ -176,7 +176,7 @@ ignore = [
 "tests/*" = ["ARG", "PLR2004"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["bennu"]
+known-first-party = ["sharur"]
 force-single-line = false
 lines-after-imports = 2
 

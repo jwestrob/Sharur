@@ -12,7 +12,7 @@ And builds a comprehensive manifest.json.
 
 Usage:
     python scripts/migrate_to_manifest.py /path/to/data/dataset/
-    python scripts/migrate_to_manifest.py /path/to/data/dataset/bennu.duckdb
+    python scripts/migrate_to_manifest.py /path/to/data/dataset/sharur.duckdb
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from typing import Optional
 def find_database(dataset_dir: Path) -> Optional[Path]:
     """Find the DuckDB database in a dataset directory."""
     candidates = [
-        dataset_dir / "bennu.duckdb",
+        dataset_dir / "sharur.duckdb",
         dataset_dir / "database.duckdb",
     ]
     for candidate in candidates:
@@ -464,13 +464,13 @@ def main():
         epilog="""
 Examples:
     python scripts/migrate_to_manifest.py data/my_dataset/
-    python scripts/migrate_to_manifest.py data/my_dataset/bennu.duckdb
+    python scripts/migrate_to_manifest.py data/my_dataset/sharur.duckdb
     python scripts/migrate_to_manifest.py data/my_dataset/ --dry-run
         """,
     )
     parser.add_argument(
         "dataset_path",
-        help="Path to dataset directory or bennu.duckdb file",
+        help="Path to dataset directory or sharur.duckdb file",
     )
     parser.add_argument(
         "--dry-run",

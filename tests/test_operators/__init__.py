@@ -1,1 +1,1 @@
-"""Tests for Bennu operator system."""
+"""Tests for Sharur operator system."""
