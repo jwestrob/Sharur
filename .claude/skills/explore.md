@@ -617,6 +617,49 @@ Include:
 # Wait for completion, review results, spawn next hypothesis test
 ```
 
+### Hypothesis Tracking API
+
+Use the persistent hypothesis registry to track reasoning across sessions:
+
+```python
+# Propose a hypothesis (persists to exploration/hypotheses.json)
+h = b.propose_hypothesis("Group 4 NiFe hydrogenases are energy-conserving in this lineage")
+
+# Do analysis...
+result = b.search_by_predicates(has=["nife_group4"])
+
+# Link evidence to hypothesis
+b.add_evidence(
+    h.hypothesis_id,
+    query="Search for NiFe Group 4 across all genomes",
+    result_summary=f"Found in {len(result.data)} genomes",
+    supports=True,
+    confidence=0.8,
+)
+
+# Check hypothesis state
+print(b.hypothesis_summary())
+
+# Generate provenance figure for the paper
+mermaid = b.render_provenance(
+    title="Hydrogenase Analysis",
+    output_path="figures/hydrogenase_provenance.mermaid",
+)
+```
+
+Hypotheses persist across sessions -- `b.resume()` shows active hypotheses automatically. Use `b.list_hypotheses()` to get full hypothesis objects.
+
+For explicit provenance chaining (building a DAG of analytical steps):
+
+```python
+e1 = b.log_provenance("Count hydrogenases", "42 found")
+e2 = b.log_provenance("Check neighborhoods", "12 with Hyf operon", parent_ids=[e1.entry_id])
+e3 = b.log_provenance("Statistical test", "p=0.003", parent_ids=[e1.entry_id, e2.entry_id])
+
+# Render the full DAG including hypotheses
+mermaid = b.render_provenance(title="Analysis", output_path="figures/provenance.mermaid")
+```
+
 ### What Makes a Good Hypothesis for Subagent Investigation?
 
 ✅ **Good (specific, testable)**:

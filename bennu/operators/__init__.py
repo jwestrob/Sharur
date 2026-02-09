@@ -73,6 +73,7 @@ class Bennu:
         self._db_path = Path(db_path) if db_path else None
         self._session: Optional[ExplorationSession] = None
         self._manifest: Optional[AnalysisManifest] = None
+        self._hypothesis_registry = None
 
     @property
     def session(self) -> ExplorationSession:
@@ -750,6 +751,158 @@ class Bennu:
             limit: Maximum errors to report per category
         """
         return detect_annotation_errors(self.store, limit=limit)
+
+    # ------------------------------------------------------------------ #
+    # Hypothesis & Provenance operators
+    # ------------------------------------------------------------------ #
+
+    @property
+    def hypothesis_registry(self):
+        """Persistent cross-session hypothesis store.
+
+        Hypotheses registered here survive across sessions and subagent runs.
+        Storage: {dataset_dir}/exploration/hypotheses.json
+        """
+        if self._hypothesis_registry is None:
+            from bennu.core.hypothesis_registry import HypothesisRegistry
+
+            path = self._db_path.parent / "exploration" / "hypotheses.json"
+            self._hypothesis_registry = HypothesisRegistry(path)
+        return self._hypothesis_registry
+
+    def propose_hypothesis(self, statement: str) -> "Hypothesis":
+        """Propose a new hypothesis and register it in the persistent registry.
+
+        Returns the Hypothesis object (use .hypothesis_id for later reference).
+
+        Example:
+            h = b.propose_hypothesis("Group 4 NiFe are energy-conserving")
+            # later: b.add_evidence(h.hypothesis_id, ...)
+        """
+        from bennu.core.types import Hypothesis
+
+        h = Hypothesis(statement=statement)
+        self.hypothesis_registry.register(h)
+        return h
+
+    def add_evidence(
+        self,
+        hypothesis_id,
+        query: str,
+        result_summary: str,
+        supports: bool,
+        confidence: float,
+    ) -> None:
+        """Add evidence to an existing hypothesis.
+
+        Args:
+            hypothesis_id: UUID or string UUID of the hypothesis
+            query: Description of the analytical step
+            result_summary: What was found
+            supports: True if evidence supports the hypothesis
+            confidence: Confidence in this evidence (0-1)
+
+        Example:
+            b.add_evidence(
+                h.hypothesis_id,
+                query="Count NiFe Group 4 across genomes",
+                result_summary="Found in 12/41 genomes",
+                supports=True,
+                confidence=0.8,
+            )
+        """
+        import uuid as _uuid
+
+        from bennu.core.types import Evidence
+
+        if isinstance(hypothesis_id, str):
+            hypothesis_id = _uuid.UUID(hypothesis_id)
+        ev = Evidence(
+            query=query,
+            result_summary=result_summary,
+            supports=supports,
+            confidence=confidence,
+        )
+        self.hypothesis_registry.add_evidence(hypothesis_id, ev)
+
+    def list_hypotheses(self) -> list:
+        """List all hypotheses from the persistent registry."""
+        return self.hypothesis_registry.list_all()
+
+    def hypothesis_summary(self) -> str:
+        """Human-readable summary of all hypotheses with evidence counts."""
+        return self.hypothesis_registry.summary()
+
+    def render_provenance(
+        self,
+        title: Optional[str] = None,
+        output_path: Optional[str] = None,
+    ) -> str:
+        """Render the provenance DAG as a Mermaid diagram.
+
+        Combines session provenance entries with persistent hypothesis
+        registry to produce a publication-ready figure.
+
+        Args:
+            title: Optional title for the diagram
+            output_path: Optional file path to write the Mermaid output
+
+        Returns:
+            Mermaid-format string
+        """
+        from bennu.core.provenance_renderer import render_provenance_mermaid
+
+        mermaid = render_provenance_mermaid(
+            session=self.session,
+            registry=self._hypothesis_registry,
+            title=title,
+        )
+
+        if output_path is not None:
+            p = Path(output_path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(mermaid)
+
+        return mermaid
+
+    def log_provenance(
+        self,
+        query: str,
+        result_summary: str,
+        parent_ids: Optional[list] = None,
+    ) -> "ProvenanceEntry":
+        """Log a provenance entry manually.
+
+        Most operators log provenance automatically. Use this for custom
+        analytical steps or when chaining provenance explicitly.
+
+        Args:
+            query: Description of what was done
+            result_summary: What was found
+            parent_ids: Optional list of parent entry UUIDs (UUID or str)
+                for DAG chaining
+
+        Returns:
+            The ProvenanceEntry (use .entry_id for parent chaining)
+
+        Example:
+            e1 = b.log_provenance("Count hydrogenases", "42 found")
+            e2 = b.log_provenance("Check neighborhoods", "12 with maturation",
+                                  parent_ids=[e1.entry_id])
+        """
+        import uuid as _uuid
+
+        if parent_ids:
+            parent_ids = [
+                _uuid.UUID(p) if isinstance(p, str) else p for p in parent_ids
+            ]
+        return self.session.log_query(
+            query=query,
+            tool_calls=[],
+            results_summary=result_summary,
+            duration_ms=0,
+            parent_ids=parent_ids,
+        )
 
 
 __all__ = [

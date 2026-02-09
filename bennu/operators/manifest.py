@@ -103,6 +103,11 @@ class AnalysisManifest:
                 "proteins": [],
             },
             "figures": [],
+            "hypotheses": {
+                "count": 0,
+                "active": 0,
+                "registry_path": "exploration/hypotheses.json",
+            },
             "reports": [],
             "unexplored": {
                 "proteins_without_findings": 0,
@@ -578,6 +583,34 @@ class AnalysisManifest:
         phases = d.get("exploration", {}).get("phases_completed", [])
         if phases:
             lines.append(f"**Phases completed:** {', '.join(phases)}")
+
+        # Hypotheses from persistent registry
+        if self.db_path:
+            registry_path = self.db_path.parent / "exploration" / "hypotheses.json"
+            if registry_path.exists():
+                try:
+                    from bennu.core.hypothesis_registry import HypothesisRegistry
+
+                    registry = HypothesisRegistry(registry_path)
+                    hypotheses = registry.list_all()
+                    if hypotheses:
+                        active = registry.list_active()
+                        lines.append(f"**Hypotheses:** {len(hypotheses)} ({len(active)} active)")
+                        lines.extend(["", "### Hypotheses"])
+                        for h in hypotheses:
+                            n_for = sum(1 for e in h.evidence if e.supports)
+                            n_against = sum(1 for e in h.evidence if not e.supports)
+                            lines.append(
+                                f"- [{h.status.value}] {h.statement} "
+                                f"(+{n_for}/-{n_against}, conf={h.confidence:.2f})"
+                            )
+                        # Update manifest counts
+                        if "hypotheses" not in self.data:
+                            self.data["hypotheses"] = {}
+                        self.data["hypotheses"]["count"] = len(hypotheses)
+                        self.data["hypotheses"]["active"] = len(active)
+                except Exception:
+                    pass  # Don't fail resume if registry is corrupted
 
         # Recent session activity
         session_log = d.get("session_log", [])

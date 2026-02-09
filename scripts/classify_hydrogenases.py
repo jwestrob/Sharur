@@ -248,7 +248,7 @@ def classify_hydrogenases(
     hyddb_proteins = db.execute("""
         SELECT DISTINCT a.protein_id, a.accession as hmm_type, a.score as hmm_score
         FROM annotations a
-        WHERE a.source = 'HydDB'
+        WHERE LOWER(a.source) = 'hyddb'
     """).fetchdf()
 
     if hyddb_proteins.empty:
@@ -268,7 +268,7 @@ def classify_hydrogenases(
     # Get PFAM annotations for validation
     pfam_domains = {}
     for row in db.execute("""
-        SELECT protein_id, accession FROM annotations WHERE source IN ('PFAM', 'pfam')
+        SELECT protein_id, accession FROM annotations WHERE LOWER(source) = 'pfam'
     """).fetchall():
         if row[0] not in pfam_domains:
             pfam_domains[row[0]] = set()

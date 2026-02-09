@@ -3,7 +3,6 @@
 Bennu CLI - Metagenomic dataset exploration.
 
 Commands:
-- ask: Natural language question using BennuAgent with LLM parsing
 - overview: Dataset summary
 - genomes: List/filter genomes
 - proteins: List/filter proteins
@@ -20,7 +19,6 @@ Example usage:
 
 from pathlib import Path
 import sys
-import os
 from typing import Optional
 
 import typer
@@ -37,52 +35,6 @@ app = typer.Typer(
     help="Bennu - Metagenomic dataset exploration CLI",
     rich_markup_mode=None,  # Disable rich to work around Typer 0.15 bug
 )
-
-
-# ------------------------------------------------------------------ #
-# Ask command (LLM-based)
-# ------------------------------------------------------------------ #
-
-
-def _run_ask(question: str, db: str, debug_lm: bool = False):
-    """Shared execution for ask command."""
-    db_path = Path(db)
-    if not db_path.exists():
-        typer.echo(f"DB not found: {db}", err=True)
-        raise typer.Exit(1)
-
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        typer.echo("OPENAI_API_KEY is not set; LLM routing is required. Aborting.", err=True)
-        raise typer.Exit(1)
-
-    # Lazy imports for LLM dependencies
-    from bennu.agent.orchestrator import BennuAgent
-    from bennu.lm_factory import make_lm
-    from bennu.core.session import ExplorationSession
-
-    model_name = os.getenv("BENNU_LM_MODEL", "gpt-5-mini-2025-08-07")
-    typer.echo(f"[debug] Using model={model_name}", err=True)
-    lm = make_lm(model_name, temperature=1.0, max_completion_tokens=16000)
-
-    session = ExplorationSession(db_path=db_path)
-    agent = BennuAgent(session, lm=lm, debug_lm=debug_lm)
-    resp = agent.process(question)
-    typer.echo(resp)
-
-
-@app.command()
-def ask(
-    question: str = typer.Argument(..., help="Natural language question"),
-    db: str = typer.Option(DEFAULT_DB, "--db", "-d", help="Path to DuckDB database"),
-    debug_lm: bool = typer.Option(False, "--debug-lm", help="Print raw LLM payload"),
-):
-    """
-    Ask a natural language question using BennuAgent.
-
-    Requires OPENAI_API_KEY environment variable.
-    """
-    _run_ask(question, db, debug_lm=debug_lm)
 
 
 # ------------------------------------------------------------------ #

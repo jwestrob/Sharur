@@ -216,6 +216,10 @@ finding = {
 
 with open(EXPLORE_DIR / "findings.jsonl", "a") as f:
     f.write(json.dumps(finding) + "\n")
+
+# Also register as a persistent hypothesis if the characterization yields a functional prediction
+h = b.propose_hypothesis(f"{protein_id} functions as [predicted function]")
+b.add_evidence(h.hypothesis_id, "Foldseek structural homology", "TM-score 0.72 to tail fiber", True, 0.7)
 ```
 
 ---

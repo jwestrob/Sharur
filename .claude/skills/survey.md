@@ -659,6 +659,14 @@ Generate **separate reports for major topics** (easier to navigate than one gian
     - Major discoveries in machine-readable format
     - Each line is a JSON object with: title, category, description, evidence, significance
 
+After survey completion, link significant findings to hypotheses:
+
+```python
+b.add_evidence(hypothesis_id, "Survey: NiFe distribution", f"{n} genomes positive", True, 0.7)
+```
+
+Use `b.propose_hypothesis()` to register new hypotheses discovered during the survey. These persist across sessions and appear in `b.resume()`.
+
 ---
 
 ## Flexibility & Judgment

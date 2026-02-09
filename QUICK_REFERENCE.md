@@ -66,19 +66,7 @@ class ToolResult:
     suggestions: list[str]  # Follow-up ideas
 ```
 
-### 6. DSPy Typed Extraction
-
-```python
-# For structured outputs, use TypedPredictor
-extractor = dspy.TypedPredictor(FindProteinsParams)
-params = extractor(query=user_query, session_context=ctx)
-
-# Access typed fields
-params.domains  # list[str]
-params.taxonomy # str
-```
-
-### 7. Session State Updates
+### 6. Session State Updates
 
 Every tool execution should:
 ```python
@@ -182,8 +170,6 @@ SELECT DISTINCT * FROM operon;
 | Wrong neighbors | Forgot strand | Use strand-aware upstream/downstream |
 | Infinite loop | Circular contig | Normalize coordinates |
 | Empty focus | Didn't push results | Always push after tool returns |
-| Type error in DSPy | Wrong output type | Check signature field types |
-
 ## File Dependencies
 
 ```
@@ -191,11 +177,11 @@ types.py          <- Everything imports from here
     ↓
 storage/*.py      <- Needs types
     ↓
-tools/*.py        <- Needs storage + types
+operators/*.py    <- Needs storage + types
     ↓
-session.py        <- Needs types + tools
+predicates/*.py   <- Needs storage + types
     ↓
-agent/*.py        <- Needs everything
+session.py        <- Needs types + operators
 ```
 
 ## Testing Checklist

@@ -22,7 +22,7 @@ conda activate sharur
 
 The `environment.yml` installs Bennu in editable mode with all dependencies plus dev tools via `pip install -e ".[dev]"`.
 
-All runtime dependencies (torch, transformers, matplotlib, dspy-ai, biopython, plotly, reportlab, jupyter, etc.) are installed by default with a bare `pip install -e "."`. The only optional extra is `[dev]` for testing and linting tools (pytest, ruff, mypy).
+All runtime dependencies (torch, transformers, matplotlib, biopython, plotly, reportlab, jupyter, etc.) are installed by default with a bare `pip install -e "."`. The only optional extra is `[dev]` for testing and linting tools (pytest, ruff, mypy).
 
 ### Minimal install (no conda)
 
@@ -147,14 +147,6 @@ Or force CPU-only in Python:
 import torch
 device = torch.device("cpu")
 ```
-
-### `import bennu` fails with dspy-ai error
-
-`BennuAgent` is lazy-imported via `__getattr__`, so `import bennu` should work even if dspy-ai has issues. If you still see errors:
-
-1. Verify you're on the latest code (`git pull`)
-2. Reinstall: `pip install -e "."`
-3. If dspy-ai itself fails to install, core Bennu functionality still works — only `from bennu import BennuAgent` requires it
 
 ### DuckDB version conflicts
 

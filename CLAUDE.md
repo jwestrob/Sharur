@@ -66,6 +66,8 @@ Coordinator
     └── Validates claims, catches errors, performs follow-ups
 ```
 
+Use `b.propose_hypothesis()` and `b.add_evidence()` to track analytical reasoning across sessions. Hypotheses persist in `exploration/hypotheses.json` and appear in `b.resume()` output. Use `b.render_provenance()` to generate Mermaid DAG figures for publications.
+
 ### Review Agent Responsibilities
 
 **Goal**: Independent validation that strengthens confidence in findings and catches gaps before publication.
@@ -207,6 +209,8 @@ If you see `hydrogenase` or `hydrogen_metabolism` predicates, **check for subgro
 | `bennu/operators/structure.py` | ESM3 structure prediction |
 | `bennu/operators/foldseek.py` | Foldseek structural homology search |
 | `bennu/operators/manifest.py` | Analysis manifest for session continuity |
+| `bennu/core/hypothesis_registry.py` | Persistent cross-session hypothesis store |
+| `bennu/core/provenance_renderer.py` | Mermaid DAG renderer for provenance figures |
 | `bennu/reports/template.py` | PDF report generation with themes |
 
 ## Analysis Manifest System
@@ -217,7 +221,7 @@ Each dataset has a `manifest.json` for session continuity:
 from bennu.operators import Bennu
 b = Bennu("data/YOUR_DATASET/bennu.duckdb")
 
-print(b.resume())  # Status, findings, structures, recent activity
+print(b.resume())  # Status, findings, structures, hypotheses, recent activity
 
 # Auto-tracking: structures and figures are automatically recorded
 b.predict_structure("protein_id")
@@ -235,6 +239,35 @@ b.manifest.save()
 from bennu.reports import generate_report_from_manifest, BennuReport
 generate_report_from_manifest("data/my_dataset/manifest.json", "output.pdf", theme="viral")
 ```
+
+## Quick Reference: Hypothesis Tracking & Provenance
+
+```python
+b = Bennu("data/YOUR_DATASET/bennu.duckdb")
+
+# Propose a hypothesis (persists to exploration/hypotheses.json)
+h = b.propose_hypothesis("Group 4 NiFe hydrogenases are energy-conserving")
+
+# Add evidence after analysis
+b.add_evidence(h.hypothesis_id, "NiFe Group 4 survey", "12/41 genomes", True, 0.8)
+b.add_evidence(h.hypothesis_id, "Neighborhood check", "Hyf operon present", True, 0.9)
+
+# Check state
+print(b.hypothesis_summary())    # One-line-per-hypothesis overview
+b.list_hypotheses()              # Full Hypothesis objects
+
+# Explicit provenance logging with parent chaining
+e1 = b.log_provenance("Count hydrogenases", "42 found")
+e2 = b.log_provenance("Check neighborhoods", "12 with Hyf", parent_ids=[e1.entry_id])
+
+# Render provenance DAG as Mermaid diagram
+mermaid = b.render_provenance(title="Analysis DAG", output_path="figures/provenance.mermaid")
+```
+
+- `b.resume()` automatically shows active hypotheses
+- Hypotheses persist across sessions and subagent runs
+- `add_evidence()` accepts UUID or string hypothesis_id
+- `log_provenance()` accepts UUID or string parent_ids
 
 ## Quick Reference: Structure Prediction & Foldseek
 

@@ -181,6 +181,7 @@ class Evidence(BaseModel):
     supports: bool  # True if supports, False if refutes
     confidence: float = Field(..., ge=0, le=1)
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    provenance_id: Optional[UUID] = None
 
 
 class Hypothesis(BaseModel):
@@ -220,6 +221,7 @@ class ProvenanceEntry(BaseModel):
     results_summary: str
     duration_ms: int
     error: Optional[str] = None
+    parent_ids: list[UUID] = Field(default_factory=list)
 
 
 __all__ = [

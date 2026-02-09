@@ -279,3 +279,10 @@ Based on metabolic gene content:
 - hydrogenase_operon.png: Representative hydrogenase gene cluster
 - pathway_completeness.png: Heatmap of pathway presence
 ```
+
+Register metabolic lifestyle hypotheses for cross-session tracking:
+
+```python
+h = b.propose_hypothesis("Lineage is obligately syntrophic based on incomplete electron transport chain")
+b.add_evidence(h.hypothesis_id, "ETC analysis", "Missing Complex III and IV in 38/41 genomes", True, 0.9)
+```

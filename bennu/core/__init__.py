@@ -20,6 +20,8 @@ from .types import (
 )
 from .session import ExplorationSession
 from .session import SessionState
+from .hypothesis_registry import HypothesisRegistry
+from .provenance_renderer import render_provenance_mermaid, render_provenance_summary
 
 __all__ = [
     "Annotation",
@@ -32,6 +34,7 @@ __all__ = [
     "ExplorationSession",
     "FocusEntity",
     "Hypothesis",
+    "HypothesisRegistry",
     "HypothesisStatus",
     "Locus",
     "LocusType",
@@ -40,4 +43,6 @@ __all__ = [
     "SessionState",
     "Strand",
     "WorkingSet",
+    "render_provenance_mermaid",
+    "render_provenance_summary",
 ]

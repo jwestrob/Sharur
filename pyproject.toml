@@ -46,8 +46,6 @@ dependencies = [
     # Structure prediction
     "biopython>=1.80",
     "esm>=3.0.0",
-    # Agent
-    "dspy-ai>=2.4.0",
     # Reports
     "reportlab>=4.0.0",
     # Notebooks
@@ -176,7 +174,6 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["ARG", "PLR2004"]
-"bennu/agent/*" = ["ARG001"]  # DSPy modules have specific signatures
 
 [tool.ruff.lint.isort]
 known-first-party = ["bennu"]
@@ -199,7 +196,6 @@ warn_unused_configs = true
 module = [
     "duckdb.*",
     "lancedb.*",
-    "dspy.*",
     "pyarrow.*",
 ]
 ignore_missing_imports = true

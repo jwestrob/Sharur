@@ -16,6 +16,10 @@ def test_crispr_minced_ingests_into_loci(tmp_path):
     if not minced_path:
         pytest.skip("minced not installed")
 
+    stage00 = DATA_DIR / "stage00_prepared"
+    if not stage00.exists():
+        pytest.skip("stage00_prepared data not present")
+
     # Use existing stage outputs for 00,03,04,05a,05b,06; generate fresh 05c via minced
     stage05c = tmp_path / "stage05c_crispr"
     stage05c.mkdir(parents=True, exist_ok=True)

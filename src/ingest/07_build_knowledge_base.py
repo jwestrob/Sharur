@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import json
 import logging
+import multiprocessing
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -33,6 +35,45 @@ from bennu.predicates.generator import (
 
 console = Console()
 logger = logging.getLogger(__name__)
+
+
+# --------------------------------------------------------------------------- #
+# Top-level worker function for parallel predicate generation (must be
+# picklable, so it lives at module scope rather than as a method).
+# --------------------------------------------------------------------------- #
+
+def _generate_predicates_chunk(item: tuple) -> tuple:
+    """Generate predicates for a single protein.  Called by Pool.imap_unordered.
+
+    Args:
+        item: (pid, length, gc, gc_mean, gc_std, ann_tuples)
+              where ann_tuples is a list of (source, accession, name, desc, evalue, score)
+
+    Returns:
+        (protein_id, predicate_list)
+    """
+    pid, length, gc, gc_mean, gc_std, ann_tuples = item
+
+    # Each worker lazily initialises its own generator (cached on the function object)
+    gen = getattr(_generate_predicates_chunk, "_gen", None)
+    if gen is None:
+        gen = PredicateGenerator(predict_topology=False)
+        _generate_predicates_chunk._gen = gen
+
+    protein = ProteinRecord(
+        protein_id=pid,
+        sequence_length=length,
+        gc_content=gc,
+        contig_gc_mean=gc_mean,
+        contig_gc_std=gc_std,
+    )
+    annotations = [
+        AnnotationRecord(source=t[0], accession=t[1], name=t[2],
+                         description=t[3], evalue=t[4], score=t[5])
+        for t in ann_tuples
+    ]
+    predicates = gen.generate_for_protein(protein, annotations)
+    return (pid, predicates)
 
 
 # --------------------------------------------------------------------------- #
@@ -381,7 +422,22 @@ class KnowledgeBaseBuilder:
         for tsv in (self.outputs.stage04_dir.rglob("*_hits_df.tsv") if self.outputs.stage04_dir.exists() else []):
             try:
                 df = pd.read_csv(tsv, sep="\t")
-                source = "pfam" if "pfam" in tsv.as_posix().lower() else "kegg"
+                # Derive source name from filename/path (always lowercase)
+                tsv_lower = tsv.as_posix().lower()
+                if "pfam" in tsv_lower:
+                    source = "pfam"
+                elif "kofam" in tsv_lower or "kegg" in tsv_lower:
+                    source = "kegg"
+                elif "hyddb" in tsv_lower:
+                    source = "hyddb"
+                elif "defense" in tsv_lower:
+                    source = "defensefinder"
+                elif "vog" in tsv_lower:
+                    source = "vogdb"
+                elif "cant" in tsv_lower:
+                    source = "cant_hyd"
+                else:
+                    source = tsv.stem.split("_")[0].lower()
                 original_name = df.get("hmm_name", None)
                 # Normalize columns and avoid duplicate labels
                 df = df.rename(
@@ -631,9 +687,12 @@ class KnowledgeBaseBuilder:
 
     # --- predicates ----------------------------------------------------- #
     def _generate_predicates(self) -> None:
-        """Generate semantic predicates for all proteins based on annotations."""
-        store = _StoreAdapter(self.conn)
-        gen = PredicateGenerator(predict_topology=False)  # Skip topology for speed
+        """Generate semantic predicates for all proteins based on annotations.
+
+        Uses multiprocessing to parallelize the pure-function predicate
+        generation across CPU cores, then bulk-inserts results.
+        """
+        console.print("[cyan]Loading protein and annotation data for predicate generation...[/cyan]")
 
         # Get GC stats per contig
         gc_stats = {}
@@ -652,8 +711,10 @@ class KnowledgeBaseBuilder:
             FROM proteins
         """).fetchall()
 
+        console.print(f"  {len(proteins):,} proteins loaded")
+
         # Get all annotations grouped by protein
-        annotations_by_protein: Dict[str, List[AnnotationRecord]] = {}
+        annotations_by_protein: Dict[str, List[tuple]] = {}
         ann_rows = self.conn.execute("""
             SELECT protein_id, source, accession, name, description, evalue, score
             FROM annotations
@@ -662,51 +723,54 @@ class KnowledgeBaseBuilder:
             pid = row[0]
             if pid not in annotations_by_protein:
                 annotations_by_protein[pid] = []
+            # Store as plain tuples for pickle-ability across processes
             annotations_by_protein[pid].append(
-                AnnotationRecord(
-                    source=row[1],
-                    accession=row[2],
-                    name=row[3],
-                    description=row[4],
-                    evalue=row[5],
-                    score=row[6],
-                )
+                (row[1], row[2], row[3], row[4], row[5], row[6])
             )
 
-        # Generate predicates and batch insert
-        batch_size = 5000
-        batch = []
+        console.print(f"  {len(ann_rows):,} annotations loaded")
 
+        # Build work items: list of (pid, length, gc, contig_gc_mean, contig_gc_std, ann_tuples)
+        work_items = []
         for row in proteins:
-            pid = row[0]
-            length = row[1]
-            gc = row[2]
-            contig = row[3]
-
+            pid, length, gc, contig = row[0], row[1], row[2], row[3]
             gc_mean, gc_std = gc_stats.get(contig, (None, None))
+            anns = annotations_by_protein.get(pid, [])
+            work_items.append((pid, length, gc, gc_mean, gc_std, anns))
 
-            protein = ProteinRecord(
-                protein_id=pid,
-                sequence_length=length,
-                gc_content=gc,
-                contig_gc_mean=gc_mean,
-                contig_gc_std=gc_std,
-            )
+        # Determine worker count
+        n_workers = min(os.cpu_count() or 4, 12)
+        chunk_size = max(1, len(work_items) // (n_workers * 4))
 
-            annotations = annotations_by_protein.get(pid, [])
-            predicates = gen.generate_for_protein(protein, annotations)
+        console.print(f"[cyan]Generating predicates with {n_workers} workers (chunk_size={chunk_size:,})...[/cyan]")
 
-            batch.append((pid, predicates))
+        # Parallel predicate generation
+        results = []
+        with multiprocessing.Pool(n_workers) as pool:
+            for batch_result in pool.imap_unordered(
+                _generate_predicates_chunk, work_items, chunksize=chunk_size
+            ):
+                results.append(batch_result)
+                if len(results) % 100_000 == 0:
+                    console.print(f"  {len(results):,}/{len(work_items):,} proteins processed")
 
-            if len(batch) >= batch_size:
-                self._insert_predicate_batch(batch)
-                batch = []
+        console.print(f"  {len(results):,} proteins processed, inserting into DB...")
 
-        # Insert remaining
-        if batch:
-            self._insert_predicate_batch(batch)
+        # Bulk insert via DataFrame register
+        insert_batch_size = 50_000
+        for i in range(0, len(results), insert_batch_size):
+            batch = results[i:i + insert_batch_size]
+            df = pd.DataFrame(batch, columns=["protein_id", "predicates"])
+            df["updated_at"] = datetime.now(timezone.utc)
+            self.conn.register("tmp_pred_batch", df)
+            self.conn.execute("""
+                INSERT INTO protein_predicates (protein_id, predicates, updated_at)
+                SELECT protein_id, predicates, updated_at FROM tmp_pred_batch
+            """)
+            self.conn.unregister("tmp_pred_batch")
 
         self.stats["predicates"] = len(proteins)
+        console.print(f"[green]  Predicates generated for {len(proteins):,} proteins[/green]")
 
         # Flag proteins overlapping CRISPR arrays
         self._flag_crispr_array_overlaps()
@@ -739,7 +803,10 @@ class KnowledgeBaseBuilder:
         console.print(f"  Flagged {len(overlaps)} proteins overlapping CRISPR arrays")
 
     def _insert_predicate_batch(self, batch: List[tuple]) -> None:
-        """Insert batch of predicates into protein_predicates table."""
+        """Insert batch of predicates into protein_predicates table.
+        Legacy row-by-row method kept for compatibility; _generate_predicates
+        now uses bulk DataFrame insert instead.
+        """
         for protein_id, predicates in batch:
             self.conn.execute(
                 """

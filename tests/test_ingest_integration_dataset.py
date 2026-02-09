@@ -102,7 +102,7 @@ def test_ingest_pipeline_with_dummy_dataset(tmp_path):
                             "description": "Synthetic annotation",
                         }
                     )
-                    cazy_rows.append({"protein_id": protein_id, "cazy_family": "GH1"})
+                    cazy_rows.append({"protein_id": protein_id, "cazyme_family": "GH1"})
                     gecco_clusters.append(
                         {
                             "cluster_id": f"{bin_id}_cluster1",
@@ -134,7 +134,7 @@ def test_ingest_pipeline_with_dummy_dataset(tmp_path):
         for row in pfam_rows:
             lines.append("\t".join(str(row[h]) for h in header))
         stage04.mkdir(parents=True, exist_ok=True)
-        _write(stage04 / "synthetic_hits_df.tsv", "\n".join(lines) + "\n")
+        _write(stage04 / "synthetic_pfam_hits_df.tsv", "\n".join(lines) + "\n")
 
     # Stage05b CAZy annotations
     if cazy_rows:

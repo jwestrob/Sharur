@@ -65,13 +65,4 @@ __all__ = [
     "Strand",
     # Session
     "SessionState",
-    # Agent (lazy-loaded)
-    "BennuAgent",
 ]
-
-
-def __getattr__(name):
-    if name == "BennuAgent":
-        from bennu.agent.orchestrator import BennuAgent
-        return BennuAgent
-    raise AttributeError(f"module 'bennu' has no attribute {name}")

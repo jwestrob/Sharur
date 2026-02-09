@@ -225,6 +225,35 @@ class ExplorationSession:
             raise KeyError("Hypothesis not found")
         self._hypotheses[hypothesis_id].status = status
 
+    def add_evidence_from_provenance(
+        self,
+        hypothesis_id: uuid.UUID,
+        entry_id: uuid.UUID,
+        supports: bool,
+        confidence: float,
+    ) -> None:
+        """Add evidence to a hypothesis by referencing a provenance entry.
+
+        Automatically populates query and result_summary from the referenced
+        provenance entry, creating an auditable link between the hypothesis
+        evidence chain and the actual analytical step that produced it.
+        """
+        entry = next(
+            (p for p in self._provenance if p.entry_id == entry_id), None
+        )
+        if entry is None:
+            raise KeyError(f"Provenance entry {entry_id} not found")
+        if hypothesis_id not in self._hypotheses:
+            raise KeyError(f"Hypothesis {hypothesis_id} not found")
+        ev = Evidence(
+            provenance_id=entry_id,
+            query=entry.query,
+            result_summary=entry.results_summary,
+            supports=supports,
+            confidence=confidence,
+        )
+        self._hypotheses[hypothesis_id].evidence.append(ev)
+
     def list_hypotheses(self, status: Optional[HypothesisStatus] = None) -> list[Hypothesis]:
         if status is None:
             return list(self._hypotheses.values())
@@ -234,7 +263,13 @@ class ExplorationSession:
     # Provenance
     # ------------------------------------------------------------------ #
     def log_query(
-        self, query: str, tool_calls: list[dict], results_summary: str, duration_ms: int, error: Optional[str] = None
+        self,
+        query: str,
+        tool_calls: list[dict],
+        results_summary: str,
+        duration_ms: int,
+        error: Optional[str] = None,
+        parent_ids: Optional[list[uuid.UUID]] = None,
     ) -> ProvenanceEntry:
         entry = ProvenanceEntry(
             query=query,
@@ -242,6 +277,7 @@ class ExplorationSession:
             results_summary=results_summary,
             duration_ms=duration_ms,
             error=error,
+            parent_ids=parent_ids or [],
         )
         self._provenance.append(entry)
         self._turn_counter += 1
@@ -268,7 +304,7 @@ class ExplorationSession:
             "hypotheses": [h.model_dump() for h in self._hypotheses.values()],
             "provenance": [p.model_dump() for p in self._provenance],
         }
-        path.write_text(json.dumps(state, indent=2))
+        path.write_text(json.dumps(state, default=str, indent=2))
 
     @classmethod
     def load(cls, path: Path) -> "ExplorationSession":
