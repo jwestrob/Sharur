@@ -2,13 +2,15 @@
 
 Comparative genomics between genomes or genome groups.
 
-**CRITICAL: You are a leaf agent. DO NOT spawn sub-agents or use the Task tool.**
-
 **CONCURRENCY: DuckDB does not support concurrent writes. Only ONE agent should access a database at a time. The coordinator must run DB-accessing skills sequentially, not in parallel.**
 
 > **Mandatory:** Follow the shared validation protocols in `_validation_protocols.md`.
 > Verify accession names before reporting. Use COUNT(DISTINCT protein_id) for protein
 > counts. Apply Context-First protocol for annotations averaging >10 hits/genome.
+
+> **Literature dispatch:** When you encounter ambiguous annotations, unknown Foldseek hits,
+> or need to make comparative claims ("first known", "largest"), dispatch a literature agent.
+> Read `.claude/skills/literature.md` for protocols.
 
 ---
 

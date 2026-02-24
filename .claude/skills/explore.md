@@ -5,9 +5,15 @@ Curiosity-driven exploration of Sharur metagenomic data to discover interesting 
 **Run AFTER `/survey` completes** - use survey results to identify questions worth investigating.
 
 **AGENT ARCHITECTURE:**
-- You CAN spawn subagents to test specific hypotheses or investigate interesting loci
-- Your subagents are LEAF AGENTS - they CANNOT spawn their own subagents
-- Tell each subagent: "You are a leaf agent. DO NOT use the Task tool. Investigate this question and return findings."
+- You CAN spawn subagents for hypothesis testing, specialist analysis, or literature research
+- Subagents CAN spawn their own subagents when needed (recursive hierarchy)
+- **Specialist dispatch:** When you encounter a domain requiring deep expertise, dispatch the relevant skill agent rather than handling it inline:
+  - Hydrogenases → read and follow `.claude/skills/hydrogenase.md`
+  - Structure prediction / Foldseek → read and follow `.claude/skills/foldseek.md`
+  - Defense systems → read and follow `.claude/skills/defense.md`
+  - Prophage / viral elements → read and follow `.claude/skills/prophage.md`
+  - Literature ambiguity → read and follow `.claude/skills/literature.md`
+- **Context-first is YOUR job, not a sub-agent's.** Always check co-annotations and neighborhood context before making functional claims. Don't outsource basic validation — outsource specialist knowledge.
 
 **CONCURRENCY: DuckDB does not support concurrent writes. Run subagents SEQUENTIALLY, not in parallel.**
 
@@ -70,6 +76,7 @@ if survey_dir.exists():
 Append-only JSONL. Each line is a JSON object with **mandatory provenance fields**:
 ```json
 {
+  "id": "E001",
   "timestamp": "2026-02-02T10:30:00",
   "category": "defense",
   "title": "High CRISPR load in GCA_018260655",
@@ -83,9 +90,23 @@ Append-only JSONL. Each line is a JSON object with **mandatory provenance fields
     "raw_result": [18],
     "accession_verified": "PF01396 = 'CRISPR_assoc' (name confirmed in database)",
     "interpretation": "18 CRISPR-associated proteins in genome GCA_018260655"
-  }
+  },
+  "figures": ["exploration/figures/GCA_018260655_defense_locus.png"],
+  "related_findings": ["survey-008"],
+  "phase": "exploration"
 }
 ```
+
+**Provenance chain fields** (optional, consumed by `compile_comprehensive_report.py`):
+- `id` — stable finding identifier (e.g. "E001", "survey-001")
+- `figures` — list of figure paths produced for this finding
+- `related_findings` — list of IDs of related findings in any phase
+- `phase` — "survey" or "exploration" (auto-tagged by compilation script if missing)
+
+**Topic deep-dives** (e.g. `exploration/mega_protein_ecology.md`) provide narrative context
+for humans, but **must also produce structured findings** in `exploration/findings.jsonl` for
+every quantitative claim. The deep-dive `.md` file is referenced in the report manifest as
+a `narrative` link.
 
 #### exploration_state.json
 Session state tracking:
@@ -172,11 +193,44 @@ FINDINGS_FILE = EXPLORE_DIR / "findings.jsonl"
 STATE_FILE = EXPLORE_DIR / "exploration_state.json"
 SUMMARY_FILE = EXPLORE_DIR / "exploration_summary.md"
 
+# Auto-increment finding ID counter
+# Convention: exploration findings use "E" prefix (E001, E002, ...)
+# Survey uses "survey-" prefix, Deepen uses "D" prefix.
+_finding_counter = 0
+if FINDINGS_FILE.exists():
+    with open(FINDINGS_FILE) as _f:
+        for _line in _f:
+            _finding_counter += 1
+
+def next_finding_id() -> str:
+    """Return the next auto-incremented finding ID."""
+    global _finding_counter
+    _finding_counter += 1
+    return f"E{_finding_counter:03d}"
+
 def log_finding(category: str, title: str, description: str,
+                finding_id: str = None,
                 proteins: list = None, evidence: dict = None,
+                n_genomes: int = None,
                 location: str = None, priority: str = "medium",
-                provenance: dict = None):
+                provenance: dict = None,
+                figures: list = None,
+                related_findings: list = None):
     """Append a finding to the persistent findings log.
+
+    Args:
+        category: Finding category (e.g. "defense", "metabolism", "mega_proteins")
+        title: Self-contained title with all qualifiers
+        description: Prose description with biological interpretation
+        finding_id: Stable ID (auto-generated as E001, E002... if omitted)
+        proteins: List of protein_ids involved
+        evidence: Dict or string with quantitative evidence
+        n_genomes: Number of genomes where finding applies
+        location: Genomic location (e.g. "contig_id:start-end")
+        priority: "high", "medium", or "low"
+        provenance: Dict with query, raw_result, accession_verified, interpretation
+        figures: List of figure paths produced for this finding
+        related_findings: List of IDs of related findings in any phase
 
     PROVENANCE IS MANDATORY for any finding that makes a functional claim.
     The provenance dict must contain:
@@ -186,27 +240,41 @@ def log_finding(category: str, title: str, description: str,
       - interpretation: The human-readable claim derived from the raw result
 
     Example:
-        provenance={
-            "query": "b.store.execute(\"SELECT name FROM annotations WHERE accession = 'PF04055' LIMIT 1\").fetchone()",
-            "raw_result": ["Radical_SAM"],
-            "accession_verified": "PF04055 = 'Radical_SAM' (NOT benzoyl-CoA reductase)",
-            "interpretation": "1,790 Radical SAM superfamily proteins (generic, not pathway-specific)"
-        }
+        log_finding(
+            category="defense",
+            title="CRISPR-Cas Type I-C with extensive spacer array in genome X",
+            description="A complete Type I-C CRISPR-Cas system spans genes 145-152...",
+            n_genomes=1,
+            provenance={
+                "query": "SELECT COUNT(*) FROM annotations WHERE accession = 'PF01396'...",
+                "raw_result": [18],
+                "accession_verified": "PF01396 = 'CRISPR_assoc'",
+                "interpretation": "18 CRISPR-associated proteins in genome X"
+            },
+            figures=["exploration/figures/genome_X_defense_locus.png"],
+            related_findings=["survey-008"],
+        )
     """
+    fid = finding_id or next_finding_id()
     finding = {
+        "id": fid,
         "timestamp": datetime.now().isoformat(),
         "category": category,
         "title": title,
         "description": description,
         "proteins": proteins or [],
         "evidence": evidence or {},
+        "n_genomes": n_genomes,
         "location": location,
         "priority": priority,  # high, medium, low
-        "provenance": provenance or {}
+        "provenance": provenance or {},
+        "figures": figures or [],
+        "related_findings": related_findings or [],
+        "phase": "exploration",
     }
     with open(FINDINGS_FILE, "a") as f:
         f.write(json.dumps(finding) + "\n")
-    print(f"[LOGGED] {category}: {title}")
+    print(f"[LOGGED] {fid} | {category}: {title}")
     return finding
 
 def load_findings():
@@ -309,6 +377,13 @@ log_finding(
 ```
 
 **Synthesis documents** (`exploration_summary.md`, hypothesis reports) should flow as narrative prose. Interpret findings in biological context rather than listing them.
+
+### Figure Generation
+
+> **Before generating any figure, read `.claude/skills/visualize.md`** for tool selection,
+> color conventions, window sizes, and manuscript integration rules. Use
+> `plot_locus_multisource.py` for any figure going into a report; use
+> `b.visualize_neighborhood()` for quick exploratory looks only.
 
 ### Figure Legends
 
@@ -591,11 +666,7 @@ Survey found:
 Task(
     subagent_type="general-purpose",
     description="Test orphan dockerin hypothesis",
-    prompt="""You are a leaf agent testing a specific hypothesis.
-
-**CRITICAL: You are a LEAF AGENT. DO NOT spawn sub-agents or use the Task tool.**
-
-Dataset: data/hinthialibacterota_v3/sharur.duckdb
+    prompt="""Dataset: data/hinthialibacterota_v3/sharur.duckdb
 
 Hypothesis: "Orphan dockerin genomes (dockerin but no cohesin) are obligate syntrophic partners with distinct metabolic features compared to self-assembly genomes."
 
@@ -605,6 +676,7 @@ Your task:
 3. Test for statistical differences (Fisher exact, t-tests)
 4. Generate neighborhood figures for representative dockerin-cytochrome proteins
 5. Document findings with evidence
+6. If you encounter ambiguous annotations or need literature context, dispatch a literature agent
 
 Write results to: data/hinthialibacterota_v3/exploration/hypothesis_orphan_dockerins.md
 
@@ -1345,32 +1417,27 @@ When logging a finding, the title must include all qualifiers. A reader should u
 - **Bad**: "Largest protein (5,461 aa) has zero annotations" — was actually "largest *unannotated* protein"
 - **Good**: "Largest unannotated protein (5,461 aa, JAJVIK010000008.1_48) — candidate adhesin"
 
-#### Hydrogenase Curation
+#### Hydrogenase Validation (MANDATORY DISPATCH)
 
-HydDB classifies proteins by structural similarity to known hydrogenases, but NADH dehydrogenase (Complex I) shares the same [NiFe] binding site fold and produces ~44% false positives for NiFe calls. The automated pipeline (`classify_hydrogenases.py`) applies a PF00374-based filter that validates Groups 1-3 but **systematically rejects all Group 4 NiFe hydrogenases** (Hyf/Hyc/Mbh/Ech) because they diverged too far to retain the NiFeSe_Hases domain.
+HydDB NiFe calls have a ~50% false-positive rate from Complex I NuoD homology. **Do not report hydrogenase counts or make hydrogen metabolism claims without validation.**
 
-**When you encounter hydrogenases, run neighborhood-based curation on unvalidated HydDB hits:**
+When you encounter hydrogenase findings, dispatch the hydrogenase skill agent:
 
 ```python
-# Step 1: Get pipeline-validated and unvalidated counts
-validated = b.search_by_predicates(has=["nife_hydrogenase"])   # PF00374-validated (Groups 1-3)
-all_hyddb = b.search_by_predicates(has=["hyddb:NiFe"])         # All HydDB NiFe calls
-unvalidated = [p for p in all_hyddb if p not in set(validated)]
-
-# Step 2: For each unvalidated hit, check ±8 gene neighborhood
-for pid in unvalidated:
-    nbr = b.get_neighborhood(pid, window=8, all_annotations=True)
-    # Hydrogenase evidence (→ rescue):
-    #   KEGG: K12136-K12145 (hyfA-J), K15828-K15833 (hycB-G)
-    #   KEGG: K04651-K04656 (HypA-F maturation), K03605 (HycI)
-    #   PFAM: PF00374 on a neighboring gene, HydDB annotation on neighbor
-    # Complex I evidence (→ reject):
-    #   KEGG: K00330-K00343 (nuoA-N)
-    #   PFAM: PF00346, PF00329 on neighbors
-    # Ambiguous (both or neither): reject conservatively
+Task(subagent_type="general-purpose",
+     prompt="""Read and follow .claude/skills/hydrogenase.md exactly.
+     DB: data/DATASET/sharur.duckdb
+     Validate all HydDB NiFe hits. Output validated counts and corrected findings.
+     Append validated findings to exploration/findings.jsonl.""")
 ```
 
-**In reports, state the curation method:** "97 NiFe hydrogenases validated by PF00374 (Groups 1-3), plus 12 rescued by neighborhood curation (8 Group 4f Hyf/Hyc + 4 Group 4e operon subunits), excluding 66 Complex I false positives."
+The hydrogenase agent will:
+1. Inventory all HydDB hits and PF00374-validated proteins
+2. Run neighborhood validation on every unvalidated hit (±8 genes)
+3. Reject Complex I NuoD false positives, rescue genuine Group 4 (Hyf/Hyc/Ech)
+4. Return validated counts with per-protein evidence
+
+**Do not duplicate this work inline.** Flag hydrogenase findings as provisional until the agent returns.
 
 #### Pathway Validation
 Don't assume a pathway from one gene - check for the complete pathway:
@@ -1381,7 +1448,7 @@ Don't assume a pathway from one gene - check for the complete pathway:
 | MCR (methyl-CoM reductase) | - | This IS the definitive methanogenesis marker |
 | CODH | ACS, methyltransferases | Complete Wood-Ljungdahl needs all components |
 | Nitrogenase (nifH) | nifD, nifK clustered | Need the complete complex |
-| Hydrogenase | Neighborhood curation | See "Hydrogenase Curation" above — PF00374 misses Group 4 |
+| Hydrogenase | Dispatch `/hydrogenase` agent | See "Hydrogenase Validation" above — PF00374 misses Group 4 |
 
 #### Archaeal-Specific Considerations
 - **RuBisCO in archaea** is usually Form II/III for AMP recycling, NOT CO2 fixation

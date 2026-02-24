@@ -2,8 +2,6 @@
 
 Check completeness of metabolic pathways using KEGG annotations.
 
-**CRITICAL: You are a leaf agent. DO NOT spawn sub-agents or use the Task tool.**
-
 **CONCURRENCY: DuckDB does not support concurrent writes. Only ONE agent should access a database at a time. The coordinator must run DB-accessing skills sequentially, not in parallel.**
 
 > **Mandatory:** Follow the shared validation protocols in `_validation_protocols.md`.

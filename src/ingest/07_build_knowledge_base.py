@@ -15,6 +15,8 @@ import json
 import logging
 import multiprocessing
 import os
+import re
+import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -35,6 +37,90 @@ from sharur.predicates.generator import (
 
 console = Console()
 logger = logging.getLogger(__name__)
+
+# --------------------------------------------------------------------------- #
+# Default e-value thresholds applied at load time.
+# Databases with --cut_ga (PFAM, KOFAM, HydDB) are already clean; these
+# thresholds act as a safety net.  Databases WITHOUT --cut_ga
+# (DefenseFinder, VOGdb, CANT-HYD) rely on this filter.
+# --------------------------------------------------------------------------- #
+DEFAULT_EVALUE_THRESHOLDS: Dict[str, float] = {
+    "pfam": 1e-5,            # Already clean via --cut_ga (max ~3e-4)
+    "kegg": 1e-5,            # --cut_ga --cascade; this is a safety net only
+    "hyddb": 1e-5,           # Already clean via --cut_ga
+    "defensefinder": 1e-15,  # Has GA but values are permissive; superfamily HMMs need strict e-value
+    "vogdb": 1e-15,          # No GA thresholds (0/48,439 profiles); e-value filter required
+    "cant_hyd": 1e-10,       # No --cut_ga
+    "cazy": 1e-5,            # dbCAN has own thresholds
+}
+
+# Regex for DefenseFinder accessions with numbered FAM variants.
+# Matches trailing _FAM_N or _FAMN (where N is one or more digits) at the
+# end of an accession string.  Example matches:
+#   RM_Type_II__Type_II_MTases_FAM_1  → group prefix = RM_Type_II__Type_II_MTases
+#   RM_Type_III__Type_III_MTases_FAM10 → group prefix = RM_Type_III__Type_III_MTases
+# Does NOT match component-level suffixes like MkoA_B (no leading _FAM).
+_DEFENSEFINDER_FAM_RE = re.compile(r"_FAM_?\d+$")
+
+
+def _dedup_defensefinder_fam_variants(df: "pd.DataFrame") -> "pd.DataFrame":
+    """Deduplicate DefenseFinder hits that differ only by FAM variant number.
+
+    DefenseFinder has ~40+ Type_II_MTases_FAM_* HMM profiles that all detect
+    variations of the same Rossmann methyltransferase fold.  When a single
+    protein is scanned, it matches many FAMs simultaneously, inflating hit
+    counts (e.g. 27 unique MTase proteins → 259 annotation rows).
+
+    This function groups hits by (protein_id, accession-with-FAM-suffix-stripped)
+    and keeps only the best-scoring hit per group.  Accessions that do NOT end
+    in a _FAM_N pattern are left untouched.
+
+    Args:
+        df: DataFrame with at least columns 'protein_id', 'accession', 'score', 'evalue'.
+
+    Returns:
+        DataFrame with redundant FAM variant rows removed.
+    """
+    if df.empty:
+        return df
+
+    # Compute the dedup group key by stripping trailing _FAM_N
+    df = df.copy()
+    df["_dedup_group"] = df["accession"].apply(
+        lambda x: _DEFENSEFINDER_FAM_RE.sub("", x) if isinstance(x, str) else x
+    )
+
+    # Identify rows that actually have FAM variants (group key differs from accession)
+    has_fam = df["_dedup_group"] != df["accession"]
+
+    if not has_fam.any():
+        df.drop(columns=["_dedup_group"], inplace=True)
+        return df
+
+    # Split: rows without FAM suffix pass through; rows with FAM suffix get deduped
+    no_fam_df = df[~has_fam].drop(columns=["_dedup_group"])
+
+    fam_df = df[has_fam].copy()
+
+    # For each (protein_id, dedup_group), keep the row with the highest score.
+    # Break ties by lowest e-value.  NaN scores sort last (ascending=False puts
+    # NaN at the bottom), so real scores are preferred.
+    fam_df = fam_df.sort_values(
+        ["score", "evalue"], ascending=[False, True], na_position="last"
+    )
+    fam_deduped = fam_df.drop_duplicates(
+        subset=["protein_id", "_dedup_group"], keep="first"
+    ).drop(columns=["_dedup_group"])
+
+    n_removed = len(fam_df) - len(fam_deduped)
+    if n_removed > 0:
+        logger.info(
+            f"  defensefinder: deduplicated {n_removed:,} redundant FAM variant hits "
+            f"({len(fam_df):,} → {len(fam_deduped):,} FAM rows)"
+        )
+
+    result = pd.concat([no_fam_df, fam_deduped], ignore_index=True)
+    return result
 
 
 # --------------------------------------------------------------------------- #
@@ -168,7 +254,7 @@ class KnowledgeBaseBuilder:
         self._init_db()
 
         with Progress() as progress:
-            task = progress.add_task("Building knowledge base...", total=9)
+            task = progress.add_task("Building knowledge base...", total=10)
 
             progress.update(task, description="Loading bins")
             self._load_bins()
@@ -200,6 +286,10 @@ class KnowledgeBaseBuilder:
 
             progress.update(task, description="Classifying hydrogenases")
             self._classify_hydrogenases()
+            progress.advance(task)
+
+            progress.update(task, description="Classifying CAZymes")
+            self._classify_cazymes()
             progress.advance(task)
 
             progress.update(task, description="Finalizing")
@@ -322,6 +412,16 @@ class KnowledgeBaseBuilder:
 
         if protein_rows:
             pdf = pd.DataFrame(protein_rows)
+            # Deduplicate proteins that appear in multiple bins (same contig
+            # assigned to different bins by different binners). Keep first
+            # occurrence; the bin_id of the first-seen bin is retained.
+            before_dedup = len(pdf)
+            pdf = pdf.drop_duplicates(subset=["protein_id"], keep="first")
+            if len(pdf) < before_dedup:
+                console.print(
+                    f"  [yellow]Deduplicated {before_dedup - len(pdf):,} "
+                    f"shared proteins across bins ({len(pdf):,} unique)[/yellow]"
+                )
             # Ensure column order matches schema
             pdf = pdf.reindex(
                 columns=[
@@ -420,6 +520,11 @@ class KnowledgeBaseBuilder:
     def _load_annotations(self) -> None:
         # Astra PFAM/KOFAM TSV
         for tsv in (self.outputs.stage04_dir.rglob("*_hits_df.tsv") if self.outputs.stage04_dir.exists() else []):
+            # Skip dbCAN raw HMM hits — _classify_cazymes() handles CAZy
+            # annotation loading via 3-tool consensus pipeline
+            if "dbcan" in tsv.as_posix().lower():
+                logger.info(f"Skipping {tsv.name} (handled by CAZyme consensus pipeline)")
+                continue
             try:
                 df = pd.read_csv(tsv, sep="\t")
                 # Derive source name from filename/path (always lowercase)
@@ -495,6 +600,25 @@ class KnowledgeBaseBuilder:
                     df["end_aa"] = df["end_aa"].fillna(df["env_to"])
 
                 df["source"] = source
+
+                # Apply e-value threshold filtering
+                evalue_threshold = DEFAULT_EVALUE_THRESHOLDS.get(source)
+                if evalue_threshold is not None and "evalue" in df.columns:
+                    before_filter = len(df)
+                    df = df[df["evalue"].isna() | (df["evalue"] <= evalue_threshold)]
+                    dropped = before_filter - len(df)
+                    if dropped > 0:
+                        logger.info(
+                            f"  {source}: filtered {dropped:,} hits with e-value > {evalue_threshold:.0e} "
+                            f"({len(df):,} retained)"
+                        )
+
+                # DefenseFinder FAM variant dedup: keep best hit per
+                # (protein_id, system_component) when multiple _FAM_N
+                # profiles match the same protein.
+                if source == "defensefinder":
+                    df = _dedup_defensefinder_fam_variants(df)
+
                 keep = [
                     "annotation_id",
                     "protein_id",
@@ -523,7 +647,8 @@ class KnowledgeBaseBuilder:
             except Exception as exc:
                 logger.warning(f"Failed to load annotations from {tsv}: {exc}")
 
-        # dbCAN JSON
+        # dbCAN JSON — backward compatibility for datasets that ran dbcan_cazyme.py.
+        # For new ingestions, _classify_cazymes() runs DIAMOND directly and takes precedence.
         for jf in (self.outputs.stage05b_dir.glob("*_cazyme_results.json") if self.outputs.stage05b_dir.exists() else []):
             try:
                 data = json.loads(jf.read_text())
@@ -864,6 +989,66 @@ class KnowledgeBaseBuilder:
         except Exception as e:
             logger.warning(f"Hydrogenase classification failed: {e}")
             console.print(f"  [yellow]Hydrogenase classification failed: {e}[/yellow]")
+
+    # --- cazyme classification --------------------------------------------- #
+    def _classify_cazymes(self) -> None:
+        """Run dbCAN 3-tool consensus CAZyme classification.
+
+        Uses DIAMOND + HMMER (dbCAN.hmm) + HMMER (dbCAN-sub.hmm) with ≥2-tool
+        consensus filter. Falls back to 2-tool mode if dbCAN-sub.hmm is absent.
+        """
+        protein_count = self.conn.execute("SELECT COUNT(*) FROM proteins").fetchone()[0]
+        if protein_count == 0:
+            console.print("  No proteins found, skipping CAZyme classification")
+            return
+
+        # Commit current changes so classification script can read them
+        self.conn.commit()
+
+        # Copy stage04 dbCAN HMM results to annotations dir for classify_cazymes cache
+        data_dir = self.db_path.parent
+        ann_dir = data_dir / "annotations"
+        ann_dir.mkdir(parents=True, exist_ok=True)
+        cached_tsv = ann_dir / "dbCAN_hits_df.tsv"
+        if not cached_tsv.exists():
+            for tsv in (self.outputs.stage04_dir.rglob("*dbCAN*_hits_df.tsv")
+                        if self.outputs.stage04_dir.exists() else []):
+                shutil.copy2(tsv, cached_tsv)
+                console.print(f"  Cached dbCAN HMM results → {cached_tsv.name}")
+                break
+
+        console.print(f"  Running dbCAN 3-tool consensus CAZyme classification for {protein_count:,} proteins...")
+
+        try:
+            import sys
+            scripts_dir = Path(__file__).resolve().parents[2] / "scripts"
+            sys.path.insert(0, str(scripts_dir))
+
+            from classify_cazymes import classify_cazymes as run_classification
+
+            results = run_classification(
+                db_path=str(self.db_path),
+                threads=4,
+                update_predicates=True,
+                verbose=False,
+            )
+
+            if not results.empty:
+                n_proteins = results['protein_id'].nunique()
+                n_families = results['family_class'].nunique()
+                console.print(f"  Classified {n_proteins:,} CAZymes across {n_families} families")
+            else:
+                console.print("  No CAZymes classified")
+
+        except ImportError as e:
+            logger.warning(f"Could not import CAZyme classification: {e}")
+            console.print("  [yellow]CAZyme classification skipped (missing dependencies)[/yellow]")
+        except FileNotFoundError as e:
+            logger.warning(f"CAZyDB reference not found: {e}")
+            console.print("  [yellow]CAZyme classification skipped (CAZyDB not found)[/yellow]")
+        except Exception as e:
+            logger.warning(f"CAZyme classification failed: {e}")
+            console.print(f"  [yellow]CAZyme classification failed: {e}[/yellow]")
 
     # --- indexes/stats -------------------------------------------------- #
     def _create_indexes(self) -> None:

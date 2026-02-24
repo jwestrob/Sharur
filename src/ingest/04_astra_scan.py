@@ -68,9 +68,20 @@ def run_single_astra_scan(database: str, protein_symlink_dir: Path, output_dir: 
         ]
         
         # Add cutoffs for databases that support them
-        # PFAM, KOFAM, and HydDB all have GA (gathering) thresholds
-        if use_cutoffs and database.upper() in ["PFAM", "KOFAM", "HYDDB"]:
+        # PFAM and HydDB have GA (gathering) thresholds on all profiles.
+        # DefenseFinder has GA on all 1,000 profiles (but values are
+        # permissive — 32% at GA=20 — so load-time e-value filter is
+        # still needed as a safety net).
+        if use_cutoffs and database.upper() in ["PFAM", "HYDDB", "DEFENSEFINDER"]:
             cmd.append("--cut_ga")
+        # KOFAM requires --cascade to apply per-profile adaptive thresholds
+        # (--cut_ga alone uses a single global threshold which is wrong for KOFAM)
+        if use_cutoffs and database.upper() == "KOFAM":
+            cmd.extend(["--cut_ga", "--cascade"])
+        # VOGdb has NO GA thresholds (0/48,439 profiles); astra falls
+        # back to permissive defaults.  CANT-HYD and others likewise.
+        # Filtering is applied at load time in 07_build_knowledge_base.py
+        # via DEFAULT_EVALUE_THRESHOLDS.
         
         console.print(f"Running astra search for {database}...")
         console.print(f"Command: {' '.join(cmd)}")
@@ -129,9 +140,9 @@ def run_astra_scan(
         help="Number of threads to use"
     ),
     databases: List[str] = typer.Option(
-        ["PFAM", "KOFAM", "HydDB", "DefenseFinder"],
+        ["PFAM", "KOFAM", "HydDB", "DefenseFinder", "dbCAN"],
         "--databases", "-d",
-        help="Databases to scan against (PFAM, KOFAM, HydDB, DefenseFinder, VOGdb, etc.)"
+        help="Databases to scan against (PFAM, KOFAM, HydDB, DefenseFinder, dbCAN, VOGdb, etc.)"
     ),
     use_cutoffs: bool = typer.Option(
         True,

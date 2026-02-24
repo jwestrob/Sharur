@@ -2,13 +2,15 @@
 
 Analyze defense systems: CRISPR-Cas, restriction-modification, toxin-antitoxin, and other anti-phage mechanisms.
 
-**CRITICAL: You are a leaf agent. DO NOT spawn sub-agents or use the Task tool.**
-
 **CONCURRENCY: DuckDB does not support concurrent writes. Only ONE agent should access a database at a time. The coordinator must run DB-accessing skills sequentially, not in parallel.**
 
 > **Mandatory:** Follow the shared validation protocols in `_validation_protocols.md`.
 > Verify accession names before reporting. Use COUNT(DISTINCT protein_id) for protein
 > counts. Apply Context-First protocol for annotations averaging >10 hits/genome.
+
+> **Literature dispatch:** When you encounter ambiguous annotations, unknown Foldseek hits,
+> or need to make comparative claims ("first known", "largest"), dispatch a literature agent.
+> Read `.claude/skills/literature.md` for protocols.
 
 ---
 
@@ -293,13 +295,23 @@ for contig, n in defense_rich[:5]:
 
 ### Step 8: Visualize Key Loci
 
+> **Read `.claude/skills/visualize.md` before generating figures.** For any figure going into
+> a report, use `plot_locus_multisource.py` (multi-source annotations, publication styling).
+> Use `b.visualize_neighborhood()` for quick exploratory checks only. Note: Mokosh Type I
+> and BREX pglW are serine/threonine kinase superfamily false positives — exclude from
+> defense heatmaps (see survey-014).
+
 ```python
 from pathlib import Path
 
 FIGURES_DIR = Path("data/DATASET/exploration/figures")
 FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
-# Visualize top CRISPR locus
+# For publication figures, prefer the multi-source CLI script:
+# python scripts/plot_locus_multisource.py --db data/DATASET/sharur.duckdb \
+#     --protein PROTEIN_ID --window 15 --output figures/crispr_locus.png
+
+# For quick exploration:
 if cas3.data:
     b.visualize_neighborhood(
         cas3.data[0],
@@ -398,6 +410,387 @@ for i, dt1 in enumerate(defense_types):
         """).fetchone()[0]
         print(f"  {dt1} + {dt2}: {both} genomes")
 ```
+
+---
+
+## Defense Island Detection
+
+**Goal:** Cluster DefenseFinder-annotated genes into genomic loci ("defense islands") and write them to the `loci`/`locus_proteins` tables for downstream analysis and prophage co-localization.
+
+Defense systems cluster in bacterial genomes — often near prophage insertion sites, forming "defense hotspots." Detecting these islands turns point annotations into spatial loci.
+
+### Step 10: Tag Genes for Defense Island Detection
+
+```python
+import json, uuid, re
+from collections import defaultdict
+
+# Load all proteins with gene positions
+proteins = b.store.execute("""
+    SELECT protein_id, contig_id, gene_index, start, end_coord, strand, bin_id
+    FROM proteins
+    WHERE gene_index IS NOT NULL
+    ORDER BY contig_id, gene_index
+""").fetchall()
+
+# Build contig -> gene list
+contig_genes = defaultdict(list)
+for pid, cid, gi, s, e, strand, bid in proteins:
+    contig_genes[cid].append({
+        "protein_id": pid, "contig_id": cid, "gene_index": gi,
+        "start": s, "end_coord": e, "strand": strand, "bin_id": bid,
+    })
+
+# Load DefenseFinder annotations
+df_annots = b.store.execute("""
+    SELECT protein_id, accession, name, description
+    FROM annotations
+    WHERE source = 'defensefinder'
+""").fetchall()
+
+# Index by protein_id
+protein_defense = defaultdict(list)
+for pid, acc, name, desc in df_annots:
+    protein_defense[pid].append((acc, name or '', desc or ''))
+
+print(f"DefenseFinder annotations: {len(df_annots):,} on {len(protein_defense):,} proteins")
+
+# Tag each gene
+def tag_gene_defense(pid, annots):
+    """Tag: 'marker' if has DefenseFinder hit, else 'negative'."""
+    extras = {"marker_accessions": [], "system_types": set()}
+
+    for acc, name, desc in annots:
+        extras["marker_accessions"].append(acc)
+        # Extract system type from accession (e.g., "CBASS__CdnC" → "CBASS")
+        if "__" in acc:
+            extras["system_types"].add(acc.split("__")[0])
+        elif name:
+            extras["system_types"].add(name)
+
+    if extras["marker_accessions"]:
+        return "marker", extras
+    return "negative", extras
+
+for cid, genes in contig_genes.items():
+    genes.sort(key=lambda g: g["gene_index"])
+    for gene in genes:
+        annots = protein_defense.get(gene["protein_id"], [])
+        tag, extras = tag_gene_defense(gene["protein_id"], annots)
+        gene["tag"] = tag
+        gene["extras"] = extras
+```
+
+### Step 11: Gap-Based Island Clustering
+
+Same algorithm as prophage detection, tuned for defense islands.
+
+```python
+# Defense island parameters
+MAX_GAP = 5        # Max gap between defense genes
+MIN_MARKERS = 3    # Min DefenseFinder-annotated genes
+MIN_GENES = 3      # Min total genes in island (markers only — no "support" concept here)
+
+def detect_defense_islands(genes, max_gap=MAX_GAP, min_markers=MIN_MARKERS, min_genes=MIN_GENES):
+    """Gap-based clustering of DefenseFinder markers on one contig."""
+    islands = []
+    current = []
+    gap_count = 0
+
+    def emit(cluster):
+        marker_count = sum(1 for g in cluster if g["tag"] == "marker")
+        if marker_count >= min_markers and len(cluster) >= min_genes:
+            islands.append({
+                "genes": list(cluster),
+                "marker_count": marker_count,
+            })
+
+    for gene in genes:
+        if gene["tag"] == "marker":
+            current.append(gene)
+            gap_count = 0
+        else:
+            if current:
+                gap_count += 1
+                if gap_count > max_gap:
+                    while current and current[-1]["tag"] == "negative":
+                        current.pop()
+                    emit(current)
+                    current = []
+                    gap_count = 0
+                else:
+                    current.append(gene)
+
+    if current:
+        while current and current[-1]["tag"] == "negative":
+            current.pop()
+        emit(current)
+
+    return islands
+
+# Run across all contigs
+all_islands = []
+for cid, genes in contig_genes.items():
+    islands = detect_defense_islands(genes)
+    for island in islands:
+        island["contig_id"] = cid
+        island["bin_id"] = genes[0]["bin_id"]
+    all_islands.extend(islands)
+
+print(f"Defense islands detected: {len(all_islands)}")
+```
+
+### Step 12: Score and Classify Defense Islands
+
+Islands with multiple distinct defense system types are the most biologically significant — they represent defense hotspots where systems accumulate, likely near prophage insertion sites.
+
+```python
+def score_defense_island(island):
+    """Score a defense island by system diversity and size.
+
+    Returns: (confidence, level, system_types)
+    """
+    system_types = set()
+    for g in island["genes"]:
+        system_types.update(g["extras"].get("system_types", set()))
+
+    marker_count = island["marker_count"]
+    n_systems = len(system_types)
+
+    if n_systems >= 3 and marker_count >= 5:
+        return 0.95, "hotspot", system_types      # Multi-system defense hotspot
+    if n_systems >= 2 and marker_count >= 5:
+        return 0.90, "high", system_types          # Two+ systems, well-supported
+    if n_systems >= 2 and marker_count >= 3:
+        return 0.80, "high", system_types          # Two systems
+    if marker_count >= 5:
+        return 0.75, "medium", system_types        # Single system, many components
+    if marker_count >= 3:
+        return 0.60, "medium", system_types        # Minimum island
+    return 0.40, "low", system_types
+
+for island in all_islands:
+    confidence, level, system_types = score_defense_island(island)
+    island["confidence"] = confidence
+    island["confidence_level"] = level
+    island["system_types"] = system_types
+
+# Summary
+hotspots = [i for i in all_islands if i["confidence_level"] == "hotspot"]
+high = [i for i in all_islands if i["confidence_level"] == "high"]
+medium = [i for i in all_islands if i["confidence_level"] == "medium"]
+
+print(f"Defense hotspots (3+ system types): {len(hotspots)}")
+print(f"High confidence (2+ system types): {len(high)}")
+print(f"Medium confidence: {len(medium)}")
+```
+
+### Step 13: Write Defense Islands to Loci Tables
+
+```python
+def write_defense_loci(islands, locus_type="defense_island", clear_existing=True):
+    """Write defense islands to loci/locus_proteins tables."""
+
+    if clear_existing:
+        existing = b.store.execute(
+            "SELECT COUNT(*) FROM loci WHERE locus_type = ?", [locus_type]
+        ).fetchone()[0]
+        if existing > 0:
+            print(f"Clearing {existing} existing {locus_type} loci")
+            b.store.execute("""
+                DELETE FROM locus_proteins
+                WHERE locus_id IN (SELECT locus_id FROM loci WHERE locus_type = ?)
+            """, [locus_type])
+            b.store.execute("DELETE FROM loci WHERE locus_type = ?", [locus_type])
+
+    n_links = 0
+    for island in islands:
+        genes = island["genes"]
+        locus_id = f"{locus_type}_{uuid.uuid4().hex[:12]}"
+
+        start = min(g["start"] for g in genes)
+        end_coord = max(g["end_coord"] for g in genes)
+
+        metadata = {
+            "marker_count": island["marker_count"],
+            "total_genes": len(genes),
+            "system_types": sorted(island.get("system_types", set())),
+            "n_system_types": len(island.get("system_types", set())),
+            "confidence_level": island["confidence_level"],
+            "marker_accessions": sorted(set(
+                a for g in genes for a in g["extras"].get("marker_accessions", [])
+            )),
+        }
+
+        b.store.execute("""
+            INSERT INTO loci (locus_id, locus_type, contig_id, start, end_coord, confidence, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, [locus_id, locus_type, island["contig_id"], start, end_coord,
+              island["confidence"], json.dumps(metadata)])
+
+        for pos, gene in enumerate(genes):
+            b.store.execute("""
+                INSERT INTO locus_proteins (locus_id, protein_id, position)
+                VALUES (?, ?, ?)
+            """, [locus_id, gene["protein_id"], pos])
+            n_links += 1
+
+    b.store.commit()
+    print(f"Wrote {len(islands)} {locus_type} loci with {n_links:,} protein links")
+
+write_defense_loci(all_islands, locus_type="defense_island")
+```
+
+**IMPORTANT:** Use `locus_type='defense_island'` (not `'island'`). The Omnitrophota dataset used `'island'` historically but `'defense_island'` is the correct convention going forward. Do NOT touch existing loci of other types (crispr_array, prophage, viral_contig).
+
+### Step 14: Characterize Defense Islands
+
+```python
+def characterize_defense_islands():
+    """Analyze defense island composition and distribution."""
+
+    loci = b.store.execute("""
+        SELECT l.locus_id, l.contig_id, l.confidence, l.metadata,
+               COUNT(lp.protein_id) as n_genes
+        FROM loci l
+        JOIN locus_proteins lp ON l.locus_id = lp.locus_id
+        WHERE l.locus_type = 'defense_island'
+        GROUP BY l.locus_id, l.contig_id, l.confidence, l.metadata
+    """).fetchall()
+
+    print(f"\n=== DEFENSE ISLAND CHARACTERIZATION ===")
+    print(f"Total defense islands: {len(loci)}")
+
+    # Size distribution
+    sizes = [n for _, _, _, _, n in loci]
+    if sizes:
+        print(f"Size (genes): min={min(sizes)}, median={sorted(sizes)[len(sizes)//2]}, max={max(sizes)}")
+
+    # System type composition across all islands
+    system_counts = defaultdict(int)
+    multi_system = 0
+    for lid, cid, conf, meta_json, n_genes in loci:
+        meta = json.loads(meta_json) if isinstance(meta_json, str) else meta_json
+        sys_types = meta.get("system_types", [])
+        if len(sys_types) >= 2:
+            multi_system += 1
+        for st in sys_types:
+            system_counts[st] += 1
+
+    print(f"\nMulti-system islands: {multi_system}/{len(loci)} ({multi_system/len(loci)*100:.0f}%)")
+    print("\nSystem types across defense islands:")
+    for st, n in sorted(system_counts.items(), key=lambda x: -x[1])[:15]:
+        print(f"  {st}: {n} islands")
+
+    # Genome distribution
+    genome_dist = b.store.execute("""
+        SELECT p.bin_id, COUNT(DISTINCT l.locus_id) as n_islands
+        FROM loci l
+        JOIN locus_proteins lp ON l.locus_id = lp.locus_id
+        JOIN proteins p ON lp.protein_id = p.protein_id
+        WHERE l.locus_type = 'defense_island'
+        GROUP BY p.bin_id
+        ORDER BY n_islands DESC
+    """).fetchall()
+
+    n_genomes = b.store.execute("SELECT COUNT(DISTINCT bin_id) FROM proteins").fetchone()[0]
+    print(f"\nGenomes with defense islands: {len(genome_dist)}/{n_genomes} ({len(genome_dist)/n_genomes*100:.1f}%)")
+
+    return loci, system_counts, genome_dist
+
+island_loci, system_counts, genome_dist = characterize_defense_islands()
+```
+
+### Step 15: Prophage Co-localization Analysis
+
+Defense systems often accumulate near prophage insertion sites. If prophage loci exist, check for spatial association.
+
+```python
+# Check if prophage loci exist
+prophage_count = b.store.execute("""
+    SELECT COUNT(*) FROM loci WHERE locus_type = 'prophage'
+""").fetchone()[0]
+
+if prophage_count > 0:
+    # Find defense islands within 20 genes of a prophage
+    colocalized = b.store.execute("""
+        WITH defense_bounds AS (
+            SELECT l.locus_id as defense_id, p.contig_id, p.bin_id,
+                   MIN(p.gene_index) as d_start, MAX(p.gene_index) as d_end
+            FROM loci l
+            JOIN locus_proteins lp ON l.locus_id = lp.locus_id
+            JOIN proteins p ON lp.protein_id = p.protein_id
+            WHERE l.locus_type = 'defense_island'
+            GROUP BY l.locus_id, p.contig_id, p.bin_id
+        ),
+        prophage_bounds AS (
+            SELECT l.locus_id as prophage_id, p.contig_id,
+                   MIN(p.gene_index) as p_start, MAX(p.gene_index) as p_end
+            FROM loci l
+            JOIN locus_proteins lp ON l.locus_id = lp.locus_id
+            JOIN proteins p ON lp.protein_id = p.protein_id
+            WHERE l.locus_type = 'prophage'
+            GROUP BY l.locus_id, p.contig_id
+        )
+        SELECT db.defense_id, pb.prophage_id, db.bin_id, db.contig_id
+        FROM defense_bounds db
+        JOIN prophage_bounds pb ON db.contig_id = pb.contig_id
+            AND (ABS(db.d_start - pb.p_end) <= 20 OR ABS(pb.p_start - db.d_end) <= 20)
+    """).fetchall()
+
+    n_defense_near_prophage = len(set(r[0] for r in colocalized))
+    n_prophage_near_defense = len(set(r[1] for r in colocalized))
+    total_defense = len(island_loci)
+
+    print(f"\nProphage-defense co-localization:")
+    print(f"  Defense islands near prophages: {n_defense_near_prophage}/{total_defense} "
+          f"({n_defense_near_prophage/total_defense*100:.0f}%)")
+    print(f"  Prophages near defense islands: {n_prophage_near_defense}/{prophage_count}")
+else:
+    print("\nNo prophage loci detected — run /prophage first for co-localization analysis")
+```
+
+### Step 16: Visualize Representative Defense Islands
+
+```python
+from pathlib import Path
+
+FIGURES_DIR = Path("data/DATASET/exploration/figures")
+FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+
+# Visualize:
+# 1. A defense hotspot (3+ system types)
+# 2. A large multi-system island
+# 3. A defense island adjacent to a prophage (if co-localized)
+
+def visualize_defense_island(locus_id, label, description):
+    """Visualize a defense island using the center protein."""
+    center = b.store.execute("""
+        SELECT lp.protein_id FROM locus_proteins lp
+        JOIN proteins p ON lp.protein_id = p.protein_id
+        WHERE lp.locus_id = ?
+        ORDER BY lp.position
+        LIMIT 1 OFFSET (SELECT COUNT(*)/2 FROM locus_proteins WHERE locus_id = ?)
+    """, [locus_id, locus_id]).fetchone()
+
+    if center:
+        locus_size = b.store.execute(
+            "SELECT COUNT(*) FROM locus_proteins WHERE locus_id = ?", [locus_id]
+        ).fetchone()[0]
+        window = max(locus_size // 2 + 5, 12)
+
+        b.visualize_neighborhood(
+            center[0],
+            window=window,
+            output_path=str(FIGURES_DIR / f"defense_island_{label}.png"),
+            title=f"Defense Island: {label}",
+            legend=description,
+        )
+        return str(FIGURES_DIR / f"defense_island_{label}.png")
+    return None
+```
+
+---
 
 ### Hypothesis Tracking & Provenance
 

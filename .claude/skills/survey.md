@@ -5,9 +5,13 @@ Comprehensive, systematic documentation of a metagenomic dataset. Not just count
 For curiosity-driven exploration, use `/explore` instead (run AFTER survey completes).
 
 **AGENT ARCHITECTURE:**
-- You CAN spawn subagents to write specific reports (metabolic_reconstruction.md, defense_systems.md, etc.)
-- Your subagents are LEAF AGENTS - they CANNOT spawn their own subagents
-- Tell each subagent: "You are a leaf agent. DO NOT use the Task tool. Write your report and return."
+- You CAN spawn subagents to write specific reports or perform specialist analysis
+- Subagents CAN spawn their own subagents when needed (recursive hierarchy)
+- **Specialist dispatch:** For domains requiring deep expertise, dispatch the relevant skill agent:
+  - Hydrogenases → `.claude/skills/hydrogenase.md`
+  - Defense systems → `.claude/skills/defense.md`
+  - Literature context → `.claude/skills/literature.md`
+- **Context-first is YOUR job.** Check co-annotations and neighborhoods before reporting functional claims.
 
 **CONCURRENCY: DuckDB does not support concurrent writes. Run subagents SEQUENTIALLY, not in parallel.**
 
@@ -77,8 +81,6 @@ Task(
     subagent_type="general-purpose",
     description="Metabolic reconstruction analysis",
     prompt="""You are a leaf agent analyzing energy metabolism and carbon flow for the survey.
-
-**CRITICAL: You are a LEAF AGENT. DO NOT spawn sub-agents or use the Task tool.**
 
 **WRITING STYLE: Write in flowing prose paragraphs. Minimize bullet points. Your report
 should read like a section of a scientific manuscript — interpret findings, explain
@@ -293,6 +295,11 @@ Your survey should address all major functional domains. Not every analysis appl
 
 - **Respiration components**: Cytochromes, terminal oxidases, quinones
 - **Hydrogenases**: If detected, subtype them using HydDB classifications (Group 1-4, Mbh/Ech)
+
+> **Hydrogenase validation:** Raw HydDB counts have ~50% false-positive rate.
+> After surveying, dispatch the `/hydrogenase` skill agent for neighborhood validation
+> before reporting hydrogen metabolism claims. See `.claude/skills/hydrogenase.md`.
+
 - **Respiratory complexes**: Complex I/II/III/IV, alternative complexes (Rnf, Nqr)
 - **Fermentation**: PFOR, lactate dehydrogenase, butyrate/propionate pathways
 - **Energy conservation**: ATP synthase, Rnf complex, ion gradients
@@ -657,7 +664,68 @@ Generate **separate reports for major topics** (easier to navigate than one gian
 
 11. **`findings.jsonl`** - Structured findings (append-only)
     - Major discoveries in machine-readable format
-    - Each line is a JSON object with: title, category, description, evidence, significance
+    - Each line is a JSON object with: id, title, category, description, evidence, n_genomes, provenance
+    - Optional provenance-chain fields: `figures` (list of figure paths), `related_findings` (list of finding IDs), `phase` (e.g. "survey")
+    - These fields are consumed by `scripts/compile_comprehensive_report.py` and `reports/report_manifest.json`
+
+**Finding helper** — use this to log findings with auto-incremented IDs:
+
+```python
+import json
+from datetime import datetime
+
+FINDINGS_FILE = survey_dir / "findings.jsonl"
+
+# Auto-increment finding ID counter
+# Convention: survey findings use "survey-" prefix (survey-001, survey-002, ...)
+_survey_counter = 0
+if FINDINGS_FILE.exists():
+    with open(FINDINGS_FILE) as _f:
+        for _line in _f:
+            _survey_counter += 1
+
+def next_survey_id() -> str:
+    global _survey_counter
+    _survey_counter += 1
+    return f"survey-{_survey_counter:03d}"
+
+def log_finding(category: str, title: str, description: str,
+                finding_id: str = None,
+                evidence=None, n_genomes: int = None,
+                provenance: dict = None,
+                figures: list = None,
+                related_findings: list = None):
+    """Append a finding to survey/findings.jsonl with a stable ID.
+
+    Args:
+        category: e.g. "energy_metabolism", "cell_surface", "defense_systems"
+        title: Self-contained title with all qualifiers
+        description: Prose paragraph with biological interpretation
+        finding_id: Stable ID (auto-generated as survey-001, survey-002... if omitted)
+        evidence: Quantitative evidence (dict or string)
+        n_genomes: Number of genomes where finding applies
+        provenance: Dict with query, raw_result, accession_verified, interpretation
+        figures: List of figure paths produced for this finding
+        related_findings: List of IDs of related findings in any phase
+    """
+    fid = finding_id or next_survey_id()
+    finding = {
+        "id": fid,
+        "title": title,
+        "category": category,
+        "description": description,
+        "evidence": evidence or {},
+        "n_genomes": n_genomes,
+        "provenance": provenance or {},
+        "figures": figures or [],
+        "related_findings": related_findings or [],
+        "phase": "survey",
+    }
+    with open(FINDINGS_FILE, "a") as f:
+        f.write(json.dumps(finding) + "\n")
+    print(f"[LOGGED] {fid} | {category}: {title}")
+    return finding
+```
 
 ### Hypothesis Tracking & Provenance
 
@@ -778,7 +846,7 @@ Use all three methods before claiming cytochrome absence. If all three find noth
 4. **Note limitations** - fragmentation, annotation coverage, missing data
 5. **Use scratchpad liberally** - capture observations and questions as you work
 6. **Cross-reference analyses** - "The high CAZyme load (227/1000 proteins) is consistent with the complete aromatic degradation pathway, suggesting these organisms specialize in complex organic matter breakdown"
-7. **Generate figures sparingly** - survey doesn't need neighborhood diagrams (that's /explore), but feature distribution plots, heatmaps, dendrograms are useful
+7. **Generate figures sparingly** - survey doesn't need neighborhood diagrams (that's /explore), but feature distribution plots, heatmaps, dendrograms are useful. When you do generate figures, read `.claude/skills/visualize.md` for conventions and tool selection
 
 ---
 

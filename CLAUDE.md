@@ -6,13 +6,15 @@ This file provides shared context, canonical tools, and best practices for agent
 
 **Quick Start:**
 - **Data organization:** `DATA_ORGANIZATION.md`
-- **Canonical report generator:** `scripts/generate_viral_genome_report.py`
+- **Manuscript workflow:** Write `MANUSCRIPT.md` → render with pandoc (see § Manuscript Rendering)
 - **Skills (Claude Code):** `.claude/skills/*.md`
 - **Validation protocols:** `.claude/skills/_validation_protocols.md`
 
 ## Project Overview
 
 Sharur is an agent-driven metagenomic exploration system. It's a data plane that makes large metagenomic datasets navigable by AI agents.
+
+**CLAUDE.md scope:** This file contains project-level tools, patterns, and best practices only. **NEVER write dataset-specific content here** — no analysis results, dataset stats, findings, missing data notes, or per-dataset TODOs. Dataset-specific context belongs in each dataset's directory (manifest.json, ANALYSIS_PLAN.md, etc.).
 
 ## Key Documentation
 
@@ -33,12 +35,17 @@ Sharur is an agent-driven metagenomic exploration system. It's a data plane that
 | `survey.md` | Systematic comprehensive survey | genome_profiles.tsv, comparative analysis |
 | `characterize.md` | Single protein/locus characterization + batch structural analysis | Detailed functional analysis, structure predictions |
 | `defense.md` | Defense system identification | CRISPR, RM, CBASS inventories |
+| `prophage.md` | Prophage & viral element detection | Prophage loci, misbinned phage contigs, loci table entries |
 | `metabolism.md` | Metabolic pathway reconstruction | Pathway completeness, gaps |
 | `compare.md` | Cross-genome comparative analysis | Synteny, orthology |
 | `literature.md` | Systematic literature/database research for functional ambiguity | Domain characterization, Foldseek hit interpretation, pathway context |
+| `reviewer_2.md` | Adversarial manuscript claim verification (Phase 4) | CLAIM_VERIFICATION.jsonl, correction_queue.md |
+| `atlas.md` | Exhaustive bottom-up genome-by-genome reading (subagent per batch) | atlas/inventories.jsonl, flags for specialist dispatch |
+| `foldseek.md` | Structure prediction (ESM3) + Foldseek structural homology search | PDB structures, foldseek_results.tsv |
+| `hydrogenase.md` | NiFe/FeFe hydrogenase validation with neighborhood curation | Validated hydrogenase inventory |
 
 **Critical Guidelines in Skills:**
-- Use canonical report generator: `scripts/generate_viral_genome_report.py`
+- Manuscripts: write `MANUSCRIPT.md`, render with pandoc (see § Manuscript Rendering)
 - Scientific rigor: No hyperbole, evidence-calibrated claims
 - Data organization: Standard directory structure for report compatibility
 - MAG interpretation: "Not detected" not "absent"
@@ -51,27 +58,73 @@ Sharur is an agent-driven metagenomic exploration system. It's a data plane that
 
 **CRITICAL: Always include independent review at the end of analysis.**
 
+### Orchestration Principles
+
+**Every task is a separate subagent with curated context.**
+
+The orchestrator (the main conversation or a dedicated coordinator agent) does NOT do analysis
+itself. It reads state, decides what to do next, crafts a focused prompt for each subagent,
+dispatches, reads outputs, and repeats.
+
+**Two agent levels:**
+
+- **Coordinator agents** (orchestrator, Deepen coordinator): dispatch subagents, run loops,
+  make phase-transition decisions. Can be the main conversation or a background agent.
+- **Task agents** (survey topic, explore hypothesis, literature search, section writer):
+  leaf agents that produce outputs and return. Do not dispatch further agents.
+
+Each task agent:
+
+- Gets **curated context**: only the findings, data, and instructions relevant to its task
+- Has a **clear output specification**: what files to produce, what format
+- Has **completion criteria**: findings must include provenance, locus-level findings must include figures
+- Runs with **clean context**: no prior conversation history bleed
+
+**Orchestrator responsibilities:**
+1. Read current state (findings, figures, reports, gaps)
+2. Decide what phase/task comes next
+3. Craft a prompt with curated context for each subagent
+4. Dispatch subagents (parallel when independent, sequential when dependent)
+5. Read subagent outputs, verify completion criteria
+6. Repeat until phase is complete, then advance to next phase
+
 ### Five-Phase Architecture
 
 ```
-Coordinator
+Orchestrator (reads state, crafts prompts, dispatches subagents)
 │
 ├── 1. Survey (systematic coverage)
-│   └── Spawns topic subagents: metabolic, defense, surface, etc.
+│   ├── Dispatch parallel topic subagents: metabolic, defense, surface, etc.
+│   │   Each subagent → survey/findings.jsonl entries + summary figures
+│   └── Orchestrator reads all survey findings, plans Explore
 │
 ├── 2. Explore (hypothesis-driven discovery)
-│   └── Reads survey → generates hypotheses → spawns testing subagents
+│   ├── Orchestrator reads survey → generates hypotheses
+│   ├── Dispatch hypothesis-testing subagents (parallel)
+│   │   Each subagent → exploration/findings.jsonl entries + locus figures
+│   └── Orchestrator reads results, decides if more exploration needed
 │
-├── 3. Deepen (targeted follow-up on findings)
-│   └── Coordinator reads all findings, identifies gaps, dispatches specialists
+├── 3. Deepen (successive rounds — see § Deepen Phase)
+│   ├── Round 1: Read all findings → identify gaps → dispatch task agents
+│   │   Gaps may need data analysis, literature research, or both (parallel)
+│   ├── Read new findings → check for remaining gaps
+│   ├── Round N: Dispatch more task agents if needed
+│   └── Create report manifest + compile COMPREHENSIVE_REPORT.md
 │
-├── 4. Review (independent validation)
-│   └── Validates claims, catches errors, assesses publication readiness
+├── 4. Review (independent validation — see § /reviewer_2 Skill)
+│   ├── Run: verify_claims.py → CLAIM_VERIFICATION.jsonl (mechanical)
+│   ├── Dispatch /reviewer_2 agent → review/correction_queue.md (interpretive)
+│   └── Fix all critical/meaningful corrections before proceeding
 │
-└── 5. Literature & Manuscript (MANDATORY before any manuscript is finalized)
-    ├── Draft manuscript with [CITE: topic] placeholders (NO training-memory citations)
-    ├── Run literature agent (`/literature manuscript`) — this is NOT optional
-    ├── Literature agent verifies/finds citations with provenance
+└── 5. Manuscript (section-by-section — see § Manuscript Writing)
+    ├── Dispatch section-writing subagents (sequential by topic)
+    │   Each subagent → one Results section + its MANUSCRIPT_CLAIMS.jsonl entries
+    ├── Orchestrator assembles MANUSCRIPT.md from sections
+    ├── Run: validate_provenance.py → PROVENANCE_AUDIT.md
+    ├── Fix any provenance gaps
+    ├── Run: verify_claims.py + /reviewer_2 → correction_queue.md
+    ├── Fix corrections
+    ├── Dispatch literature agent — this is NOT optional
     └── Apply citation corrections, re-render PDF
 ```
 
@@ -104,6 +157,61 @@ a factual error (GGDEF:EAL "1:1" baseline), and missed the first author's own pr
 The literature agent performs real-time web searches and records provenance (URL, quote,
 verification status) for every citation, creating an auditable trail.
 
+### Manuscript Writing (Section-by-Section Subagents)
+
+**The manuscript is written by separate subagents, one per Results section.** Each subagent
+produces both the section text AND its claims. The orchestrator assembles the full manuscript
+from the sections.
+
+**Orchestrator workflow:**
+
+1. Read all findings + report manifest to determine section topics
+2. For each Results section, dispatch a subagent:
+
+```python
+Task(subagent_type="general-purpose",
+     prompt="""Write Results section: "Energy Metabolism and Respiratory Chain"
+     Source findings: survey-001, survey-005, E002, D001
+     DB: data/DATASET/sharur.duckdb (for verification queries)
+
+     Output TWO files:
+     1. sections/energy_metabolism.md — the section text with [CITE: ...] placeholders
+     2. sections/energy_metabolism_claims.jsonl — one claim per factual assertion
+
+     Rules for claims:
+     - Every sentence with a number, percentage, or count → quantitative claim
+     - Every "X suggests Y" or "consistent with Z" → interpretive claim
+     - Every "more than", "absent in", "unlike" → comparative claim
+     - Use log_claim() with claim_type, source_findings, section name
+     - claim_id format: MC001, MC002, ... (sequential within this section)
+     """)
+```
+
+3. After all section subagents complete, assemble:
+   - Concatenate section `.md` files into `MANUSCRIPT.md` (add title, abstract, intro, discussion, methods)
+   - Concatenate section `_claims.jsonl` files into `MANUSCRIPT_CLAIMS.jsonl` (renumber claim_ids globally)
+   - Write Introduction and Discussion as additional subagent tasks
+
+4. Run `python scripts/validate_provenance.py --dataset data/DATASET_NAME/`
+   - Fix any provenance gaps or schema drift before proceeding
+5. Dispatch literature agent
+6. Apply citation corrections, re-render PDF
+
+**What gets a claim entry:**
+- Every quantitative assertion (counts, percentages, sizes)
+- Every comparative claim ("larger than", "more than any known", "absent in")
+- Every interpretive conclusion ("consistent with syntrophy", "suggests predation")
+- Methodological claims that affect interpretation ("validated by PacBio", "false positive rate of 44%")
+
+**What does NOT need a claim entry:**
+- Background/introduction sentences sourced from literature (those are tracked by citations)
+- Figure captions (the figure reference in the claim entry covers this)
+- Methods section boilerplate (database versions, tool parameters)
+
+**When to run `validate_provenance.py`:**
+- **NOT during Phase 4 (Review)** — MANUSCRIPT.md and MANUSCRIPT_CLAIMS.jsonl don't exist yet
+- **During Phase 5**, after assembling MANUSCRIPT.md + MANUSCRIPT_CLAIMS.jsonl but before the literature agent
+
 ### Manuscript Changelog (REQUIRED)
 
 Every dataset with a manuscript must have a `MANUSCRIPT_CHANGELOG.md` alongside `MANUSCRIPT.md`.
@@ -122,49 +230,113 @@ See `data/omni_production/MANUSCRIPT_CHANGELOG.md` for the reference example.
 
 Use `b.propose_hypothesis()` and `b.add_evidence()` to track analytical reasoning across sessions. Hypotheses persist in `exploration/hypotheses.json` and appear in `b.resume()` output. Use `b.render_provenance()` to generate Mermaid DAG figures for publications.
 
-### Deepen Phase (Coordinator-Driven)
+### Deepen Phase (Successive Rounds)
 
-**Goal**: Turn preliminary findings into well-supported, publication-ready results. Unlike Explore (which follows its own curiosity), Deepen is the coordinator making deliberate decisions about what needs more evidence.
+**Goal**: Turn preliminary findings into well-supported, publication-ready results. Unlike Explore
+(which follows its own curiosity), Deepen is the orchestrator making deliberate decisions about
+what needs more evidence — and running as many rounds as needed until gaps are filled.
 
-**Workflow:**
+**Workflow (iterative):**
 
-1. **Read all findings** from Survey and Explore (`findings.jsonl`, `genome_profiles.tsv`, `exploration_state.json`)
+**Round 1:**
+
+1. **Read all findings** from Survey and Explore (`findings.jsonl`, `genome_profiles.tsv`)
 2. **Gap analysis** — identify:
-   - Findings with weak evidence (single annotation, no neighborhood context)
+   - Findings with weak evidence (single annotation, no neighborhood context, no figure)
    - Unknown proteins that deserve characterization
    - Metabolic claims missing pathway completeness checks
    - Defense systems needing detailed inventory
    - Novel findings lacking literature context
-3. **Dispatch targeted subagents** based on gaps:
+   - Findings missing figures (locus-level findings MUST have a neighborhood diagram)
+3. **Dispatch targeted task agents** — one per gap, each with curated context.
+   Gaps may require data analysis, literature research, or both:
 
 ```python
-# Characterize key unknowns — structure + foldseek + literature
+# Data analysis task agent
 Task(subagent_type="general-purpose",
-     prompt="Characterize protein X: predict structure, run foldseek, search literature...",
+     prompt="""Deepen finding survey-001 (hydrogenase survey).
+     Gap: No neighborhood validation of NiFe Group 4 calls.
+     DB: data/DATASET/sharur.duckdb
+     Task: Pick 3-5 Group 4 hits, run get_neighborhood(pid, window=8),
+     check for Hyf/Hyc operon context. Generate neighborhood figures.
+     Output: Append findings to exploration/findings.jsonl with id='D001'.
+     Save figures to figures/.""",
      run_in_background=True)
 
-# Verify metabolic pathway claims
+# Literature task agent (dispatched in parallel with data agents)
 Task(subagent_type="general-purpose",
-     prompt="Check completeness of Wood-Ljungdahl pathway across all genomes...",
-     run_in_background=True)
-
-# Literature search on novel findings
-Task(subagent_type="general-purpose",
-     prompt="Search literature for precedents of [finding]...",
-     run_in_background=True)
-
-# Defense system deep-dive
-Task(subagent_type="general-purpose",
-     prompt="Complete defense system inventory: CRISPR typing, RM specificity...",
+     prompt="""Literature search for finding E001 (DsrAB in 9/41 genomes).
+     Questions: Is DsrAB known in other candidate phyla? What is the typical
+     operon structure? Are reverse-DsrAB variants reported in non-sulfate-reducers?
+     Output: Append to exploration/findings.jsonl with literature provenance.""",
      run_in_background=True)
 ```
 
-4. **Synthesize** — integrate subagent results back into findings, update hypotheses, write narrative
+4. **Read task agent outputs** — verify each produced findings + figures
 
-**Key principle:** The coordinator decides what's worth investing in. Not every finding needs deepening. Deepen is the "what would a reviewer ask?" step — focus effort on:
-- Findings likely to be headline results
-- Claims that reviewers will challenge
-- Unknowns that could change the story
+**Round 2+ (if needed):**
+
+5. **Re-read all findings** including new Deepen findings
+6. **Check for remaining gaps** — did the subagents actually fill the gaps?
+   - If a subagent's findings raise new questions → dispatch another round
+   - If gaps remain unfilled (e.g., structure prediction failed) → note as limitation
+   - If all major gaps filled → move on
+7. **Stop criterion:** No more gaps that would weaken a manuscript claim, or diminishing returns
+
+**After final round:**
+
+8. **Create report manifest** — organize all findings into thematic sections:
+```python
+manifest = {
+    "dataset": "DATASET_NAME",
+    "sections": [
+        {
+            "title": "Energy Metabolism and Hydrogenases",
+            "finding_ids": ["survey-001", "survey-005", "D001"],
+            "figures": ["figures/hydrogenase_neighborhood.png"],
+            "narrative": "exploration/hypothesis_hydrogenase.md"
+        },
+        # ... one section per major topic
+    ],
+    "excluded_findings": [
+        {"id": "survey-009", "reason": "Data quality issue, not biological"}
+    ]
+}
+```
+
+9. **Build report manifest PROGRAMMATICALLY** — read `findings.jsonl` files and group by category:
+```python
+# Read actual findings, group by category, build sections
+python3 -c "
+import json
+from pathlib import Path
+from collections import defaultdict
+findings = []
+for sub in ['survey', 'exploration']:
+    fp = Path('data/DATASET/') / sub / 'findings.jsonl'
+    if fp.exists():
+        findings.extend(json.loads(l) for l in fp.read_text().splitlines() if l.strip())
+by_cat = defaultdict(list)
+for f in findings:
+    by_cat[f.get('category','uncategorized')].append(f.get('id'))
+# Review output, curate into report_manifest.json sections
+for cat, ids in sorted(by_cat.items()):
+    print(f'{cat}: {ids}')
+"
+```
+**NEVER write report_manifest.json from memory.** Always read the actual findings files first.
+Methods QC findings (false positive corrections, annotation artifacts) go in `excluded_findings`.
+
+10. **Generate comprehensive report:**
+```bash
+python scripts/compile_comprehensive_report.py --dataset data/DATASET_NAME/
+```
+
+**Key principles:**
+- The orchestrator decides what's worth investing in — not every finding needs deepening
+- Focus on: findings likely to be headline results, claims reviewers will challenge, unknowns that could change the story
+- **Successive rounds** prevent single-pass gaps: if Round 1 reveals that "DsrAB is present" but doesn't check operon context, Round 2 dispatches a neighborhood subagent
+- Each round's subagents are independent and can run in parallel
 
 ### Review Agent Responsibilities
 
@@ -247,16 +419,210 @@ result = b.get_neighborhood(protein_id, window=5, all_annotations=True)
 
 ## Canonical Tools
 
-### Report Generation
-**Script:** `scripts/generate_viral_genome_report.py` (37KB, proven generator)
-**Use for:** Comprehensive viral genome reports with locus diagrams
-**Do NOT:** Create new report generators from scratch
+### Report Tiers
+
+Not every analysis needs the full publication pipeline. Match the output to the audience:
+
+| Tier | Audience | Requires | Does NOT require |
+|------|----------|----------|------------------|
+| **Collaborator report** | Colleague who owns the data | manifest → COMPREHENSIVE_REPORT → authored MANUSCRIPT.md + figures → PDF | MANUSCRIPT_CLAIMS.jsonl, verify_claims.py, /reviewer_2, /literature |
+| **Publication manuscript** | Journal submission | Everything above PLUS claims tracking, provenance audit, adversarial review, literature agent | — |
+
+**Both tiers require:**
+1. `reports/report_manifest.json` built programmatically from findings (see § Deepen Phase step 9)
+2. `COMPREHENSIVE_REPORT.md` generated by `compile_comprehensive_report.py`
+3. COMPREHENSIVE_REPORT used as scaffold for authored `MANUSCRIPT.md`
+4. Figures generated and embedded
+
+**The collaborator report is the most common output.** Do not skip the manifest + compilation steps just because it's not a journal submission.
+
+### Standard Figures
+
+Every report/manuscript should include at minimum:
+
+| Figure | Content | When generated |
+|--------|---------|----------------|
+| Genome overview | Heatmap: genomes × key metrics (size, proteins, annotation rate, defense, CRISPR) | After survey |
+| Metabolic matrix | Presence/absence of key pathway markers across genomes | After survey |
+| Defense distribution | Defense system types × genomes | After survey + CRISPR analysis |
+| Neighborhood diagrams | Gene arrow diagrams for notable loci (1 per major locus-level finding) | During explore/deepen |
+
+**Conventions:**
+- Output directory: `figures/`
+- Naming: `figure{N}_{descriptive_name}.png` (e.g., `figure1_genome_overview.png`)
+- Format: PNG, 300 dpi, tight layout
+- Style: clean professional palette, readable at printed page size
+- Generation: separate subagent with DB access, after survey/explore phases complete
+- Reference in MANUSCRIPT.md with relative paths: `![Caption](figures/filename.png)`
+
+### Manuscript Pipeline
+
+The full provenance chain from structured findings to rendered manuscript:
+
+```
+findings.jsonl (survey/ + exploration/)     ← Phases 1-3
+  ↓
+reports/report_manifest.json                ← Phase 3 (Deepen): organize findings into sections
+  ↓
+COMPREHENSIVE_REPORT.md                     ← compile_comprehensive_report.py
+  ↓
+sections/*.md + sections/*_claims.jsonl     ← Phase 5: section-writing subagents (one per topic)
+  ↓  orchestrator assembles
+MANUSCRIPT.md + MANUSCRIPT_CLAIMS.jsonl     ← concatenated + renumbered
+  ↓
+PROVENANCE_AUDIT.md                         ← validate_provenance.py (full chain audit)
+  ↓  fix any gaps
+CLAIM_VERIFICATION.jsonl                    ← verify_claims.py (number re-derivation)
+  ↓
+review/correction_queue.md                  ← /reviewer_2 agent (adversarial review)
+  ↓  fix corrections
+literature_citations.jsonl                  ← /literature agent: verified citations
+  ↓
+MANUSCRIPT.pdf                              ← pandoc
+```
+
+#### Rendering
+
+```bash
+export PATH="/Library/TeX/texbin:$PATH"
+cd data/DATASET_NAME/
+pandoc MANUSCRIPT.md -o MANUSCRIPT.pdf --pdf-engine=xelatex -V geometry:margin=1in
+```
+
+**Requirements:** pandoc + xelatex. Figure paths relative to the Markdown file directory.
+
+#### File Structure
+
+| File | Purpose |
+|------|---------|
+| `MANUSCRIPT.md` | Complete Markdown manuscript |
+| `MANUSCRIPT_CLAIMS.jsonl` | Maps each claim → source findings + citations |
+| `MANUSCRIPT_CHANGELOG.md` | Revision history (see § Manuscript Changelog) |
+| `COMPREHENSIVE_REPORT.md` | Auto-generated from findings + manifest |
+| `PROVENANCE_AUDIT.md` | Audit output from validation script |
+| `CLAIM_VERIFICATION.jsonl` | Per-claim verification records from verify_claims.py |
+| `REVIEW_REPORT.md` | Human-readable claim verification summary |
+| `review/correction_queue.md` | Prioritized corrections from /reviewer_2 |
+| `review/interpretive_review.md` | Non-quantitative claim assessment |
+| `reports/report_manifest.json` | Finding → section organization |
+| `literature_citations.jsonl` | Verified citations with finding links |
+| `figures/` | All referenced figures as PNG files |
+| `MANUSCRIPT.pdf` | Rendered output |
+
+#### Findings Schema (Extended)
+
+`findings.jsonl` entries support these optional fields for provenance linking:
+
+```jsonl
+{
+  "id": "survey-001",
+  "title": "...",
+  "category": "energy_metabolism",
+  "description": "...",
+  "evidence": "...",
+  "n_genomes": 1366,
+  "provenance": { "query": "...", "raw_result": "...", "accession_verified": "...", "interpretation": "..." },
+  "figures": ["figures/hydrogenase_distribution.png"],
+  "related_findings": ["survey-005", "E001"],
+  "phase": "survey"
+}
+```
+
+Existing findings without `figures`, `related_findings`, or `phase` remain valid.
+
+#### Figure Completion Criteria
+
+**Locus-level findings MUST include a neighborhood figure.** If a finding describes a specific
+gene, operon, or genomic region, the subagent producing it must also generate a visualization.
+This is a completion criterion, not a suggestion.
+
+| Finding type | Figure requirement |
+|---|---|
+| Specific locus/operon (e.g., "DsrAB operon in 9 genomes") | Neighborhood diagram for 1-3 representative examples |
+| Distribution claim (e.g., "CoxI in 25/41 genomes") | Optional summary plot (heatmap, bar chart) |
+| Pathway completeness (e.g., "WL pathway in 30 genomes") | Optional pathway diagram with gene presence/absence |
+| Interpretive/comparative (e.g., "ecotypes are non-overlapping") | Recommended comparison figure |
+
+**When figures are generated:**
+- **Survey subagents:** Summary/distribution figures for their topic area
+- **Explore subagents:** Neighborhood diagrams for every locus-level finding
+- **Deepen subagents:** Figures for any finding that was flagged as "missing figure" in gap analysis
+- **Manuscript subagents:** No new figures — reference existing ones from `figures/`
+
+#### Finding ID Convention
+
+Every finding must have a stable `id` for downstream referencing by claims and the report manifest.
+
+| Phase | Prefix | Example | Auto-generated by |
+|-------|--------|---------|-------------------|
+| Survey | `survey-` | `survey-001`, `survey-015` | `log_finding()` in survey.md |
+| Exploration | `E` | `E001`, `E016` | `log_finding()` in explore.md |
+| Deepen | `D` | `D001`, `D010` | `log_finding()` in explore.md (with `finding_id="D001"`) |
+
+IDs auto-increment within each phase file. The `log_finding()` helpers in survey.md and
+explore.md generate IDs automatically. For Deepen findings appended to `exploration/findings.jsonl`,
+pass an explicit `finding_id="DNNN"` to distinguish them from exploration findings.
+
+**A finding without an `id` cannot be referenced by claims or the report manifest.** The
+compilation script shows `[???]` for missing IDs.
+
+#### Report Manifest (`reports/report_manifest.json`)
+
+See § Deepen Phase for schema and example.
+
+#### Manuscript Claims (`MANUSCRIPT_CLAIMS.jsonl`)
+
+Maps each factual claim in the manuscript to source findings and citations:
+
+```jsonl
+{
+  "claim_id": "MC001",
+  "section": "Abstract",
+  "claim_text": "Energy-conserving Group 4 NiFe hydrogenases are present in 74.6% of genomes",
+  "source_findings": ["survey-001"],
+  "source_citations": [],
+  "figures": [],
+  "claim_type": "quantitative"
+}
+```
+
+**Required:** `claim_id`, `claim_text`, `source_findings`, `claim_type`
+**Recommended:** `section` (manuscript section where the claim appears)
+**Optional:** `source_citations`, `figures`, `review_status`
+**claim_type:** `quantitative` | `interpretive` | `comparative` | `methodological`
+
+#### Literature Citations (Enhanced)
+
+`literature_citations.jsonl` entries can link to findings they support:
+
+```jsonl
+{
+  "citation_id": "touchon_2016",
+  "supports_findings": ["D008", "D009"],
+  "... existing fields ..."
+}
+```
+
+#### Scripts
+
+- **Compile report:** `python scripts/compile_comprehensive_report.py --dataset data/DATASET_NAME/` → `COMPREHENSIVE_REPORT.md`
+- **Validate provenance:** `python scripts/validate_provenance.py --dataset data/DATASET_NAME/` → `PROVENANCE_AUDIT.md`
+- **Verify claims:** `python scripts/verify_claims.py --dataset data/DATASET_NAME/ --auto-extract` → `CLAIM_VERIFICATION.jsonl` + `REVIEW_REPORT.md`
+- Legacy report generators (`generate_paper_report.py`, etc.) are hardcoded for specific datasets — do NOT use for new manuscripts.
 
 ### Hydrogenase Classification
 **Script:** `scripts/classify_hydrogenases.py`
 **Requires:** HydDB HMMs via Astra, DIAMOND database (`data/reference/hyddb/HydDB_all.dmnd`)
 **Output:** Subgroup-level classification (NiFe Group 1-4, FeFe A-C)
 **Note:** Pipeline classifies all HydDB hits and assigns subgroup predicates. Hits lacking PFAM corroboration are tagged `hyddb_needs_curation` for agent neighborhood curation — see skill specs.
+
+### CAZyme Classification (dbCAN 3-tool consensus)
+**Script:** `scripts/classify_cazymes.py`
+**Requires:** `data/dbcan_db/` with CAZy.dmnd, dbCAN.hmm, dbCAN-sub.hmm; dbCAN installed in Astra
+**Output:** Consensus CAZyme annotations (`source='cazy'`, family-level: GH, GT, PL, CE, CBM, AA)
+**Method:** DIAMOND (e-value ≤1e-18) + Astra/HMMER vs dbCAN.hmm (i-evalue ≤1e-15) + Astra/HMMER vs dbCAN-sub.hmm (i-evalue ≤1e-15), consensus ≥2 tools. Falls back to 2-tool if dbCAN-sub absent.
+**Caching:** Reuses DIAMOND results from `cazyme_classification.tsv` and Astra HMM results from `annotations/dbCAN_hits_df.tsv`. dbCAN-sub runs only on proteins hit by ≥1 other tool.
+**Pipeline:** Integrated into stage 07 (`_classify_cazymes()`) after predicates + hydrogenase classification. Stage 04 runs Astra dbCAN automatically.
 
 ### Embedding Visualization
 **Script:** `scripts/visualize_embeddings.py`
@@ -268,11 +634,6 @@ result = b.get_neighborhood(protein_id, window=5, all_annotations=True)
 **Binary:** Auto-detected via `which foldseek`
 **Database path:** `~/.foldseek/{db_name}/{db_name}` (e.g. `~/.foldseek/pdb100/pdb100`)
 **Behavior:** `search_foldseek()` tries local binary first (`prefer_local=True` by default), falls back to web API for databases not installed locally. Local search is faster and has no rate limits.
-
-### Visualization
-**Sharur operators:** `b.visualize_neighborhood()`, `b.visualize_domains()`
-**Multi-source locus script:** `scripts/plot_locus_multisource.py`
-**Do NOT:** Create matplotlib code from scratch when operators exist
 
 ---
 
@@ -317,87 +678,66 @@ If you see `hydrogenase` or `hydrogen_metabolism` predicates, **check for subgro
 
 ## Analysis Manifest System
 
-Each dataset has a `manifest.json` for session continuity:
-
-```python
-from sharur.operators import Sharur
-b = Sharur("data/YOUR_DATASET/sharur.duckdb")
-
-print(b.resume())  # Status, findings, structures, hypotheses, recent activity
-
-# Auto-tracking: structures and figures are automatically recorded
-b.predict_structure("protein_id")
-b.visualize_neighborhood("protein_id", title="My Figure", legend="Caption text")
-
-# Manual updates
-b.manifest.log_session("exploration", "Completed CRISPR locus analysis")
-b.manifest.save()
-```
-
-**Migration:** `python scripts/migrate_to_manifest.py data/my_dataset/`
-
-**Report from manifest:**
-```python
-from sharur.reports import generate_report_from_manifest, SharurReport
-generate_report_from_manifest("data/my_dataset/manifest.json", "output.pdf", theme="viral")
-```
+Each dataset has a `manifest.json` for session continuity. Key APIs: `b.resume()` (status overview), `b.manifest.log_session(phase, note)`, `b.manifest.save()`. Structures and figures are auto-tracked. Migration: `python scripts/migrate_to_manifest.py data/my_dataset/`
 
 ## Quick Reference: Hypothesis Tracking & Provenance
 
 ```python
 b = Sharur("data/YOUR_DATASET/sharur.duckdb")
-
-# Propose a hypothesis (persists to exploration/hypotheses.json)
 h = b.propose_hypothesis("Group 4 NiFe hydrogenases are energy-conserving")
-
-# Add evidence after analysis
 b.add_evidence(h.hypothesis_id, "NiFe Group 4 survey", "12/41 genomes", True, 0.8)
-b.add_evidence(h.hypothesis_id, "Neighborhood check", "Hyf operon present", True, 0.9)
-
-# Check state
-print(b.hypothesis_summary())    # One-line-per-hypothesis overview
-b.list_hypotheses()              # Full Hypothesis objects
-
-# Explicit provenance logging with parent chaining
-e1 = b.log_provenance("Count hydrogenases", "42 found")
-e2 = b.log_provenance("Check neighborhoods", "12 with Hyf", parent_ids=[e1.entry_id])
-
-# Render provenance DAG as Mermaid diagram
-mermaid = b.render_provenance(title="Analysis DAG", output_path="figures/provenance.mermaid")
+print(b.hypothesis_summary())  # One-line overview
+# Provenance: e1 = b.log_provenance("query", "result"); e2 = b.log_provenance("next", "result", parent_ids=[e1.entry_id])
+# DAG figure: b.render_provenance(title="Analysis DAG", output_path="figures/provenance.mermaid")
 ```
 
-- `b.resume()` automatically shows active hypotheses
-- Hypotheses persist across sessions and subagent runs
-- `add_evidence()` accepts UUID or string hypothesis_id
-- `log_provenance()` accepts UUID or string parent_ids
+Hypotheses persist in `exploration/hypotheses.json` across sessions. `b.resume()` shows active hypotheses.
 
 ## Quick Reference: Structure Prediction & Foldseek
 
+**Reference code:** `sharur/operators/structure.py` (implementation), `sharur/operators/__init__.py` (Sharur class integration, lines 541-615)
+
+**Available methods:**
+
+### 1. For database proteins (standard workflow)
 ```python
-b = Sharur("data/YOUR_DATASET/sharur.duckdb")
-
-# Predict structure (requires ESM_API_KEY env var)
-result = b.predict_structure("protein_id", output_path="structures/protein.pdb")
-
-# Search structure against databases
-b.list_foldseek_databases()  # afdb50, afdb-swissprot, pdb100
-hits = b.search_foldseek("structures/protein.pdb", databases=["afdb50", "pdb100"], top_k=10)
-
-# Convenience: search for protein (uses existing PDB if available)
-hits = b.search_foldseek_for_protein("protein_id")
+b = Sharur("data/DATASET/sharur.duckdb")
+result = b.predict_structure("protein_id", output_path="structures/protein.pdb")  # requires ESM_API_KEY
+# Auto-updates manifest with structure prediction
+# Max length: 1024 aa (ESM3 API limit)
 ```
 
-**Interpreting results:**
-- TM-score > 0.5: Similar fold, likely related function
-- TM-score > 0.7: High confidence homology
-- pdb100 hits: Known structures with experimental validation
-- afdb50 hits: AlphaFold predictions, check UniProt
+### 2. For arbitrary sequences (no database lookup)
+```python
+from sharur.operators.structure import predict_structure_from_sequence
+result = predict_structure_from_sequence(
+    sequence="MKVL...",  # raw AA sequence
+    output_path="output.pdb",
+    name="my_protein"  # optional identifier
+)
+# Use for external sequences, synthetic constructs, or protein fragments
+```
 
-### All-Atom Folding with Ligands (ESM3 Forge API)
+### 3. Batch processing
+```python
+result = b.batch_predict_structures(
+    protein_ids=["id1", "id2", "id3"],
+    output_dir="structures/",
+    max_length=1024  # skip proteins longer than this
+)
+# Auto-generates filenames: {protein_id}.pdb
+```
 
-**Status:** Not yet implemented in Sharur operators. The Forge API supports all-atom folding with ligands via `/api/v1/fold_all_atom` (proteins, DNA, RNA, ligands, covalent bonds). See API docs for `ProteinInput`, `LigandInput`, and `covalent_bonds` parameters.
+**Foldseek structural homology search:**
+```python
+hits = b.search_foldseek("structures/protein.pdb", databases=["afdb50", "pdb100"], top_k=10)
+hits = b.search_foldseek_for_protein("protein_id")  # convenience: uses existing PDB if available
+b.list_foldseek_databases()  # afdb50, afdb-swissprot, pdb100
+```
 
-**Alternatives:** AlphaFold3, RoseTTAFold All-Atom, AlphaFill (post-hoc enrichment).
+**TM-score:** >0.5 = similar fold; >0.7 = high confidence homology. pdb100 = experimental; afdb50 = AlphaFold predictions.
+
+**Implementation details:** See `sharur/operators/structure.py` lines 34-318 for full ESM3 API integration, error handling, and manifest tracking.
 
 ## Astra Annotation Pipeline
 
@@ -405,7 +745,7 @@ Astra manages pre-installed HMM databases for annotation searches.
 
 **Location:** `~/astra/` (source), installed via pyenv shim
 
-**Installed databases** (`~/.config/Astra/`): PFAM, KOFAM, VOGdb, HydDB, DefenseFinder, CRISPRCasFinder, CANT-HYD
+**Installed databases** (`~/.config/Astra/`): PFAM, KOFAM, VOGdb, HydDB, DefenseFinder, CRISPRCasFinder, CANT-HYD, dbCAN, padloc
 
 ```bash
 astra search --installed_hmms DefenseFinder --threads 12 \
@@ -451,23 +791,33 @@ To avoid growing `pfam_map.py` indefinitely:
 
 ## Code Standards & Best Practices
 
-### Report Generation
+### Data Integrity Rule
 
-**Two report scripts — use the right one:**
+**Never write structured data from memory.** When producing JSON, JSONL, TSV, or any output that
+references findings, database entries, annotations, or other generated artifacts, ALWAYS read the
+source data first. This applies to:
+- `report_manifest.json` — read `findings.jsonl` to get actual finding IDs and categories
+- `MANUSCRIPT_CLAIMS.jsonl` — verify numbers against the database before writing claims
+- Any summary table — query the database, don't reconstruct from conversation history
 
-| Script | Purpose | When to use |
-|--------|---------|-------------|
-| `scripts/generate_exploration_report.py` | Auto-generated survey/exploration report | After `/survey` or `/explore` completes |
-| `scripts/generate_paper_report.py` | Hand-curated paper-style report | Publication-quality output with narrative sections |
+If you need to group, filter, or organize existing data, write a script that reads and processes
+the actual files. Do not type structured output from what you remember seeing earlier.
 
-**Never create ad-hoc PDF generation** — always adapt existing report generators.
+### Manuscript & Report Writing
 
-**Report filename convention:** Use ONE consistent filename per dataset: `data/DATASET_NAME/COMPREHENSIVE_REPORT.pdf`. Do not create versioned or dated filenames.
+**Standard output:** Each dataset produces `MANUSCRIPT.md` → `MANUSCRIPT.pdf` via pandoc (see § Manuscript Rendering under Canonical Tools).
 
-**Report writing guidelines:**
+**Do NOT:**
+- Create new Python PDF generators — write Markdown and use pandoc
+- Use hardcoded report scripts (`generate_paper_report.py`, etc.) for new datasets
+- Create versioned or dated PDF filenames — always `MANUSCRIPT.pdf`
+
+**Writing guidelines:**
 - Avoid sensationalized framing — no "Mystery - Resolved" sections
 - TnpB classification — report as transposases unless clearly within a CRISPR/Cas locus
 - Use neutral, factual language
+- Figures go in `figures/` subdirectory, referenced with relative paths in Markdown
+- Number figures sequentially; when inserting a new figure, renumber all subsequent figures and their cross-references
 
 ### Visualization
 
@@ -626,26 +976,57 @@ If all three find nothing AND genome is high-quality (<50 contigs), absence is p
 
 ## Subagent Strategies
 
+### Sub-Agent Context Injection (CRITICAL)
+
+**Subagents receive ONLY the prompt parameter.** They do NOT automatically get CLAUDE.md, skill specs (`.claude/skills/*.md`), conversation history, or memory files. The quality of subagent work depends entirely on what context the orchestrator includes in the prompt.
+
+**When dispatching analysis subagents, include in the prompt:**
+1. **Database path** and dataset context (genome count, phylum, environment)
+2. **Domain documentation path** — tell subagents about the Obsidian docs vault so they can look up protocols on demand (see below)
+3. **Relevant skill spec content** — read the appropriate `.claude/skills/*.md` and include key sections: finding schema, `log_finding()` helper, validation protocols, output specifications
+4. **Superfamily awareness rule** — always include the Context-First Analysis Protocol (co-annotation + neighborhood checks before functional claims)
+5. **Scientific rigor guidelines** — MAG interpretation ("not detected" not "absent"), claim escalation, forbidden language
+6. **Database query patterns** — column names (`name` not `annotation_id`, `score` not `bitscore`), `COUNT(DISTINCT protein_id)`, no correlated subqueries
+7. **Output specification** — what files to produce, what format, completion criteria
+
+**Minimum boilerplate for any analysis subagent prompt:**
+```
+DB: data/DATASET/sharur.duckdb
+Import: from sharur.operators import Sharur; b = Sharur("data/DATASET/sharur.duckdb")
+Columns: 'name' (not annotation_id), 'score' (not bitscore)
+Counts: always COUNT(DISTINCT protein_id) — repeat domains inflate COUNT(*)
+MAG caveat: "Not detected" not "absent"
+Findings: JSONL with id, title, category, description, evidence, n_genomes, provenance
+
+## Domain Documentation (READ ON DEMAND)
+When you encounter a domain-specific situation, look up the relevant protocol doc before acting:
+Docs path: /Users/jacob/Documents/Obsidian Vault/sharur-docs/
+Key docs:
+  - hydrogenase-classification.md — HydDB curation, Complex I FP detection, neighborhood validation
+  - defense-system-validation.md — superfamily FP filtering, prevalence sanity checks
+  - giant-protein-recovery.md — E-value recovery for >1000 aa, ESM3/Foldseek workflow
+  - context-first-protocol.md — co-annotation validation, claim escalation ladder
+  - mag-quality-interpretation.md — fragmentation checks, absence claim language
+  - query-patterns.md — DuckDB query templates, JOIN patterns, performance tips
+  - neighborhood.md — get_neighborhood() usage, what to look for
+  - predicates-overview.md — predicate system, search_by_predicates()
+Use the Read tool to load any doc when you need its protocol. Don't guess — look it up.
+```
+
+**For survey/explore subagents**, read the full skill spec and paste the protocol sections, finding schema, and validation rules into the prompt. These specs contain ~1000+ lines of battle-tested methodology.
+
 ### Sub-Agent Protocol
-- Sub-agents are **leaf agents** — they should NOT spawn further agents
-- Provide full context in the prompt (don't assume they know prior conversation)
+- Sub-agents CAN spawn further sub-agents (recursive dispatch) for specialist tasks (literature, foldseek, hydrogenase curation)
 - Each sub-agent produces a discrete output (markdown report, JSONL findings)
 - Parent agent synthesizes outputs from all sub-agents
-
-### Background Tasks
-```python
-result = Task(subagent_type="general-purpose", prompt="...", run_in_background=True)
-# Returns immediately with task_id; use TaskOutput(task_id) to check
-```
+- **DuckDB write locks** — run subagents SEQUENTIALLY if they write to the database
 
 ### Practical Tips
 - **Parallel genome browser agents** work well (quarters or groups)
 - **JSONL for findings** — easy to append, merge, and process
-- **DuckDB write locks** — run subagents SEQUENTIALLY if they write to the database
 - **Check database schema** before writing queries (`DESCRIBE table_name`)
 - **Research external data** via WebFetch — don't guess PDB functions
 - **Don't create new visualization code** when operators exist
-- **Don't create ad-hoc report generators** — adapt existing ones
 
 ---
 
@@ -679,57 +1060,13 @@ stats = b.store.execute("""
 
 ### DuckDB Query Patterns for Large Datasets
 
-**CRITICAL: Correlated subqueries destroy performance on >1M row tables.**
+**CRITICAL: Correlated subqueries destroy performance on >1M row tables.** Never put a subquery inside WHERE that references the outer row. Instead:
 
-DuckDB cannot optimize nested `SELECT` inside `WHERE EXISTS` or `WHERE x = (SELECT ...)` when the outer query is large. These cause per-row subquery execution, eating memory and swap.
-
-```sql
--- BAD: Correlated subquery — O(n * m), causes swap thrashing on 2.9M proteins
-SELECT su.protein_id,
-    EXISTS (
-        SELECT 1 FROM proteins p2
-        WHERE p2.contig_id = (SELECT contig_id FROM proteins WHERE protein_id = su.protein_id)
-          AND ABS(p2.gene_index - (SELECT gene_index FROM proteins WHERE protein_id = su.protein_id)) BETWEEN 1 AND 3
-    )
-FROM sample_unann su
-
--- GOOD: Materialize context first, then JOIN
-WITH sample AS (
-    SELECT pp.protein_id, p.contig_id, p.gene_index
-    FROM protein_predicates pp
-    JOIN proteins p ON pp.protein_id = p.protein_id
-    WHERE list_contains(pp.predicates, 'unannotated')
-    ORDER BY RANDOM() LIMIT 500
-)
-SELECT DISTINCT s.protein_id
-FROM sample s
-JOIN proteins p2 ON s.contig_id = p2.contig_id
-    AND ABS(p2.gene_index - s.gene_index) BETWEEN 1 AND 3
-JOIN annotations a ON p2.protein_id = a.protein_id AND a.source = 'pfam'
-```
-
-**General pattern for neighborhood queries:**
 1. **Materialize the seed set** in a CTE with `contig_id` and `gene_index`
 2. **JOIN** to find neighbors (same contig, gene_index ± window)
 3. **JOIN** to annotations/predicates for neighbor features
-4. **Never** put a subquery inside WHERE that references the outer row
-
-**For per-genome cross-tabs:**
-```sql
--- BAD: Python loop over genomes
-for genome in genomes:
-    count = db.execute(f"SELECT COUNT(*) FROM ... WHERE bin_id = '{genome}'")
-
--- GOOD: Single GROUP BY query
-SELECT p.bin_id,
-    COUNT(DISTINCT CASE WHEN a.accession = 'K02274' THEN p.protein_id END) as coxI,
-    COUNT(DISTINCT CASE WHEN a.accession = 'K02275' THEN p.protein_id END) as coxII,
-    COUNT(DISTINCT CASE WHEN list_contains(pp.predicates, 'nife_group4') THEN p.protein_id END) as g4_hyd
-FROM proteins p
-LEFT JOIN annotations a ON p.protein_id = a.protein_id
-LEFT JOIN protein_predicates pp ON p.protein_id = pp.protein_id
-GROUP BY p.bin_id
-```
+4. **Use GROUP BY** for per-genome cross-tabs, not Python loops over genomes
+5. **Use CASE WHEN** inside COUNT(DISTINCT ...) for multi-marker pivots
 
 ---
 
@@ -749,64 +1086,6 @@ data/{dataset_name}/
 └── figures/                    # Top-level figures
 ```
 
-## Active Datasets
-
-### Omnitrophota (2026-02-08, In Progress)
-
-**Database:** `data/omni_production/bennu.duckdb` (5.3 GB)
-**Scale:** 1,831 MAGs (~1,637 unique), 355,904 contigs, 2,921,111 proteins, 11,249,502 annotations
-
-| Source | Hits |
-|--------|------|
-| PFAM | 4,880,659 |
-| KEGG | 3,940,782 |
-| DefenseFinder | 2,424,782 |
-| HydDB | 3,279 |
-
-**Missing data:** No taxonomy (all "unknown"), no CheckM2, no GC content, no embeddings, no VOGdb/CAZy.
-
-**Emerging model:** Omnitrophota are **sessile, surface-specialist syntrophs** that invest heavily in polysaccharide decoration and use fermentative metabolism to produce acetate and H2 for partners.
-
-**Key findings from Phase 1 (Survey):**
-- Mega-proteins up to 85,804 aa — entire biosynthesis pathways in single ORFs
-- Group 4 NiFe hydrogenases in 74.6% of genomes (H2-evolving, obligate syntrophy)
-- 2.3% of proteome = glycosyltransferases (2-3x normal bacteria)
-- Extreme c-di-GMP signaling density (15+ GGDEF/PilZ per genome)
-- Non-motile (<4% flagella) but universal type IV pili + adhesins
-- Rnf + acetate kinase energy strategy — no canonical respiratory chain
-- 46,646 Radical SAM proteins — dual defense (Viperin) + biosynthetic roles
-- DUF1015 in 85% of genomes — top characterization target
-- 194 duplicate genome pairs detected
-- 13,422 giant unknown proteins (largest unannotated: 39,880 aa)
-
-**Analysis plan:** `data/omni_production/ANALYSIS_PLAN.md`
-**Survey outputs:** `data/omni_production/survey/`
-**Exploration outputs:** `data/omni_production/exploration/`
-
-**Status:** Phase 1 (Survey) complete. Phase 2 (Explore) in progress. Phases 3-4 pending.
-
-### Hinthialibacterota (2026-02-05, Complete)
-
-**Database:** `data/hinthialibacterota_production/bennu.duckdb`
-41 genomes, 184,136 proteins. MANUSCRIPT.md with 30 literature citations. PDF rendered.
-
-### GJALLARVIRUS (2026-02-06, Complete)
-
-**Database:** `data/heimdall_megavirus_production/bennu.duckdb`
-473 kb genome, 588 proteins. Comprehensive report complete.
-
-## Archives
-
-| Dataset | Date | Location | Size |
-|---------|------|----------|------|
-| Altiarchaeota (63 genomes) | 2026-02-03 | `data/archives/altiarchaeota_2026-02-03/` | 789 MB |
-| Thorarchaeota/Heimdall | 2026-02-03 | `data/archives/thorarchaeota_2026-02-03/` | ~50 MB |
-| Heimdall Megavirus | 2026-02-04 | `data/archives/heimdall_megavirus_2026-02-04/` | 16 MB |
-| BioFrame DSL (retired) | 2026-02-07 | `data/archives/bioframe_2026-02-07/` | — |
-
 ## TODO
 
-- [ ] **Build `/atlas` skill** — Hierarchical annotation census with Context-First protocol baked in
-- [x] **Sharur rename** — completed 2026-02-09
-- [ ] **Omnitrophota: Run CheckM2 + GTDB-Tk** for quality and taxonomy
-- [ ] **Omnitrophota: VOGdb annotations** pending Aksha refactor
+- [ ] **Bake superfamily validation deeper into `/survey`** — known traps (HydDB, Mokosh/BREX, Radical_SAM), co-annotation checks, automatic specialist dispatch

@@ -2,8 +2,6 @@
 
 Systematic literature and database research to resolve functional ambiguity, interpret structural hits, understand domains, and provide biological context for metagenomic findings.
 
-**CRITICAL: You are a leaf agent. DO NOT spawn sub-agents or use the Task tool.**
-
 **Note:** This skill uses WebSearch and WebFetch only — no database writes. Can run in parallel with other skills.
 
 > **Mandatory:** Follow the shared validation protocols in `_validation_protocols.md`.
