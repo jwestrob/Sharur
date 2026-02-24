@@ -65,12 +65,52 @@ for pred in defense_predicates:
         print(f"{pred}: {count}")
 ```
 
-### Step 2b: DefenseFinder / PADLOC Integration
+### Step 2b: System-Level Defense Validation (CRITICAL)
 
-Check for system-level defense annotations from DefenseFinder and PADLOC:
+**Astra's DefenseFinder HMM hits have a ~72% false positive rate.** Most hits are superfamily
+matches (kinases, Rossmann folds, helicases) that are NOT part of real defense systems.
+Always prefer system-validated annotations (`source='defensefinder_system'`) over raw HMM
+hits (`source='defensefinder'`).
 
 ```python
-# DefenseFinder annotations
+# PREFERRED: System-validated defense annotations (co-localization checked)
+# These come from running defense-finder proper (MacSyFinder system detection)
+# Run: python scripts/run_defensefinder_systems.py data/DATASET/
+validated = b.store.execute("""
+    SELECT a.name, COUNT(DISTINCT a.protein_id) as n_proteins,
+           COUNT(DISTINCT p.bin_id) as n_genomes
+    FROM annotations a
+    JOIN proteins p ON a.protein_id = p.protein_id
+    WHERE a.source = 'defensefinder_system'
+    GROUP BY a.name
+    ORDER BY n_proteins DESC
+""")
+print("System-validated defense proteins:")
+for name, n_prot, n_gen in validated:
+    print(f"  {name}: {n_prot} proteins in {n_gen} genomes")
+
+# System-level summary from defense_systems table
+systems = b.store.execute("""
+    SELECT system_type, system_subtype, COUNT(*) as n_systems,
+           SUM(genes_count) as total_genes
+    FROM defense_systems
+    GROUP BY system_type, system_subtype
+    ORDER BY n_systems DESC
+""")
+print("\nDefense systems by type:")
+for stype, subtype, n_sys, n_genes in systems:
+    print(f"  {stype}/{subtype}: {n_sys} systems, {n_genes} genes")
+```
+
+**If `defensefinder_system` annotations don't exist yet**, run the system validation:
+```bash
+python scripts/run_defensefinder_systems.py data/DATASET/ --workers 8
+```
+This takes ~2 minutes per 50k proteins. Uses `--db-type ordered_replicon` for co-localization.
+
+**Fallback: raw HMM hits** (use with extreme caution, expect ~72% FPs):
+```python
+# Raw DefenseFinder HMM annotations (NOT system-validated)
 df_systems = b.store.execute("""
     SELECT a.accession, a.name, a.description,
            COUNT(DISTINCT a.protein_id) as n_proteins,
@@ -80,12 +120,12 @@ df_systems = b.store.execute("""
     WHERE a.source = 'defensefinder'
     GROUP BY a.accession, a.name, a.description
     ORDER BY n_proteins DESC
-""").fetchall()
+""")
 
 if df_systems:
-    print("DefenseFinder Systems:")
+    print("DefenseFinder HMM Hits (WARNING: ~72% FP rate):")
     for acc, name, desc, n_prot, n_gen in df_systems:
-        print(f"  {name} ({acc}): {n_prot} proteins in {n_gen}/{n_genomes} genomes")
+        print(f"  {name} ({acc}): {n_prot} proteins in {n_gen} genomes")
 else:
     print("No DefenseFinder annotations found")
 
