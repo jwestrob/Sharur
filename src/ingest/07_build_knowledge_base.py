@@ -254,7 +254,7 @@ class KnowledgeBaseBuilder:
         self._init_db()
 
         with Progress() as progress:
-            task = progress.add_task("Building knowledge base...", total=10)
+            task = progress.add_task("Building knowledge base...", total=11)
 
             progress.update(task, description="Loading bins")
             self._load_bins()
@@ -290,6 +290,10 @@ class KnowledgeBaseBuilder:
 
             progress.update(task, description="Classifying CAZymes")
             self._classify_cazymes()
+            progress.advance(task)
+
+            progress.update(task, description="Validating defense systems")
+            self._validate_defense_systems()
             progress.advance(task)
 
             progress.update(task, description="Finalizing")
@@ -1049,6 +1053,59 @@ class KnowledgeBaseBuilder:
         except Exception as e:
             logger.warning(f"CAZyme classification failed: {e}")
             console.print(f"  [yellow]CAZyme classification failed: {e}[/yellow]")
+
+    # --- defense system validation ---------------------------------------- #
+    def _validate_defense_systems(self) -> None:
+        """Run MacSyFinder co-localization validation on DefenseFinder HMM hits.
+
+        Requires Astra DefenseFinder output with --write_macsyfinder (macsyfinder_compat/).
+        Skipped gracefully if the macsyfinder_compat directory is absent.
+        """
+        # Check if macsyfinder_compat exists
+        macsyfinder_dir = self.outputs.stage04_dir / "defensefinder_results" / "macsyfinder_compat"
+        if not macsyfinder_dir.exists():
+            console.print("  No macsyfinder_compat directory found, skipping defense system validation")
+            console.print("  [dim](Re-run stage 04 with DefenseFinder --write_macsyfinder to enable)[/dim]")
+            return
+
+        # Commit current changes so validation script can read them
+        self.conn.commit()
+
+        console.print("  Running MacSyFinder co-localization validation...")
+
+        try:
+            import sys as _sys
+            scripts_dir = Path(__file__).resolve().parents[2] / "scripts"
+            _sys.path.insert(0, str(scripts_dir))
+
+            from validate_defense_systems import validate_defense_systems, integrate_results
+
+            data_dir = self.db_path.parent
+
+            systems_df, genes_df = validate_defense_systems(
+                db_path=str(self.db_path),
+                data_dir=str(data_dir),
+                workers=4,
+                verbose=True,
+            )
+
+            if not systems_df.empty or not genes_df.empty:
+                integrate_results(self.db_path, systems_df, genes_df)
+                n_systems = len(systems_df)
+                n_genes = len(genes_df)
+                console.print(f"  Validated {n_systems} defense systems ({n_genes} genes)")
+            else:
+                console.print("  No defense systems validated")
+
+        except ImportError as e:
+            logger.warning(f"Could not import defense system validation: {e}")
+            console.print("  [yellow]Defense system validation skipped (missing dependencies)[/yellow]")
+        except FileNotFoundError as e:
+            logger.warning(f"MacSyFinder or models not found: {e}")
+            console.print("  [yellow]Defense system validation skipped (macsyfinder not found)[/yellow]")
+        except Exception as e:
+            logger.warning(f"Defense system validation failed: {e}")
+            console.print(f"  [yellow]Defense system validation failed: {e}[/yellow]")
 
     # --- indexes/stats -------------------------------------------------- #
     def _create_indexes(self) -> None:

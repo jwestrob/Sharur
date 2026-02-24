@@ -136,6 +136,25 @@ CREATE TABLE IF NOT EXISTS protein_scores (
 );
 CREATE INDEX IF NOT EXISTS idx_protein_scores_interest ON protein_scores(interest_score DESC);
 
+-- Defense system validation (MacSyFinder co-localization)
+CREATE TABLE IF NOT EXISTS defense_systems (
+    system_id VARCHAR PRIMARY KEY,
+    genome_id VARCHAR,
+    system_type VARCHAR,
+    system_subtype VARCHAR,
+    activity VARCHAR,
+    genes_count INTEGER,
+    protein_ids VARCHAR,
+    profile_names VARCHAR,
+    sys_beg VARCHAR,
+    sys_end VARCHAR,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (genome_id) REFERENCES bins(bin_id)
+);
+CREATE INDEX IF NOT EXISTS idx_defense_systems_genome ON defense_systems(genome_id);
+CREATE INDEX IF NOT EXISTS idx_defense_systems_type ON defense_systems(system_type);
+
 -- Refs for expand() pagination
 CREATE TABLE IF NOT EXISTS refs (
     ref_id VARCHAR PRIMARY KEY,

@@ -384,6 +384,42 @@ class PredicateGenerator:
             # General defense marker
             predicates.add("defensefinder_annotated")
 
+        elif source == "defensefinder_system":
+            # System-validated DefenseFinder annotations (MacSyFinder co-localization)
+            # name is "system_type/system_subtype", accession is gene-level HMM name
+            sys_name = (ann.name or "").lower()
+
+            # All system-validated hits are genuine defense systems
+            predicates.add("defense_system")
+            predicates.add("defensefinder_annotated")
+
+            if self.include_direct_access:
+                predicates.add(f"defensefinder:{ann.accession or ''}")
+
+            # Restriction-modification
+            if "rm_" in sys_name or sys_name.startswith("rm"):
+                predicates.add("restriction_modification")
+
+            # CBASS
+            if "cbass" in sys_name:
+                predicates.add("cbass")
+
+            # Toxin-antitoxin (MazEF, DarTG, SanaTA, RosmerTA, PsyrTA, PfiAT, etc.)
+            if any(ta in sys_name for ta in ("mazef", "dartg", "sanata", "rosmerta", "psyrta", "pfiat", "abie")):
+                predicates.add("toxin_antitoxin")
+
+            # Abortive infection (Abi prefix, not substring — avoids "Gabija" etc.)
+            if sys_name.startswith("abi") or "/abi" in sys_name:
+                predicates.add("abortive_infection")
+
+            # CRISPR-Cas (unlikely without CasFinder, but handle if present)
+            if "cas" in sys_name or "crispr" in sys_name:
+                predicates.add("crispr_associated")
+
+            # BREX
+            if "brex" in sys_name:
+                predicates.add("brex")
+
         # Check for hypothetical annotations
         if self._is_hypothetical(ann):
             predicates.add("hypothetical")
