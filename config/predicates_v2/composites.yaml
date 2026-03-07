@@ -1,0 +1,170 @@
+# Composite predicate definitions.
+# Evaluated against a protein's atom set to derive higher-order predicates.
+#
+# DSL operators:
+#   has_atom: <atom_id>       - protein has this atom
+#   relation_in: [list]       - atom must have one of these relations
+#   relation: <relation>      - atom must have exactly this relation
+#   source_db: <db>           - atom must come from this source
+#   property_equals: {k: v}   - topology dict has key=value
+#   property_gte: {k: v}      - topology dict key >= value
+#   property_lte: {k: v}      - topology dict key <= value
+#   all_of: [conditions]      - all conditions must be true
+#   any_of: [conditions]      - at least one condition must be true
+#   none_of: [conditions]     - no condition may be true
+
+nife_hydrogenase_validated:
+  description: "NiFe hydrogenase confirmed by PFAM corroboration"
+  facet: activity
+  requires:
+    all_of:
+      - has_atom: nife_hydrogenase
+        relation_in: [implies, supports]
+      - has_atom: nickel_binding
+    none_of:
+      - has_atom: complex_I_subunit
+        relation: implies
+
+fefe_hydrogenase_validated:
+  description: "FeFe hydrogenase confirmed by PFAM corroboration"
+  facet: activity
+  requires:
+    all_of:
+      - has_atom: fefe_hydrogenase
+        relation_in: [implies, supports]
+    any_of:
+      - has_atom: iron_sulfur
+      - has_atom: iron_binding
+
+energy_conserving_hydrogenase:
+  description: "Group 4 NiFe hydrogenase (Ech/Mbh)"
+  facet: activity
+  requires:
+    any_of:
+      - has_atom: nife_group4
+      - has_atom: mbh_hydrogenase
+      - has_atom: ech_hydrogenase
+
+novel_membrane_protein:
+  description: "Unannotated protein with predicted TM helices"
+  facet: quality_flag
+  requires:
+    all_of:
+      - has_atom: unannotated
+      - has_atom: transmembrane_predicted
+
+giant_unannotated:
+  description: "Giant protein with no functional annotation"
+  facet: quality_flag
+  requires:
+    all_of:
+      - has_atom: giant
+      - has_atom: unannotated
+
+giant_multi_domain:
+  description: "Giant protein with multiple annotated domains"
+  facet: quality_flag
+  requires:
+    all_of:
+      - has_atom: giant
+      - has_atom: multi_domain
+
+defense_system_validated:
+  description: "Defense system confirmed by MacSyFinder co-localization"
+  facet: role
+  requires:
+    all_of:
+      - has_atom: defense_system
+        relation: implies
+        source_db: defensefinder_system
+
+crispr_validated:
+  description: "CRISPR-Cas system with validated components"
+  facet: role
+  requires:
+    all_of:
+      - has_atom: crispr_associated
+        relation_in: [implies, supports]
+
+restriction_modification_validated:
+  description: "RM system with validated components"
+  facet: role
+  requires:
+    all_of:
+      - has_atom: restriction_modification
+        relation_in: [implies, supports]
+      - has_atom: defense_system
+
+abc_transporter_complete:
+  description: "ABC transporter with ATPase domain"
+  facet: role
+  requires:
+    all_of:
+      - has_atom: abc_transporter
+      - has_atom: atp_binding
+
+polytopic_transporter:
+  description: "Multi-pass membrane transporter"
+  facet: role
+  requires:
+    all_of:
+      - has_atom: transporter
+      - has_atom: polytopic_membrane
+
+carbon_fixation_active:
+  description: "Active carbon fixation (RuBisCO + PRK)"
+  facet: activity
+  requires:
+    all_of:
+      - has_atom: rubisco
+      - has_atom: prk
+
+methanogenesis_confirmed:
+  description: "Methanogenesis confirmed by MCR complex"
+  facet: activity
+  requires:
+    all_of:
+      - has_atom: mcr_complex
+        relation_in: [implies, supports]
+
+nitrogen_fixation_confirmed:
+  description: "Nitrogen fixation with nitrogenase"
+  facet: activity
+  requires:
+    all_of:
+      - has_atom: nitrogenase
+        relation_in: [implies, supports]
+      - has_atom: nitrogen_fixation
+
+cellulosome_component:
+  description: "Protein with dockerin or cohesin domain"
+  facet: architecture
+  requires:
+    any_of:
+      - has_atom: dockerin
+      - has_atom: cohesin
+
+secretion_system_validated:
+  description: "Secretion system confirmed by TXSScan co-localization"
+  facet: role
+  requires:
+    all_of:
+      - has_atom: secretion_system
+        relation: implies
+        source_db: txsscan_system
+
+gc_outlier_unannotated:
+  description: "GC outlier with no annotations (possible HGT)"
+  facet: quality_flag
+  requires:
+    all_of:
+      - has_atom: gc_outlier
+      - has_atom: unannotated
+
+well_characterized:
+  description: "Protein with multiple annotation sources and high confidence"
+  facet: quality_flag
+  requires:
+    all_of:
+      - has_atom: well_annotated
+      - has_atom: multi_source

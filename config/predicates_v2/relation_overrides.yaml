@@ -1,0 +1,44 @@
+# Relation overrides for semantic atom generation.
+#
+# Source-level defaults determine the ClaimRelation for atoms
+# generated from each annotation source. Accession-level overrides
+# can promote/demote specific accessions.
+#
+# Relations: implies, supports, flags, excludes, unresolved
+
+source_defaults:
+  kegg: implies
+  pfam: supports
+  cazy: supports
+  vogdb: flags
+  vog: flags
+  hyddb: implies
+  defensefinder_system: implies
+  defensefinder: flags
+  txsscan_system: implies
+  txsscan: flags
+  cant_hyd: supports
+  # Internal/computed sources
+  _property: implies    # Size, GC — deterministic from data
+  _computed: implies    # Annotation status predicates
+
+# Accession-level overrides (promote or demote specific accessions)
+accession_overrides:
+  # NiFeSe_Hases — definitive NiFe hydrogenase marker
+  PF00374: implies
+  # Fe_hyd_lg_C — definitive FeFe hydrogenase marker
+  PF02906: implies
+  # Fe_hyd_SSU — definitive FeFe hydrogenase small subunit
+  PF02256: implies
+  # Complex1_49kDa — supports but context-dependent (could be hydrogenase OR Complex I)
+  PF00346: supports
+  # Complex1_30kDa — supports but context-dependent
+  PF00329: supports
+  # Urease alpha — definitive urease
+  PF00449: implies
+  # Molybdopterin — definitive molybdenum cofactor
+  PF00384: implies
+  # Radical_SAM — broad superfamily, flags not supports
+  PF04055: flags
+  # P-loop_NTPase — very broad superfamily
+  PF00005: supports  # ABC_tran is still specific enough for "supports"

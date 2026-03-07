@@ -1,0 +1,16 @@
+# Curated DUF -> function mappings.
+# Starts small, grows as agents curate unmapped DUFs via structural analysis.
+#
+# Format:
+#   DUF_ID:
+#     atom_id: semantic_tag
+#     facet: activity|role|architecture|localization
+#     relation: implies|supports|flags
+#     note: Human-readable justification
+#
+# Example:
+#   DUF1015:
+#     atom_id: kinase
+#     facet: activity
+#     relation: supports
+#     note: "SerK phosphotransferase fold (PDB 5X0K, E=1e-8)"

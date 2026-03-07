@@ -789,6 +789,7 @@ python -c "from sharur.predicates.mappings.pfam_map import PFAM_TO_PREDICATES, P
 - **Carbon fixation**: RuBisCO without PRK is NOT Calvin cycle (likely nucleotide salvage). `calvin_cycle` requires PRK.
 - **Methanogenesis**: Only MCR complex triggers; H4MPT enzymes alone are insufficient
 - **Topology**: pyTMHMM integration (optional: `pip install sharur[topology]`). TMbed planned for signal peptide prediction.
+- **Predicate V2 (shadow mode):** Typed semantic atoms with composite DSL. See `docs/predicates_v2.md` for API and config reference.
 
 ### PFAM Mapping Scaling
 
