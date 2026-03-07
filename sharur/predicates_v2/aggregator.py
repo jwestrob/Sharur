@@ -53,6 +53,10 @@ def aggregate_atoms(
                 unresolved_accessions.append(acc)
             continue
 
+        # Skip internal witness atoms — they're for compat layer only
+        if atom.atom_id.startswith("_source_witness:"):
+            continue
+
         key = (atom.facet.value, atom.atom_id)
         groups[key].append(atom)
 

@@ -162,7 +162,7 @@ class TestAtomGenerator:
 
         # No direct access predicates should appear as atoms
         for atom in atoms:
-            assert ":" not in atom.atom_id or atom.atom_id.startswith("unresolved:")
+            assert ":" not in atom.atom_id or atom.atom_id.startswith(("unresolved:", "_source_witness:"))
 
     def test_no_annotated_flag_atoms(self):
         """Should NOT include *_annotated atoms (handled as status)."""
@@ -196,7 +196,8 @@ class TestAtomGenerator:
         atoms = gen.generate_atoms(protein, annotations)
 
         # All annotation-derived atoms should carry the evidence values
-        ann_atoms = [a for a in atoms if a.source_db == "pfam"]
+        ann_atoms = [a for a in atoms if a.source_db == "pfam" and not a.atom_id.startswith("_source_witness:")]
+        assert len(ann_atoms) > 0
         for atom in ann_atoms:
             assert atom.evidence_evalue == 3.14e-42
             assert atom.evidence_score == 187.3

@@ -106,6 +106,27 @@ class AtomGenerator:
                     evidence_score=ann.score,
                 ))
 
+        # --- Source witness atoms ---
+        # Record which annotation sources were seen, even if all semantic
+        # atoms from that source are later stripped by validation.
+        # This lets the compat layer reconstruct *_annotated flags.
+        seen_sources = {ann.source.lower() for ann in annotations}
+        for source_db in seen_sources:
+            atoms.append(SemanticAtom(
+                protein_id=protein.protein_id,
+                atom_id=f"_source_witness:{source_db}",
+                facet=SemanticFacet.quality_flag,
+                relation=ClaimRelation.implies,
+                source_accession="_witness",
+                source_db=source_db,
+            ))
+
+        # --- Post-processing: hydrogenase validation ---
+        # Replicate V1's _validate_hydrogenase_calls: NiFe hydrogenase
+        # hits from HydDB are false positives when Complex I domains
+        # are present without PF00374 (NiFeSe_Hases).
+        atoms = self._validate_hydrogenase_atoms(atoms)
+
         return atoms
 
     def _atoms_from_annotation(
@@ -133,8 +154,9 @@ class AtomGenerator:
 
         # Meta-predicates that V1 emits per-annotation but are not
         # semantic mappings — they indicate annotation quality, not function.
+        # (hypothetical is kept — it flows through as a quality_flag atom)
         _META_PREDICATES = {
-            "confident_hit", "weak_hit", "hypothetical",
+            "confident_hit", "weak_hit",
         }
 
         for pred_id in v1_preds:
@@ -212,6 +234,32 @@ class AtomGenerator:
                 source_accession="_computed",
                 source_db="_computed",
             ))
+
+        return atoms
+
+    def _validate_hydrogenase_atoms(
+        self, atoms: list[SemanticAtom],
+    ) -> list[SemanticAtom]:
+        """Validate hydrogenase atoms against Complex I false positives.
+
+        Mirrors V1's _validate_hydrogenase_calls: if HydDB NiFe hit exists
+        but PF00374 (NiFeSe_Hases) is absent and Complex I domains are
+        present, remove hydrogenase-related atoms.
+        """
+        atom_ids = {a.atom_id for a in atoms}
+        source_accessions = {a.source_accession for a in atoms}
+
+        has_hyddb_nife = "nife_hydrogenase" in atom_ids
+        if not has_hyddb_nife:
+            return atoms
+
+        has_nifese_hases = "PF00374" in source_accessions
+        has_complex1 = "PF00346" in source_accessions or "PF00329" in source_accessions
+
+        if not has_nifese_hases and has_complex1:
+            # False positive — remove hydrogenase atoms
+            hydrogenase_atoms = {"nife_hydrogenase", "hydrogenase", "hydrogen_metabolism"}
+            atoms = [a for a in atoms if a.atom_id not in hydrogenase_atoms]
 
         return atoms
 

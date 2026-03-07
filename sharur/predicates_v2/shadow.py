@@ -72,7 +72,7 @@ def shadow_diff(
         v2_state = aggregate_atoms(pid, v2_atoms)
         composite_hits = evaluate_composites(v2_atoms, composites, v2_state.topology)
         v2_state.composite_predicates = composite_hits
-        v2_preds_flat = set(semantic_state_to_predicates(v2_state))
+        v2_preds_flat = set(semantic_state_to_predicates(v2_state, atoms=v2_atoms))
 
         # Compute diff
         # Filter out direct-access predicates from V1 (pfam:*, kegg:*, etc.)
