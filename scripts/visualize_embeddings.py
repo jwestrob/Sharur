@@ -52,7 +52,7 @@ def load_embeddings(db_path: str, limit: int = 10000) -> tuple[np.ndarray, list[
             sys.exit(1)
 
     db = lancedb.connect(str(lance_path))
-    table = db.open_table("embeddings")
+    table = db.open_table("protein_embeddings")
 
     # Read embeddings
     df = table.to_pandas()

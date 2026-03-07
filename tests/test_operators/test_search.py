@@ -9,7 +9,7 @@ from sharur.operators.base import SharurResult
 class TestSearchByPredicates:
     """Tests for search_by_predicates() operator."""
 
-    def test_returns_bennu_result(self, store):
+    def test_returns_sharur_result(self, store):
         """search_by_predicates() should return a SharurResult."""
         result = search_by_predicates(store, has=["giant"])
         assert isinstance(result, SharurResult)
@@ -59,7 +59,7 @@ class TestSearchByPredicates:
 class TestSearchProteins:
     """Tests for search_proteins() operator."""
 
-    def test_returns_bennu_result(self, store):
+    def test_returns_sharur_result(self, store):
         """search_proteins() should return a SharurResult."""
         result = search_proteins(store)
         assert isinstance(result, SharurResult)

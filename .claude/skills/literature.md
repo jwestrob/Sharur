@@ -141,7 +141,7 @@ Systematic literature and database research to resolve functional ambiguity, int
    present = b.store.execute(f"""
        SELECT DISTINCT accession FROM annotations
        WHERE accession IN ({','.join(f"'{k}'" for k in module_kos)})
-   """).fetchall()
+   """)
    ```
 
 **Caveats for divergent organisms:**

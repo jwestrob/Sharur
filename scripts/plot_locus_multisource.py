@@ -343,7 +343,7 @@ def plot_locus(
     # Check for CRISPR arrays in region
     crispr_arrays = db.execute(
         """SELECT locus_id, start, end_coord FROM loci
-           WHERE contig_id = ? AND locus_type = 'crispr_array'
+           WHERE contig_id = ? AND locus_type = 'crispr'
            AND start <= ? AND end_coord >= ?""",
         [contig_id, max_coord + 1000, min_coord - 1000]
     ).fetchall()

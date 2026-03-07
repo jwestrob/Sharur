@@ -139,7 +139,7 @@ padloc_systems = b.store.execute("""
     WHERE a.source = 'padloc'
     GROUP BY a.accession, a.name, a.description
     ORDER BY n_proteins DESC
-""").fetchall()
+""")
 
 if padloc_systems:
     print("\nPADLOC Systems:")
@@ -156,13 +156,13 @@ Compare DefenseFinder/PADLOC system-level calls with predicate-based detection t
 pred_defense = b.store.execute("""
     SELECT COUNT(DISTINCT protein_id) FROM protein_predicates
     WHERE 'defense_system' = ANY(predicates)
-""").fetchone()[0]
+""")[0][0]
 
 # DefenseFinder protein count
 df_defense = b.store.execute("""
     SELECT COUNT(DISTINCT protein_id) FROM annotations
     WHERE source = 'defensefinder'
-""").fetchone()[0]
+""")[0][0]
 
 print(f"Defense proteins (predicates): {pred_defense}")
 print(f"Defense proteins (DefenseFinder): {df_defense}")
@@ -178,7 +178,7 @@ if df_defense > 0:
             WHERE 'defense_system' = ANY(predicates)
           )
         LIMIT 10
-    """).fetchall()
+    """)
     if missing_from_preds:
         print(f"\nDefenseFinder hits NOT in defense predicates ({len(missing_from_preds)} shown):")
         for pid, name, acc in missing_from_preds:
@@ -405,7 +405,7 @@ defense_load = b.store.execute("""
     LEFT JOIN protein_predicates pp ON p.protein_id = pp.protein_id
     GROUP BY p.bin_id
     ORDER BY n_defense DESC
-""").fetchall()
+""")
 
 for genome, n_defense, n_total in defense_load:
     pct = n_defense / n_total * 100 if n_total > 0 else 0
@@ -447,7 +447,7 @@ for i, dt1 in enumerate(defense_types):
                 JOIN protein_predicates pp2 ON p2.protein_id = pp2.protein_id
                 WHERE '{dt2}' = ANY(pp2.predicates)
               )
-        """).fetchone()[0]
+        """)[0][0]
         print(f"  {dt1} + {dt2}: {both} genomes")
 ```
 
@@ -471,7 +471,7 @@ proteins = b.store.execute("""
     FROM proteins
     WHERE gene_index IS NOT NULL
     ORDER BY contig_id, gene_index
-""").fetchall()
+""")
 
 # Build contig -> gene list
 contig_genes = defaultdict(list)
@@ -486,7 +486,7 @@ df_annots = b.store.execute("""
     SELECT protein_id, accession, name, description
     FROM annotations
     WHERE source = 'defensefinder'
-""").fetchall()
+""")
 
 # Index by protein_id
 protein_defense = defaultdict(list)
@@ -634,7 +634,7 @@ def write_defense_loci(islands, locus_type="defense_island", clear_existing=True
     if clear_existing:
         existing = b.store.execute(
             "SELECT COUNT(*) FROM loci WHERE locus_type = ?", [locus_type]
-        ).fetchone()[0]
+        )[0][0]
         if existing > 0:
             print(f"Clearing {existing} existing {locus_type} loci")
             b.store.execute("""
@@ -681,7 +681,7 @@ def write_defense_loci(islands, locus_type="defense_island", clear_existing=True
 write_defense_loci(all_islands, locus_type="defense_island")
 ```
 
-**IMPORTANT:** Use `locus_type='defense_island'` (not `'island'`). The Omnitrophota dataset used `'island'` historically but `'defense_island'` is the correct convention going forward. Do NOT touch existing loci of other types (crispr_array, prophage, viral_contig).
+**IMPORTANT:** Use `locus_type='defense_island'` (not `'island'`). The Omnitrophota dataset used `'island'` historically but `'defense_island'` is the correct convention going forward. Do NOT touch existing loci of other types (crispr, prophage, viral_contig).
 
 ### Step 14: Characterize Defense Islands
 
@@ -696,7 +696,7 @@ def characterize_defense_islands():
         JOIN locus_proteins lp ON l.locus_id = lp.locus_id
         WHERE l.locus_type = 'defense_island'
         GROUP BY l.locus_id, l.contig_id, l.confidence, l.metadata
-    """).fetchall()
+    """)
 
     print(f"\n=== DEFENSE ISLAND CHARACTERIZATION ===")
     print(f"Total defense islands: {len(loci)}")
@@ -731,9 +731,9 @@ def characterize_defense_islands():
         WHERE l.locus_type = 'defense_island'
         GROUP BY p.bin_id
         ORDER BY n_islands DESC
-    """).fetchall()
+    """)
 
-    n_genomes = b.store.execute("SELECT COUNT(DISTINCT bin_id) FROM proteins").fetchone()[0]
+    n_genomes = b.store.execute("SELECT COUNT(DISTINCT bin_id) FROM proteins")[0][0]
     print(f"\nGenomes with defense islands: {len(genome_dist)}/{n_genomes} ({len(genome_dist)/n_genomes*100:.1f}%)")
 
     return loci, system_counts, genome_dist
@@ -749,7 +749,7 @@ Defense systems often accumulate near prophage insertion sites. If prophage loci
 # Check if prophage loci exist
 prophage_count = b.store.execute("""
     SELECT COUNT(*) FROM loci WHERE locus_type = 'prophage'
-""").fetchone()[0]
+""")[0][0]
 
 if prophage_count > 0:
     # Find defense islands within 20 genes of a prophage
@@ -776,7 +776,7 @@ if prophage_count > 0:
         FROM defense_bounds db
         JOIN prophage_bounds pb ON db.contig_id = pb.contig_id
             AND (ABS(db.d_start - pb.p_end) <= 20 OR ABS(pb.p_start - db.d_end) <= 20)
-    """).fetchall()
+    """)
 
     n_defense_near_prophage = len(set(r[0] for r in colocalized))
     n_prophage_near_defense = len(set(r[1] for r in colocalized))
@@ -811,12 +811,12 @@ def visualize_defense_island(locus_id, label, description):
         WHERE lp.locus_id = ?
         ORDER BY lp.position
         LIMIT 1 OFFSET (SELECT COUNT(*)/2 FROM locus_proteins WHERE locus_id = ?)
-    """, [locus_id, locus_id]).fetchone()
+    """, [locus_id, locus_id])
 
     if center:
         locus_size = b.store.execute(
             "SELECT COUNT(*) FROM locus_proteins WHERE locus_id = ?", [locus_id]
-        ).fetchone()[0]
+        )[0][0]
         window = max(locus_size // 2 + 5, 12)
 
         b.visualize_neighborhood(

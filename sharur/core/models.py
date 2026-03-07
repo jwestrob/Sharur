@@ -29,6 +29,16 @@ class AnnotationSource(str, Enum):
     TIGR = "tigr"
     EGGNOG = "eggnog"
     INTERPRO = "interpro"
+    HYDDB = "hyddb"
+    DEFENSEFINDER = "defensefinder"
+    DEFENSEFINDER_SYSTEM = "defensefinder_system"
+    VOGDB = "vogdb"
+    CANT_HYD = "cant_hyd"
+    TXSSCAN = "txsscan"
+    TXSSCAN_SYSTEM = "txsscan_system"
+    PFAM_RELAXED = "pfam_relaxed"
+    FOLDSEEK = "foldseek"
+    CRISPR = "crispr"
     CUSTOM = "custom"
 
 
@@ -40,6 +50,9 @@ class LocusType(str, Enum):
     CRISPR = "crispr"
     OPERON = "operon"
     ISLAND = "island"  # Genomic island
+    DEFENSE_ISLAND = "defense_island"  # Defense system island
+    VIRAL_CONTIG = "viral_contig"  # Misbinned phage contig
+    METABOLIC = "metabolic"  # Metabolic pathway cluster
     TRANSPOSON = "transposon"
     CUSTOM = "custom"
 

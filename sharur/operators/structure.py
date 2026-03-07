@@ -107,7 +107,7 @@ def predict_structure(
             if output_path is None:
                 # Use a safe filename
                 safe_name = "".join(c if c.isalnum() or c in "_-" else "_" for c in protein_id[:40])
-                output_path = f"/tmp/bennu_structure_{safe_name}.pdb"
+                output_path = f"/tmp/sharur_structure_{safe_name}.pdb"
 
             result.to_pdb(output_path)
 
@@ -190,7 +190,7 @@ def predict_structure_from_sequence(
             plddt = result.plddt.mean() if result.plddt is not None else None
 
             if output_path is None:
-                output_path = f"/tmp/bennu_structure_{name[:30]}.pdb"
+                output_path = f"/tmp/sharur_structure_{name[:30]}.pdb"
 
             result.to_pdb(output_path)
 
@@ -240,7 +240,7 @@ def batch_predict_structures(
             return ctx.make_result(data=error, rows=0)
 
         if output_dir is None:
-            output_dir = "/tmp/bennu_structures"
+            output_dir = "/tmp/sharur_structures"
         Path(output_dir).mkdir(parents=True, exist_ok=True)
 
         # Get sequences

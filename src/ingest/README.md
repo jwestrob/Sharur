@@ -32,7 +32,7 @@ That is the complete standard pipeline. Stage 07 auto-discovers all `stage*` dir
 Optional post-pipeline step:
 ```bash
 # Stage 06: ESM2 embeddings (GPU recommended; CPU works but 10-20x slower)
-python src/ingest/06_esm2_embeddings.py data/$DATASET/sharur.duckdb data/$DATASET/embeddings/
+python src/ingest/06_esm2_embeddings.py data/$DATASET/stage03_prodigal data/$DATASET/embeddings/
 ```
 
 ---
@@ -191,6 +191,16 @@ That is all you need. The five default databases cover all standard annotation:
 | DefenseFinder | Defense systems (CRISPR Cas proteins, RM, CBASS, etc.) | `--cut_ga` (permissive; Stage 07 applies e-value 1e-15 filter) |
 | dbCAN | CAZyme domain HMMs | No GA; Stage 07 applies e-value filter |
 
+**Non-default databases (opt-in via `-d`):**
+
+| Database | What it annotates | Cutoff strategy |
+|----------|-------------------|-----------------|
+| TXSScan | Secretion systems (T1SS–T9SS, T4P, Tad, Flagellum, MSH, ComM) | No GA; Stage 07 applies e-value 1e-10 filter |
+| VOGdb | Viral ortholog groups | No GA; requires e-value 1e-15 filter |
+| CANT-HYD | Hydrocarbon degradation markers | No GA; e-value 1e-10 filter |
+
+DefenseFinder and TXSScan automatically produce `--write_macsyfinder` output for downstream MacSyFinder co-localization validation in Stage 07.
+
 **Important options:**
 
 | Flag | Default | Description |
@@ -211,6 +221,16 @@ That is all you need. The five default databases cover all standard annotation:
 > - CRISPRCasFinder in Astra detects Cas protein domains, not CRISPR arrays. DefenseFinder is better for Cas proteins, and MinCED (Stage 05c) handles array detection.
 > - CANT-HYD is specialized and only needed for specific hydrocarbon degradation analysis.
 > These databases can be added for specialized analyses, but they are not standard pipeline databases.
+
+> **TXSScan (secretion systems) is available but NOT a default database.**
+> Add `-d TXSScan` alongside the defaults to enable secretion system detection (T1SS–T9SS,
+> T4P, Tad, Flagellum, MSH, ComM). Requires repeated `-d` flags for all databases:
+> ```bash
+> python src/ingest/04_astra_scan.py -i ... -o ... -t 12 \
+>     -d PFAM -d KOFAM -d HydDB -d DefenseFinder -d dbCAN -d TXSScan
+> ```
+> Stage 07 automatically validates TXSScan hits via MacSyFinder co-localization when
+> `txsscan_results/macsyfinder_compat/` exists.
 
 **Common errors:**
 - "Protein symlink directory not found" -- run Stage 03 first.
@@ -255,7 +275,7 @@ python src/ingest/minced_crispr.py -i data/DATASET/stage00_prepared -o data/DATA
 
 ### Stage 07: Build Knowledge Base (`07_build_knowledge_base.py`)
 
-**What it does:** Consolidates all upstream outputs into a single DuckDB database. Auto-discovers stage directories under the data directory. Loads proteins, annotations, CRISPR arrays, BGC loci (if present), generates predicates, classifies hydrogenases (if HydDB annotations exist), and runs dbCAN 3-tool consensus CAZyme classification.
+**What it does:** Consolidates all upstream outputs into a single DuckDB database. Auto-discovers stage directories under the data directory. Loads proteins, annotations, CRISPR arrays, BGC loci (if present), generates predicates, classifies hydrogenases (if HydDB annotations exist), runs dbCAN 3-tool consensus CAZyme classification, and validates defense/secretion systems via MacSyFinder co-localization (if macsyfinder_compat output exists).
 
 **Required inputs:** Data directory containing at minimum `stage03_prodigal/` and `stage04_astra/`. Loads additional data from any other stage directories that exist.
 
@@ -299,7 +319,9 @@ python src/ingest/07_build_knowledge_base.py -d data/DATASET -o data/DATASET/sha
 8. Flags proteins overlapping CRISPR arrays
 9. Runs HydDB subgroup classification (if HydDB annotations exist)
 10. Runs dbCAN 3-tool consensus CAZyme classification (DIAMOND + dbCAN.hmm + dbCAN-sub.hmm)
-11. Creates indexes
+11. Validates DefenseFinder hits via MacSyFinder co-localization (if `defensefinder_results/macsyfinder_compat/` exists) → `defense_systems` table + `defensefinder_system` annotations
+12. Validates TXSScan hits via MacSyFinder co-localization (if `txsscan_results/macsyfinder_compat/` exists) → `secretion_systems` table + `txsscan_system` annotations
+13. Creates indexes
 
 **E-value thresholds applied at load time:**
 
@@ -309,6 +331,7 @@ python src/ingest/07_build_knowledge_base.py -d data/DATASET -o data/DATASET/sha
 | kegg | 1e-5 | Safety net; already clean via `--cut_ga --cascade` |
 | hyddb | 1e-5 | Safety net; already clean via `--cut_ga` |
 | defensefinder | 1e-15 | Strict; superfamily HMMs are permissive at GA threshold |
+| txsscan | 1e-10 | No GA thresholds; secretion system HMMs |
 | vogdb | 1e-15 | No GA thresholds; e-value filter required |
 | cant_hyd | 1e-10 | No `--cut_ga` |
 | cazy | 1e-5 | dbCAN has own thresholds |
@@ -340,10 +363,10 @@ Biosynthetic gene cluster detection using GECCO. Stage 07 loads results from `st
 
 ### Stage 06: ESM2 Embeddings (`06_esm2_embeddings.py`)
 
-Generates 320-dimensional protein embeddings using ESM2. Requires PyTorch, Transformers, and LanceDB. GPU recommended. Run after Stage 07 (needs the DuckDB database).
+Generates 320-dimensional protein embeddings using ESM2. Requires PyTorch, Transformers, and LanceDB. GPU recommended. Can run any time after Stage 03 (reads .faa files from the Prodigal output directory, does NOT need the DuckDB database).
 
 ```bash
-python src/ingest/06_esm2_embeddings.py data/DATASET/sharur.duckdb data/DATASET/embeddings/
+python src/ingest/06_esm2_embeddings.py data/DATASET/stage03_prodigal data/DATASET/embeddings/
 ```
 
 ---
@@ -361,6 +384,8 @@ After a successful pipeline run, `sharur.duckdb` contains:
 | `loci` | `locus_id`, `locus_type`, `contig_id`, `start`, `end_coord` | CRISPR arrays, BGCs |
 | `locus_proteins` | `locus_id`, `protein_id`, `position` | Protein membership in loci |
 | `protein_predicates` | `protein_id`, `predicates` (list) | Semantic predicate tags |
+| `defense_systems` | `system_id`, `genome_id`, `system_type`, `protein_ids` | MacSyFinder-validated defense systems (if DefenseFinder ran) |
+| `secretion_systems` | `system_id`, `genome_id`, `system_type`, `protein_ids` | MacSyFinder-validated secretion systems (if TXSScan ran) |
 | `feature_store` | `protein_id`, `metric_name`, `metric_value` | Computed metrics (length z-score) |
 
 **Query conventions (for downstream agents):**
@@ -433,6 +458,6 @@ Reduce batch size in the embeddings script, or use CPU (10-20x slower but works)
 - GPU recommended
 
 ### Astra Installed Databases (`~/.config/Astra/`)
-PFAM, KOFAM, VOGdb, HydDB, DefenseFinder, CRISPRCasFinder, CANT-HYD, dbCAN, padloc
+PFAM, KOFAM, VOGdb, HydDB, DefenseFinder, CRISPRCasFinder, CANT-HYD, dbCAN, padloc, TXSScan
 
-Note: Not all installed databases are used in the standard pipeline. Only PFAM, KOFAM, HydDB, DefenseFinder, and dbCAN are defaults.
+Note: Not all installed databases are used in the standard pipeline. Only PFAM, KOFAM, HydDB, DefenseFinder, and dbCAN are defaults. TXSScan is available as a non-default opt-in.

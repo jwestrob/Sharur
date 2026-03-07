@@ -197,7 +197,7 @@ def _run_macsyfinder_on_dir(
 
     try:
         proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=300
+            cmd, capture_output=True, text=True, timeout=600
         )
     except subprocess.TimeoutExpired:
         logger.warning(f"  MacSyFinder timed out for {genome_dir.name}")

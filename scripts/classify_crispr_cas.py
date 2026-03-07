@@ -569,7 +569,7 @@ def classify_crispr_cas(
     # Get CRISPR array coordinates
     array_coords = []
     for row in db.execute("""
-        SELECT contig_id, start, end_coord FROM loci WHERE locus_type = 'crispr_array'
+        SELECT contig_id, start, end_coord FROM loci WHERE locus_type = 'crispr'
     """).fetchall():
         array_coords.append((row[0], row[1], row[2]))
 

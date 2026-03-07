@@ -81,16 +81,16 @@ result = b.batch_predict_structures(
 rows = b.store.execute("""
     SELECT protein_id, sequence, sequence_length
     FROM proteins WHERE protein_id = ?
-""", [protein_id]).fetchone()
+""", [protein_id])
 
-if rows[2] > 1024:
+if rows[0][2] > 1024:
     # Option 1: ESMFold server (up to 2048 aa, sometimes longer)
     # https://esmatlas.com/resources?action=fold
     # Option 2: Local ESMFold on H200/A100 (no length limit with enough VRAM)
     # Option 3: AlphaFold2 via ColabFold
     with open(f"structures/{protein_id}.fasta", "w") as f:
-        f.write(f">{protein_id}\n{rows[1]}\n")
-    print(f"Exported {rows[2]} aa FASTA for external folding")
+        f.write(f">{protein_id}\n{rows[0][1]}\n")
+    print(f"Exported {rows[0][2]} aa FASTA for external folding")
 ```
 
 ### pLDDT interpretation
@@ -217,9 +217,10 @@ Standard PFAM bitscore cutoffs (`--cut_ga`) are LENGTH-BIASED. Giant proteins (>
 python3 -c "
 from sharur.operators import Sharur
 b = Sharur('data/DATASET/sharur.duckdb')
-row = b.store.execute('''
+rows = b.store.execute('''
     SELECT protein_id, sequence FROM proteins WHERE protein_id = ?
-''', ['PROTEIN_ID']).fetchone()
+''', ['PROTEIN_ID'])
+row = rows[0]
 with open('/tmp/giant.faa', 'w') as f:
     f.write(f'>{row[0]}\n{row[1]}\n')
 "
@@ -269,13 +270,13 @@ annots = b.store.execute("""
     SELECT source, accession, name, score, evalue
     FROM annotations WHERE protein_id = ?
     ORDER BY evalue
-""", [protein_id]).fetchall()
+""", [protein_id])
 
 # 2. Check protein size
 info = b.store.execute("""
     SELECT sequence_length, bin_id FROM proteins WHERE protein_id = ?
-""", [protein_id]).fetchone()
-length = info[0]
+""", [protein_id])
+length = info[0][0]
 
 # 3. Get genomic neighborhood (context-first)
 print(b.get_neighborhood(protein_id, window=8, all_annotations=True))
@@ -291,7 +292,7 @@ if length <= 1024:
 else:
     # Export for external folding
     seq = b.store.execute("SELECT sequence FROM proteins WHERE protein_id = ?",
-        [protein_id]).fetchone()[0]
+        [protein_id])[0][0]
     with open(f"structures/{protein_id}.fasta", "w") as f:
         f.write(f">{protein_id}\n{seq}\n")
     print(f"Exported {length} aa for external folding (exceeds 1024 aa ESM3 limit)")

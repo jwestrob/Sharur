@@ -385,8 +385,8 @@ def search_foldseek_for_protein(
             # Check common locations using protein_id
             safe_name = "".join(c if c.isalnum() or c in "_-" else "_" for c in protein_id[:40])
             possible_paths = [
-                f"/tmp/bennu_structures/{safe_name}.pdb",
-                f"/tmp/bennu_structure_{safe_name}.pdb",
+                f"/tmp/sharur_structures/{safe_name}.pdb",
+                f"/tmp/sharur_structure_{safe_name}.pdb",
             ]
             for path in possible_paths:
                 if Path(path).exists():

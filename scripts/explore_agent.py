@@ -143,7 +143,7 @@ def run_focused_exploration(focus: str = "general", db_path: str = DEFAULT_DB):
     b = get_sharur(db_path)
 
     print("=" * 70)
-    print(f"BENNU EXPLORATION: {focus.upper()}")
+    print(f"SHARUR EXPLORATION: {focus.upper()}")
     print("=" * 70)
 
     # Overview

@@ -52,9 +52,9 @@ from sharur.operators import Sharur
 b = Sharur("data/my_dataset/sharur.duckdb")
 
 # Predicate search
-hydrogenases = b.search("nife_group3 AND bidirectional_hydrogenase")
-giants = b.search("giant AND unannotated")
-defense = b.search("crispr_associated OR restriction_modification")
+hydrogenases = b.search_by_predicates(has=["nife_group3", "bidirectional_hydrogenase"])
+giants = b.search_by_predicates(has=["giant", "unannotated"])
+defense = b.search_by_predicates(has=["crispr_associated"])
 
 # Genomic neighborhood (with all annotation sources)
 b.get_neighborhood(protein_id, window=10, all_annotations=True)
@@ -107,7 +107,7 @@ Sharur ships with skill specs in `.claude/skills/` that give Claude Code structu
 ## Project structure
 
 ```
-├── bennu/                 # Core package
+├── sharur/                # Core package
 │   ├── core/              # Data models, session state, types
 │   ├── storage/           # DuckDB store, vector store, schema, migrations
 │   ├── operators/         # Search, navigation, similarity, export, visualization

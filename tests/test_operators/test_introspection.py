@@ -9,7 +9,7 @@ from sharur.operators.base import SharurResult
 class TestOverview:
     """Tests for overview() operator."""
 
-    def test_returns_bennu_result(self, store):
+    def test_returns_sharur_result(self, store):
         """overview() should return a SharurResult."""
         result = overview(store)
         assert isinstance(result, SharurResult)
@@ -48,7 +48,7 @@ class TestOverview:
 class TestDescribeSchema:
     """Tests for describe_schema() operator."""
 
-    def test_returns_bennu_result(self, store):
+    def test_returns_sharur_result(self, store):
         """describe_schema() should return a SharurResult."""
         result = describe_schema(store)
         assert isinstance(result, SharurResult)

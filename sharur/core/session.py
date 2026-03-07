@@ -1,5 +1,5 @@
 """
-Exploration session state (Part 5 of BENNU_PROJECT_SEED).
+Exploration session state.
 
 Tracks working sets, focus stack, hypotheses, and provenance, and exposes
 handles to the DuckDB store and optional vector store.

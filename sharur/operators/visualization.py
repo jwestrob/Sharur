@@ -189,7 +189,7 @@ def visualize_neighborhood(
                     """SELECT locus_id, start, end_coord, metadata
                        FROM loci
                        WHERE contig_id = ?
-                         AND locus_type = 'crispr_array'
+                         AND locus_type = 'crispr'
                          AND start <= ? AND end_coord >= ?""",
                     [contig_id, expanded_max, expanded_min],
                 )
@@ -272,7 +272,7 @@ def visualize_neighborhood(
 
         # Save or return path
         if output_path is None:
-            output_path = f"/tmp/bennu_neighborhood_{protein_id[:30]}.png"
+            output_path = f"/tmp/sharur_neighborhood_{protein_id[:30]}.png"
 
         plt.tight_layout()
         plt.savefig(output_path, dpi=150, bbox_inches='tight')
@@ -329,14 +329,12 @@ def visualize_domain_architecture(
         length = protein[0][0]
 
         # Get PFAM domain annotations with coordinates
-        # Note: This assumes annotations have domain coordinates stored
-        # If not available, we'll create a simple representation
         annotations = store.execute(
             """
-            SELECT name, accession, description
+            SELECT name, accession, description, start_aa, end_aa
             FROM annotations
             WHERE protein_id = ? AND source = 'pfam'
-            ORDER BY evalue NULLS LAST
+            ORDER BY start_aa NULLS LAST, evalue NULLS LAST
             """,
             [protein_id],
         )
@@ -347,25 +345,46 @@ def visualize_domain_architecture(
                 rows=0,
             )
 
-        # Create features (evenly spaced if no coordinates)
-        features = []
-        n_domains = len(annotations)
-        segment_length = length // (n_domains + 1)
+        # Check if we have real coordinates
+        has_coords = any(row[3] is not None and row[4] is not None for row in annotations)
 
+        features = []
         colors = ['#2196F3', '#4CAF50', '#FF9800', '#9C27B0', '#E91E63', '#00BCD4']
 
-        for i, (name, accession, description) in enumerate(annotations):
-            start = (i + 1) * segment_length - segment_length // 2
-            end = start + segment_length // 2
-            features.append(
-                GraphicFeature(
-                    start=start,
-                    end=min(end, length),
-                    strand=0,
-                    color=colors[i % len(colors)],
-                    label=f"{name}\n{accession}",
+        if has_coords:
+            # Use actual domain coordinates
+            for i, (name, accession, description, start_aa, end_aa) in enumerate(annotations):
+                if start_aa is not None and end_aa is not None:
+                    feat_start, feat_end = start_aa, end_aa
+                else:
+                    # Fallback for domains missing coords within a mostly-coordinated set
+                    feat_start = (i + 1) * (length // (len(annotations) + 1))
+                    feat_end = feat_start + 50
+                features.append(
+                    GraphicFeature(
+                        start=feat_start,
+                        end=min(feat_end, length),
+                        strand=0,
+                        color=colors[i % len(colors)],
+                        label=f"{name}\n{accession}",
+                    )
                 )
-            )
+        else:
+            # Evenly space if no coordinates available
+            n_domains = len(annotations)
+            segment_length = length // (n_domains + 1)
+            for i, (name, accession, description, _, _) in enumerate(annotations):
+                start = (i + 1) * segment_length - segment_length // 2
+                end = start + segment_length // 2
+                features.append(
+                    GraphicFeature(
+                        start=start,
+                        end=min(end, length),
+                        strand=0,
+                        color=colors[i % len(colors)],
+                        label=f"{name}\n{accession}",
+                    )
+                )
 
         record = GraphicRecord(
             sequence_length=length,
@@ -377,7 +396,7 @@ def visualize_domain_architecture(
         ax.set_title(f"Domain Architecture: {protein_id[:50]}... ({length} aa)", fontsize=10)
 
         if output_path is None:
-            output_path = f"/tmp/bennu_domains_{protein_id[:30]}.png"
+            output_path = f"/tmp/sharur_domains_{protein_id[:30]}.png"
 
         plt.tight_layout()
         plt.savefig(output_path, dpi=150, bbox_inches='tight')

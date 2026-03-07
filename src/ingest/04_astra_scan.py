@@ -74,10 +74,10 @@ def run_single_astra_scan(database: str, protein_symlink_dir: Path, output_dir: 
         # still needed as a safety net).
         if use_cutoffs and database.upper() in ["PFAM", "HYDDB", "DEFENSEFINDER"]:
             cmd.append("--cut_ga")
-        # DefenseFinder: also write MacSyFinder-compatible hmmsearch output
-        # so downstream validation (validate_defense_systems.py) can run
-        # MacSyFinder --previous-run for co-localization filtering.
-        if database.upper() == "DEFENSEFINDER":
+        # DefenseFinder / TXSScan: also write MacSyFinder-compatible hmmsearch
+        # output so downstream validation can run MacSyFinder --previous-run
+        # for co-localization filtering.
+        if database.upper() in ("DEFENSEFINDER", "TXSSCAN"):
             cmd.append("--write_macsyfinder")
         # KOFAM requires --cascade to apply per-profile adaptive thresholds
         # (--cut_ga alone uses a single global threshold which is wrong for KOFAM)

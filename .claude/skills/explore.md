@@ -86,7 +86,7 @@ Append-only JSONL. Each line is a JSON object with **mandatory provenance fields
   "location": "contig_id:start-end",
   "priority": "high",
   "provenance": {
-    "query": "b.store.execute(\"SELECT COUNT(*) FROM annotations a JOIN proteins p ON a.protein_id = p.protein_id WHERE a.accession = 'PF01396' AND p.bin_id = 'GCA_018260655'\").fetchone()",
+    "query": "b.store.execute(\"SELECT COUNT(*) FROM annotations a JOIN proteins p ON a.protein_id = p.protein_id WHERE a.accession = 'PF01396' AND p.bin_id = 'GCA_018260655'\")[0][0]",
     "raw_result": [18],
     "accession_verified": "PF01396 = 'CRISPR_assoc' (name confirmed in database)",
     "interpretation": "18 CRISPR-associated proteins in genome GCA_018260655"
@@ -1268,7 +1268,7 @@ co_annots = b.store.execute("""
       AND a2.accession != 'K23108'  -- exclude self
     GROUP BY a2.source, a2.accession, a2.name
     ORDER BY n DESC LIMIT 10
-""").fetchall()
+""")
 # If top co-annotations are from a DIFFERENT enzyme family → superfamily cross-hit
 ```
 
@@ -1375,7 +1375,7 @@ result = subprocess.run(
 # STEP 1: Verify the accession name in the database
 name_check = b.store.execute("""
     SELECT DISTINCT name FROM annotations WHERE accession = 'PF04055'
-""").fetchall()
+""")
 print(f"PF04055 = {name_check}")  # → [('Radical_SAM',)]
 # If the name doesn't match your assumption, STOP. Your claim is wrong.
 

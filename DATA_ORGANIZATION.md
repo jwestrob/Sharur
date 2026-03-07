@@ -97,12 +97,13 @@ python scripts/ingest_protein_fasta.py \
 python -c "
 from sharur.operators import Sharur
 b = Sharur('data/${NEW_ORGANISM}_production/sharur.duckdb')
-b.regenerate_predicates()
+# Regenerate predicates using the script:
+# python scripts/regenerate_predicates.py data/${NEW_ORGANISM}_production/sharur.duckdb
 "
 
 # Step 4: Generate embeddings (ESM2)
 python src/ingest/06_esm2_embeddings.py \
-  data/${NEW_ORGANISM}_production/sharur.duckdb \
+  data/${NEW_ORGANISM}_production/stage03_prodigal \
   data/${NEW_ORGANISM}_production/embeddings/
 ```
 

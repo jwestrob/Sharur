@@ -102,8 +102,9 @@ import pandas as pd
 
 db = duckdb.connect('data/${DATASET}/sharur.duckdb')
 pfam = pd.read_csv('data/${DATASET}/annotations/pfam_results/PFAM_hits_df.tsv', sep='\t')
-pfam.columns = ['protein_id', 'annotation_id', 'evalue', 'score', 'bias']  # Adjust if needed
-db.execute('INSERT INTO annotations SELECT * FROM pfam')
+pfam.columns = ['protein_id', 'accession', 'evalue', 'score', 'bias']  # Adjust if needed
+# Note: annotations table schema is (annotation_id, protein_id, source, accession, name, description, evalue, score, start_aa, end_aa)
+# Use Stage 07 (07_build_knowledge_base.py) for proper loading instead of manual INSERT
 db.close()
 "
 
@@ -114,8 +115,9 @@ import pandas as pd
 
 db = duckdb.connect('data/${DATASET}/sharur.duckdb')
 kegg = pd.read_csv('data/${DATASET}/annotations/kofam_results/KOFAM_hits_df.tsv', sep='\t')
-kegg.columns = ['protein_id', 'annotation_id', 'evalue', 'score', 'bias']
-db.execute('INSERT INTO annotations SELECT * FROM kegg')
+kegg.columns = ['protein_id', 'accession', 'evalue', 'score', 'bias']
+# Note: annotations table schema is (annotation_id, protein_id, source, accession, name, description, evalue, score, start_aa, end_aa)
+# Use Stage 07 (07_build_knowledge_base.py) for proper loading instead of manual INSERT
 db.close()
 "
 
@@ -133,8 +135,10 @@ python -c "
 from sharur.operators import Sharur
 b = Sharur('data/${DATASET}/sharur.duckdb')
 print('Generating predicates from annotations...')
-b.regenerate_predicates()  # Uses PFAM, KEGG, HydDB, VOGdb
-print(f'Generated {len(b.list_predicates())} unique predicates')
+# Use the regenerate_predicates script instead:
+# python scripts/regenerate_predicates.py data/${DATASET}/sharur.duckdb
+from sharur.predicates.vocabulary import ALL_PREDICATES
+print(f'Vocabulary contains {len(ALL_PREDICATES)} defined predicates')
 "
 ```
 
@@ -146,7 +150,7 @@ print(f'Generated {len(b.list_predicates())} unique predicates')
 
 ```bash
 python src/ingest/06_esm2_embeddings.py \
-  data/${DATASET}/sharur.duckdb \
+  data/${DATASET}/stage03_prodigal \
   data/${DATASET}/embeddings/
 ```
 
@@ -163,10 +167,14 @@ python -c "
 from sharur.operators import Sharur
 b = Sharur('data/${DATASET}/sharur.duckdb')
 
-print(f'Total proteins: {b.total_proteins()}')
-print(f'Annotated: {len(b.search(\"confident_hit\"))} proteins')
-print(f'Unannotated: {len(b.search(\"unannotated\"))} proteins')
-print(f'Available predicates: {len(b.list_predicates())}')
+total = b.store.execute('SELECT COUNT(*) FROM proteins')[0][0]
+print(f'Total proteins: {total}')
+annotated = b.store.execute(\"SELECT COUNT(DISTINCT protein_id) FROM annotations\")[0][0]
+print(f'Annotated: {annotated} proteins')
+unannotated = total - annotated
+print(f'Unannotated: {unannotated} proteins')
+from sharur.predicates.vocabulary import ALL_PREDICATES
+print(f'Defined predicates: {len(ALL_PREDICATES)}')
 
 # Test similarity search
 print(f'Embeddings loaded: {b.vector_store is not None}')
@@ -178,7 +186,7 @@ print(f'Embeddings loaded: {b.vector_store is not None}')
 Total proteins: 10234
 Annotated: 7891 proteins
 Unannotated: 2343 proteins
-Available predicates: 1523
+Defined predicates: 1523
 Embeddings loaded: True
 ```
 
@@ -202,17 +210,18 @@ from sharur.operators import Sharur
 b = Sharur('data/my_dataset_production/sharur.duckdb')
 
 # Find interesting proteins
-giants = b.search("giant AND unannotated")
-defense = b.search("crispr_associated OR restriction_modification")
-transporters = b.search("transporter AND membrane_protein")
+giants = b.search_by_predicates(has=["giant", "unannotated"])
+defense = b.search_by_predicates(has=["crispr_associated"])
+transporters = b.search_by_predicates(has=["transporter", "membrane_protein"])
 
-# Examine neighborhoods
-for pid in giants[:5]:
+# Examine neighborhoods (use ._raw to get underlying list from SharurResult)
+giant_proteins = giants._raw
+for pid in giant_proteins[:5]:
     b.visualize_neighborhood(pid, window=10,
                             output_path=f"figures/{pid}_neighborhood.png")
 
 # Find similar proteins
-similar = b.find_similar(giants[0], k=20)
+similar = b.find_similar(giant_proteins[0], k=20)
 ```
 
 ### Option C: Generate Report
@@ -242,8 +251,8 @@ python scripts/generate_${DATASET}_report.py
 
 ### "Predicates not generating"
 - Ensure annotations are in database: `SELECT COUNT(*) FROM annotations`
-- Check annotation_id format (should be like `PF00001`, `K00001`)
-- Run with verbose: `b.regenerate_predicates(verbose=True)`
+- Check accession format (should be like `PF00001`, `K00001`)
+- Regenerate predicates: `python scripts/regenerate_predicates.py data/${DATASET}/sharur.duckdb`
 
 ### "Embeddings taking forever"
 - Use GPU if available

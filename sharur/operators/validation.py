@@ -306,7 +306,7 @@ def validate_context(
             SELECT locus_id, start, end_coord
             FROM loci
             WHERE contig_id = ?
-              AND locus_type = 'crispr_array'
+              AND locus_type = 'crispr'
         """, [contig_id])
 
         # Analyze neighbors
@@ -429,7 +429,7 @@ def analyze_crispr_systems(store) -> SharurResult:
                 c.length as contig_length
             FROM loci l
             JOIN contigs c ON l.contig_id = c.contig_id
-            WHERE l.locus_type = 'crispr_array'
+            WHERE l.locus_type = 'crispr'
         """)
 
         if not arrays:
@@ -621,7 +621,7 @@ def detect_annotation_errors(store, limit: int = 50) -> SharurResult:
             FROM proteins p
             LEFT JOIN annotations a ON p.protein_id = a.protein_id
             JOIN loci l ON p.contig_id = l.contig_id
-            WHERE l.locus_type = 'crispr_array'
+            WHERE l.locus_type = 'crispr'
               AND p.start < l.end_coord
               AND p.end_coord > l.start
             LIMIT ?

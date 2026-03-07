@@ -24,7 +24,7 @@ def get_upstream(protein, n_bp):
     if protein.strand == "+":
         return (protein.start - n_bp, protein.start)
     else:  # "-" strand
-        return (protein.end, protein.end + n_bp)  # HIGHER coordinates!
+        return (protein.end_coord, protein.end_coord + n_bp)  # HIGHER coordinates!
 ```
 
 ### 3. Circular Contig Handling
@@ -93,14 +93,14 @@ def execute(self, params, session):
 ### Loci Table (CRISPR Arrays, BGCs, etc.)
 ```sql
 -- CRISPR arrays are detected by MinCED (stage 05c) and stored in loci table
-SELECT * FROM loci WHERE locus_type = 'crispr_array';
+SELECT * FROM loci WHERE locus_type = 'crispr';
 
 -- BGCs from GECCO (stage 05a)
 SELECT * FROM loci WHERE locus_type = 'bgc';
 
 -- Schema:
 --   locus_id     VARCHAR PRIMARY KEY
---   locus_type   VARCHAR  -- 'crispr_array', 'bgc', 'prophage'
+--   locus_type   VARCHAR  -- 'crispr', 'bgc', 'prophage'
 --   contig_id    VARCHAR REFERENCES contigs
 --   start        INTEGER
 --   end_coord    INTEGER
@@ -122,11 +122,11 @@ JOIN contigs c ON p1.contig_id = c.contig_id
 WHERE p1.protein_id = :anchor
 AND (
     -- Linear contig
-    (NOT c.is_circular AND p2.start >= p1.start - :window AND p2.end <= p1.end + :window)
+    (NOT c.is_circular AND p2.start >= p1.start - :window AND p2.end_coord <= p1.end_coord + :window)
     OR
     -- Circular contig (wrap-around case)
     (c.is_circular AND (
-        (p2.start >= :wrapped_start OR p2.end <= :wrapped_end)
+        (p2.start >= :wrapped_start OR p2.end_coord <= :wrapped_end)
     ))
 )
 ORDER BY p2.start;
@@ -145,17 +145,17 @@ AND b.taxonomy LIKE :tax_pattern || '%';
 ```sql
 WITH RECURSIVE operon AS (
     -- Seed: the starting gene
-    SELECT protein_id, contig_id, start, end, strand, 0 as depth
+    SELECT protein_id, contig_id, start, end_coord, strand, 0 as depth
     FROM proteins WHERE protein_id = :seed
-    
+
     UNION ALL
-    
+
     -- Expand: adjacent genes on same strand within gap threshold
-    SELECT p.protein_id, p.contig_id, p.start, p.end, p.strand, o.depth + 1
+    SELECT p.protein_id, p.contig_id, p.start, p.end_coord, p.strand, o.depth + 1
     FROM proteins p
     JOIN operon o ON p.contig_id = o.contig_id AND p.strand = o.strand
-    WHERE (p.start - o.end BETWEEN 0 AND :gap_threshold 
-           OR o.start - p.end BETWEEN 0 AND :gap_threshold)
+    WHERE (p.start - o.end_coord BETWEEN 0 AND :gap_threshold
+           OR o.start - p.end_coord BETWEEN 0 AND :gap_threshold)
     AND p.protein_id != o.protein_id
     AND o.depth < 50  -- Safety limit
 )

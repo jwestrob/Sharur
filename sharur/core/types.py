@@ -1,9 +1,8 @@
 """
-Canonical Pydantic models for Sharur (per BENNU_PROJECT_SEED.md).
+Internal Pydantic models for Sharur storage layer.
 
-These types are the single source of truth for domain entities and are
-imported by every other module. Keep them minimal and free of runtime
-dependencies beyond the standard library and Pydantic.
+These types are used by DuckDBStore for constructing typed results from
+database rows. The public API models are in sharur.core.models.
 """
 
 from __future__ import annotations
@@ -77,7 +76,7 @@ class Annotation(BaseModel):
     """A functional annotation on a protein."""
 
     protein_id: str
-    source: Literal["pfam", "kegg", "cazy", "bgc", "cog", "custom"]
+    source: str  # e.g., "pfam", "kegg", "defensefinder", "hyddb", etc.
     accession: str  # e.g., "PF00142", "K00001"
     name: Optional[str] = None
     description: Optional[str] = None
@@ -98,6 +97,10 @@ class LocusType(str, Enum):
     CRISPR = "crispr"  # CRISPR-Cas system
     OPERON = "operon"  # Co-transcribed genes
     METABOLIC = "metabolic"  # Metabolic pathway cluster
+    ISLAND = "island"  # Genomic island
+    DEFENSE_ISLAND = "defense_island"  # Defense system island
+    VIRAL_CONTIG = "viral_contig"  # Misbinned phage contig
+    TRANSPOSON = "transposon"  # Transposable element
     CUSTOM = "custom"  # User-defined
 
 

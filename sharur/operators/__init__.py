@@ -648,7 +648,7 @@ class Sharur:
 
         Args:
             protein_id: Protein ID
-            pdb_path: Optional path to PDB (auto-detects from /tmp/bennu_structures/)
+            pdb_path: Optional path to PDB (auto-detects from /tmp/sharur_structures/)
             databases: Databases to search
             top_k: Number of hits to return
         """

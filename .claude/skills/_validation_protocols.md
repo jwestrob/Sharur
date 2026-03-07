@@ -16,7 +16,7 @@ This rule exists because PF04055 was falsely claimed as "benzoyl-CoA reductase" 
 # STEP 1: Verify the accession name in the database
 name_check = b.store.execute("""
     SELECT DISTINCT name FROM annotations WHERE accession = 'PF04055'
-""").fetchall()
+""")
 print(f"PF04055 = {name_check}")  # → [('Radical_SAM',)]
 # If the name doesn't match your assumption, STOP. Your claim is wrong.
 ```
@@ -83,7 +83,7 @@ co_annots = b.store.execute("""
       AND a2.accession != 'K23108'  -- exclude self
     GROUP BY a2.source, a2.accession, a2.name
     ORDER BY n DESC LIMIT 10
-""").fetchall()
+""")
 # If top co-annotations are from a DIFFERENT enzyme family → superfamily cross-hit
 ```
 

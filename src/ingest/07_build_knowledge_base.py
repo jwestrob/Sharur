@@ -2,7 +2,7 @@
 """
 Stage 07: Build Sharur knowledge base (DuckDB) from ingest outputs.
 
-Lightweight implementation aligned to BENNU_PROJECT_SEED and INGEST_PIPELINE_SEED:
+Lightweight implementation:
 - Uses Sharur DuckDB schema from sharur.storage.schema.SCHEMA
 - Ingests bins (stage02), proteins/contigs (stage03), annotations (stage04/dbCAN),
   loci (stage05a/05c when present), and basic feature_store metrics.
@@ -52,6 +52,7 @@ DEFAULT_EVALUE_THRESHOLDS: Dict[str, float] = {
     "vogdb": 1e-15,          # No GA thresholds (0/48,439 profiles); e-value filter required
     "cant_hyd": 1e-10,       # No --cut_ga
     "cazy": 1e-5,            # dbCAN has own thresholds
+    "txsscan": 1e-10,        # No GA thresholds; secretion system HMMs
 }
 
 # Regex for DefenseFinder accessions with numbered FAM variants.
@@ -254,7 +255,7 @@ class KnowledgeBaseBuilder:
         self._init_db()
 
         with Progress() as progress:
-            task = progress.add_task("Building knowledge base...", total=11)
+            task = progress.add_task("Building knowledge base...", total=12)
 
             progress.update(task, description="Loading bins")
             self._load_bins()
@@ -294,6 +295,10 @@ class KnowledgeBaseBuilder:
 
             progress.update(task, description="Validating defense systems")
             self._validate_defense_systems()
+            progress.advance(task)
+
+            progress.update(task, description="Validating secretion systems")
+            self._validate_secretion_systems()
             progress.advance(task)
 
             progress.update(task, description="Finalizing")
@@ -545,6 +550,8 @@ class KnowledgeBaseBuilder:
                     source = "vogdb"
                 elif "cant" in tsv_lower:
                     source = "cant_hyd"
+                elif "txss" in tsv_lower:
+                    source = "txsscan"
                 else:
                     source = tsv.stem.split("_")[0].lower()
                 original_name = df.get("hmm_name", None)
@@ -911,7 +918,7 @@ class KnowledgeBaseBuilder:
             SELECT DISTINCT p.protein_id
             FROM proteins p
             JOIN loci l ON p.contig_id = l.contig_id
-            WHERE l.locus_type = 'crispr_array'
+            WHERE l.locus_type = 'crispr'
               AND p.start < l.end_coord
               AND p.end_coord > l.start
         """).fetchall()
@@ -1106,6 +1113,57 @@ class KnowledgeBaseBuilder:
         except Exception as e:
             logger.warning(f"Defense system validation failed: {e}")
             console.print(f"  [yellow]Defense system validation failed: {e}[/yellow]")
+
+    # --- secretion system validation -------------------------------------- #
+    def _validate_secretion_systems(self) -> None:
+        """Run MacSyFinder co-localization validation on TXSScan HMM hits.
+
+        Requires Astra TXSScan output with --write_macsyfinder (macsyfinder_compat/).
+        Skipped gracefully if the macsyfinder_compat directory is absent.
+        """
+        macsyfinder_dir = self.outputs.stage04_dir / "txsscan_results" / "macsyfinder_compat"
+        if not macsyfinder_dir.exists():
+            console.print("  No TXSScan macsyfinder_compat directory found, skipping secretion system validation")
+            console.print("  [dim](Add TXSScan to --databases and re-run stage 04 to enable)[/dim]")
+            return
+
+        self.conn.commit()
+
+        console.print("  Running MacSyFinder co-localization validation for TXSScan...")
+
+        try:
+            import sys as _sys
+            scripts_dir = Path(__file__).resolve().parents[2] / "scripts"
+            _sys.path.insert(0, str(scripts_dir))
+
+            from validate_secretion_systems import validate_secretion_systems, integrate_results
+
+            data_dir = self.db_path.parent
+
+            systems_df, genes_df = validate_secretion_systems(
+                db_path=str(self.db_path),
+                data_dir=str(data_dir),
+                workers=4,
+                verbose=True,
+            )
+
+            if not systems_df.empty or not genes_df.empty:
+                integrate_results(self.db_path, systems_df, genes_df)
+                n_systems = len(systems_df)
+                n_genes = len(genes_df)
+                console.print(f"  Validated {n_systems} secretion systems ({n_genes} genes)")
+            else:
+                console.print("  No secretion systems validated")
+
+        except ImportError as e:
+            logger.warning(f"Could not import secretion system validation: {e}")
+            console.print("  [yellow]Secretion system validation skipped (missing dependencies)[/yellow]")
+        except FileNotFoundError as e:
+            logger.warning(f"MacSyFinder or TXSScan models not found: {e}")
+            console.print("  [yellow]Secretion system validation skipped (TXSScan models not found)[/yellow]")
+        except Exception as e:
+            logger.warning(f"Secretion system validation failed: {e}")
+            console.print(f"  [yellow]Secretion system validation failed: {e}[/yellow]")
 
     # --- indexes/stats -------------------------------------------------- #
     def _create_indexes(self) -> None:

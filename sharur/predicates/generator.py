@@ -420,6 +420,42 @@ class PredicateGenerator:
             if "brex" in sys_name:
                 predicates.add("brex")
 
+        elif source == "txsscan_system":
+            # System-validated TXSScan annotations (MacSyFinder co-localization)
+            # name is "system_type/system_subtype", accession is gene-level HMM name
+            sys_name = (ann.name or "").lower()
+
+            predicates.add("secretion_system")
+
+            if self.include_direct_access:
+                predicates.add(f"txsscan:{ann.accession or ''}")
+
+            # Type-specific predicates
+            if "t1ss" in sys_name:
+                predicates.add("type_I_secretion")
+            if "t2ss" in sys_name:
+                predicates.add("type_II_secretion")
+            if "t3ss" in sys_name:
+                predicates.add("type_III_secretion")
+            if "t4ss" in sys_name:
+                predicates.add("type_IV_secretion")
+            if "t5ss" in sys_name or "t5ass" in sys_name or "t5bss" in sys_name or "t5css" in sys_name:
+                predicates.add("type_V_secretion")
+            if "t6ss" in sys_name:
+                predicates.add("type_VI_secretion")
+            if "t9ss" in sys_name:
+                predicates.add("type_IX_secretion")
+            if "t4p" in sys_name:
+                predicates.add("type_IV_pilus")
+            if "tad" in sys_name:
+                predicates.add("tad_pilus")
+            if "flagell" in sys_name:
+                predicates.add("flagellar")
+            if "msh" in sys_name:
+                predicates.add("msh_pilus")
+            if "comm" in sys_name:
+                predicates.add("competence")
+
         # Check for hypothetical annotations
         if self._is_hypothetical(ann):
             predicates.add("hypothetical")

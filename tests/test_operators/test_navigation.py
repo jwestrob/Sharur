@@ -15,7 +15,7 @@ from sharur.operators.base import SharurResult
 class TestListGenomes:
     """Tests for list_genomes() operator."""
 
-    def test_returns_bennu_result(self, store):
+    def test_returns_sharur_result(self, store):
         """list_genomes() should return a SharurResult."""
         result = list_genomes(store)
         assert isinstance(result, SharurResult)
@@ -62,7 +62,7 @@ class TestListGenomes:
 class TestListProteins:
     """Tests for list_proteins() operator."""
 
-    def test_returns_bennu_result(self, store):
+    def test_returns_sharur_result(self, store):
         """list_proteins() should return a SharurResult."""
         result = list_proteins(store)
         assert isinstance(result, SharurResult)
@@ -102,7 +102,7 @@ class TestListProteins:
 class TestGetGenome:
     """Tests for get_genome() operator."""
 
-    def test_returns_bennu_result(self, store):
+    def test_returns_sharur_result(self, store):
         """get_genome() should return a SharurResult."""
         result = get_genome(store, "bin_001")
         assert isinstance(result, SharurResult)
@@ -128,7 +128,7 @@ class TestGetGenome:
 class TestGetProtein:
     """Tests for get_protein() operator."""
 
-    def test_returns_bennu_result(self, store):
+    def test_returns_sharur_result(self, store):
         """get_protein() should return a SharurResult."""
         result = get_protein(store, "prot_001")
         assert isinstance(result, SharurResult)
@@ -154,7 +154,7 @@ class TestGetProtein:
 class TestGetNeighborhood:
     """Tests for get_neighborhood() operator."""
 
-    def test_returns_bennu_result(self, store):
+    def test_returns_sharur_result(self, store):
         """get_neighborhood() should return a SharurResult."""
         result = get_neighborhood(store, "prot_003")  # Middle of contig_001
         assert isinstance(result, SharurResult)

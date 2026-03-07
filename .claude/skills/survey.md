@@ -103,7 +103,7 @@ Your task: Write a comprehensive metabolic_reconstruction.md report covering:
 
 Output: Write to data/hinthialibacterota_v3/survey/metabolic_reconstruction.md
 
-Use the Sharur operators to query. Synthesize, don't just enumerate. See /Users/jacob/Documents/Sandbox/Bennu2/bennu/.claude/skills/survey.md for detailed guidance on each area."""
+Use the Sharur operators to query. Synthesize, don't just enumerate. See .claude/skills/survey.md for detailed guidance on each area."""
 )
 
 # Wait for it to complete, then spawn next subagent for cell_surface_biology.md, etc.
@@ -142,10 +142,10 @@ source_census = b.store.execute("""
     FROM annotations
     GROUP BY source
     ORDER BY n_proteins DESC
-""").fetchall()
+""")
 
-n_genomes = b.store.execute("SELECT COUNT(DISTINCT bin_id) FROM proteins").fetchone()[0]
-n_proteins = b.store.execute("SELECT COUNT(*) FROM proteins").fetchone()[0]
+n_genomes = b.store.execute("SELECT COUNT(DISTINCT bin_id) FROM proteins")[0][0]
+n_proteins = b.store.execute("SELECT COUNT(*) FROM proteins")[0][0]
 
 print(f"Dataset: {n_genomes} genomes, {n_proteins} proteins")
 print(f"\nAnnotation Sources:")
@@ -166,7 +166,7 @@ for source, _, _, _ in source_census:
         GROUP BY accession, name
         ORDER BY n_proteins DESC
         LIMIT 20
-    """, [source]).fetchall()
+    """, [source])
 
     print(f"\n--- {source.upper()} Top 20 ---")
     for accession, name, n_prot in top_annots:
@@ -184,7 +184,7 @@ pred_counts = b.store.execute("""
          LATERAL unnest(predicates) AS t(pred)
     GROUP BY pred
     ORDER BY n DESC
-""").fetchall()
+""")
 
 print(f"\nPredicate Summary ({len(pred_counts)} distinct predicates):")
 for pred, n in pred_counts[:30]:
@@ -215,7 +215,7 @@ census_data = {
             FROM annotations WHERE source = ?
             GROUP BY accession, name
             HAVING COUNT(DISTINCT protein_id) / ? > 10
-        """, [source, n_genomes]).fetchall()
+        """, [source, n_genomes])
     ],
     "predicates": {pred: n for pred, n in pred_counts}
 }
@@ -441,10 +441,10 @@ This rule exists because a false finding (PF04055 claimed as "benzoyl-CoA reduct
 
 ```python
 # Verify accession matches expected function
-name = b.store.execute(
+name_row = b.store.execute(
     "SELECT DISTINCT name FROM annotations WHERE accession = ?", [accession]
-).fetchone()
-print(f"{accession} = {name[0]}")  # Confirm this is what you think it is
+)
+print(f"{accession} = {name_row[0][0]}")  # Confirm this is what you think it is
 ```
 
 **Include verification in your reports:**
@@ -537,7 +537,7 @@ co_annots = b.store.execute("""
       AND a2.accession != 'K23108'  -- exclude self
     GROUP BY a2.source, a2.accession, a2.name
     ORDER BY n DESC LIMIT 10
-""").fetchall()
+""")
 # If top co-annotations are from a DIFFERENT enzyme family → superfamily cross-hit
 ```
 

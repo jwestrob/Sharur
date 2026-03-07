@@ -377,7 +377,7 @@ result = b.store.execute("""
     SELECT accession, name, COUNT(*)
     FROM annotations WHERE accession = 'PF04055'
     GROUP BY accession, name
-""").fetchone()
+""")[0]
 print(f"{result[0]} = {result[1]}")  # PF04055 = Radical_SAM
 
 # AVOID: Relying on accession-to-function memory
@@ -404,7 +404,7 @@ co_annots = b.store.execute("""
     WHERE a1.accession = 'K23108' AND a2.accession != 'K23108'
     GROUP BY a2.source, a2.accession, a2.name
     ORDER BY n DESC LIMIT 10
-""").fetchall()
+""")
 
 # 2. Neighborhood with ALL annotation sources
 result = b.get_neighborhood(protein_id, window=5, all_annotations=True)
@@ -608,6 +608,8 @@ Maps each factual claim in the manuscript to source findings and citations:
 - **Compile report:** `python scripts/compile_comprehensive_report.py --dataset data/DATASET_NAME/` → `COMPREHENSIVE_REPORT.md`
 - **Validate provenance:** `python scripts/validate_provenance.py --dataset data/DATASET_NAME/` → `PROVENANCE_AUDIT.md`
 - **Verify claims:** `python scripts/verify_claims.py --dataset data/DATASET_NAME/ --auto-extract` → `CLAIM_VERIFICATION.jsonl` + `REVIEW_REPORT.md`
+- **Validate defense systems:** `python scripts/validate_defense_systems.py data/DATASET_NAME/` → `defense_systems` table + `defensefinder_system` annotations
+- **Validate secretion systems:** `python scripts/validate_secretion_systems.py data/DATASET_NAME/` → `secretion_systems` table + `txsscan_system` annotations
 - Legacy report generators (`generate_paper_report.py`, etc.) are hardcoded for specific datasets — do NOT use for new manuscripts.
 
 ### Hydrogenase Classification
@@ -745,7 +747,7 @@ Astra manages pre-installed HMM databases for annotation searches.
 
 **Location:** `~/astra/` (source), installed via pyenv shim
 
-**Installed databases** (`~/.config/Astra/`): PFAM, KOFAM, VOGdb, HydDB, DefenseFinder, CRISPRCasFinder, CANT-HYD, dbCAN, padloc
+**Installed databases** (`~/.config/Astra/`): PFAM, KOFAM, VOGdb, HydDB, DefenseFinder, CRISPRCasFinder, CANT-HYD, dbCAN, padloc, TXSScan
 
 ```bash
 astra search --installed_hmms DefenseFinder --threads 12 \
@@ -759,6 +761,14 @@ astra search --installed_hmms DefenseFinder --threads 12 \
 - Output: `<outdir>/<database>_hits_df.tsv` (tab-separated)
 - `--cut_ga` uses gathering thresholds (recommended)
 - For single files: `mkdir source/ && cp proteins.faa source/`
+- `--write_macsyfinder` produces MacSyFinder-compatible hmmsearch output for co-localization validation (auto-added for DefenseFinder and TXSScan in stage 04)
+
+### Secretion System Identification (TXSScan)
+**Script:** `scripts/validate_secretion_systems.py`
+**Requires:** TXSScan HMMs via Astra, TXSScan models in MacSyFinder (`macsyfinder --install-models TXSScan`)
+**Pipeline:** Non-default — add `-d TXSScan` to stage 04. Stage 07 auto-validates via MacSyFinder `--previous-run` when `txsscan_results/macsyfinder_compat/` exists.
+**Output:** `secretion_systems` table + `txsscan_system` annotations in DuckDB. Predicates: `secretion_system`, `type_I_secretion`–`type_IX_secretion`, `type_IV_pilus`, `tad_pilus`, `flagellar`, `msh_pilus`, `competence`.
+**Systems detected:** T1SS–T9SS, T4P, Tad, Flagellum, MSH, ComM (280 HMM profiles).
 
 ## Testing
 
@@ -850,7 +860,7 @@ Features: Multi-source annotation priority (Foldseek > DefenseFinder > PADLOC > 
 # Always COUNT(DISTINCT protein_id) for protein counts — repeat domains inflate COUNT(*)
 
 # Prefer Sharur operators over raw DuckDB:
-b.search("unannotated AND giant")
+result = b.search_by_predicates(has=["unannotated", "giant"]); proteins = result._raw
 b.get_neighborhood(protein_id, window=10)
 b.get_neighborhood(protein_id, window=5, all_annotations=True)
 ```
@@ -1033,9 +1043,9 @@ Use the Read tool to load any doc when you need its protocol. Don't guess — lo
 ## Large Dataset Performance (>50k proteins)
 
 **Rules:**
-1. **Never** `b.search("")` on large datasets — use `b.total_proteins()` or specific predicates
-2. **Always** check `len(result)` before iterating
-3. **Always** use `[:10]` or `[:100]` limits when iterating
+1. **Never** `b.search_proteins(query="")` on large datasets — use `b.store.execute("SELECT COUNT(*) FROM proteins")[0][0]` or specific predicates
+2. **Always** check result size before iterating (use `result._raw` to get the underlying list)
+3. **Always** limit iteration (e.g., `for pid in proteins[:10]` after `proteins = result._raw`)
 4. **Combine** specific predicates (AND/OR) to narrow results
 5. **Aggregate** in SQL, not Python loops
 6. **Limit** to 20-30 visualizations per analysis
@@ -1044,18 +1054,19 @@ Use the Read tool to load any doc when you need its protocol. Don't guess — lo
 
 ```python
 # BAD
-all_proteins = b.search("")
-for pid in all_proteins: ...
+all_proteins = b.search_proteins(query="")
+for pid in all_proteins._raw: ...
 
 # GOOD
-targets = b.search("hydrogenase AND membrane_protein")
-for pid in targets[:10]: ...
+result = b.search_by_predicates(has=["hydrogenase", "membrane_protein"])
+proteins = result._raw
+for pid in proteins[:10]: ...
 
 # GOOD — SQL aggregation
 stats = b.store.execute("""
-    SELECT COUNT(*) as total, AVG(length) as avg_size, MAX(length) as max_size
+    SELECT COUNT(*) as total, AVG(sequence_length) as avg_size, MAX(sequence_length) as max_size
     FROM proteins
-""").fetchone()
+""")[0]
 ```
 
 ### DuckDB Query Patterns for Large Datasets
