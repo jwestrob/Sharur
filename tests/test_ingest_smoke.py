@@ -6,9 +6,12 @@ import duckdb
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 KB_PATH = REPO_ROOT / "src" / "ingest" / "07_build_knowledge_base.py"
-kb_module = SourceFileLoader("kb_build", str(KB_PATH)).load_module()
-KnowledgeBaseBuilder = kb_module.KnowledgeBaseBuilder
-PipelineOutputs = kb_module.PipelineOutputs
+
+
+def _load_kb_module():
+    """Load the knowledge base module lazily to avoid slowing pytest collection."""
+    kb_module = SourceFileLoader("kb_build", str(KB_PATH)).load_module()
+    return kb_module.KnowledgeBaseBuilder, kb_module.PipelineOutputs
 
 
 def _write(path: Path, text: str):
@@ -17,6 +20,7 @@ def _write(path: Path, text: str):
 
 
 def test_ingest_smoke(tmp_path):
+    KnowledgeBaseBuilder, PipelineOutputs = _load_kb_module()
     data_dir = tmp_path / "data"
     # Stage02 manifest with one genome
     stage02 = data_dir / "stage02_dfast_qc"
