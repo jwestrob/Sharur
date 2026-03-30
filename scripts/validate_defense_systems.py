@@ -28,6 +28,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -74,89 +75,53 @@ def _build_protein_to_genome_from_db(db_path: Path) -> dict[str, str]:
 
 
 # ------------------------------------------------------------------ #
-# Filter hmmsearch output files per-genome
+# Whole-dataset MacSyFinder: one invocation, all genomes
 # ------------------------------------------------------------------ #
 
-def _filter_hmmsearch_file(
-    src_path: Path, dst_path: Path, protein_ids: set[str]
-) -> int:
-    """Filter a .search_hmm.out file to keep only hits for given protein IDs.
-
-    Returns the number of kept hit blocks.
-    """
-    kept = 0
-    with open(src_path) as fin, open(dst_path, "w") as fout:
-        in_hit_block = False
-        keep_block = False
-        block_lines: list[str] = []
-
-        for line in fin:
-            if line.startswith(">> "):
-                # Flush previous block
-                if in_hit_block and keep_block:
-                    fout.writelines(block_lines)
-                    kept += 1
-                # Start new block
-                pid = line[3:].split()[0]
-                keep_block = pid in protein_ids
-                block_lines = [line]
-                in_hit_block = True
-            elif line.startswith("//"):
-                # End-of-query marker: flush last block, write marker
-                if in_hit_block and keep_block:
-                    fout.writelines(block_lines)
-                    kept += 1
-                fout.write(line)
-                in_hit_block = False
-                block_lines = []
-            elif in_hit_block:
-                block_lines.append(line)
-            else:
-                # Header lines before first hit block
-                fout.write(line)
-
-    return kept
-
-
-def _prepare_genome_macsyfinder_dir(
-    genome_name: str,
-    genome_faa: Path,
-    global_hmmer_dir: Path,
-    protein_ids: set[str],
+def _prepare_global_macsyfinder_dir(
+    macsyfinder_compat: Path,
+    genome_faas: dict[str, Path],
     work_dir: Path,
-) -> Optional[Path]:
-    """Create a per-genome macsyfinder_compat directory with filtered hmmsearch output.
+) -> Path:
+    """Create a MacSyFinder --previous-run directory for the whole dataset.
 
-    Returns the path to the created directory, or None if no hits were found.
+    Creates a combined FASTA and conf file. The existing hmmsearch results
+    from Astra are symlinked in — no copying or splitting needed.
+
+    Returns the prepared directory path.
     """
-    genome_dir = work_dir / genome_name
-    hmmer_out = genome_dir / "hmmer_results"
-    hmmer_out.mkdir(parents=True, exist_ok=True)
+    import time as _time
+    t0 = _time.time()
 
-    total_kept = 0
-    for src_file in sorted(global_hmmer_dir.glob("*.search_hmm.out")):
-        dst_file = hmmer_out / src_file.name
-        n = _filter_hmmsearch_file(src_file, dst_file, protein_ids)
-        total_kept += n
-        # Remove empty files (MacSyFinder is fine without them)
-        if n == 0:
-            dst_file.unlink()
+    run_dir = work_dir / "global_run"
+    run_dir.mkdir(parents=True, exist_ok=True)
 
-    if total_kept == 0:
-        shutil.rmtree(genome_dir, ignore_errors=True)
-        return None
+    # Symlink hmmer_results from the Astra output (already global)
+    hmmer_link = run_dir / "hmmer_results"
+    if not hmmer_link.exists():
+        hmmer_link.symlink_to((macsyfinder_compat / "hmmer_results").resolve())
 
-    # Write macsyfinder.conf pointing to this genome's FAA
-    conf_path = genome_dir / "macsyfinder.conf"
+    # Create combined FASTA preserving per-genome protein order
+    combined_faa = run_dir / "combined_proteins.faa"
+    with open(combined_faa, "w") as fout:
+        for genome_name in sorted(genome_faas):
+            faa = genome_faas[genome_name]
+            with open(faa) as fin:
+                for line in fin:
+                    fout.write(line)
+
+    # Write macsyfinder.conf — ordered_replicon treats each contig independently
+    conf_path = run_dir / "macsyfinder.conf"
     with open(conf_path, "w") as fh:
         fh.write("[base]\n")
-        fh.write(f"sequence_db = {genome_faa.resolve()}\n")
+        fh.write(f"sequence_db = {combined_faa.resolve()}\n")
         fh.write("db_type = ordered_replicon\n")
         fh.write("hmmer = hmmsearch\n\n")
         fh.write("[hmmer]\n")
         fh.write("e_value_search = 0.1\n")
 
-    return genome_dir
+    logger.info(f"  Prepared global MacSyFinder dir in {_time.time() - t0:.1f}s")
+    return run_dir
 
 
 # ------------------------------------------------------------------ #
@@ -178,47 +143,68 @@ def _find_models_dir() -> Optional[Path]:
 def _run_macsyfinder_on_dir(
     genome_dir: Path, models_dir: Path, workers: int = 4
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Run MacSyFinder --previous-run on a prepared per-genome directory.
+    """Run MacSyFinder --previous-run on a prepared directory.
+
+    CRITICAL: Do NOT pass -o flag. With --previous-run, MacSyFinder only reuses
+    existing hmmsearch results if -o is omitted. With -o, it starts a fresh run
+    and re-runs all hmmsearch from scratch (hours on large datasets).
+
+    MacSyFinder creates an auto-named output directory in the CWD or alongside
+    the previous-run dir. We find it via glob after completion.
 
     Returns (systems_df, genes_df).
     """
-    # MacSyFinder writes output into a results directory inside the working dir
-    results_dir = genome_dir / "macsyfinder_results"
-    results_dir.mkdir(exist_ok=True)
-
+    genome_dir_abs = genome_dir.resolve()
     cmd = [
         "macsyfinder",
-        "--previous-run", str(genome_dir),
+        "--previous-run", str(genome_dir_abs),
         "--models-dir", str(models_dir),
         "--models", "defense-finder-models", "all",
         "-w", str(workers),
-        "-o", str(results_dir),
+        # NO -o flag — this is critical for reusing hmmsearch results
     ]
 
     try:
         proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=600
+            cmd, capture_output=True, text=True,
+            cwd=str(genome_dir_abs),
         )
     except subprocess.TimeoutExpired:
         logger.warning(f"  MacSyFinder timed out for {genome_dir.name}")
-        return pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame()  # kept for safety but no timeout set
     except FileNotFoundError:
         logger.error("macsyfinder not found on PATH")
         return pd.DataFrame(), pd.DataFrame()
 
     if proc.returncode != 0:
         stderr = proc.stderr or ""
-        # Some warnings are non-fatal (e.g., no hits for some models)
         if "error" in stderr.lower() and "no systems found" not in stderr.lower():
             logger.warning(
                 f"  MacSyFinder non-zero exit for {genome_dir.name}: "
                 f"{stderr[-300:]}"
             )
 
-    # Parse best_solution.tsv
+    # Find the output directory — MacSyFinder creates macsyfinder-YYYYMMDD_HHMMSS/
+    # when --previous-run is used without -o
+    results_dir = None
+
+    # Check for best_solution.tsv in the genome_dir tree
+    for bs in sorted(genome_dir.rglob("best_solution.tsv"), key=lambda p: p.stat().st_mtime, reverse=True):
+        results_dir = bs.parent
+        break
+
+    if results_dir is None:
+        # Also check CWD-relative dirs (MacSyFinder may write there)
+        for candidate in sorted(genome_dir.glob("macsyfinder-*"), reverse=True):
+            if candidate.is_dir():
+                results_dir = candidate
+                break
+
+    if results_dir is None:
+        return pd.DataFrame(), pd.DataFrame()
+
     best_solution = results_dir / "best_solution.tsv"
     if not best_solution.exists():
-        # Check inside subdirectories (MacSyFinder output structure varies)
         for bs in results_dir.rglob("best_solution.tsv"):
             best_solution = bs
             break
@@ -239,7 +225,6 @@ def _run_macsyfinder_on_dir(
     genes_df = df.copy()
 
     # Extract system type from model_fqn (e.g. "defense-finder-models/DefenseFinder/Pycsar/Pycsar")
-    # The second-to-last path component is the system type.
     if "model_fqn" in genes_df.columns:
         genes_df["type"] = genes_df["model_fqn"].apply(_extract_system_type)
         genes_df["subtype"] = genes_df["model_fqn"].apply(_extract_system_subtype)
@@ -319,6 +304,7 @@ def validate_defense_systems(
     macsyfinder_compat = None
     for candidate in [
         data_dir / "stage04_astra" / "defensefinder_results" / "macsyfinder_compat",
+        data_dir / "stage04_astra" / "defensefinder_macsyfinder_rerun" / "macsyfinder_compat",
     ]:
         if candidate.is_dir() and list(candidate.glob("hmmer_results/*.search_hmm.out")):
             macsyfinder_compat = candidate
@@ -392,65 +378,52 @@ def validate_defense_systems(
                 if faas:
                     genome_faas[genome_dir.name] = faas[0]
 
-    # Create temp working directory for per-genome macsyfinder dirs
+    # Create temp working directory
     work_dir = data_dir / "stage04_astra" / "defensefinder_results" / "_macsyfinder_work"
     if work_dir.exists():
         shutil.rmtree(work_dir)
     work_dir.mkdir(parents=True)
 
-    # Process each genome
-    all_systems: list[pd.DataFrame] = []
-    all_genes: list[pd.DataFrame] = []
-    total_genomes = len(genome_proteins)
-
-    for i, (genome_name, protein_ids) in enumerate(
-        sorted(genome_proteins.items()), 1
-    ):
-        if verbose:
-            logger.info(f"  [{i}/{total_genomes}] {genome_name} ({len(protein_ids)} proteins)")
-
-        genome_faa = genome_faas.get(genome_name)
-        if genome_faa is None:
-            logger.warning(f"    No FAA found for {genome_name}, skipping")
-            continue
-
-        # Filter hmmsearch output for this genome
-        genome_msf_dir = _prepare_genome_macsyfinder_dir(
-            genome_name, genome_faa, global_hmmer_dir, protein_ids, work_dir
-        )
-        if genome_msf_dir is None:
-            if verbose:
-                logger.info(f"    No DefenseFinder hits for {genome_name}")
-            continue
-
-        # Run MacSyFinder
-        systems_df, genes_df = _run_macsyfinder_on_dir(
-            genome_msf_dir, models_dir, workers=workers
-        )
-
-        if not systems_df.empty:
-            systems_df["genome_id"] = genome_name
-            all_systems.append(systems_df)
-        if not genes_df.empty:
-            genes_df["genome_id"] = genome_name
-            all_genes.append(genes_df)
-
-        n_sys = len(systems_df) if not systems_df.empty else 0
-        if verbose and n_sys > 0:
-            logger.info(f"    {n_sys} systems found")
-
-    # Merge results
-    merged_systems = (
-        pd.concat(all_systems, ignore_index=True) if all_systems else pd.DataFrame()
-    )
-    merged_genes = (
-        pd.concat(all_genes, ignore_index=True) if all_genes else pd.DataFrame()
+    # Prepare a single MacSyFinder run directory with combined FASTA + symlinked hmmer_results
+    run_dir = _prepare_global_macsyfinder_dir(
+        macsyfinder_compat, genome_faas, work_dir
     )
 
+    # Run MacSyFinder ONCE on the entire dataset
+    if verbose:
+        logger.info(
+            f"  Running MacSyFinder once on {len(genome_faas)} genomes "
+            f"(ordered_replicon mode, {workers} workers)..."
+        )
+
+    import time as _time
+    t0 = _time.time()
+    merged_systems, merged_genes = _run_macsyfinder_on_dir(
+        run_dir, models_dir, workers=workers
+    )
+    elapsed = _time.time() - t0
+    if verbose:
+        logger.info(f"  MacSyFinder completed in {elapsed:.1f}s")
+
+    # Post-process: add genome_id column by mapping protein IDs back to genomes
+    if not merged_genes.empty and "hit_id" in merged_genes.columns:
+        merged_genes["genome_id"] = merged_genes["hit_id"].map(prot_to_genome)
+    if not merged_systems.empty:
+        # Derive genome_id from the first protein in each system
+        if "protein_in_syst" in merged_systems.columns:
+            merged_systems["genome_id"] = merged_systems["protein_in_syst"].apply(
+                lambda pids: prot_to_genome.get(
+                    str(pids).split(",")[0].strip(), ""
+                ) if pd.notna(pids) else ""
+            )
+
+    n_genomes_with_systems = (
+        len(merged_systems["genome_id"].unique()) if not merged_systems.empty else 0
+    )
     if verbose:
         logger.info(
             f"\nTotal: {len(merged_systems)} systems, "
-            f"{len(merged_genes)} gene assignments across {total_genomes} genomes"
+            f"{len(merged_genes)} gene assignments across {n_genomes_with_systems} genomes"
         )
 
     # Save merged results

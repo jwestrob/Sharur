@@ -358,40 +358,96 @@ def classify_hydrogenases(
         if verbose:
             print("\nUpdating predicates...")
 
+        # Collect all new predicates per protein first, then bulk-update.
+        # Row-by-row UPDATE causes write-write conflicts when a protein
+        # appears in multiple HydDB hits.
+        pid_new_preds: dict[str, set] = {}
         for _, row in results_df.iterrows():
             pid = row['protein_id']
             subgroup = row['subgroup']
             hmm_type = row['hmm_type']
 
-            # Get subgroup predicates
-            new_predicates = get_subgroup_predicates(hmm_type, subgroup)
-            if not new_predicates:
+            preds = get_subgroup_predicates(hmm_type, subgroup)
+            if not preds:
                 continue
 
-            # Add subgroup direct access predicate
-            new_predicates.append(f"hyddb_subgroup:{subgroup}")
+            preds.append(f"hyddb_subgroup:{subgroup}")
 
-            # Flag hits that need agent-level neighborhood curation
             if row['needs_curation']:
-                new_predicates.append("hyddb_needs_curation")
+                preds.append("hyddb_needs_curation")
 
-            # Get current predicates
-            current = db.execute("""
-                SELECT predicates FROM protein_predicates WHERE protein_id = ?
-            """, [pid]).fetchone()
+            if pid not in pid_new_preds:
+                pid_new_preds[pid] = set()
+            pid_new_preds[pid].update(preds)
 
-            if current:
-                current_preds = set(current[0])
-                current_preds.update(new_predicates)
-                db.execute("""
-                    UPDATE protein_predicates
-                    SET predicates = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE protein_id = ?
-                """, [list(current_preds), pid])
+        # Fetch current predicates for all affected proteins in one query
+        if pid_new_preds:
+            pids_list = list(pid_new_preds.keys())
+            current_rows = db.execute(
+                "SELECT protein_id, predicates FROM protein_predicates WHERE protein_id IN "
+                f"(SELECT UNNEST(?::VARCHAR[]))",
+                [pids_list],
+            ).fetchall()
+            current_map = {r[0]: set(r[1]) for r in current_rows}
+
+            # Bulk update — one UPDATE per protein, all in a single transaction
+            for pid, new_preds in pid_new_preds.items():
+                existing = current_map.get(pid, set())
+                merged = existing | new_preds
+                if merged != existing:
+                    db.execute("""
+                        UPDATE protein_predicates
+                        SET predicates = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE protein_id = ?
+                    """, [list(merged), pid])
+
+        # Also write subgroup annotations to the annotations table so
+        # the V2 semantic atom pipeline can produce subgroup-level atoms.
+        # Each subgroup predicate becomes a separate annotation row.
+        db.execute("DELETE FROM annotations WHERE source = 'hyddb_subgroup'")
+        max_id = db.execute("SELECT COALESCE(MAX(annotation_id), 0) FROM annotations").fetchone()[0]
+        ann_rows = []
+        for _, row in results_df.iterrows():
+            pid = row['protein_id']
+            subgroup = row['subgroup']
+            hmm_type = row['hmm_type']
+
+            preds = get_subgroup_predicates(hmm_type, subgroup)
+            if not preds:
+                continue
+
+            diamond = diamond_results.get(pid, {})
+            d_evalue = diamond.get('evalue')
+            d_bitscore = diamond.get('bitscore')
+
+            for pred_name in preds:
+                max_id += 1
+                ann_rows.append((
+                    max_id, pid, 'hyddb_subgroup', pred_name,
+                    pred_name,
+                    f"HydDB DIAMOND: [{hmm_type}] {subgroup}",
+                    d_evalue, d_bitscore,
+                ))
+
+            if row['needs_curation']:
+                max_id += 1
+                ann_rows.append((
+                    max_id, pid, 'hyddb_subgroup', 'hyddb_needs_curation',
+                    'hyddb_needs_curation',
+                    f"HydDB hit needs neighborhood curation",
+                    d_evalue, d_bitscore,
+                ))
+
+        if ann_rows:
+            db.executemany("""
+                INSERT INTO annotations
+                (annotation_id, protein_id, source, accession, name, description, evalue, score)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, ann_rows)
 
         db.commit()
         if verbose:
-            print("Predicates updated")
+            print(f"Predicates updated, {len(ann_rows)} subgroup annotations written")
 
     # Save detailed results
     output_path = Path(db_path).parent / "hydrogenase_classification.tsv"

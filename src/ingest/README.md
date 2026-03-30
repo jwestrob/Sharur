@@ -14,8 +14,8 @@ mkdir -p data/$DATASET/{source,annotations,embeddings,structures,exploration,fig
 # Stage 00: Validate and organize input assemblies
 python src/ingest/00_prepare_inputs.py -i $INPUT -o data/$DATASET/stage00_prepared --copy
 
-# Stage 03: Gene calling (--mode meta for MAGs, --mode single for isolates)
-python src/ingest/03_prodigal.py -i data/$DATASET/stage00_prepared -o data/$DATASET/stage03_prodigal --mode meta --max-workers 8
+# Stage 03: Gene calling (default --mode single is correct for most inputs)
+python src/ingest/03_prodigal.py -i data/$DATASET/stage00_prepared -o data/$DATASET/stage03_prodigal --max-workers 8
 
 # Stage 04: Functional annotation (defaults: PFAM, KOFAM, HydDB, DefenseFinder, dbCAN)
 python src/ingest/04_astra_scan.py -i data/$DATASET/stage03_prodigal -o data/$DATASET/stage04_astra -t 12
@@ -29,11 +29,30 @@ python src/ingest/07_build_knowledge_base.py -d data/$DATASET -o data/$DATASET/s
 
 That is the complete standard pipeline. Stage 07 auto-discovers all `stage*` directories under `data/$DATASET/` and loads proteins, annotations, CRISPR arrays, and predicates.
 
-Optional post-pipeline step:
 ```bash
-# Stage 06: ESM2 embeddings (GPU recommended; CPU works but 10-20x slower)
+# Stage 06: ESM2 embeddings (standard — required for ELSA synteny discovery)
+# GPU recommended (MPS/CUDA); CPU works but 10-20x slower
 python src/ingest/06_esm2_embeddings.py data/$DATASET/stage03_prodigal data/$DATASET/embeddings/
 ```
+
+Stage 06 produces `protein_embeddings.h5` (HDF5: `protein_ids` string array + `embeddings` float32 matrix) which is the input format for ELSA synteny discovery. See § ELSA Synteny Discovery in CLAUDE.md.
+
+**ELSA synteny + genome browser (after Stage 06 + 07):**
+```bash
+# Run ELSA with Sharur annotations (skips redundant Astra PFAM scan)
+elsa synteny \
+    --db data/$DATASET/sharur.duckdb \
+    --embeddings data/$DATASET/embeddings/protein_embeddings.h5 \
+    --annotations-db data/$DATASET/sharur.duckdb \
+    --store data/$DATASET/synteny/store \
+    -o data/$DATASET/synteny/
+
+# Populate genome browser DB with all annotation sources from Sharur
+elsa browser data/$DATASET/synteny/ --store data/$DATASET/synteny/store \
+    --annotations-db data/$DATASET/sharur.duckdb
+```
+
+The `--annotations-db` flag loads PFAM domains into the browser `genes` table and all annotation sources (KEGG, CAZy, DefenseFinder, etc.) into the browser `annotations_multi` table, eliminating the need for a separate Astra PFAM run.
 
 ---
 
@@ -69,11 +88,11 @@ Stage 03  Gene Calling            (Prodigal: genomes -> proteins + GFF)
    |
 Stage 07  Knowledge Base          (consolidate everything -> sharur.duckdb)
    |
-Stage 06  Embeddings (optional)   (ESM2: proteins -> vector embeddings)
+Stage 06  Embeddings              (ESM2: proteins -> vector embeddings for ELSA)
 ```
 
-**Standard pipeline stages:** 00, 03, 04, 05c, 07
-**Optional/post-pipeline:** 06 (embeddings)
+**Standard pipeline stages:** 00, 03, 04, 05c, 07, 06
+**Post-pipeline (standard):** 06 (embeddings — runs after 07, required for ELSA synteny)
 **Optional/deprecated:** 01 (QUAST QC), 02 (DFAST QC), 05a (GECCO BGC), 05b (dbCAN legacy)
 
 ---
@@ -90,7 +109,7 @@ Stage 06  Embeddings (optional)   (ESM2: proteins -> vector embeddings)
 | 05a | `gecco_bgc.py` | Optional | Biosynthetic gene cluster detection |
 | 05b | `dbcan_cazyme.py` | Deprecated | Legacy dbCAN (replaced by Stage 07 built-in) |
 | 05c | `minced_crispr.py` | **Standard** | CRISPR repeat-spacer array detection |
-| 06 | `06_esm2_embeddings.py` | Optional | Protein vector embeddings |
+| 06 | `06_esm2_embeddings.py` | **Standard** | Protein vector embeddings (ELSA input) |
 | 07 | `07_build_knowledge_base.py` | **Standard** | Build DuckDB knowledge base |
 
 Stages 01, 02, 05a, and 05b exist as scripts but are not required for a standard pipeline run. Stage 07 gracefully handles their absence.
@@ -144,7 +163,7 @@ python src/ingest/00_prepare_inputs.py -i /path/to/genomes -o data/DATASET/stage
 
 **Minimal invocation:**
 ```bash
-python src/ingest/03_prodigal.py -i data/DATASET/stage00_prepared -o data/DATASET/stage03_prodigal --mode meta
+python src/ingest/03_prodigal.py -i data/DATASET/stage00_prepared -o data/DATASET/stage03_prodigal --max-workers 8
 ```
 
 **Important options:**
@@ -153,7 +172,7 @@ python src/ingest/03_prodigal.py -i data/DATASET/stage00_prepared -o data/DATASE
 |------|---------|-------------|
 | `-i`, `--input-dir` | `data/stage00_prepared` | Stage 00 output directory |
 | `-o`, `--output-dir` | `data/stage03_prodigal` | Output directory |
-| `-m`, `--mode` | `single` | Prodigal mode: `meta` for MAGs, `single` for isolates |
+| `-m`, `--mode` | `single` | Prodigal mode: `single` trains on each genome (better gene calls). Only use `meta` for very short contigs (<100 kb total) where Prodigal can't train. |
 | `-w`, `--max-workers` | CPU count - 1 | Parallel workers |
 | `-g`, `--genetic-code` | `11` | Genetic code table (11 = bacteria/archaea) |
 | `--force` | off | Overwrite existing output |

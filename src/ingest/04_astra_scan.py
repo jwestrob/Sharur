@@ -66,7 +66,7 @@ def run_single_astra_scan(database: str, protein_symlink_dir: Path, output_dir: 
             "--outdir", str(db_output_dir),
             "--threads", str(threads)
         ]
-        
+
         # Add cutoffs for databases that support them
         # PFAM and HydDB have GA (gathering) thresholds on all profiles.
         # DefenseFinder has GA on all 1,000 profiles (but values are
@@ -87,10 +87,10 @@ def run_single_astra_scan(database: str, protein_symlink_dir: Path, output_dir: 
         # back to permissive defaults.  CANT-HYD and others likewise.
         # Filtering is applied at load time in 07_build_knowledge_base.py
         # via DEFAULT_EVALUE_THRESHOLDS.
-        
+
         console.print(f"Running astra search for {database}...")
         console.print(f"Command: {' '.join(cmd)}")
-        
+
         # Execute astra search
         process_result = subprocess.run(
             cmd,
@@ -98,17 +98,25 @@ def run_single_astra_scan(database: str, protein_symlink_dir: Path, output_dir: 
             text=True,
             # No timeout — KOFAM on large datasets can take hours
         )
-        
-        if process_result.returncode != 0:
-            result["error_message"] = f"Astra search failed: {process_result.stderr}"
-            return result
-        
-        # Find the results file
+
+        astra_failed = process_result.returncode != 0
+        if astra_failed:
+            logger.warning(f"Astra returned non-zero exit code for {database}")
+
+        # Find the results file — either the consolidated TSV or per-genome tmp_results
         hits_file = db_output_dir / f"{database}_hits_df.tsv"
+
         if not hits_file.exists():
-            result["error_message"] = f"Expected results file not found: {hits_file}"
+            # Fallback: consolidate per-genome results from tmp_results/
+            hits_file = _consolidate_tmp_results(db_output_dir, database, hits_file)
+
+        if hits_file is None or not hits_file.exists():
+            result["error_message"] = (
+                f"No results found for {database} "
+                f"(exit code {process_result.returncode}): {process_result.stderr[-500:]}"
+            )
             return result
-        
+
         # Parse results statistics
         try:
             df = pd.read_csv(hits_file, sep='\t')
@@ -118,14 +126,69 @@ def run_single_astra_scan(database: str, protein_symlink_dir: Path, output_dir: 
             result["hits_file"] = str(hits_file)
         except Exception as e:
             logger.warning(f"Failed to parse results statistics for {database}: {e}")
-        
-        result["execution_status"] = "success"
-        
+
+        if astra_failed and result["total_hits"] > 0:
+            result["execution_status"] = "partial"
+            result["error_message"] = (
+                f"Astra exited non-zero but {result['total_hits']:,} hits recovered "
+                f"from tmp_results/"
+            )
+        else:
+            result["execution_status"] = "success"
+
     except Exception as e:
         result["error_message"] = f"Unexpected error: {str(e)}"
-    
+
     result["execution_time_seconds"] = round(time.time() - start_time, 2)
     return result
+
+
+def _consolidate_tmp_results(db_output_dir: Path, database: str,
+                              hits_file: Path) -> Optional[Path]:
+    """
+    Merge per-genome TSVs from tmp_results/ into a single consolidated hits file.
+
+    Astra's --cascade mode (KOFAM) and some failure modes produce per-genome
+    result files in tmp_results/ without creating the consolidated {DB}_hits_df.tsv.
+    This function merges them.
+    """
+    tmp_dir = db_output_dir / "tmp_results"
+    if not tmp_dir.exists():
+        return None
+
+    tmp_files = sorted(tmp_dir.glob("*_results.tsv"))
+    if not tmp_files:
+        return None
+
+    console.print(
+        f"[yellow]Consolidating {len(tmp_files)} per-genome result files "
+        f"for {database}...[/yellow]"
+    )
+
+    # Stream-merge: write header from first file, then data rows from all files
+    header_written = False
+    total_rows = 0
+
+    with open(hits_file, 'w') as out:
+        for tf in tmp_files:
+            with open(tf) as inp:
+                header = inp.readline()
+                if not header_written:
+                    out.write(header)
+                    header_written = True
+                for line in inp:
+                    out.write(line)
+                    total_rows += 1
+
+    if total_rows == 0:
+        hits_file.unlink(missing_ok=True)
+        return None
+
+    console.print(
+        f"[green]Consolidated {total_rows:,} hits from {len(tmp_files)} files "
+        f"→ {hits_file.name}[/green]"
+    )
+    return hits_file
 
 
 def run_astra_scan(
@@ -212,8 +275,13 @@ def run_astra_scan(
             console.print("[yellow]Use --force to overwrite[/yellow]")
             raise typer.Exit(1)
         else:
-            console.print(f"[yellow]Removing existing output directory: {output_dir}[/yellow]")
-            shutil.rmtree(output_dir)
+            # Only remove the specific database subdirectories being re-run,
+            # not the entire output dir (which may contain other DB results)
+            for db in databases:
+                db_subdir = output_dir / f"{db.lower()}_results"
+                if db_subdir.exists():
+                    console.print(f"[yellow]Removing existing results: {db_subdir}[/yellow]")
+                    shutil.rmtree(db_subdir)
     
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)

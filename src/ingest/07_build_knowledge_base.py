@@ -17,6 +17,7 @@ import multiprocessing
 import os
 import re
 import shutil
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -124,6 +125,37 @@ def _dedup_defensefinder_fam_variants(df: "pd.DataFrame") -> "pd.DataFrame":
     return result
 
 
+def _dedup_kegg_best_hit(df: "pd.DataFrame") -> "pd.DataFrame":
+    """Keep only the best-scoring KEGG KO per protein.
+
+    KOFAM assigns individual score thresholds per KO profile.  Proteins
+    matching broad enzyme superfamilies (PKS, P450, etc.) can hit dozens
+    of variant-specific KO models simultaneously.  Only the top-scoring
+    KO is informative; the rest describe the same fold.
+
+    Args:
+        df: DataFrame with at least columns 'protein_id', 'score', 'evalue'.
+
+    Returns:
+        DataFrame with one row per protein (the best-scoring KO hit).
+    """
+    if df.empty or len(df) <= 1:
+        return df
+
+    before = len(df)
+    df = df.sort_values(
+        ["score", "evalue"], ascending=[False, True], na_position="last"
+    )
+    df = df.drop_duplicates(subset=["protein_id"], keep="first")
+    n_removed = before - len(df)
+    if n_removed > 0:
+        logger.info(
+            f"  kegg: deduplicated {n_removed:,} secondary KO hits "
+            f"({before:,} → {len(df):,} rows, best-hit-per-protein)"
+        )
+    return df
+
+
 # --------------------------------------------------------------------------- #
 # Top-level worker function for parallel predicate generation (must be
 # picklable, so it lives at module scope rather than as a method).
@@ -205,10 +237,12 @@ class PipelineOutputs:
 # Builder
 # --------------------------------------------------------------------------- #
 class KnowledgeBaseBuilder:
-    def __init__(self, outputs: PipelineOutputs, db_path: Path, force: bool = False):
+    def __init__(self, outputs: PipelineOutputs, db_path: Path, force: bool = False,
+                 enable_cazymes: bool = False):
         self.outputs = outputs
         self.db_path = db_path
         self.force = force
+        self.enable_cazymes = enable_cazymes
         self.conn: Optional[duckdb.DuckDBPyConnection] = None
         self.embeddings_path: Optional[str] = None
         self.stats: Dict[str, int] = {
@@ -251,62 +285,61 @@ class KnowledgeBaseBuilder:
                 logger.warning(f"Failed to load KO reference ({ko_path}): {exc}")
 
     # --- orchestrate ---------------------------------------------------- #
+    def _run_step(self, name: str, func, step_num: int, total: int) -> None:
+        """Run a build step with timing and logging."""
+        console.print(f"\n[bold cyan]━━━ Step {step_num}/{total}: {name} ━━━[/bold cyan]")
+        t0 = time.time()
+        try:
+            func()
+            elapsed = time.time() - t0
+            console.print(f"  [green]✓ {name} completed in {elapsed:.1f}s[/green]")
+        except Exception as e:
+            elapsed = time.time() - t0
+            console.print(f"  [red]✗ {name} FAILED after {elapsed:.1f}s: {e}[/red]")
+            raise
+
     def build(self) -> Dict[str, int]:
+        build_start = time.time()
         self._init_db()
 
-        with Progress() as progress:
-            task = progress.add_task("Building knowledge base...", total=12)
+        steps = [
+            ("Load bins", self._load_bins),
+            ("Load proteins/contigs", self._load_proteins_and_contigs),
+            ("Load annotations", self._load_annotations),
+            ("Load loci", self._load_loci),
+            ("Load embeddings info", self._load_embeddings_info),
+            ("Compute metrics", self._compute_basic_metrics),
+            ("Generate predicates", self._generate_predicates),
+            ("Classify hydrogenases", self._classify_hydrogenases),
+            *([("Classify CAZymes", self._classify_cazymes)] if self.enable_cazymes else []),
+            ("Validate defense systems", self._validate_defense_systems),
+            ("Validate secretion systems", self._validate_secretion_systems),
+            ("Finalize indexes", self._finalize),
+        ]
 
-            progress.update(task, description="Loading bins")
-            self._load_bins()
-            progress.advance(task)
+        for i, (name, func) in enumerate(steps, 1):
+            self._run_step(name, func, i, len(steps))
 
-            progress.update(task, description="Loading proteins/contigs")
-            self._load_proteins_and_contigs()
-            progress.advance(task)
-
-            progress.update(task, description="Loading annotations")
-            self._load_annotations()
-            progress.advance(task)
-
-            progress.update(task, description="Loading loci")
-            self._load_loci()
-            progress.advance(task)
-
-            progress.update(task, description="Loading embeddings info")
-            self._load_embeddings_info()
-            progress.advance(task)
-
-            progress.update(task, description="Computing metrics")
-            self._compute_basic_metrics()
-            progress.advance(task)
-
-            progress.update(task, description="Generating predicates")
-            self._generate_predicates()
-            progress.advance(task)
-
-            progress.update(task, description="Classifying hydrogenases")
-            self._classify_hydrogenases()
-            progress.advance(task)
-
-            progress.update(task, description="Classifying CAZymes")
-            self._classify_cazymes()
-            progress.advance(task)
-
-            progress.update(task, description="Validating defense systems")
-            self._validate_defense_systems()
-            progress.advance(task)
-
-            progress.update(task, description="Validating secretion systems")
-            self._validate_secretion_systems()
-            progress.advance(task)
-
-            progress.update(task, description="Finalizing")
-            self._create_indexes()
-            self._update_stats()
-            progress.advance(task)
-
+        total_elapsed = time.time() - build_start
+        console.print(f"\n[bold green]Build complete in {total_elapsed:.0f}s ({total_elapsed/60:.1f}m)[/bold green]")
+        console.print(f"Stats: {self.stats}")
         return self.stats
+
+    def _finalize(self) -> None:
+        self._create_indexes()
+        self._update_stats()
+
+    # --- connection management ------------------------------------------ #
+    def _release_db(self) -> None:
+        """Close the DB connection so external scripts can open their own."""
+        if self.conn is not None:
+            self.conn.commit()
+            self.conn.close()
+            self.conn = None
+
+    def _reacquire_db(self) -> None:
+        """Re-open the DB connection after external scripts finish."""
+        self.conn = duckdb.connect(str(self.db_path))
 
     # --- init ----------------------------------------------------------- #
     def _init_db(self) -> None:
@@ -353,11 +386,18 @@ class KnowledgeBaseBuilder:
             logger.warning("stage03 genomes directory missing; skipping proteins")
             return
 
-        for faa in genomes_dir.glob("**/*.faa"):
-            if faa.parent.name == "all_protein_symlinks":
-                continue  # skip symlink aggregation dir to avoid duplicates
+        faa_files = [
+            faa for faa in genomes_dir.glob("**/*.faa")
+            if faa.parent.name != "all_protein_symlinks"
+        ]
+        console.print(f"  Parsing {len(faa_files):,} FAA files...")
+        t0 = time.time()
+        for i, faa in enumerate(faa_files):
             bin_id = faa.parent.name
             protein_rows.extend(self._parse_prodigal_faa(faa, bin_id, contig_lengths))
+            if (i + 1) % 500 == 0:
+                console.print(f"    {i+1:,}/{len(faa_files):,} files, {len(protein_rows):,} proteins so far")
+        console.print(f"  Parsed {len(protein_rows):,} proteins from {len(faa_files):,} files ({time.time()-t0:.1f}s)")
 
         # Ensure bins exist even if stage02 was skipped
         if contig_lengths:
@@ -528,13 +568,16 @@ class KnowledgeBaseBuilder:
     # --- annotations ---------------------------------------------------- #
     def _load_annotations(self) -> None:
         # Astra PFAM/KOFAM TSV
-        for tsv in (self.outputs.stage04_dir.rglob("*_hits_df.tsv") if self.outputs.stage04_dir.exists() else []):
+        tsv_files = list(self.outputs.stage04_dir.rglob("*_hits_df.tsv")) if self.outputs.stage04_dir.exists() else []
+        console.print(f"  Found {len(tsv_files)} annotation TSV files")
+        for tsv in tsv_files:
             # Skip dbCAN raw HMM hits — _classify_cazymes() handles CAZy
             # annotation loading via 3-tool consensus pipeline
             if "dbcan" in tsv.as_posix().lower():
                 logger.info(f"Skipping {tsv.name} (handled by CAZyme consensus pipeline)")
                 continue
             try:
+                t_ann = time.time()
                 df = pd.read_csv(tsv, sep="\t")
                 # Derive source name from filename/path (always lowercase)
                 tsv_lower = tsv.as_posix().lower()
@@ -630,6 +673,13 @@ class KnowledgeBaseBuilder:
                 if source == "defensefinder":
                     df = _dedup_defensefinder_fam_variants(df)
 
+                # KEGG best-hit dedup: keep only the top-scoring KO per
+                # protein.  KOFAM profiles for enzyme superfamilies (PKS,
+                # P450, etc.) produce dozens of hits per protein from
+                # variant-specific models that all match the same fold.
+                if source == "kegg":
+                    df = _dedup_kegg_best_hit(df)
+
                 keep = [
                     "annotation_id",
                     "protein_id",
@@ -655,8 +705,10 @@ class KnowledgeBaseBuilder:
                     """,
                 )
                 self.stats["annotations"] += len(df)
+                console.print(f"    {source}: {len(df):,} annotations from {tsv.name} ({time.time()-t_ann:.1f}s)")
             except Exception as exc:
                 logger.warning(f"Failed to load annotations from {tsv}: {exc}")
+                console.print(f"    [red]FAILED: {tsv.name}: {exc}[/red]")
 
         # dbCAN JSON — backward compatibility for datasets that ran dbcan_cazyme.py.
         # For new ingestions, _classify_cazymes() runs DIAMOND directly and takes precedence.
@@ -800,7 +852,7 @@ class KnowledgeBaseBuilder:
 
     # --- metrics -------------------------------------------------------- #
     def _compute_basic_metrics(self) -> None:
-        # length_zscore within bins
+        console.print("  Computing length z-scores...")
         self.conn.execute(
             """
             INSERT INTO feature_store (protein_id, metric_name, metric_value)
@@ -825,10 +877,11 @@ class KnowledgeBaseBuilder:
     def _generate_predicates(self) -> None:
         """Generate semantic predicates for all proteins based on annotations.
 
-        Uses multiprocessing to parallelize the pure-function predicate
-        generation across CPU cores, then bulk-inserts results.
+        Uses multiprocessing (spawn context for macOS safety) to parallelize
+        the pure-function predicate generation across CPU cores, then bulk-inserts.
         """
-        console.print("[cyan]Loading protein and annotation data for predicate generation...[/cyan]")
+        t0 = time.time()
+        console.print("  Loading protein and annotation data...")
 
         # Get GC stats per contig
         gc_stats = {}
@@ -841,15 +894,16 @@ class KnowledgeBaseBuilder:
         for row in gc_rows:
             gc_stats[row[0]] = (row[1], row[2] if row[2] else 0.0)
 
-        # Get all proteins
+        # Get all proteins (without sequences — not needed for predicates)
         proteins = self.conn.execute("""
             SELECT protein_id, sequence_length, gc_content, contig_id
             FROM proteins
         """).fetchall()
 
-        console.print(f"  {len(proteins):,} proteins loaded")
+        console.print(f"  {len(proteins):,} proteins loaded ({time.time() - t0:.1f}s)")
 
         # Get all annotations grouped by protein
+        t1 = time.time()
         annotations_by_protein: Dict[str, List[tuple]] = {}
         ann_rows = self.conn.execute("""
             SELECT protein_id, source, accession, name, description, evalue, score
@@ -864,9 +918,10 @@ class KnowledgeBaseBuilder:
                 (row[1], row[2], row[3], row[4], row[5], row[6])
             )
 
-        console.print(f"  {len(ann_rows):,} annotations loaded")
+        console.print(f"  {len(ann_rows):,} annotations loaded ({time.time() - t1:.1f}s)")
 
-        # Build work items: list of (pid, length, gc, contig_gc_mean, contig_gc_std, ann_tuples)
+        # Build work items
+        t2 = time.time()
         work_items = []
         for row in proteins:
             pid, length, gc, contig = row[0], row[1], row[2], row[3]
@@ -874,26 +929,49 @@ class KnowledgeBaseBuilder:
             anns = annotations_by_protein.get(pid, [])
             work_items.append((pid, length, gc, gc_mean, gc_std, anns))
 
-        # Determine worker count
+        console.print(f"  {len(work_items):,} work items built ({time.time() - t2:.1f}s)")
+
+        # Determine worker count — cap chunk_size for progress granularity
         n_workers = min(os.cpu_count() or 4, 12)
-        chunk_size = max(1, len(work_items) // (n_workers * 4))
+        chunk_size = min(5000, max(1, len(work_items) // (n_workers * 4)))
 
-        console.print(f"[cyan]Generating predicates with {n_workers} workers (chunk_size={chunk_size:,})...[/cyan]")
+        console.print(
+            f"  Generating predicates: {n_workers} workers, "
+            f"chunk_size={chunk_size:,}, {len(work_items):,} items"
+        )
 
-        # Parallel predicate generation
+        # Use 'spawn' context to avoid macOS fork + DuckDB deadlocks
+        ctx = multiprocessing.get_context("spawn")
         results = []
-        with multiprocessing.Pool(n_workers) as pool:
+        t3 = time.time()
+        last_log = t3
+        with ctx.Pool(n_workers) as pool:
             for batch_result in pool.imap_unordered(
                 _generate_predicates_chunk, work_items, chunksize=chunk_size
             ):
                 results.append(batch_result)
-                if len(results) % 100_000 == 0:
-                    console.print(f"  {len(results):,}/{len(work_items):,} proteins processed")
+                now = time.time()
+                # Log every 10 seconds or every 100k proteins
+                if len(results) % 100_000 == 0 or (now - last_log > 10):
+                    elapsed = now - t3
+                    rate = len(results) / elapsed if elapsed > 0 else 0
+                    eta = (len(work_items) - len(results)) / rate if rate > 0 else 0
+                    console.print(
+                        f"  {len(results):,}/{len(work_items):,} "
+                        f"({len(results)*100//len(work_items)}%) "
+                        f"{rate:.0f}/s ETA {eta:.0f}s"
+                    )
+                    last_log = now
 
-        console.print(f"  {len(results):,} proteins processed, inserting into DB...")
+        pool_elapsed = time.time() - t3
+        console.print(
+            f"  Pool complete: {len(results):,} proteins in {pool_elapsed:.1f}s "
+            f"({len(results)/pool_elapsed:.0f}/s)"
+        )
 
         # Bulk insert via DataFrame register
-        insert_batch_size = 50_000
+        t4 = time.time()
+        insert_batch_size = 100_000
         for i in range(0, len(results), insert_batch_size):
             batch = results[i:i + insert_batch_size]
             df = pd.DataFrame(batch, columns=["protein_id", "predicates"])
@@ -904,39 +982,46 @@ class KnowledgeBaseBuilder:
                 SELECT protein_id, predicates, updated_at FROM tmp_pred_batch
             """)
             self.conn.unregister("tmp_pred_batch")
+            console.print(
+                f"  Inserted batch {i//insert_batch_size + 1} "
+                f"({min(i + insert_batch_size, len(results)):,}/{len(results):,})"
+            )
+
+        insert_elapsed = time.time() - t4
+        console.print(f"  DB insert complete in {insert_elapsed:.1f}s")
 
         self.stats["predicates"] = len(proteins)
-        console.print(f"[green]  Predicates generated for {len(proteins):,} proteins[/green]")
+        console.print(f"  Predicates: {len(proteins):,} proteins total")
 
         # Flag proteins overlapping CRISPR arrays
         self._flag_crispr_array_overlaps()
 
     def _flag_crispr_array_overlaps(self) -> None:
         """Add 'in_crispr_array' predicate to proteins overlapping CRISPR arrays."""
-        # Find proteins that overlap CRISPR arrays
-        overlaps = self.conn.execute("""
-            SELECT DISTINCT p.protein_id
-            FROM proteins p
-            JOIN loci l ON p.contig_id = l.contig_id
-            WHERE l.locus_type = 'crispr'
-              AND p.start < l.end_coord
-              AND p.end_coord > l.start
-        """).fetchall()
-
-        if not overlaps:
+        # Check if any CRISPR loci exist first (skip the join entirely if not)
+        crispr_count = self.conn.execute(
+            "SELECT COUNT(*) FROM loci WHERE locus_type = 'crispr'"
+        ).fetchone()[0]
+        if crispr_count == 0:
+            console.print("  No CRISPR loci found, skipping overlap flagging")
             return
 
-        # Add predicate to each overlapping protein
-        for (protein_id,) in overlaps:
-            self.conn.execute("""
-                UPDATE protein_predicates
-                SET predicates = list_append(predicates, 'in_crispr_array'),
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE protein_id = ?
-                  AND NOT list_contains(predicates, 'in_crispr_array')
-            """, [protein_id])
-
-        console.print(f"  Flagged {len(overlaps)} proteins overlapping CRISPR arrays")
+        # Bulk update — single UPDATE with subquery instead of row-by-row
+        self.conn.execute("""
+            UPDATE protein_predicates
+            SET predicates = list_append(predicates, 'in_crispr_array'),
+                updated_at = CURRENT_TIMESTAMP
+            WHERE protein_id IN (
+                SELECT DISTINCT p.protein_id
+                FROM proteins p
+                JOIN loci l ON p.contig_id = l.contig_id
+                WHERE l.locus_type = 'crispr'
+                  AND p.start < l.end_coord
+                  AND p.end_coord > l.start
+            )
+            AND NOT list_contains(predicates, 'in_crispr_array')
+        """)
+        console.print(f"  Flagged CRISPR array overlaps ({crispr_count} arrays)")
 
     def _insert_predicate_batch(self, batch: List[tuple]) -> None:
         """Insert batch of predicates into protein_predicates table.
@@ -964,30 +1049,28 @@ class KnowledgeBaseBuilder:
             console.print("  No HydDB annotations found, skipping hydrogenase classification")
             return
 
-        # Commit current changes so classification script can read them
-        self.conn.commit()
-
         console.print(f"  Found {hyddb_count} HydDB annotations, running subgroup classification...")
 
+        # Release DB so the external script can open its own connection
+        self._release_db()
         try:
-            # Import the classification function
             import sys
             scripts_dir = Path(__file__).resolve().parents[2] / "scripts"
             sys.path.insert(0, str(scripts_dir))
 
             from classify_hydrogenases import classify_hydrogenases as run_classification
 
-            # Run classification (updates predicates in place)
+            n_threads = min(os.cpu_count() or 4, 12)
             results = run_classification(
                 db_path=str(self.db_path),
-                threads=4,
+                threads=n_threads,
                 update_predicates=True,
                 verbose=False,
             )
 
             if not results.empty:
-                validated = results['validated'].sum()
-                console.print(f"  Classified {len(results)} hydrogenases, {validated} validated")
+                n_curation = results['needs_curation'].sum() if 'needs_curation' in results.columns else 0
+                console.print(f"  Classified {len(results)} hydrogenases, {n_curation} need curation")
             else:
                 console.print("  No hydrogenases classified")
 
@@ -1000,6 +1083,8 @@ class KnowledgeBaseBuilder:
         except Exception as e:
             logger.warning(f"Hydrogenase classification failed: {e}")
             console.print(f"  [yellow]Hydrogenase classification failed: {e}[/yellow]")
+        finally:
+            self._reacquire_db()
 
     # --- cazyme classification --------------------------------------------- #
     def _classify_cazymes(self) -> None:
@@ -1012,9 +1097,6 @@ class KnowledgeBaseBuilder:
         if protein_count == 0:
             console.print("  No proteins found, skipping CAZyme classification")
             return
-
-        # Commit current changes so classification script can read them
-        self.conn.commit()
 
         # Copy stage04 dbCAN HMM results to annotations dir for classify_cazymes cache
         data_dir = self.db_path.parent
@@ -1030,6 +1112,8 @@ class KnowledgeBaseBuilder:
 
         console.print(f"  Running dbCAN 3-tool consensus CAZyme classification for {protein_count:,} proteins...")
 
+        # Release DB so the external script can open its own connection
+        self._release_db()
         try:
             import sys
             scripts_dir = Path(__file__).resolve().parents[2] / "scripts"
@@ -1037,9 +1121,10 @@ class KnowledgeBaseBuilder:
 
             from classify_cazymes import classify_cazymes as run_classification
 
+            n_threads = min(os.cpu_count() or 4, 12)
             results = run_classification(
                 db_path=str(self.db_path),
-                threads=4,
+                threads=n_threads,
                 update_predicates=True,
                 verbose=False,
             )
@@ -1060,110 +1145,82 @@ class KnowledgeBaseBuilder:
         except Exception as e:
             logger.warning(f"CAZyme classification failed: {e}")
             console.print(f"  [yellow]CAZyme classification failed: {e}[/yellow]")
+        finally:
+            self._reacquire_db()
 
     # --- defense system validation ---------------------------------------- #
     def _validate_defense_systems(self) -> None:
-        """Run MacSyFinder co-localization validation on DefenseFinder HMM hits.
+        """Run co-location validation on DefenseFinder HMM hits.
 
-        Requires Astra DefenseFinder output with --write_macsyfinder (macsyfinder_compat/).
-        Skipped gracefully if the macsyfinder_compat directory is absent.
+        Uses the in-process co-location engine (sharur.colocation) which reads
+        HMM hits directly from DuckDB annotations. No MacSyFinder subprocess
+        or macsyfinder_compat directory needed.
+
+        Skipped if no defensefinder annotations exist in the database.
         """
-        # Check if macsyfinder_compat exists
-        macsyfinder_dir = self.outputs.stage04_dir / "defensefinder_results" / "macsyfinder_compat"
-        if not macsyfinder_dir.exists():
-            console.print("  No macsyfinder_compat directory found, skipping defense system validation")
-            console.print("  [dim](Re-run stage 04 with DefenseFinder --write_macsyfinder to enable)[/dim]")
-            return
-
-        # Commit current changes so validation script can read them
-        self.conn.commit()
-
-        console.print("  Running MacSyFinder co-localization validation...")
-
-        try:
-            import sys as _sys
-            scripts_dir = Path(__file__).resolve().parents[2] / "scripts"
-            _sys.path.insert(0, str(scripts_dir))
-
-            from validate_defense_systems import validate_defense_systems, integrate_results
-
-            data_dir = self.db_path.parent
-
-            systems_df, genes_df = validate_defense_systems(
-                db_path=str(self.db_path),
-                data_dir=str(data_dir),
-                workers=4,
-                verbose=True,
-            )
-
-            if not systems_df.empty or not genes_df.empty:
-                integrate_results(self.db_path, systems_df, genes_df)
-                n_systems = len(systems_df)
-                n_genes = len(genes_df)
-                console.print(f"  Validated {n_systems} defense systems ({n_genes} genes)")
-            else:
-                console.print("  No defense systems validated")
-
-        except ImportError as e:
-            logger.warning(f"Could not import defense system validation: {e}")
-            console.print("  [yellow]Defense system validation skipped (missing dependencies)[/yellow]")
-        except FileNotFoundError as e:
-            logger.warning(f"MacSyFinder or models not found: {e}")
-            console.print("  [yellow]Defense system validation skipped (macsyfinder not found)[/yellow]")
-        except Exception as e:
-            logger.warning(f"Defense system validation failed: {e}")
-            console.print(f"  [yellow]Defense system validation failed: {e}[/yellow]")
+        self._run_colocation("defensefinder", "defense")
 
     # --- secretion system validation -------------------------------------- #
     def _validate_secretion_systems(self) -> None:
-        """Run MacSyFinder co-localization validation on TXSScan HMM hits.
+        """Run co-location validation on TXSScan HMM hits.
 
-        Requires Astra TXSScan output with --write_macsyfinder (macsyfinder_compat/).
-        Skipped gracefully if the macsyfinder_compat directory is absent.
+        Uses the in-process co-location engine (sharur.colocation) which reads
+        HMM hits directly from DuckDB annotations. No MacSyFinder subprocess
+        or macsyfinder_compat directory needed.
+
+        Skipped if no txsscan annotations exist in the database.
         """
-        macsyfinder_dir = self.outputs.stage04_dir / "txsscan_results" / "macsyfinder_compat"
-        if not macsyfinder_dir.exists():
-            console.print("  No TXSScan macsyfinder_compat directory found, skipping secretion system validation")
-            console.print("  [dim](Add TXSScan to --databases and re-run stage 04 to enable)[/dim]")
+        self._run_colocation("txsscan", "secretion")
+
+    def _run_colocation(self, source: str, system_type: str) -> None:
+        """Generic co-location validation for any MacSyFinder-model-based source.
+
+        Args:
+            source: Annotation source in DuckDB ('defensefinder' or 'txsscan').
+            system_type: Human label for logging ('defense' or 'secretion').
+        """
+        # Check if annotations exist for this source
+        n_hits = self.conn.execute(
+            "SELECT COUNT(*) FROM annotations WHERE source = ?", [source]
+        ).fetchone()[0]
+        if n_hits == 0:
+            console.print(f"  No {source} annotations in DB, skipping {system_type} system validation")
             return
 
-        self.conn.commit()
+        console.print(f"  Running co-location validation on {n_hits:,} {source} hits...")
 
-        console.print("  Running MacSyFinder co-localization validation for TXSScan...")
-
+        # Release DB so the co-location engine can open its own connection
+        self._release_db()
         try:
-            import sys as _sys
-            scripts_dir = Path(__file__).resolve().parents[2] / "scripts"
-            _sys.path.insert(0, str(scripts_dir))
+            from sharur.colocation import (
+                validate_systems,
+                integrate_defense_results,
+                integrate_secretion_results,
+            )
 
-            from validate_secretion_systems import validate_secretion_systems, integrate_results
-
-            data_dir = self.db_path.parent
-
-            systems_df, genes_df = validate_secretion_systems(
+            systems_df, genes_df = validate_systems(
                 db_path=str(self.db_path),
-                data_dir=str(data_dir),
-                workers=4,
+                source=source,
                 verbose=True,
             )
 
             if not systems_df.empty or not genes_df.empty:
-                integrate_results(self.db_path, systems_df, genes_df)
+                if source == "defensefinder":
+                    integrate_defense_results(self.db_path, systems_df, genes_df)
+                elif source == "txsscan":
+                    integrate_secretion_results(self.db_path, systems_df, genes_df)
+
                 n_systems = len(systems_df)
                 n_genes = len(genes_df)
-                console.print(f"  Validated {n_systems} secretion systems ({n_genes} genes)")
+                console.print(f"  Validated {n_systems} {system_type} systems ({n_genes} genes)")
             else:
-                console.print("  No secretion systems validated")
+                console.print(f"  No {system_type} systems validated")
 
-        except ImportError as e:
-            logger.warning(f"Could not import secretion system validation: {e}")
-            console.print("  [yellow]Secretion system validation skipped (missing dependencies)[/yellow]")
-        except FileNotFoundError as e:
-            logger.warning(f"MacSyFinder or TXSScan models not found: {e}")
-            console.print("  [yellow]Secretion system validation skipped (TXSScan models not found)[/yellow]")
         except Exception as e:
-            logger.warning(f"Secretion system validation failed: {e}")
-            console.print(f"  [yellow]Secretion system validation failed: {e}[/yellow]")
+            logger.warning(f"{system_type.title()} system validation failed: {e}")
+            console.print(f"  [yellow]{system_type.title()} system validation failed: {e}[/yellow]")
+        finally:
+            self._reacquire_db()
 
     # --- indexes/stats -------------------------------------------------- #
     def _create_indexes(self) -> None:
@@ -1223,6 +1280,7 @@ def main(
     data_dir: Path = typer.Option(Path("data"), "--data-dir", "-d"),
     output: Path = typer.Option(Path("data/sharur.duckdb"), "--output", "-o"),
     force: bool = typer.Option(False, "--force"),
+    enable_cazymes: bool = typer.Option(False, "--enable-cazymes", help="Run dbCAN CAZyme classification (slow, off by default)"),
 ) -> None:
     logging.basicConfig(level=logging.INFO)
     outputs = PipelineOutputs(
@@ -1237,7 +1295,7 @@ def main(
         stage06_dir=data_dir / "stage06_embeddings",
     )
     console.print(f"Detected stage outputs: {outputs.validate()}")
-    builder = KnowledgeBaseBuilder(outputs, output, force=force)
+    builder = KnowledgeBaseBuilder(outputs, output, force=force, enable_cazymes=enable_cazymes)
     stats = builder.build()
     console.print(f"[green]Build complete[/green]: {stats}")
 
