@@ -249,7 +249,7 @@ PFAM_TO_PREDICATES: dict[str, list[str]] = {
     "PF00384": ["denitrification", "nitrate_reduction", "molybdenum_binding"],  # Molybdopterin
     "PF01568": ["denitrification", "nitrate_reduction"],  # Molydop_binding
     "PF02613": ["denitrification", "nitrite_reductase", "heme_binding"],  # Nitrite_red_cu
-    "PF00115": ["respiration", "heme_binding"],  # COX1 (cytochrome oxidase)
+    "PF00115": ["respiration", "heme_binding", "cytochrome", "electron_transport", "terminal_oxidase", "cytochrome_c_oxidase"],  # COX1
     "PF00394": ["denitrification", "copper_binding"],  # Cu-oxidase
 
     # Ammonia metabolism
@@ -3960,7 +3960,7 @@ PFAM_TO_PREDICATES: dict[str, list[str]] = {
 
     # Cytochromes (heme-containing electron carriers)
     "PF13435": ["cytochrome", "electron_transport", "respiration", "heme_binding"],  # Cytochrome_C554
-    "PF13442": ["cytochrome", "electron_transport", "respiration", "heme_binding"],  # Cytochrome_CBB3
+    "PF13442": ["cytochrome", "electron_transport", "respiration", "heme_binding", "terminal_oxidase", "cytochrome_c_oxidase"],  # Cytochrome_CBB3
     "PF14522": ["cytochrome", "electron_transport", "respiration", "heme_binding"],  # Cytochrome_C7
     "PF22085": ["cytochrome", "electron_transport", "respiration", "heme_binding"],  # NorB_cytochrome_c-like
     "PF00033": ["cytochrome", "electron_transport", "respiration", "heme_binding"],  # Cytochrome_B
@@ -4005,6 +4005,19 @@ PFAM_TO_PREDICATES: dict[str, list[str]] = {
 
     # Sigma factor
     "PF14532": ["regulator", "sigma_factor", "atp_binding"],  # Sigma54_activ_2 - Sigma-54 interaction domain
+
+    # Outer membrane receptors / transporters
+    "PF07715": ["transporter", "tonb_dependent_receptor", "outer_membrane"],  # Plug - TonB-dependent receptor plug domain
+    "PF00593": ["transporter", "tonb_dependent_receptor", "outer_membrane", "beta_barrel"],  # TonB_dep_Rec - TonB-dependent receptor beta-barrel
+    "PF00691": ["outer_membrane", "cell_surface"],  # OmpA - Outer membrane protein A
+
+    # Signaling domains
+    "PF00498": ["signaling", "phosphopeptide_binding"],  # FHA - Forkhead-associated domain
+    "PF07238": ["signaling", "cdgmp_binding", "cyclic_dinucleotide"],  # PilZ - c-di-GMP binding
+
+    # Terminal oxidases (additional)
+    "PF02322": ["respiration", "heme_binding", "cytochrome", "electron_transport", "terminal_oxidase", "cytochrome_c_oxidase"],  # COX2
+    "PF01654": ["respiration", "heme_binding", "electron_transport", "terminal_oxidase", "cytochrome_bd_oxidase"],  # Cytochrome bd
 
     # -------------------------------------------------------------------------
     # NAME-ONLY HMMs (pipelines without PF accessions)

@@ -129,6 +129,7 @@ _SOURCE_ALIASES: dict[str, str] = {
     "kegg": "kegg",
     "cazy": "cazy",
     "hyddb": "hyddb",
+    "hyddb_subgroup": "hyddb_subgroup",
     "defensefinder": "defensefinder",
     "defensefinder_system": "defensefinder_system",
     "txsscan": "txsscan",

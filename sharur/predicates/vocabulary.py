@@ -124,6 +124,7 @@ TRANSPORT_PREDICATES = [
     PredicateVocab("cell_surface", "Cell surface", "Surface-exposed protein", "transport"),
     PredicateVocab("cytoplasmic", "Cytoplasmic", "Cytoplasmic protein", "transport"),
     PredicateVocab("outer_membrane", "Outer membrane", "Outer membrane protein", "transport", "membrane"),
+    PredicateVocab("tonb_dependent_receptor", "TonB-dependent receptor", "TonB-dependent outer membrane receptor", "transport", "outer_membrane"),
     PredicateVocab("inner_membrane", "Inner membrane", "Inner/cytoplasmic membrane protein", "transport", "membrane"),
 ]
 
@@ -147,6 +148,7 @@ REGULATION_PREDICATES = [
     PredicateVocab("cyclic_dinucleotide", "Cyclic dinucleotide signaling", "c-di-GMP/c-di-AMP signaling", "regulation", "signaling"),
     PredicateVocab("diguanylate_cyclase", "Diguanylate cyclase", "c-di-GMP synthesis (GGDEF)", "regulation", "cyclic_dinucleotide"),
     PredicateVocab("phosphodiesterase", "Phosphodiesterase", "c-di-GMP hydrolysis (EAL/HD-GYP)", "regulation", "cyclic_dinucleotide"),
+    PredicateVocab("cdgmp_binding", "c-di-GMP binding", "c-di-GMP receptor/binding domain", "regulation", "cyclic_dinucleotide"),
     PredicateVocab("serine_threonine_kinase", "Ser/Thr kinase", "Serine/threonine protein kinase", "regulation", "signaling"),
     PredicateVocab("tyrosine_kinase", "Tyrosine kinase", "Tyrosine protein kinase", "regulation", "signaling"),
     PredicateVocab("phosphoprotein_phosphatase", "Phosphoprotein phosphatase", "Protein dephosphorylation", "regulation", "signaling"),
@@ -192,6 +194,9 @@ METABOLISM_PREDICATES = [
     PredicateVocab("fermentation", "Fermentation", "Fermentative metabolism", "metabolism", "energy_metabolism"),
     PredicateVocab("electron_transport", "Electron transport", "Electron transport chain", "metabolism", "energy_metabolism"),
     PredicateVocab("cytochrome", "Cytochrome", "Cytochrome protein (heme-containing electron carrier)", "metabolism", "electron_transport"),
+    PredicateVocab("terminal_oxidase", "Terminal oxidase", "Terminal electron acceptor in respiratory chain", "metabolism", "respiration"),
+    PredicateVocab("cytochrome_c_oxidase", "Cytochrome c oxidase", "Cytochrome c oxidase (caa3/cbb3-type)", "metabolism", "terminal_oxidase"),
+    PredicateVocab("cytochrome_bd_oxidase", "Cytochrome bd oxidase", "Cytochrome bd ubiquinol oxidase", "metabolism", "terminal_oxidase"),
     PredicateVocab("ferredoxin", "Ferredoxin", "Ferredoxin (iron-sulfur electron carrier)", "metabolism", "electron_transport"),
 
     # Amino acid metabolism

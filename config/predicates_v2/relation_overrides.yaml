@@ -13,6 +13,7 @@ source_defaults:
   vogdb: flags
   vog: flags
   hyddb: implies
+  hyddb_subgroup: implies      # DIAMOND classification — high confidence
   defensefinder_system: implies
   defensefinder: flags
   txsscan_system: implies

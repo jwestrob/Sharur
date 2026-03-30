@@ -453,6 +453,15 @@ KEGG_TO_PREDICATES: dict[str, list[str]] = {
     "K27875": ["oxidoreductase", "anaerobic_respiration", "selenium_metabolism"],  # selenate reductase subunit B
     "K17051": ["oxidoreductase", "anaerobic_respiration", "selenium_metabolism"],  # selenate/chlorate reductase beta
 
+    # Terminal oxidases - respiratory chain
+    "K02274": ["cytochrome", "electron_transport", "respiration", "terminal_oxidase", "cytochrome_c_oxidase", "heme_binding"],  # coxI
+    "K02275": ["cytochrome", "electron_transport", "respiration", "terminal_oxidase", "cytochrome_c_oxidase", "copper_binding"],  # coxII
+    "K02276": ["cytochrome", "electron_transport", "respiration", "terminal_oxidase", "cytochrome_c_oxidase"],  # coxIII
+    "K02277": ["cytochrome", "electron_transport", "respiration", "terminal_oxidase", "cytochrome_c_oxidase"],  # coxIV
+    "K15862": ["cytochrome", "electron_transport", "respiration", "terminal_oxidase", "cytochrome_c_oxidase"],  # cbb3-type I/II
+    "K00425": ["cytochrome", "electron_transport", "respiration", "terminal_oxidase", "cytochrome_bd_oxidase"],  # cydA
+    "K00426": ["cytochrome", "electron_transport", "respiration", "terminal_oxidase", "cytochrome_bd_oxidase"],  # cydB
+
     # Halogenases - secondary metabolism
     "K21256": ["oxidoreductase", "fad_binding", "secondary_metabolism"],  # flavin-dependent halogenase
     "K12714": ["oxidoreductase", "fad_binding", "secondary_metabolism"],  # clorobiocin halogenase
@@ -501,6 +510,8 @@ KEGG_TO_PREDICATES: dict[str, list[str]] = {
     "K19857": ["oxidoreductase", "reductase", "carbohydrate_active"],  # dTDP-sugar reductase
     "K22098": ["oxidoreductase", "dehydrogenase", "secondary_metabolism"],  # noscapine synthase
     "K20152": ["oxidoreductase", "reductase", "secondary_metabolism"],  # dehydrokanamycin reductase
+    "K18535": ["oxidoreductase"],  # putative oxidoreductase
+    "K14373": ["oxidoreductase", "reductase"],  # C-5 ketoreductase
 
     # Isomerases
     "K20930": ["isomerase", "lyase"],  # phosphinomethylmalate isomerase

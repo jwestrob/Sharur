@@ -344,6 +344,18 @@ class PredicateGenerator:
             # Add hyddb_annotated
             predicates.add("hyddb_annotated")
 
+        elif source == "hyddb_subgroup":
+            # HydDB DIAMOND subgroup classification
+            # Accession IS the predicate name (e.g., nife_group4, ech_hydrogenase)
+            acc = ann.accession or ""
+            if acc:
+                predicates.add(acc)
+                predicates.add("hydrogenase")
+                predicates.add("hydrogen_metabolism")
+
+            if self.include_direct_access:
+                predicates.add(f"hyddb_subgroup:{acc}")
+
         elif source == "defensefinder":
             # DefenseFinder defense system predictions
             # The accession contains the system/component name

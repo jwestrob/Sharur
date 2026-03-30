@@ -181,61 +181,74 @@ def generate_and_persist_v2(
 
 
 def _persist_atoms(store: "DuckDBStore", atoms: list[SemanticAtom]) -> None:
-    """Write atoms to semantic_atoms table."""
+    """Write atoms to semantic_atoms table using batch insert."""
     # Clear existing
     store.execute("DELETE FROM semantic_atoms;")
 
-    for atom in atoms:
-        store.execute(
-            """
-            INSERT OR REPLACE INTO semantic_atoms
-            (protein_id, atom_id, facet, relation, source_accession,
-             source_db, evidence_evalue, evidence_score)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            [
-                atom.protein_id,
-                atom.atom_id,
-                atom.facet.value,
-                atom.relation.value,
-                atom.source_accession,
-                atom.source_db,
-                atom.evidence_evalue,
-                atom.evidence_score,
-            ],
+    if not atoms:
+        return
+
+    # Batch insert via executemany for ~10-50x speedup over per-row inserts
+    rows = [
+        (
+            atom.protein_id,
+            atom.atom_id,
+            atom.facet.value,
+            atom.relation.value,
+            atom.source_accession,
+            atom.source_db,
+            atom.evidence_evalue,
+            atom.evidence_score,
         )
+        for atom in atoms
+    ]
+    store.conn.executemany(
+        """
+        INSERT OR REPLACE INTO semantic_atoms
+        (protein_id, atom_id, facet, relation, source_accession,
+         source_db, evidence_evalue, evidence_score)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        rows,
+    )
 
 
 def _persist_states(
     store: "DuckDBStore",
     states: dict[str, SemanticState],
 ) -> None:
-    """Write aggregated states to semantic_state table."""
+    """Write aggregated states to semantic_state table using batch insert."""
     # Clear existing
     store.execute("DELETE FROM semantic_state;")
 
-    for pid, state in states.items():
-        store.execute(
-            """
-            INSERT OR REPLACE INTO semantic_state
-            (protein_id, activities, roles, architecture, localization,
-             topology, size_class, quality_flags, composite_predicates,
-             unresolved_count, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            """,
-            [
-                pid,
-                state.activities,
-                state.roles,
-                state.architecture,
-                state.localization,
-                json.dumps(state.topology),
-                state.size_class,
-                state.quality_flags,
-                state.composite_predicates,
-                len(state.unresolved_accessions),
-            ],
+    if not states:
+        return
+
+    rows = [
+        (
+            pid,
+            state.activities,
+            state.roles,
+            state.architecture,
+            state.localization,
+            json.dumps(state.topology),
+            state.size_class,
+            state.quality_flags,
+            state.composite_predicates,
+            len(state.unresolved_accessions),
         )
+        for pid, state in states.items()
+    ]
+    store.conn.executemany(
+        """
+        INSERT OR REPLACE INTO semantic_state
+        (protein_id, activities, roles, architecture, localization,
+         topology, size_class, quality_flags, composite_predicates,
+         unresolved_count, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """,
+        rows,
+    )
 
 
 def _get_contig_gc_stats(

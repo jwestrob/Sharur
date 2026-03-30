@@ -78,72 +78,128 @@ class SemanticState:
     unresolved_accessions: list[str]
 ```
 
-## Public API
+## Facade API (Recommended)
 
-All imports come from `sharur.predicates_v2`:
+The Sharur facade (`b = Sharur(...)`) exposes V2 through high-level methods. **This is the recommended way for agents and analysis scripts to use V2.**
+
+### Generate V2 atoms + state
+
+```python
+from sharur.operators import Sharur
+b = Sharur("data/my_dataset/sharur.duckdb")
+
+# Run the full V2 pipeline: generate atoms, aggregate, evaluate composites, persist
+states = b.generate_v2()
+
+# With review queue output (unmapped accessions ranked by frequency)
+states = b.generate_v2(output_review_queue="review_queue.tsv")
+```
+
+### Query semantic state
+
+```python
+# Get the resolved semantic state for a protein
+state = b.get_semantic_state("protein_123")
+state.activities     # ["hydrogenase", "nife_hydrogenase"]
+state.roles          # ["defense_system"]
+state.architecture   # ["multi_domain"]
+state.size_class     # "giant"
+state.composite_predicates  # ["energy_conserving_hydrogenase"]
+
+# Get raw atoms (full provenance: which annotation produced each claim)
+atoms = b.get_atoms("protein_123")
+for a in atoms:
+    print(f"{a.atom_id} ({a.facet.value}): {a.relation.value} via {a.source_db}:{a.source_accession}")
+```
+
+### Search by V2 facets and atoms
+
+**Default limit=50.** All search methods return at most 50 results by default to avoid flooding context. Pass `limit=N` for larger result sets, or use SQL aggregation (`COUNT(DISTINCT protein_id)`) for counts.
+
+```python
+# Search by facet: find all proteins with a specific type of claim
+b.search_by_facet("activity")                                      # any activity
+b.search_by_facet("activity", atom_ids=["hydrogenase"])            # specific activity
+b.search_by_facet("role", atom_ids=["defense_system"], relation="implies")  # strong evidence only
+b.search_by_facet("activity", limit=500)                           # override default limit
+
+# Search by atom presence/absence (V2-native analog of search_by_predicates)
+b.search_by_atoms(has=["giant", "unannotated"])         # giant + unannotated
+b.search_by_atoms(has=["hydrogenase"], lacks=["membrane"])  # hydrogenase, not membrane
+b.search_by_atoms(has=["defense_system"], limit=5000)   # get all defense proteins
+```
+
+### Composite predicates (DSL)
+
+```python
+# List all composite predicate definitions
+for comp in b.list_composites():
+    print(f"{comp.name}: {comp.description}")
+
+# Composite predicates are auto-evaluated during generate_v2() and stored
+# in semantic_state.composite_predicates. Query them via get_semantic_state:
+state = b.get_semantic_state("protein_123")
+if "nife_hydrogenase_validated" in state.composite_predicates:
+    print("Validated NiFe hydrogenase!")
+```
+
+### Review queue and shadow diff
+
+```python
+# Unmapped accessions: what annotation hits have no semantic mapping yet?
+queue = b.v2_review_queue(limit=20)
+for entry in queue:
+    print(f"{entry['accession']} ({entry['source_db']}): {entry['n_proteins']} proteins")
+
+# V1 vs V2 comparison
+diff = b.run_shadow_diff(output_report="shadow_report.md")
+print(f"Match rate: {diff['summary']['match_rate_pct']}%")
+```
+
+### V1 compatibility
+
+V2 produces flat V1-compatible predicate lists via the compat layer, so `search_by_predicates()` continues to work unchanged:
+
+```python
+# V1 predicate search still works
+b.search_by_predicates(has=["giant", "unannotated"])
+b.search_by_predicates(has=["hydrogenase"], lacks=["hypothetical"])
+```
+
+## Library API (Advanced)
+
+For custom pipelines or extending V2 internals, import directly from `sharur.predicates_v2`:
 
 ```python
 from sharur.predicates_v2 import (
     # Data model
-    ClaimRelation,
-    SemanticAtom,
-    SemanticFacet,
-    SemanticState,
+    ClaimRelation, SemanticAtom, SemanticFacet, SemanticState,
     # Pipeline components
-    AtomGenerator,          # annotation -> atoms
-    aggregate_atoms,        # atoms -> SemanticState
-    evaluate_composites,    # atoms + YAML rules -> composite predicate names
-    load_composites,        # load composite definitions from YAML
-    create_v2_tables,       # create DuckDB tables for V2
-    generate_and_persist_v2,# full pipeline: DB -> atoms -> state -> persist
+    AtomGenerator, aggregate_atoms, evaluate_composites, load_composites,
+    create_v2_tables, generate_and_persist_v2,
     # V1 compatibility
-    semantic_state_to_predicates,  # SemanticState -> flat predicate list
+    semantic_state_to_predicates,
     # Review queue
-    build_review_queue,     # all atoms -> prioritized unmapped accessions
-    format_review_queue_tsv,# review queue -> TSV string
+    build_review_queue, format_review_queue_tsv,
     # Shadow diff
-    shadow_diff,            # V1 vs V2 comparison on raw data
-    run_shadow_diff_on_store,  # V1 vs V2 comparison from DuckDB
+    shadow_diff, run_shadow_diff_on_store,
 )
 ```
 
-### Full pipeline (from DuckDB)
-
-```python
-from sharur.predicates_v2 import generate_and_persist_v2
-from sharur.storage.duckdb_store import DuckDBStore
-
-store = DuckDBStore("data/my_dataset/sharur.duckdb")
-states = generate_and_persist_v2(
-    store,
-    protein_ids=None,               # None = all proteins
-    output_review_queue="review_queue.tsv",
-)
-# states: dict[str, SemanticState]
-# DuckDB tables semantic_atoms and semantic_state are now populated
-# review_queue.tsv has prioritized unmapped accessions
-```
-
-### Step-by-step (for custom pipelines)
+### Step-by-step pipeline
 
 ```python
 from sharur.predicates.generator import AnnotationRecord, ProteinRecord
 from sharur.predicates_v2 import (
-    AtomGenerator,
-    aggregate_atoms,
-    evaluate_composites,
+    AtomGenerator, aggregate_atoms, evaluate_composites,
     semantic_state_to_predicates,
 )
 
 # 1. Create generator
 gen = AtomGenerator(expand_hierarchy=True, predict_topology=False)
 
-# 2. Build protein + annotation records
-protein = ProteinRecord(
-    protein_id="prot_001",
-    sequence_length=450,
-    gc_content=0.35,
-)
+# 2. Build records
+protein = ProteinRecord(protein_id="prot_001", sequence_length=450, gc_content=0.35)
 annotations = [
     AnnotationRecord(source="pfam", accession="PF00374", name="NiFeSe_Hases",
                      description="NiFe hydrogenase", evalue=1e-50, score=180.0),
@@ -153,39 +209,16 @@ annotations = [
 
 # 3. Generate atoms
 atoms = gen.generate_atoms(protein, annotations)
-# Each atom has: atom_id, facet, relation, source_accession, source_db
 
 # 4. Aggregate into state
 state = aggregate_atoms(protein.protein_id, atoms)
-# state.activities = ["hydrogenase", "nife_hydrogenase", ...]
-# state.roles = [...]
-# state.size_class = "medium"
 
 # 5. Evaluate composite predicates
 composites = evaluate_composites(atoms, topology=state.topology)
 state.composite_predicates = composites
-# e.g. ["nife_hydrogenase_validated"]
 
 # 6. Convert back to V1 format if needed
-flat_predicates = semantic_state_to_predicates(state)
-# ["hydrogenase", "medium", "nife_hydrogenase", "nife_hydrogenase_validated", ...]
-```
-
-### Shadow diff (V1 vs V2 comparison)
-
-```python
-from sharur.predicates_v2 import run_shadow_diff_on_store
-from sharur.storage.duckdb_store import DuckDBStore
-
-store = DuckDBStore("data/my_dataset/sharur.duckdb")
-result = run_shadow_diff_on_store(
-    store,
-    protein_ids=None,                     # None = all
-    output_report="shadow_diff_report.md", # Markdown report
-    output_jsonl="shadow_diff.jsonl",      # Per-protein JSONL diffs
-)
-# result["summary"]["match_rate_pct"] -> percentage of proteins with identical V1/V2 output
-# result["summary"]["v2_unique_unresolved"] -> how many accessions need curation
+flat_predicates = semantic_state_to_predicates(state, atoms=atoms)
 ```
 
 ## Composite Predicate DSL

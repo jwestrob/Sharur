@@ -164,7 +164,7 @@ class AtomGenerator:
             # These are not semantic atoms — they're index keys
             if ":" in pred_id and pred_id.split(":")[0] in (
                 "pfam", "kegg", "cazy", "vog", "hyddb",
-                "defensefinder", "txsscan",
+                "hyddb_subgroup", "defensefinder", "txsscan",
             ):
                 continue
 
@@ -242,9 +242,10 @@ class AtomGenerator:
     ) -> list[SemanticAtom]:
         """Validate hydrogenase atoms against Complex I false positives.
 
-        Mirrors V1's _validate_hydrogenase_calls: if HydDB NiFe hit exists
-        but PF00374 (NiFeSe_Hases) is absent and Complex I domains are
-        present, remove hydrogenase-related atoms.
+        When HydDB NiFe hit exists but PF00374 (NiFeSe_Hases) is absent
+        and Complex I domains are present, emit `excludes` atoms. The
+        aggregator will surface implies+excludes as a conflict for review.
+        Use the composite `nife_hydrogenase_validated` to find true positives.
         """
         atom_ids = {a.atom_id for a in atoms}
         source_accessions = {a.source_accession for a in atoms}
@@ -257,9 +258,18 @@ class AtomGenerator:
         has_complex1 = "PF00346" in source_accessions or "PF00329" in source_accessions
 
         if not has_nifese_hases and has_complex1:
-            # False positive — remove hydrogenase atoms
-            hydrogenase_atoms = {"nife_hydrogenase", "hydrogenase", "hydrogen_metabolism"}
-            atoms = [a for a in atoms if a.atom_id not in hydrogenase_atoms]
+            # Emit excludes atoms — aggregator will surface as conflict
+            pid = atoms[0].protein_id
+            complex1_acc = "PF00346" if "PF00346" in source_accessions else "PF00329"
+            for excluded_id in ("nife_hydrogenase", "hydrogenase", "hydrogen_metabolism"):
+                atoms.append(SemanticAtom(
+                    protein_id=pid,
+                    atom_id=excluded_id,
+                    facet=get_facet(excluded_id),
+                    relation=ClaimRelation.excludes,
+                    source_accession=complex1_acc,
+                    source_db="_validation",
+                ))
 
         return atoms
 
