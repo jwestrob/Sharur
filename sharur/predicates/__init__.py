@@ -51,13 +51,22 @@ from sharur.predicates.generator import (
     generate_predicates_for_proteins,
     persist_generated_predicates,
 )
-from sharur.predicates.topology import (
-    is_available as topology_is_available,
-    TopologyPrediction,
-    predict_topology,
-    get_topology_predicates,
-    predict_topology_batch,
-)
+try:
+    from sharur.predicates.topology import (
+        is_available as topology_is_available,
+        TopologyPrediction,
+        predict_topology,
+        get_topology_predicates,
+        predict_topology_batch,
+    )
+except Exception:
+    # pyTMHMM may be missing or ABI-incompatible (numpy 1.x vs 2.x)
+    from sharur.predicates.topology import is_available as topology_is_available  # type: ignore[no-redef]
+
+    TopologyPrediction = None  # type: ignore[assignment,misc]
+    predict_topology = None  # type: ignore[assignment]
+    get_topology_predicates = None  # type: ignore[assignment]
+    predict_topology_batch = None  # type: ignore[assignment]
 
 __all__ = [
     # Registry (legacy)

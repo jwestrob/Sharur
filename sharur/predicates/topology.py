@@ -14,12 +14,12 @@ from typing import Optional
 import re
 
 
-# Try to import pyTMHMM, but don't fail if not installed
+# Try to import pyTMHMM, but don't fail if not installed or ABI-incompatible
 _PYTMHMM_AVAILABLE = False
 try:
     import pyTMHMM
     _PYTMHMM_AVAILABLE = True
-except ImportError:
+except Exception:
     pyTMHMM = None  # type: ignore
 
 
