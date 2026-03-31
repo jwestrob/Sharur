@@ -12,7 +12,7 @@ In Sumerian mythology, Sharur is the sentient mace of the god Ninurta. It flies 
 
 > A data plane for agent-driven metagenomic discovery
 
-Sharur makes large metagenomic datasets navigable by AI agents. It combines a DuckDB relational store, LanceDB vector store, and a functional predicate system into an operator framework that agents (Claude Code, Codex, etc.) use to search, characterize, and compare proteins across hundreds of genomes.
+Sharur makes large metagenomic datasets navigable by AI agents. It combines a DuckDB relational store, FAISS vector store, and a functional predicate system into an operator framework that agents (Claude Code, Codex, etc.) use to search, characterize, and compare proteins across hundreds of genomes.
 
 ## What it does
 
@@ -100,7 +100,7 @@ Sharur ships with skill specs in `.claude/skills/` that give Claude Code structu
 ┌────────────────────────┴────────────────────────────────┐
 │                     Data Layer                           │
 │  DuckDB (proteins, annotations, loci, predicates)       │
-│  LanceDB (ESM2 embeddings, similarity search)           │
+│  FAISS (ESM2 embeddings, similarity search)           │
 └─────────────────────────────────────────────────────────┘
 ```
 

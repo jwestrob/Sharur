@@ -24,8 +24,7 @@ data/
 │   │
 │   ├── embeddings/                    # ESM2 protein embeddings
 │   │   ├── embedding_manifest.json
-│   │   ├── lancedb/                   # LanceDB vector store
-│   │   └── protein_embeddings.h5      # Raw embeddings (optional)
+│   │   └── protein_embeddings.h5      # ESM2 embeddings (FAISS index built at runtime)
 │   │
 │   ├── structures/                    # ESM3 structure predictions
 │   │   ├── *.pdb                      # Predicted PDB files
@@ -115,7 +114,7 @@ python src/ingest/06_esm2_embeddings.py \
 | Archive directory | `{organism}_{YYYY-MM-DD}` | `thorarchaeota_2026-02-03` |
 | Source file | `source/proteins.faa` | `source/Heimdall_Megavirus.faa` |
 | Annotations | `annotations/{db}.tsv` | `annotations/pfam.tsv` |
-| Embeddings | `embeddings/` | Standard LanceDB structure |
+| Embeddings | `embeddings/` | H5 file with FAISS index built at runtime |
 | Reports | `reports/{type}.pdf` | `reports/final.pdf` |
 | Figures | `figures/{locus_name}.png` | `figures/escrt_locus.png` |
 

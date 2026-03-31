@@ -101,7 +101,7 @@ integrate_secretion_results(db_path, systems_df, genes_df)
 **Script:** `src/ingest/06_esm2_embeddings.py`
 **Usage:** `python src/ingest/06_esm2_embeddings.py data/DATASET/stage03_prodigal data/DATASET/embeddings/`
 **Model:** `facebook/esm2_t6_8M_UR50D` (320-dim, auto-detects MPS/CUDA/CPU)
-**Output:** `embeddings/protein_embeddings.h5` + `embeddings/lancedb/` + `embedding_manifest.json`
+**Output:** `embeddings/protein_embeddings.h5` + `embedding_manifest.json` (FAISS index built at runtime from H5)
 **Status:** Standard pipeline stage — run after stage 07. Required for ELSA synteny.
 
 ## ELSA Synteny Discovery

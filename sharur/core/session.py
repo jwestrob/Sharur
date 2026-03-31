@@ -24,7 +24,7 @@ from sharur.core.types import (
     WorkingSet,
 )
 from sharur.storage.duckdb_store import DuckDBStore
-from sharur.storage.vector_store import LanceDBStore
+from sharur.storage.vector_store import FAISSStore
 
 MAX_FOCUS_DEPTH = 10
 FOCUS_EXPIRY_TURNS = 10
@@ -178,7 +178,7 @@ class ExplorationSession:
     # ------------------------------------------------------------------ #
     def _attach_vector_store(self, db_path: Path) -> None:
         """
-        Auto-load LanceDB vector store if embeddings manifest is present
+        Auto-load FAISS vector store from H5 embeddings if present
         alongside the DuckDB.
 
         Checks both new standard path (embeddings/) and legacy path (stage06_embeddings/).
@@ -189,17 +189,10 @@ class ExplorationSession:
             if not embeddings_dir.exists():
                 embeddings_dir = db_path.parent / "stage06_embeddings"
 
-            manifest = embeddings_dir / "embedding_manifest.json"
-            if not manifest.exists():
+            h5_path = embeddings_dir / "protein_embeddings.h5"
+            if not h5_path.exists():
                 return
-            data = json.loads(manifest.read_text())
-            lancedb_path = data.get("output_files", {}).get("lancedb") or str(embeddings_dir / "lancedb")
-            # Use protein_embeddings table name and protein_id column to match ingest pipeline
-            self._vector_store = LanceDBStore(
-                str(lancedb_path),
-                table_name="protein_embeddings",
-                id_column="protein_id",
-            )
+            self._vector_store = FAISSStore(str(h5_path))
         except Exception:
             # Fallback to None; find_similar will warn gracefully
             self._vector_store = None

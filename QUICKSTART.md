@@ -156,7 +156,7 @@ python src/ingest/06_esm2_embeddings.py \
 
 **Note:** Requires GPU for speed (CPU works but slow). Uses `facebook/esm2_t6_8M_UR50D` model.
 
-**Output:** LanceDB vector store in `embeddings/` for similarity search
+**Output:** FAISS vector index in `embeddings/` for similarity search
 
 ---
 
@@ -260,7 +260,7 @@ python scripts/generate_${DATASET}_report.py
 - ESM2 model will auto-download first time (~200MB)
 
 ### "Vector store not loading"
-- Check `embeddings/` directory has LanceDB files
+- Check `embeddings/` directory has `protein_embeddings.h5`
 - Verify protein_id column exists: `db.open_table('protein_embeddings')`
 - Regenerate if corrupted
 
@@ -304,7 +304,7 @@ data/my_dataset_production/
 │   ├── pfam_results/PFAM_hits_df.tsv
 │   ├── kofam_results/KOFAM_hits_df.tsv
 │   └── hyddb_results/HydDB_hits_df.tsv
-├── embeddings/               # LanceDB vector store (100-500 MB)
+├── embeddings/               # FAISS vector index (100-500 MB)
 ├── exploration/              # Created during analysis
 ├── figures/                  # Created during analysis
 └── reports/                  # Created during analysis

@@ -379,7 +379,7 @@ class Sharur:
         """
         Find proteins with similar ESM2 embeddings.
 
-        Uses LanceDB kNN search to find structurally/functionally similar proteins.
+        Uses FAISS kNN search to find structurally/functionally similar proteins.
 
         Args:
             protein_id: Query protein ID

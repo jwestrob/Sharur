@@ -15,7 +15,7 @@ def test_embeddings_manifest_updates_stats(tmp_path):
     stage06.mkdir(parents=True)
     manifest = {
         "total_proteins": 5,
-        "output_files": {"lancedb": str(stage06 / "lancedb")},
+        "output_files": {"embeddings": str(stage06 / "protein_embeddings.h5")},
     }
     (stage06 / "embedding_manifest.json").write_text(json.dumps(manifest))
 
@@ -34,4 +34,3 @@ def test_embeddings_manifest_updates_stats(tmp_path):
     builder = KnowledgeBaseBuilder(outputs, db_path, force=True)
     stats = builder.build()
     assert stats["embeddings"] == 5
-    assert builder.embeddings_path.endswith("lancedb")

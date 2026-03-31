@@ -1,20 +1,23 @@
 from pathlib import Path
 import json
 
+import h5py
+import numpy as np
+
 from sharur.core.session import ExplorationSession
 
 
-def test_session_auto_loads_lancedb_if_manifest_present(tmp_path):
+def test_session_auto_loads_faiss_if_h5_present(tmp_path):
     db_path = tmp_path / "sharur.duckdb"
-    # create empty duckdb file to satisfy path existence expectation in store
     db_path.touch()
-    stage06 = tmp_path / "stage06_embeddings"
-    stage06.mkdir(parents=True)
-    manifest = {
-        "total_proteins": 3,
-        "output_files": {"lancedb": str(stage06 / "lancedb")},
-    }
-    (stage06 / "embedding_manifest.json").write_text(json.dumps(manifest))
+    embeddings_dir = tmp_path / "embeddings"
+    embeddings_dir.mkdir(parents=True)
+
+    # Write a small H5 embeddings file
+    h5_path = embeddings_dir / "protein_embeddings.h5"
+    with h5py.File(h5_path, "w") as f:
+        f.create_dataset("protein_ids", data=["prot_1", "prot_2", "prot_3"])
+        f.create_dataset("embeddings", data=np.random.randn(3, 320).astype(np.float32))
 
     session = ExplorationSession(db_path=db_path)
     assert session.vector_store is not None

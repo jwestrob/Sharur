@@ -382,7 +382,7 @@ Biosynthetic gene cluster detection using GECCO. Stage 07 loads results from `st
 
 ### Stage 06: ESM2 Embeddings (`06_esm2_embeddings.py`)
 
-Generates 320-dimensional protein embeddings using ESM2. Requires PyTorch, Transformers, and LanceDB. GPU recommended. Can run any time after Stage 03 (reads .faa files from the Prodigal output directory, does NOT need the DuckDB database).
+Generates 320-dimensional protein embeddings using ESM2. Requires PyTorch and Transformers. GPU recommended. Can run any time after Stage 03 (reads .faa files from the Prodigal output directory, does NOT need the DuckDB database).
 
 ```bash
 python src/ingest/06_esm2_embeddings.py data/DATASET/stage03_prodigal data/DATASET/embeddings/
@@ -473,7 +473,7 @@ Reduce batch size in the embeddings script, or use CPU (10-20x slower but works)
 - MinCED (CRISPR detection)
 
 ### Embeddings (Stage 06)
-- PyTorch, Transformers (HuggingFace), LanceDB
+- PyTorch, Transformers (HuggingFace)
 - GPU recommended
 
 ### Astra Installed Databases (`~/.config/Astra/`)

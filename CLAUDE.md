@@ -159,7 +159,7 @@ data/{dataset_name}/
 ├── manifest.json               # Analysis state
 ├── source/                     # Input files (.faa)
 ├── annotations/                # Annotation results
-├── embeddings/                 # ESM2 embeddings (H5 + LanceDB)
+├── embeddings/                 # ESM2 embeddings (H5 + FAISS)
 ├── structures/                 # ESM3 PDBs + Foldseek results
 ├── synteny/                    # ELSA synteny results + FAISS store
 ├── exploration/                # Exploration outputs

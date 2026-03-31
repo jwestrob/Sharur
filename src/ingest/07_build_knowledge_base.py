@@ -1254,9 +1254,9 @@ class KnowledgeBaseBuilder:
             try:
                 data = json.loads(manifest.read_text())
                 self.stats["embeddings"] = int(data.get("total_proteins", 0))
-                lancedb_path = data.get("output_files", {}).get("lancedb")
-                if lancedb_path:
-                    self.embeddings_path = lancedb_path
+                h5_path = data.get("output_files", {}).get("embeddings")
+                if h5_path:
+                    self.embeddings_path = h5_path
             except Exception as exc:
                 logger.warning(f"Failed to read embeddings manifest: {exc}")
         else:

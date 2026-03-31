@@ -1,8 +1,9 @@
-"""Vector store interfaces (Part 8.3)."""
+"""Vector store interfaces for protein embedding similarity search."""
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -43,194 +44,74 @@ def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.dot(a, b) / denom)
 
 
-class LanceDBStore(VectorStore):
-    """LanceDB implementation (with in-memory fallback if lancedb unavailable)."""
+class FAISSStore(VectorStore):
+    """FAISS-backed vector store. Loads from H5 embeddings on init.
 
-    def __init__(self, uri: str, table_name: str = "embeddings", id_column: str = "id"):
-        self.table_name = table_name
-        self.id_column = id_column
-        self._mem: dict[str, np.ndarray] = {}
+    Builds an inner-product index on L2-normalized vectors so that
+    FAISS scores equal cosine similarity directly.
+    """
 
-        try:
-            import lancedb
-            self._db = lancedb.connect(uri)
-            if table_name in self._db.table_names():
-                self._table = self._db.open_table(table_name)
-            else:
-                # Avoid creating schema when database is empty; fall back to in-memory only.
-                self._table = None
-        except ModuleNotFoundError:
-            # Graceful degradation: keep everything in memory.
-            self._db = None
-            self._table = None
-
-    def add(self, id: str, embedding: np.ndarray, metadata: dict | None = None) -> None:
-        metadata = metadata or {}
-        vec = np.asarray(embedding, dtype=float)
-        if self._table is not None:
-            self._table.add([{"id": id, "vector": vec.tolist(), "metadata": metadata}])
-        # Always keep in-memory cache for quick fallback queries
-        self._mem[id] = vec
-
-    def query(
+    def __init__(
         self,
-        query_id: str,
-        k: int = 10,
-        threshold: Optional[float] = None,
-        include_distances: bool = False,
-    ) -> list[str] | list[tuple[str, float]]:
-        # Try to use in-memory cache first (fast, avoids extra round trips)
-        if query_id not in self._mem:
-            if self._table is None:
-                return []
-            # Pull vector from LanceDB if not cached
-            try:
-                row = (
-                    self._table.search(None)
-                    .where(f"{self.id_column} = '{query_id}'")
-                    .limit(1)
-                    .to_list()
-                )
-            except Exception:
-                row = []
-            if not row:
-                return []
-            self._mem[query_id] = np.asarray(row[0]["vector"], dtype=float)
+        h5_path: str | Path,
+        id_column: str = "protein_id",
+        nprobe: int = 32,
+    ):
+        self._id_to_idx: dict[str, int] = {}
+        self._idx_to_id: list[str] = []
+        self._index = None
+        self._vectors: np.ndarray | None = None
 
-        anchor = self._mem[query_id]
-
-        # If table is available, delegate search; otherwise use in-memory cosine.
-        if self._table is not None:
-            try:
-                results = self._table.search(anchor).limit(k * 2).to_list()
-                pairs = []
-                for r in results:
-                    rid = r.get(self.id_column) or r.get("id")
-                    if rid == query_id:
-                        continue  # skip self
-                    dist = r.get("_distance")
-                    if dist is not None:
-                        # LanceDB returns L2 distance by default; convert to similarity
-                        # Using 1/(1+d) gives range (0, 1] where 1 is identical
-                        score = 1.0 / (1.0 + float(dist))
-                    else:
-                        # Estimate similarity manually if only vector present
-                        score = _cosine_similarity(anchor, np.asarray(r["vector"], dtype=float))
-                    pairs.append((rid, float(score)))
-            except Exception:
-                pairs = []
-        else:
-            pairs = []
-
-        # Merge with in-memory cache for robustness
-        for rid, vec in self._mem.items():
-            if rid == query_id:
-                continue
-            pairs.append((rid, _cosine_similarity(anchor, vec)))
-
-        # Deduplicate keeping max score
-        merged: dict[str, float] = {}
-        for rid, score in pairs:
-            merged[rid] = max(score, merged.get(rid, -1.0))
-
-        # Apply threshold and sort
-        filtered = [
-            (rid, score)
-            for rid, score in merged.items()
-            if threshold is None or score >= threshold
-        ]
-        filtered.sort(key=lambda x: x[1], reverse=True)
-        filtered = filtered[:k]
-
-        if include_distances:
-            return filtered
-        return [rid for rid, _ in filtered]
-
-    def query_vector(
-        self, vector: np.ndarray, k: int = 10, threshold: Optional[float] = None
-    ) -> list[tuple[str, float]]:
-        vec = np.asarray(vector, dtype=float)
-        pairs: list[tuple[str, float]] = []
-
-        if self._table is not None:
-            try:
-                results = self._table.search(vec).limit(k * 2).to_list()
-                for r in results:
-                    rid = r.get(self.id_column) or r.get("id")
-                    dist = r.get("_distance")
-                    if dist is not None:
-                        # L2 distance to similarity: 1/(1+d)
-                        score = 1.0 / (1.0 + float(dist))
-                    else:
-                        score = _cosine_similarity(vec, np.asarray(r["vector"], dtype=float))
-                    pairs.append((rid, score))
-            except Exception:
-                pairs = []
-
-        # Add in-memory cache
-        for rid, cached in self._mem.items():
-            pairs.append((rid, _cosine_similarity(vec, cached)))
-
-        merged: dict[str, float] = {}
-        for rid, score in pairs:
-            merged[rid] = max(score, merged.get(rid, -1.0))
-
-        filtered = [
-            (rid, score)
-            for rid, score in merged.items()
-            if threshold is None or score >= threshold
-        ]
-        filtered.sort(key=lambda x: x[1], reverse=True)
-        return filtered[:k]
-
-
-class PgVectorStore(VectorStore):
-    """pgvector implementation (best-effort, simple cosine similarity)."""
-
-    def __init__(self, connection_string: str, table_name: str = "embeddings"):
-        self.table_name = table_name
-        try:
-            import psycopg2
-
-            self._pg = psycopg2
-            self.conn = psycopg2.connect(connection_string)
-            self.conn.autocommit = True
-        except ModuleNotFoundError:
-            self._pg = None
-            self.conn = None
-
-        # In-memory fallback to keep interface usable without Postgres
-        self._mem: dict[str, np.ndarray] = {}
-
-    def add(self, id: str, embedding: np.ndarray, metadata: dict | None = None) -> None:
-        vec = np.asarray(embedding, dtype=float)
-        self._mem[id] = vec
-
-        if self.conn is None:
+        h5_path = Path(h5_path)
+        if not h5_path.exists():
             return
 
-        import json
+        try:
+            import faiss
+            import h5py
+        except ImportError:
+            return
 
-        with self.conn.cursor() as cur:
-            cur.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self.table_name} (
-                    id TEXT PRIMARY KEY,
-                    embedding VECTOR,
-                    metadata JSONB
-                );
-                """,
-            )
-            cur.execute(
-                f"""
-                INSERT INTO {self.table_name} (id, embedding, metadata)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (id) DO UPDATE
-                  SET embedding = EXCLUDED.embedding,
-                      metadata = EXCLUDED.metadata;
-                """,
-                (id, vec.tolist(), json.dumps(metadata or {})),
-            )
+        with h5py.File(h5_path, "r") as f:
+            ids_raw = f["protein_ids"][:]
+            ids = [x.decode() if isinstance(x, bytes) else x for x in ids_raw]
+            vectors = np.asarray(f["embeddings"][:], dtype=np.float32)
+
+        # L2-normalize so inner product == cosine similarity
+        norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+        norms[norms == 0] = 1.0
+        vectors = vectors / norms
+
+        self._idx_to_id = ids
+        self._id_to_idx = {pid: i for i, pid in enumerate(ids)}
+        self._vectors = vectors
+
+        dim = vectors.shape[1]
+        n = vectors.shape[0]
+
+        # Use IVF index for large datasets, flat for small
+        if n > 100_000:
+            nlist = min(int(np.sqrt(n)), 4096)
+            quantizer = faiss.IndexFlatIP(dim)
+            self._index = faiss.IndexIVFFlat(quantizer, dim, nlist, faiss.METRIC_INNER_PRODUCT)
+            self._index.train(vectors)
+            self._index.add(vectors)
+            self._index.nprobe = nprobe
+        else:
+            self._index = faiss.IndexFlatIP(dim)
+            self._index.add(vectors)
+
+    def add(self, id: str, embedding: np.ndarray, metadata: dict | None = None) -> None:
+        # FAISS index is built from H5 at init; runtime adds go to memory only
+        vec = np.asarray(embedding, dtype=np.float32).reshape(1, -1)
+        norm = np.linalg.norm(vec)
+        if norm > 0:
+            vec = vec / norm
+        idx = len(self._idx_to_id)
+        self._idx_to_id.append(id)
+        self._id_to_idx[id] = idx
+        if self._index is not None:
+            self._index.add(vec)
 
     def query(
         self,
@@ -239,19 +120,29 @@ class PgVectorStore(VectorStore):
         threshold: Optional[float] = None,
         include_distances: bool = False,
     ) -> list[str] | list[tuple[str, float]]:
-        if query_id not in self._mem:
+        if self._index is None or query_id not in self._id_to_idx:
             return []
-        anchor = self._mem[query_id]
 
-        pairs = [
-            (rid, _cosine_similarity(anchor, vec))
-            for rid, vec in self._mem.items()
-            if rid != query_id
-        ]
+        idx = self._id_to_idx[query_id]
+        vec = self._vectors[idx].reshape(1, -1) if self._vectors is not None else None
+        if vec is None:
+            return []
 
-        if threshold is not None:
-            pairs = [(rid, s) for rid, s in pairs if s >= threshold]
-        pairs.sort(key=lambda x: x[1], reverse=True)
+        # k+1 to account for self-match
+        scores, indices = self._index.search(vec, k + 1)
+
+        pairs = []
+        for score, i in zip(scores[0], indices[0]):
+            if i < 0 or i >= len(self._idx_to_id):
+                continue
+            rid = self._idx_to_id[i]
+            if rid == query_id:
+                continue
+            sim = float(score)  # already cosine similarity (inner product of normalized vecs)
+            if threshold is not None and sim < threshold:
+                continue
+            pairs.append((rid, sim))
+
         pairs = pairs[:k]
 
         if include_distances:
@@ -259,14 +150,32 @@ class PgVectorStore(VectorStore):
         return [rid for rid, _ in pairs]
 
     def query_vector(
-        self, vector: np.ndarray, k: int = 10, threshold: Optional[float] = None
+        self,
+        vector: np.ndarray,
+        k: int = 10,
+        threshold: Optional[float] = None,
     ) -> list[tuple[str, float]]:
-        vec = np.asarray(vector, dtype=float)
-        pairs = [(rid, _cosine_similarity(vec, emb)) for rid, emb in self._mem.items()]
-        if threshold is not None:
-            pairs = [(rid, s) for rid, s in pairs if s >= threshold]
-        pairs.sort(key=lambda x: x[1], reverse=True)
-        return pairs[:k]
+        if self._index is None:
+            return []
+
+        vec = np.asarray(vector, dtype=np.float32).reshape(1, -1)
+        norm = np.linalg.norm(vec)
+        if norm > 0:
+            vec = vec / norm
+
+        scores, indices = self._index.search(vec, k)
+
+        pairs = []
+        for score, i in zip(scores[0], indices[0]):
+            if i < 0 or i >= len(self._idx_to_id):
+                continue
+            rid = self._idx_to_id[i]
+            sim = float(score)
+            if threshold is not None and sim < threshold:
+                continue
+            pairs.append((rid, sim))
+
+        return pairs
 
 
-__all__ = ["VectorStore", "LanceDBStore", "PgVectorStore"]
+__all__ = ["VectorStore", "FAISSStore"]

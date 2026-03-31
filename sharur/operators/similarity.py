@@ -1,7 +1,7 @@
 """
 Similarity search operators using vector embeddings.
 
-Uses LanceDB with ESM2 protein embeddings for finding structurally/functionally
+Uses FAISS with ESM2 protein embeddings for finding structurally/functionally
 similar proteins across the database.
 """
 
@@ -27,12 +27,12 @@ def find_similar(
     """
     Find proteins with similar ESM2 embeddings.
 
-    Uses LanceDB kNN search to find proteins with similar sequence embeddings,
+    Uses FAISS kNN search to find proteins with similar sequence embeddings,
     which often correlates with structural and functional similarity.
 
     Args:
         store: DuckDB store for protein metadata
-        vector_store: LanceDB vector store with embeddings
+        vector_store: FAISS vector store with embeddings
         protein_id: Query protein ID
         k: Number of similar proteins to return
         threshold: Minimum similarity score (0-1, cosine similarity)
@@ -184,7 +184,7 @@ def find_similar_to_set(
 
     Args:
         store: DuckDB store
-        vector_store: LanceDB vector store
+        vector_store: FAISS vector store
         protein_ids: Set of query protein IDs
         k: Number of similar proteins per query
         threshold: Minimum similarity score

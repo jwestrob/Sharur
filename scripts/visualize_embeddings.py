@@ -30,37 +30,29 @@ import numpy as np
 
 
 def load_embeddings(db_path: str, limit: int = 10000) -> tuple[np.ndarray, list[str]]:
-    """Load ESM2 embeddings from LanceDB alongside the Sharur database.
+    """Load ESM2 embeddings from H5 file alongside the Sharur database.
 
     Returns (embeddings_array, protein_ids).
     """
-    import lancedb
+    import h5py
 
     db_dir = Path(db_path).parent
-    lance_path = db_dir / "embeddings"
+    h5_path = db_dir / "embeddings" / "protein_embeddings.h5"
 
-    if not lance_path.exists():
-        # Try alternative locations
-        for alt in ["lancedb", "embeddings.lance"]:
-            alt_path = db_dir / alt
-            if alt_path.exists():
-                lance_path = alt_path
-                break
-        else:
-            print(f"Error: No LanceDB embeddings found near {db_path}")
-            print(f"  Checked: {db_dir / 'embeddings'}, {db_dir / 'lancedb'}")
-            sys.exit(1)
+    if not h5_path.exists():
+        print(f"Error: No H5 embeddings found at {h5_path}")
+        sys.exit(1)
 
-    db = lancedb.connect(str(lance_path))
-    table = db.open_table("protein_embeddings")
+    with h5py.File(h5_path, "r") as f:
+        ids_raw = f["protein_ids"][:]
+        protein_ids = [x.decode() if isinstance(x, bytes) else x for x in ids_raw]
+        vectors = np.asarray(f["embeddings"][:], dtype=np.float32)
 
-    # Read embeddings
-    df = table.to_pandas()
-    if limit and len(df) > limit:
-        df = df.sample(n=limit, random_state=42)
-
-    protein_ids = df["protein_id"].tolist()
-    vectors = np.stack(df["vector"].values)
+    if limit and len(protein_ids) > limit:
+        rng = np.random.RandomState(42)
+        idx = rng.choice(len(protein_ids), size=limit, replace=False)
+        protein_ids = [protein_ids[i] for i in idx]
+        vectors = vectors[idx]
 
     print(f"Loaded {len(protein_ids)} embeddings ({vectors.shape[1]}-dim)")
     return vectors, protein_ids
