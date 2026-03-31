@@ -81,11 +81,17 @@ export ESM_API_KEY="your-key-here"
 
 ### HydDB DIAMOND database
 
-Used by `scripts/classify_hydrogenases.py` for hydrogenase classification:
+Used by `scripts/classify_hydrogenases.py` for hydrogenase subgroup classification:
 
+```bash
+mkdir -p data/reference/hyddb
+curl -L -o data/reference/hyddb/HydDB_all_hydrogenases.faa \
+  https://raw.githubusercontent.com/GreeningLab/HydDB/main/fastas/HydDB_all_hydrogenases.faa
+diamond makedb --in data/reference/hyddb/HydDB_all_hydrogenases.faa \
+  --db data/reference/hyddb/HydDB_all
 ```
-data/reference/hyddb/HydDB_all.dmnd
-```
+
+This produces `data/reference/hyddb/HydDB_all.dmnd`, which Stage 07 uses automatically when HydDB annotations are present.
 
 ### Foldseek databases
 
