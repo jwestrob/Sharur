@@ -37,7 +37,7 @@ pip install -e ".[dev]"   # + pytest, ruff, mypy
 
 ### Astra annotation pipeline
 
-Astra manages pre-installed HMM databases (PFAM, KOFAM, VOGdb, HydDB, DefenseFinder, etc.).
+Astra manages HMM databases for functional annotation.
 
 ```bash
 # Astra is installed from source (not on conda/PyPI)
@@ -46,13 +46,37 @@ pip install -e .
 
 # Verify
 astra --help
-
-# Example: run DefenseFinder against a protein directory
-astra search --installed_hmms DefenseFinder --threads 12 \
-    --prot_in source/ --outdir annotations/ --cut_ga
 ```
 
 **Note:** `--prot_in` expects a **directory** containing `.faa` files, not a single file.
+
+#### Installing Astra HMM databases
+
+```bash
+# List available and installed databases
+astra initialize --show_available
+astra initialize --show_installed
+
+# Install the standard pipeline databases
+astra initialize --hmms PFAM
+astra initialize --hmms KOFAM
+astra initialize --hmms HydDB
+astra initialize --hmms DefenseFinder
+astra initialize --hmms dbCAN
+```
+
+Databases are stored at `~/.config/Astra/`. The standard pipeline (Stage 04) defaults to PFAM, KOFAM, HydDB, DefenseFinder, and dbCAN.
+
+### DefenseFinder co-location models
+
+The co-location validation engine (Stage 07) requires MacSyFinder model definitions in addition to the Astra HMM profiles:
+
+```bash
+pip install mdmparis-defense-finder
+defense-finder update
+```
+
+This installs XML system definitions to `~/.macsyfinder/models/defense-finder-models/`, which Stage 07 uses to validate raw HMM hits into genuine multi-gene defense systems.
 
 ### BasicTeX (macOS only, for PDF rendering)
 
