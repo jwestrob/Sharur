@@ -5,11 +5,11 @@ channels:
   - defaults
 dependencies:
   # Python
-  - python=3.11
+  - python=3.12
   - pip
 
   # Compiled scientific libs (conda-forge)
-  - numpy<2.0            # pyTMHMM needs numpy 1.x ABI
+  - numpy
   - scipy
   - pandas
   - pyarrow
@@ -33,3 +33,6 @@ dependencies:
   # pip-only packages
   - pip:
       - -e ".[dev]"
+      # Defense system co-location validation
+      - macsyfinder==2.1.4
+      - --no-deps mdmparis-defense-finder
