@@ -462,7 +462,7 @@ Analysis performed using Sharur metagenomic analysis framework.
 - Embeddings: ESM2 (320-dimensional)
 - Structure prediction: ESM3 API
 - Structural homology: Foldseek against AlphaFold DB and PDB
-- Database: DuckDB with LanceDB vector store
+- Database: DuckDB with FAISS vector index
     """)
 
     # Fill TOC

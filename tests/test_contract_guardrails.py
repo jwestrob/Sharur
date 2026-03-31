@@ -152,16 +152,15 @@ class TestDuckDBStoreContract:
         assert len(result) == 0
 
 
-class TestLanceDBTableName:
-    """Verify canonical LanceDB table name is consistent."""
+class TestFAISSH5Path:
+    """Verify session loads FAISS from canonical H5 path."""
 
-    def test_session_uses_canonical_name(self):
-        """session.py should use 'protein_embeddings' table name."""
+    def test_session_uses_canonical_h5(self):
+        """session.py should reference protein_embeddings.h5."""
         import sharur.core.session as session_mod
 
         source = inspect.getsource(session_mod)
-        assert "protein_embeddings" in source
-        assert '"embeddings"' not in source or "protein_embeddings" in source
+        assert "protein_embeddings.h5" in source
 
 
 class TestSchemaColumnNames:

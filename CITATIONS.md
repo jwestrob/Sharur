@@ -167,20 +167,17 @@ For the KEGG database itself, also cite:
 ### ESM2
 > Lin, Z., Akin, H., Rao, R., Hie, B., Zhu, Z., Lu, W., Smetanin, N., Verkuil, R., Kabeli, O., Shmueli, Y., dos Santos Costa, A., Fazel-Zarandi, M., Sercu, T., Candido, S. & Rives, A. (2023) Evolutionary-scale prediction of atomic-level protein structure with a language model. *Science* 379(6637), 1123--1130. DOI: [10.1126/science.ade2574](https://doi.org/10.1126/science.ade2574)
 
-**Used for:** Protein embeddings (Stage 06) -- the `esm2_t6_8M_UR50D` model generates 320-dimensional protein representations for semantic similarity search via LanceDB.
+**Used for:** Protein embeddings (Stage 06) -- the `esm2_t6_8M_UR50D` model generates 320-dimensional protein representations for semantic similarity search via FAISS.
 **Verified:** [Science](https://www.science.org/doi/10.1126/science.ade2574)
 **Abstract excerpt:** "As language models of protein sequences were scaled up to 15 billion parameters, an atomic-resolution picture of protein structure emerged in the learned representations."
 
 ---
 
-### LanceDB
-> No formal publication. LanceDB is an open-source embedded vector database built on the Lance columnar format.
-> GitHub: [https://github.com/lancedb/lancedb](https://github.com/lancedb/lancedb)
-> Website: [https://lancedb.com](https://lancedb.com)
+### FAISS
+> Johnson, J., Douze, M. & Jégou, H. (2021) Billion-scale similarity search with GPUs. *IEEE Transactions on Big Data* 7(3), 535--547. DOI: [10.1109/TBDATA.2019.2921572](https://doi.org/10.1109/TBDATA.2019.2921572)
 
-**Used for:** Vector storage and kNN search (Stage 06 output) -- stores ESM2 protein embeddings and enables fast similarity search.
-**Verified:** [GitHub repository](https://github.com/lancedb/lancedb)
-**Note:** LanceDB does not have a formal academic publication. Reference the GitHub repository. LanceDB's core is written in Rust and built using the Lance open-source columnar format.
+**Used for:** Vector similarity search -- IVF inner-product index on L2-normalized ESM2 embeddings for cosine similarity kNN search.
+**Verified:** [IEEE](https://doi.org/10.1109/TBDATA.2019.2921572)
 
 ---
 
@@ -268,7 +265,7 @@ For the KEGG database itself, also cite:
 | GECCO | Carroll et al., *bioRxiv* (preprint) | 2021 | BGC detection |
 | MinCED / CRT | Bland et al., *BMC Bioinformatics* | 2007 | CRISPR array detection |
 | ESM2 | Lin et al., *Science* | 2023 | Protein embeddings |
-| LanceDB | GitHub repository (no paper) | -- | Vector database |
+| FAISS | Johnson et al., *IEEE Trans. Big Data* | 2021 | Vector similarity search |
 | Foldseek | van Kempen et al., *Nature Biotech* | 2024 | Structural homology search |
 | ESM3 | Hayes et al., *Science* | 2025 | Structure prediction |
 | Protenix | ByteDance, *bioRxiv* (preprint) | 2025 | Complex structure prediction |

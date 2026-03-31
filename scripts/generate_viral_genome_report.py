@@ -816,7 +816,7 @@ Foldseek identified structural similarity to archaeal inteins, including TFIIB m
 - Protein sequences: Prodigal gene prediction
 - Annotation: PFAM/KEGG via Astra HMM (evalue 1e-5), VOGdb (evalue 1e-15)
 - Embeddings: ESM2 (facebook/esm2_t6_8M_UR50D, 320-dimensional)
-- Database: DuckDB with LanceDB vector store
+- Database: DuckDB with FAISS vector index
 
 **Structure Prediction**
 - Tool: ESM3 API (esm3-open-2024-03)

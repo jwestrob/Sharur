@@ -135,7 +135,7 @@ orthologs = b.store.execute(f"""
         SELECT protein_id FROM proteins WHERE bin_id = '{genome_b}'
     )
     -- This requires vector similarity search
-    -- Implementation depends on LanceDB setup
+    -- Implementation depends on FAISS index (loaded from protein_embeddings.h5)
 """)
 
 # Alternative: use annotation-based ortholog detection
