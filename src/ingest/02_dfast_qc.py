@@ -146,7 +146,6 @@ def run_dfast(
                     stdout=log_f,
                     stderr=subprocess.STDOUT,
                     text=True,
-                    timeout=1800,  # 30 minute timeout per genome
                     env={"TMPDIR": temp_dir}
                 )
             
@@ -166,7 +165,6 @@ def run_dfast(
                 [exe, "--version"],
                 capture_output=True,
                 text=True,
-                timeout=10
             )
             if version_result.returncode == 0:
                 result["dfast_qc_version"] = version_result.stdout.strip()

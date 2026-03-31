@@ -97,9 +97,8 @@ def search_foldseek_local(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=120,
             )
-        except (subprocess.TimeoutExpired, FileNotFoundError):
+        except FileNotFoundError:
             return None
 
         if proc.returncode != 0:

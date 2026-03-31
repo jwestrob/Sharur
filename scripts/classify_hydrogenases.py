@@ -139,11 +139,7 @@ def classify_with_diamond(
             ],
             capture_output=True,
             text=True,
-            timeout=300,
         )
-    except subprocess.TimeoutExpired:
-        print("Warning: DIAMOND search timed out")
-        return {}
     finally:
         Path(query_file).unlink(missing_ok=True)
 

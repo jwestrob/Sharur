@@ -72,16 +72,11 @@ def run_defensefinder_on_genome(
         "--db-type", "ordered_replicon",
     ]
 
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=600,
-        )
-    except subprocess.TimeoutExpired:
-        logger.error(f"  Timeout running defense-finder on {genome_name}")
-        return None
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+    )
 
     if result.returncode != 0:
         # Check if we got partial results (DefenseFinder + RM may succeed even if CasFinder fails)

@@ -92,7 +92,6 @@ def run_gecco(fasta: Path, out_dir: Path, threads: int = 0, is_metagenome: bool 
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=1800  # 30 minute timeout
             )
             
             if result.returncode != 0:

@@ -226,7 +226,6 @@ def run_prodigal_single(genome_info: Dict[str, Any],
                 stdout=log_f,
                 stderr=subprocess.STDOUT,
                 text=True,
-                timeout=300  # 5 minute timeout per genome
             )
             
         if process_result.returncode != 0:
@@ -239,7 +238,6 @@ def run_prodigal_single(genome_info: Dict[str, Any],
                 ["prodigal", "-v"],
                 capture_output=True,
                 text=True,
-                timeout=10
             )
             if version_result.returncode == 0:
                 # Parse version from output

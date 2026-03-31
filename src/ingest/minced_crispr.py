@@ -32,7 +32,7 @@ def run_minced(fasta: Path, out_dir: Path) -> Dict[str, Any]:
 
     # MinCED usage: minced input.fa output.txt output.gff
     cmd = [exe, str(fasta), str(txt_out), str(gff_out)]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+    result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(f"minced failed: {result.stderr}")
 
