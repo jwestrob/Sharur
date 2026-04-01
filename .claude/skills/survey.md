@@ -93,7 +93,7 @@ checks, verify neighborhood context with b.get_neighborhood(pid, window=5, all_a
 and only claim specific function if supported by pathway-specific markers. Check accession
 names in the database before reporting.**
 
-Dataset: data/hinthialibacterota_v3/sharur.duckdb
+Dataset: data/YOUR_DATASET/sharur.duckdb
 
 Your task: Write a comprehensive metabolic_reconstruction.md report covering:
 - Energy metabolism (respiration, fermentation, electron carriers)
@@ -101,7 +101,7 @@ Your task: Write a comprehensive metabolic_reconstruction.md report covering:
 - Biosynthesis (what they can make)
 - Metabolic strategy narrative
 
-Output: Write to data/hinthialibacterota_v3/survey/metabolic_reconstruction.md
+Output: Write to data/YOUR_DATASET/survey/metabolic_reconstruction.md
 
 Use the Sharur operators to query. Synthesize, don't just enumerate. See .claude/skills/survey.md for detailed guidance on each area."""
 )
@@ -123,6 +123,8 @@ Use the Sharur operators to query. Synthesize, don't just enumerate. See .claude
 - `survey/findings.jsonl` - High-level structured findings
 
 **Run subagents SEQUENTIALLY** (DuckDB limitation). Each subagent reads the database and writes to its own report file.
+
+**Cross-referencing between subagents:** When spawning sequential subagents, instruct each to check for and read any existing reports in `survey/` before writing their own. This enables cross-referencing between topic areas (e.g., the defense report can reference metabolic findings, the cell surface report can note connections to secondary metabolism). Later subagents produce richer, more integrated reports because they can build on earlier analyses.
 
 ---
 
@@ -256,7 +258,7 @@ print(f"Census saved to {survey_dir / 'census.json'} and {survey_dir / 'census.m
 When spawning topic subagents (metabolic, defense, etc.), include the census summary in their prompt context:
 
 ```python
-# Read census for subagent context
+# Read census for subagent context (fallback — subagents should read the file directly)
 census_text = (survey_dir / "census.md").read_text()
 
 Task(
@@ -264,7 +266,12 @@ Task(
     description="Metabolic reconstruction analysis",
     prompt=f"""You are a leaf agent analyzing energy metabolism for the survey.
 
-**CENSUS CONTEXT (from mandatory census phase):**
+**Read `data/YOUR_DATASET/survey/census.json` for dataset context before starting analysis.**
+This file contains the full census: genome/protein counts, annotation source coverage,
+superfamily flags, and predicate frequencies. Load it with `json.load()` and use it
+throughout your analysis.
+
+**CENSUS CONTEXT (fallback summary — prefer reading census.json above):**
 {census_text}
 
 **Superfamilies flagged above are fold-level annotations — do NOT claim specific
@@ -282,6 +289,10 @@ enzymatic function from them without neighborhood validation.**
 1. **Run census phase** (above — mandatory, do this first)
 2. **Create genome_profiles.tsv** (feature matrix for all genomes)
 3. **Spawn topic-specific subagents sequentially** with census context included in each prompt
+
+---
+
+> **Orchestrator note:** The sections above (Mission, Writing Style, Workflow with Subagents, Census Phase, Recommended Subagent Strategy) are your primary workflow guide. The sections below (Coverage Areas, Validation Protocols, Context-First Analysis, Statistical Validation, Output Structure, etc.) are reference material -- read them when needed for a specific topic, but you do not need to load them all before starting. Dispatch to the relevant section when you or a subagent needs guidance on a particular analysis area.
 
 ---
 
@@ -726,6 +737,28 @@ def log_finding(category: str, title: str, description: str,
     print(f"[LOGGED] {fid} | {category}: {title}")
     return finding
 ```
+
+### Post-Survey Findings Extraction
+
+After all topic subagents have completed their reports, the orchestrator should do a **final extraction pass** to bridge prose reports and structured findings.
+
+1. Read each completed report in `survey/` (`metabolic_reconstruction.md`, `defense_immunity.md`, `novel_proteins.md`, `cell_surface_biology.md`, etc.).
+2. For each report, identify the key **quantitative findings** -- counts, pathway completions, notable absences, cross-genome patterns -- that deserve structured representation.
+3. Call `log_finding()` for each, using the `provenance` field to reference the source report:
+
+```python
+log_finding(
+    category="energy_metabolism",
+    title="12 of 15 genomes encode complete TCA cycle",
+    description="...",
+    evidence={"complete": 12, "partial": 2, "absent": 1},
+    n_genomes=12,
+    provenance={"source_report": "survey/metabolic_reconstruction.md", "section": "TCA cycle completeness"},
+)
+```
+
+4. This pass ensures that insights buried in prose are also captured in `findings.jsonl`, where downstream tools (`compile_comprehensive_report.py`, cross-phase comparisons) can consume them programmatically.
+5. Skip findings that were already logged during analysis -- check existing IDs in `findings.jsonl` to avoid duplicates. Focus on findings that only appeared in the written reports but were never formally logged.
 
 ### Hypothesis Tracking & Provenance
 

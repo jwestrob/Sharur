@@ -22,6 +22,7 @@ Detailed guides live in `docs/` and `.claude/skills/`. **Read the relevant doc b
 | Working with V2 predicate system | `docs/predicates_v2.md` |
 | Validating hydrogenases | `.claude/skills/hydrogenase.md` |
 | Querying ELSA synteny results | `.claude/skills/synteny.md` |
+| Coordinating multi-agent runs | `agent_ops_spec.md`, `sharur/ops/` |
 
 **Other key docs:**
 
@@ -143,6 +144,9 @@ b.get_neighborhood(protein_id, window=5, all_annotations=True)
 | `sharur/operators/foldseek.py` | Foldseek structural homology search |
 | `sharur/operators/manifest.py` | Analysis manifest for session continuity |
 | `sharur/core/hypothesis_registry.py` | Persistent hypothesis store |
+| `sharur/ops/server.py` | Multi-agent coordination server (FastAPI + SQLite) |
+| `sharur/ops/client.py` | Agent client for ops server |
+| `agent_ops_spec.md` | Full ops coordination layer spec |
 
 ## Pipeline Notes
 
