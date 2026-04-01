@@ -52,6 +52,7 @@ Detailed guides live in `docs/` and `.claude/skills/`. **Read the relevant doc b
 | `hydrogenase.md` | NiFe/FeFe hydrogenase validation |
 | `synteny.md` | ELSA-powered synteny discovery |
 | `coordinator.md` | Multi-agent analysis orchestration |
+| `brainstorm.md` | Cross-domain synthesis and investigation proposals |
 
 ---
 

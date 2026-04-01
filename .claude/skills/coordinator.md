@@ -128,14 +128,25 @@ Spawn a reviewer_2 agent with:
 - Instructions to re-run verification queries and report pass/fail
 ```
 
-**Soliciting suggestions:**
-After each wave, ask the specialist agents: "Based on what you found, what should we investigate next?" Include this in the agent prompt:
+**Soliciting suggestions from agents:**
+Include this in every agent prompt:
 ```
 Before finishing, suggest 1-3 follow-up investigations that emerged from your analysis.
 Write them as a "## Suggested Follow-ups" section at the end of your report.
 ```
 
-Promote good suggestions to tasks: `ops.create_task(...)`.
+**Brainstorm agent (mandatory after each wave):**
+After all agents in a wave complete, dispatch the brainstorm skill (`.claude/skills/brainstorm.md`). The brainstorm agent reads ALL findings, reports, and ops store state, then proposes ranked investigations that cross domain boundaries. It also detects diminishing returns and recommends convergence when appropriate.
+
+```
+Spawn brainstorm agent with:
+- OpsStore path
+- All prose reports in survey/ and exploration/
+- Census context
+- Current wave number
+```
+
+The brainstorm agent posts its top proposals as tasks to the ops store. Review them, adjust priorities, then seed the next wave.
 
 ---
 
