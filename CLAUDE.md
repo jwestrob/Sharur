@@ -51,6 +51,7 @@ Detailed guides live in `docs/` and `.claude/skills/`. **Read the relevant doc b
 | `foldseek.md` | ESM3 structure prediction + Foldseek search |
 | `hydrogenase.md` | NiFe/FeFe hydrogenase validation |
 | `synteny.md` | ELSA-powered synteny discovery |
+| `coordinator.md` | Multi-agent analysis orchestration |
 
 ---
 
