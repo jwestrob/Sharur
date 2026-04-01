@@ -4,6 +4,9 @@ Analyze defense systems: CRISPR-Cas, restriction-modification, toxin-antitoxin, 
 
 **CONCURRENCY: DuckDB does not support concurrent writes. Only ONE agent should access a database at a time. The coordinator must run DB-accessing skills sequentially, not in parallel.**
 
+> **Mandatory:** Read `docs/findings_spec.md` for the structured findings format.
+> Write `findings.jsonl` alongside your prose reports. Every quantitative claim needs a verification query.
+
 > **Mandatory:** Follow the shared validation protocols in `_validation_protocols.md`.
 > Verify accession names before reporting. Use COUNT(DISTINCT protein_id) for protein
 > counts. Apply Context-First protocol for annotations averaging >10 hits/genome.

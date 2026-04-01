@@ -17,6 +17,10 @@ Curiosity-driven exploration of Sharur metagenomic data to discover interesting 
 
 **CONCURRENCY: DuckDB does not support concurrent writes. Run subagents SEQUENTIALLY, not in parallel.**
 
+> **Mandatory:** Read `docs/findings_spec.md` for the structured findings format.
+> Write `exploration/findings.jsonl` alongside your prose `.md` reports.
+> Every quantitative claim needs a verification query.
+
 > **Mandatory:** Follow the shared validation protocols in `_validation_protocols.md`.
 > This file contains authoritative inline versions of those protocols with additional
 > exploration-specific context. Verify accession names, use COUNT(DISTINCT protein_id),
