@@ -838,15 +838,25 @@ class KnowledgeBaseBuilder:
                         fill_value=None,
                     )
                     self.conn.register("tmp_ldf_cr", ldf)
+                    # Filter to contigs that exist in the DB (CRISPR arrays
+                    # may land on contigs with no predicted genes)
+                    n_before = len(ldf)
                     self.conn.execute(
                         """
                         INSERT INTO loci (
                             locus_id, locus_type, contig_id, start, end_coord, confidence,
                             metadata
                         ) SELECT * FROM tmp_ldf_cr
+                        WHERE contig_id IN (SELECT contig_id FROM contigs)
                         """,
                     )
-                    self.stats["loci"] += len(loci_rows)
+                    actual = self.conn.execute(
+                        "SELECT COUNT(*) FROM loci WHERE locus_type = 'crispr'"
+                    ).fetchone()[0]
+                    skipped = n_before - actual if actual < n_before else 0
+                    if skipped > 0:
+                        logger.info(f"  crispr: skipped {skipped}/{n_before} arrays on contigs without genes")
+                    self.stats["loci"] += actual
             except Exception as exc:
                 logger.warning(f"Failed to load CRISPR arrays from {crispr_json}: {exc}")
 

@@ -144,6 +144,11 @@ b.get_neighborhood(protein_id, window=5, all_annotations=True)
 | `sharur/operators/manifest.py` | Analysis manifest for session continuity |
 | `sharur/core/hypothesis_registry.py` | Persistent hypothesis store |
 
+## Pipeline Notes
+
+- **MinCED is single-threaded.** Run on the login node, not SLURM. A single-threaded job doesn't justify a cluster allocation.
+- **KOFAM is slow.** On large datasets (>100k proteins) KOFAM can take many hours. This is normal. Submit as a SLURM job with generous walltime (48h+).
+
 ## Testing
 
 ```bash
