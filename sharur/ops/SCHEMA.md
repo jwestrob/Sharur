@@ -1,5 +1,21 @@
 # Sharur Ops Layer — Schema Design
 
+## Access Modes
+
+Two backends expose the same API and schema:
+
+```python
+# Direct SQLite (no server needed — use for local/single-machine runs)
+from sharur.ops.store import OpsStore
+ops = OpsStore("sharur_ops.db", agent_id="my_agent")
+
+# HTTP client (requires uvicorn sharur.ops.server:app running)
+from sharur.ops.client import SharurOps
+ops = SharurOps("http://localhost:8811", agent_id="my_agent")
+```
+
+Both support: `finding()`, `recent_findings()`, `hypothesis()`, `create_task()`, `claim_task()`, `log()`, `stats()`, etc.
+
 ## Design Principles
 
 1. **Mixed granularity**: Findings range from single genes to multi-phylum observations.
@@ -21,7 +37,7 @@ The core scientific output. Every agent writes here.
 
 | Column | Type | Description |
 |---|---|---|
-| `id` | TEXT (uuid) | Unique finding ID, generated client-side by agent |
+| `id` | TEXT (uuid) | Unique finding ID, generated on insert |
 | `agent_id` | TEXT | Which agent produced this |
 | `ts` | REAL | Unix timestamp |
 | `finding_type` | TEXT | Enum: `gene`, `neighborhood`, `cassette`, `domain_architecture`, `phylogenetic`, `observation` |
