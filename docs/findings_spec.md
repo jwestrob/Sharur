@@ -38,6 +38,7 @@ Most agents should write only these fields:
 | `verification` | array | Required | List of `{claim, query, expected}` records. See Verification. |
 | `protein_ids` | array | Optional | Key supporting proteins. Include enough to reproduce. |
 | `contigs` | array | Optional | Key supporting contigs. |
+| `falsification` | string | Required if novelty >= 2 | "This finding would be wrong if ___." Must be testable. See Falsification. |
 
 Agents do **not** need to hand-author these in normal workflows:
 
@@ -76,6 +77,7 @@ Each line in `findings.jsonl` should normalize to this stored shape:
 |-------|------|-------------|
 | `protein_ids` | array | Canonical top-level protein references for downstream tooling. |
 | `contigs` | array | Canonical top-level contig references. |
+| `falsification` | string | **Required for novelty >= 2.** States the specific condition that would break this finding. See Falsification. |
 | `provenance` | object | Normalized provenance metadata. Preferred keys include `source_report`, `query_used`, `accession_verified`, `agent_id`. |
 | `related_findings` | array | Related finding IDs across phases. |
 | `novelty` | int | 0=routine, 1=interesting, 2=novel, 3=potentially_significant. |
@@ -126,7 +128,8 @@ Each line in `findings.jsonl` should normalize to this stored shape:
   },
   "related_findings": ["survey-005"],
   "novelty": 3,
-  "confidence": 0.85
+  "confidence": 0.85,
+  "falsification": "Wrong if the AbiEii PFAM domain cross-reacts with non-defense proteins (e.g., SanaT toxins) making the co-occurrence an annotation artifact rather than a genuine functional association."
 }
 ```
 
@@ -272,6 +275,67 @@ Queries can be:
 **If you cannot write a verification query for a number, do not include that number in the finding.**
 
 **Decompositions require separate verification.** "68 DUF1016_N near defense, across 20 system types" is two claims needing two queries, not one.
+
+---
+
+## Falsification
+
+**Required for novelty >= 2.** Before committing a finding, state the specific condition that would make it wrong. This forces you to articulate the failure mode and ideally test it before writing the finding.
+
+The `falsification` field is a plain string answering: "This finding would be wrong if ___."
+
+**Examples:**
+
+```json
+{
+  "title": "SoxYZ carrier is part of the LanM operon",
+  "falsification": "Wrong if SoxYZ and LanM are on different strands, >5 genes apart, or the association disappears when restricted to same-contig same-strand genes within 500bp intergenic distance."
+}
+```
+
+```json
+{
+  "title": "YcaO + TfuA co-locate with LanM in 13 genomes",
+  "falsification": "Wrong if these 13 genomes are all from 2-3 closely related species sharing whole-genome synteny, making this genome conservation rather than functional co-selection."
+}
+```
+
+```json
+{
+  "title": "DUF6088 is a novel defense accessory component",
+  "falsification": "Wrong if DUF6088 is already annotated as part of a known defense system in DefenseFinder or if the AbiEii PFAM domain cross-reacts with non-defense proteins."
+}
+```
+
+**The falsification must be testable.** "This might not be real" is not a falsification. "This would be wrong if the 40/63 co-occurrence drops below 10/63 when restricted to same-contig same-strand pairs" is testable.
+
+**When novelty >= 2, agents should test their own falsification before committing the finding.** If the test breaks the finding, revise or discard it. If it survives, include both the falsification statement and the result of the test.
+
+---
+
+## Locus Validation
+
+Before claiming genes form a "conserved locus" or "operon," verify all of:
+
+1. **Same contig** — genes share the same `contig_id`
+2. **Co-oriented** — genes are on the same strand
+3. **Short intergenic distance** — adjacent genes are <500bp apart (operonic spacing)
+4. **Not just genome-level synteny** — the association should hold across phylogenetically diverse genomes, not just closely related strains sharing whole-chromosome gene order
+
+A query pattern for checking:
+
+```sql
+SELECT p1.protein_id, p2.protein_id,
+       p1.strand, p2.strand,
+       p2.start - p1.end_coord AS intergenic_bp
+FROM proteins p1
+JOIN proteins p2 ON p1.contig_id = p2.contig_id
+  AND p1.bin_id = p2.bin_id
+  AND p2.gene_index = p1.gene_index + 1
+WHERE p1.protein_id = ?
+```
+
+Claims about "conserved neighborhoods" that fail these checks should be downgraded from "operon" to "genomic proximity" and the finding description should reflect the weaker association.
 
 ---
 
