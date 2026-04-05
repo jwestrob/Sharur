@@ -2,6 +2,8 @@
 
 This document describes the standard organization for genome analysis projects.
 
+The standard ingest workflow starts from genome assembly FASTAs and should usually be run through `sharur-ingest`. The staged scripts in `src/ingest/` remain the manual/debugging path. Protein-only ingestion is a fallback path for datasets that do not have assemblies.
+
 ## Directory Structure
 
 ```
@@ -14,13 +16,16 @@ data/
 │   ├── manifest.json                  # Analysis state and session continuity
 │   │
 │   ├── source/                        # Input files
-│   │   └── proteins.faa               # Source protein FASTA
+│   │   └── *.fna / *.fa / *.fasta     # Source genome assemblies
 │   │
-│   ├── annotations/                   # Annotation results (consolidated)
-│   │   ├── pfam.tsv                   # PFAM domain hits
-│   │   ├── kegg.tsv                   # KEGG KOfam results
-│   │   ├── vogdb.tsv                  # VOGdb hits (viral)
-│   │   └── cazy.tsv                   # CAZy hits (if applicable)
+│   ├── stage00_prepared/              # Validated + organized assemblies
+│   ├── stage03_prodigal/              # Gene calls and protein FASTAs
+│   ├── stage04_astra/                 # Annotation stage outputs
+│   ├── stage05c_crispr/               # CRISPR array stage outputs
+│   ├── stage05a_gecco/                # Optional BGC stage outputs
+│   ├── stage06_embeddings/            # Legacy embedding location (if present)
+│   │
+│   ├── annotations/                   # Consolidated/derived annotation exports
 │   │
 │   ├── embeddings/                    # ESM2 protein embeddings
 │   │   ├── embedding_manifest.json
@@ -74,37 +79,35 @@ mkdir -p data/${NEW_ORGANISM}_production/{source,annotations,embeddings,structur
 
 | Input | Required | Format | Notes |
 |-------|----------|--------|-------|
-| Protein FASTA | Yes | `.faa` or `.faa.gz` | Prodigal-called or from annotation |
-| PFAM annotations | Recommended | TSV/domtblout | From hmmsearch or Astra |
-| KEGG annotations | Recommended | TSV | From KOfamScan or Astra |
-| HydDB annotations | Recommended | TSV | Hydrogenase classification (Astra --installed_hmms HydDB --cut_ga) |
-| Genome FASTA | Optional | `.fna` | For contig context |
-| GFF annotations | Optional | `.gff3` | Gene coordinates |
+| Genome FASTA | Yes | `.fna`, `.fa`, `.fasta` | Standard Sharur ingest starts here |
+| Protein FASTA | Optional | `.faa` or `.faa.gz` | Fallback path only when assemblies are unavailable |
+| Astra databases | Yes | Installed locally | Standard: PFAM, KOFAM, HydDB, DefenseFinder, dbCAN |
+| MinCED | Yes | Executable | Required for standard CRISPR array ingest |
+| Optional Astra DBs | Optional | Installed locally | TXSScan, VOGdb, CANT-HYD |
 
 ### 3. Ingestion Workflow
 
 ```bash
-# Step 1: Ingest proteins
-python scripts/ingest_protein_fasta.py \
-  --fasta /path/to/proteins.faa.gz \
-  --output data/${NEW_ORGANISM}_production/sharur.duckdb
+mkdir -p data/${NEW_ORGANISM}_production/{source,annotations,embeddings,structures,exploration,survey,reports,figures}
 
-# Step 2: Add annotations (if available)
-# Via Astra pipeline or direct import
-
-# Step 3: Generate predicates
-python -c "
-from sharur.operators import Sharur
-b = Sharur('data/${NEW_ORGANISM}_production/sharur.duckdb')
-# Regenerate predicates using the script:
-# python scripts/regenerate_predicates.py data/${NEW_ORGANISM}_production/sharur.duckdb
-"
-
-# Step 4: Generate embeddings (ESM2)
-python src/ingest/06_esm2_embeddings.py \
-  data/${NEW_ORGANISM}_production/stage03_prodigal \
-  data/${NEW_ORGANISM}_production/embeddings/
+sharur-ingest \
+  --input-dir /path/to/genomes \
+  --data-dir data/${NEW_ORGANISM}_production \
+  --output data/${NEW_ORGANISM}_production/sharur.duckdb \
+  --force
 ```
+
+For manual stage-by-stage execution, see `QUICKSTART.md` and `src/ingest/README.md`.
+
+If you only have pre-called proteins, you can bootstrap a database with:
+
+```bash
+python scripts/ingest_protein_fasta.py \
+  /path/to/proteins.faa.gz \
+  --output data/${NEW_ORGANISM}_production/sharur.duckdb
+```
+
+That fallback path does not replace the standard stage pipeline, and it does not run Astra, MinCED, or Stage 07 for you.
 
 ### 4. Standard Naming Conventions
 
@@ -112,7 +115,8 @@ python src/ingest/06_esm2_embeddings.py \
 |------|------------|---------|
 | Production directory | `{organism}_production` | `heimdall_megavirus_production` |
 | Archive directory | `{organism}_{YYYY-MM-DD}` | `thorarchaeota_2026-02-03` |
-| Source file | `source/proteins.faa` | `source/Heimdall_Megavirus.faa` |
+| Source file | `source/{sample}.fna` | `source/Heimdall_Megavirus.fna` |
+| Stage outputs | `stageXX_*` | `stage04_astra/` |
 | Annotations | `annotations/{db}.tsv` | `annotations/pfam.tsv` |
 | Embeddings | `embeddings/` | H5 file with FAISS index built at runtime |
 | Reports | `reports/{type}.pdf` | `reports/final.pdf` |
@@ -157,9 +161,8 @@ git status --porcelain | grep "^?" | head -20
 ## Analysis Phases
 
 ### Phase 1: Ingestion & Annotation
-- Ingest protein FASTA
-- Run/import PFAM and KEGG annotations
-- Generate predicates
+- Run the staged assembly-based ingest pipeline
+- Build `sharur.duckdb` via Stage 07
 - Compute ESM2 embeddings
 
 ### Phase 2: Initial Exploration

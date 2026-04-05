@@ -45,7 +45,7 @@ produces both the section text AND its claims. The orchestrator assembles the fu
 ```python
 Task(subagent_type="general-purpose",
      prompt="""Write Results section: "Energy Metabolism and Respiratory Chain"
-     Source findings: survey-001, survey-005, E002, D001
+     Source findings: survey-001, survey-005, exploration-002, exploration-007
      DB: data/DATASET/sharur.duckdb (for verification queries)
 
      Output TWO files:
@@ -85,9 +85,13 @@ When editing the manuscript, **always** append an entry documenting:
 **Standard output:** Each dataset produces `MANUSCRIPT.md` → `MANUSCRIPT.pdf` via pandoc.
 
 **Do NOT:**
-- Create new Python PDF generators — write Markdown and use pandoc
+- Create new Python PDF generators for manuscripts or comprehensive collaborator reports — write Markdown and use pandoc
 - Use hardcoded report scripts (`generate_paper_report.py`, etc.) for new datasets
 - Create versioned or dated PDF filenames — always `MANUSCRIPT.pdf`
+
+Maintained exception:
+- Phase-specific findings overview PDFs may be rendered from the canonical findings archives using the maintained scripts `scripts/render_survey_pdf.py` and `scripts/render_exploration_pdf.py`.
+- The deprecated compatibility wrappers `scripts/generate_survey_report.py` and `scripts/generate_exploration_report.py` should not be extended further.
 
 **Writing guidelines:**
 - Avoid sensationalized framing — no "Mystery - Resolved" sections
@@ -162,23 +166,38 @@ MANUSCRIPT.pdf                              ← pandoc
 
 ## Findings Schema
 
+`survey/findings.jsonl` and `exploration/findings.jsonl` are the canonical scientific record. `manifest.json` is derived. Use `docs/findings_spec.md` as the source of truth for field definitions and compatibility rules.
+
 **Every specific number in a finding must have a verification query — including breakdowns.** See CLAUDE.md § Reproducible Findings. If a finding says "9 genomes carry X, including 3 from phylum A", both "9" and "3" need queries.
 
 ```jsonl
 {
   "id": "survey-001",
+  "schema_version": "2.0",
+  "phase": "survey",
   "title": "...",
   "category": "energy_metabolism",
   "description": "...",
-  "evidence": "...",
-  "n_genomes": 1366,
-  "provenance": { "query": "...", "raw_result": "...", "interpretation": "..." },
+  "evidence": {"...": "..."},
   "verification": [
-    {"claim": "1,366 genomes carry NiFe Group 4", "query": "SELECT COUNT(DISTINCT bin_id) FROM predicates WHERE predicate = 'nife_group4'", "expected": 1366}
+    {
+      "claim": "1,366 genomes carry NiFe Group 4",
+      "query": "SELECT COUNT(DISTINCT bin_id) FROM predicates WHERE predicate = 'nife_group4'",
+      "expected": 1366
+    }
   ],
+  "protein_ids": ["protein_1", "protein_2"],
+  "contigs": ["contig_1"],
+  "n_genomes": 1366,
+  "provenance": {
+    "source_report": "survey/hydrogenase_summary.md",
+    "query_used": "SELECT COUNT(DISTINCT bin_id) FROM predicates WHERE predicate = 'nife_group4'",
+    "agent_id": "survey_hydrogenase"
+  },
   "figures": ["figures/hydrogenase_distribution.png"],
-  "related_findings": ["survey-005", "E001"],
-  "phase": "survey"
+  "related_findings": ["survey-005", "exploration-001"],
+  "novelty": 2,
+  "confidence": 0.83
 }
 ```
 
@@ -187,8 +206,12 @@ MANUSCRIPT.pdf                              ← pandoc
 | Phase | Prefix | Example |
 |-------|--------|---------|
 | Survey | `survey-` | `survey-001` |
-| Exploration | `E` | `E001` |
-| Deepen | `D` | `D001` |
+| Exploration | `exploration-` | `exploration-001` |
+| Characterization | `characterization-` | `characterization-001` |
+| Defense | `defense-` | `defense-001` |
+| Metabolism | `metabolism-` | `metabolism-001` |
+
+Legacy IDs like `E001` and `D001` may still be read from older datasets, but new findings and manuscripts should use canonical slug-style IDs consistently.
 
 ## Manuscript Claims Schema
 

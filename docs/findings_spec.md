@@ -1,58 +1,196 @@
 # Findings Specification
 
-**Audience:** All agents producing analytical outputs (survey, explore, characterize, defense, etc.)
+**Audience:** All agents producing analytical outputs (`survey`, `exploration`, `characterize`, `defense`, etc.)
 
-**Purpose:** Every discovery must be recorded as a structured, verifiable finding in `findings.jsonl`. Prose reports (`.md`) are for human consumption; findings are for machines, auditors, and downstream agents.
+**Purpose:** Every scientific discovery must be recorded as a structured, verifiable finding in `findings.jsonl`. Prose reports (`.md`) are for humans. Findings are the canonical scientific record for downstream agents, reports, and audits.
 
 ---
 
-## Location
+## Canonical Ownership
 
-Each analysis phase writes to its own findings file within the dataset directory:
+These files are the scientific source of truth:
 
-```
+```text
 data/{dataset}/survey/findings.jsonl
 data/{dataset}/exploration/findings.jsonl
+data/{dataset}/exploration/hypotheses.json
 ```
 
-The coordinator (when active) may also maintain a unified `data/{dataset}/findings.jsonl` that merges across phases.
+Boundary rules:
+
+- `survey/findings.jsonl` and `exploration/findings.jsonl` are the canonical findings archive.
+- `exploration/hypotheses.json` is the canonical local hypothesis store.
+- `manifest.json` is a derived summary/cache only. It may be regenerated from canonical findings and other dataset outputs.
+- `sharur_ops.db` is coordination-only state for multi-agent runs. It is not the long-term scientific archive.
 
 ---
 
-## Schema
+## Lean Agent Write Contract
 
-Each line in `findings.jsonl` is a self-contained JSON object with these fields:
+Most agents should write only these fields:
 
-### Required Fields
+| Field | Type | Requirement | Notes |
+|-------|------|-------------|-------|
+| `title` | string | Required | One-line summary with qualifiers included. |
+| `category` | string | Required | Functional area such as `energy_metabolism`, `defense_systems`, `crispr`, `general`. |
+| `description` | string | Required | Interpretation and significance, not just a restatement of the title. |
+| `evidence` | object | Required | Structured supporting data. See Evidence Payloads. |
+| `verification` | array | Required | List of `{claim, query, expected}` records. See Verification. |
+| `protein_ids` | array | Optional | Key supporting proteins. Include enough to reproduce. |
+| `contigs` | array | Optional | Key supporting contigs. |
+
+Agents do **not** need to hand-author these in normal workflows:
+
+- `id`
+- `phase`
+- `schema_version`
+- `provenance`
+- `related_findings`
+- `novelty`
+- `confidence`
+
+The system may fill or derive those fields during normalization/storage.
+
+---
+
+## Canonical Stored Finding Shape
+
+Each line in `findings.jsonl` should normalize to this stored shape:
+
+### Core Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | string | Stable ID. Convention: `{phase}-{NNN}` (e.g., `survey-001`, `explore-014`). Auto-increment within file. |
-| `title` | string | Self-contained one-line summary with all qualifiers. Must be meaningful without reading the description. |
-| `category` | string | Functional area: `energy_metabolism`, `defense_systems`, `cell_surface`, `novel_proteins`, `metal_resistance`, `carbon_metabolism`, `crispr`, `secondary_metabolism`, `general` |
-| `description` | string | Prose paragraph with biological interpretation. Not a restatement of the title — explain *why this matters*. |
-| `evidence` | object | Quantitative evidence. Structure depends on finding type (see below). |
-| `verification` | array | **MANDATORY.** List of `{claim, query, expected}` triples. Every specific number in the title, description, or evidence must have a verification query. See Verification section. |
-| `phase` | string | Which analysis phase produced this: `survey`, `exploration`, `characterization`, `defense`, `metabolism`, etc. |
+| `id` | string | Stable finding ID. Canonical convention: `{phase}-{NNN}` such as `survey-001` or `exploration-014`. |
+| `schema_version` | string | Finding schema version. Current canonical value: `"2.0"`. |
+| `phase` | string | Producing phase, such as `survey`, `exploration`, `characterization`, `defense`, `metabolism`. |
+| `title` | string | Self-contained one-line summary. |
+| `category` | string | Functional category. |
+| `description` | string | Biological interpretation. |
+| `evidence` | object | Structured evidence payload. |
+| `verification` | array | Mandatory verification records. |
 
-### Recommended Fields
+### Optional / Derived Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `confidence` | float | 0.0–1.0. Agent's self-assessed confidence in the finding. |
-| `novelty` | int | 0=routine, 1=interesting, 2=novel, 3=potentially_significant |
-| `n_genomes` | int | Number of genomes where finding applies. For unbinned metagenomes, use `null`. |
-| `protein_ids` | array | Key protein IDs supporting the finding. Include enough to reproduce, not all. |
-| `contigs` | array | Key contig IDs. |
-| `provenance` | object | `{source_report, query_used, accession_verified, agent_id}` |
-| `figures` | array | Paths to any figures generated for this finding. |
-| `related_findings` | array | IDs of related findings in any phase. |
+| `protein_ids` | array | Canonical top-level protein references for downstream tooling. |
+| `contigs` | array | Canonical top-level contig references. |
+| `provenance` | object | Normalized provenance metadata. Preferred keys include `source_report`, `query_used`, `accession_verified`, `agent_id`. |
+| `related_findings` | array | Related finding IDs across phases. |
+| `novelty` | int | 0=routine, 1=interesting, 2=novel, 3=potentially_significant. |
+| `confidence` | float | 0.0-1.0 self-assessed confidence. |
+| `n_genomes` | int or null | Number of genomes where the finding applies. |
+| `figures` | array | Figure paths associated with the finding. |
+
+### Canonical Example
+
+```json
+{
+  "id": "exploration-003",
+  "schema_version": "2.0",
+  "phase": "exploration",
+  "title": "DUF6088 forms a conserved genomic module with AbiEii abortive infection toxin",
+  "category": "defense_systems",
+  "description": "DUF6088, a ~200 aa protein of unknown function, co-occurs with AbiEii toxin domains in 63.5% of instances (40/63 proteins). This association spans 6 different defense system types, suggesting DUF6088 is a genuine accessory component of abortive infection systems rather than a coincidental neighbor.",
+  "evidence": {
+    "duf_accession": "DUF6088",
+    "total_in_metagenome": 63,
+    "near_defense": 40,
+    "fraction_near_abiEii": 0.635,
+    "defense_system_types_associated": 6,
+    "example_loci": ["IL_777", "IL_22959", "IL_123011"]
+  },
+  "verification": [
+    {
+      "claim": "63 DUF6088 proteins in the metagenome",
+      "query": "SELECT COUNT(DISTINCT protein_id) FROM annotations WHERE name LIKE '%DUF6088%'",
+      "expected": 63
+    },
+    {
+      "claim": "40 of 63 have AbiEii within 2 genes",
+      "query": "See exploration/duf_defense_candidates.md methods: neighborhood scan with window=2 for AbiEii co-occurrence",
+      "expected": 40
+    }
+  ],
+  "protein_ids": [
+    "CoronaMine_BoilerAditFilter_100nm_15_12_2024_IL_777_6",
+    "CoronaMine_BoilerAditFilter_100nm_15_12_2024_IL_123011_2",
+    "CoronaMine_BoilerAditFilter_100nm_15_12_2024_IL_22959_1"
+  ],
+  "contigs": ["IL_777", "IL_22959", "IL_123011"],
+  "provenance": {
+    "source_report": "exploration/duf_defense_candidates.md",
+    "query_used": "Neighborhood scan with window=2 for AbiEii co-occurrence",
+    "agent_id": "explore_duf_defense"
+  },
+  "related_findings": ["survey-005"],
+  "novelty": 3,
+  "confidence": 0.85
+}
+```
+
+### Minimal Authoring Example
+
+This is valid agent-facing input as long as the normalizer can infer the phase from the destination file:
+
+```json
+{
+  "title": "DUF6088 forms a conserved genomic module with AbiEii abortive infection toxin",
+  "category": "defense_systems",
+  "description": "DUF6088 co-occurs with AbiEii toxin domains in a substantial fraction of neighborhoods, suggesting it is a genuine accessory component rather than a coincidental neighbor.",
+  "evidence": {
+    "duf_accession": "DUF6088",
+    "total_in_metagenome": 63,
+    "near_defense": 40
+  },
+  "verification": [
+    {
+      "claim": "63 DUF6088 proteins in the metagenome",
+      "query": "SELECT COUNT(DISTINCT protein_id) FROM annotations WHERE name LIKE '%DUF6088%'",
+      "expected": 63
+    }
+  ],
+  "protein_ids": [
+    "CoronaMine_BoilerAditFilter_100nm_15_12_2024_IL_777_6"
+  ]
+}
+```
+
+---
+
+## Compatibility and Normalization Policy
+
+Only the compatibility/normalization layer may interpret legacy top-level fields.
+
+### Accepted Legacy Inputs
+
+| Legacy Input | Normalized Behavior |
+|--------------|---------------------|
+| Top-level `genes` | Legacy-only compatibility input. Normalize to canonical `protein_ids`. |
+| Top-level `priority` | Legacy-only compatibility input. Normalize to a derived summary signal such as "key finding". |
+| `provenance.query` | Normalize to `provenance.query_used`. |
+| Legacy IDs like `E001` or `D001` | Preserve on read if already present. Do not generate new legacy IDs. |
+
+### Important Distinction
+
+- `evidence["genes"]` is **valid canonical evidence** and should remain valid.
+- Top-level `finding["genes"]` is **legacy compatibility input only**.
+- Legacy string `evidence` values should be migrated to an object wrapper that preserves the original text, for example with keys such as `source_format`, `legacy_text`, and `statements`. New findings should not emit free-text evidence strings.
+
+The normalizer may use `evidence["genes"]` to derive canonical `protein_ids`, but downstream code should read `protein_ids`, not top-level legacy `genes`.
+
+### Validation Behavior
+
+- `verification` is mandatory.
+- Missing or malformed verification records must surface as validation issues.
+- Do not silently invent verification, provenance, or IDs.
 
 ---
 
 ## Evidence Payloads
 
-Structure the `evidence` field based on what was found:
+Structure the `evidence` field based on what was found.
 
 ```json
 // Gene/protein-level finding
@@ -125,101 +263,64 @@ Structure the `evidence` field based on what was found:
 ```
 
 Queries can be:
-- **SQL** against `sharur.duckdb` (preferred — most reproducible)
-- **Shell commands** (awk, grep — for file-based checks)
-- **Python one-liners** (for complex logic)
-- **References** to methods in the prose report (acceptable when the full query is complex, but include the report path)
+
+- SQL against `sharur.duckdb` (preferred)
+- Shell commands
+- Python one-liners
+- References to a concrete methods section when the logic is too large to inline
 
 **If you cannot write a verification query for a number, do not include that number in the finding.**
 
-**Decompositions require separate verification.** "68 DUF1016_N near defense, across 20 system types" is two claims needing two queries — one for the count, one for the system type diversity.
+**Decompositions require separate verification.** "68 DUF1016_N near defense, across 20 system types" is two claims needing two queries, not one.
 
 ---
 
 ## ID Convention
 
+Canonical IDs use the full phase slug:
+
+```text
+survey-001, survey-002, ...
+exploration-001, exploration-002, ...
+characterization-001, characterization-002, ...
+defense-001, defense-002, ...
+metabolism-001, metabolism-002, ...
 ```
-survey-001, survey-002, ...      # Survey phase findings
-explore-001, explore-002, ...    # Exploration phase findings
-char-001, char-002, ...          # Characterization phase findings
-defense-001, defense-002, ...    # Defense-specific findings
-```
 
-Auto-increment within each file. When reading an existing `findings.jsonl`, count existing entries to determine the next ID.
+When generating a new ID, count existing entries in the phase file and emit the next `{phase}-{NNN}` value.
 
----
-
-## Complete Example
-
-```json
-{
-  "id": "explore-003",
-  "title": "DUF6088 forms a conserved genomic module with AbiEii abortive infection toxin",
-  "category": "defense_systems",
-  "description": "DUF6088, a ~200 aa protein of unknown function, co-occurs with AbiEii toxin domains in 63.5% of instances (40/63 proteins). This association spans 6 different defense system types, suggesting DUF6088 is a genuine accessory component of abortive infection systems rather than a coincidental neighbor. It may function as a regulatory or modulatory subunit controlling AbiEii toxin activation.",
-  "evidence": {
-    "duf_accession": "DUF6088",
-    "total_in_metagenome": 63,
-    "near_defense": 40,
-    "fraction_near_abiEii": 0.635,
-    "defense_system_types_associated": 6,
-    "example_loci": ["IL_777", "IL_22959", "IL_123011"]
-  },
-  "verification": [
-    {
-      "claim": "63 DUF6088 proteins in the metagenome",
-      "query": "SELECT COUNT(DISTINCT protein_id) FROM annotations WHERE name LIKE '%DUF6088%'",
-      "expected": 63
-    },
-    {
-      "claim": "40 of 63 have AbiEii within 2 genes",
-      "query": "See duf_defense_candidates.md methods: neighborhood scan with window=2 for AbiEii co-occurrence",
-      "expected": 40
-    }
-  ],
-  "confidence": 0.85,
-  "novelty": 3,
-  "n_genomes": null,
-  "protein_ids": [
-    "CoronaMine_BoilerAditFilter_100nm_15_12_2024_IL_777_6",
-    "CoronaMine_BoilerAditFilter_100nm_15_12_2024_IL_123011_2",
-    "CoronaMine_BoilerAditFilter_100nm_15_12_2024_IL_22959_1"
-  ],
-  "phase": "exploration",
-  "provenance": {
-    "source_report": "exploration/duf_defense_candidates.md",
-    "agent_id": "explore_duf_defense"
-  },
-  "related_findings": ["survey-005"]
-}
-```
+Legacy IDs such as `E001` or `D001` may still appear in older datasets. Preserve them on read; do not emit new ones.
 
 ---
 
 ## When to Write Findings
 
-Write a finding when you discover something that is:
-- **Quantitative** — has specific counts, enrichments, or measurements
-- **Verifiable** — you can write SQL or a command to reproduce the numbers
-- **Interpretable** — it means something biologically, not just "X exists"
+Write a finding when the result is:
 
-Do NOT write findings for:
-- Routine annotation counts without interpretation ("1,276,251 PFAM annotations")
-- Negative results ("no CRISPR arrays found") unless the absence is itself surprising
-- Methodological notes ("used window=10 for neighborhood analysis")
+- Quantitative
+- Verifiable
+- Interpretable
+
+Do **not** write findings for:
+
+- Routine annotation counts without interpretation
+- Negative results unless the absence itself is the finding
+- Methodological notes that are not scientific claims
 
 ---
 
 ## Integration with Skills
 
-Every skill that produces analytical outputs should:
-1. **Read this spec** before writing findings
-2. **Write `findings.jsonl`** alongside the prose `.md` report
-3. **Include verification queries** for every quantitative claim
-4. **Use the ID convention** for the current phase
+Every analytical skill should:
 
-Reference this document in skill prompts:
-```
-Read docs/findings_spec.md for the required findings output format.
+1. Read this spec before writing findings
+2. Write `findings.jsonl` alongside the prose `.md` report
+3. Include verification queries for every quantitative claim
+4. Use canonical slug-style IDs for new findings
+
+Reference snippet for skill prompts:
+
+```text
+Read docs/findings_spec.md for the required findings format.
 Write findings to {output_dir}/findings.jsonl alongside your prose report.
 ```

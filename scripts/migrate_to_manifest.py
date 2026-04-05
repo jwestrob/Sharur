@@ -25,6 +25,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from sharur.core.analysis_record_compat import (
+    build_findings_summary,
+    load_findings_file,
+)
+
 
 def find_database(dataset_dir: Path) -> Optional[Path]:
     """Find the DuckDB database in a dataset directory."""
@@ -44,14 +49,9 @@ def find_database(dataset_dir: Path) -> Optional[Path]:
     return None
 
 
-def scan_findings(dataset_dir: Path) -> dict:
+def scan_findings(dataset_dir: Path) -> tuple[dict, int]:
     """Scan findings.jsonl and build findings summary."""
-    findings_info = {
-        "count": 0,
-        "by_category": {},
-        "high_priority": [],
-    }
-    proteins_with_findings: set[str] = set()
+    records = []
 
     # Check both exploration and survey directories
     for subdir in ["exploration", "survey"]:
@@ -62,34 +62,14 @@ def scan_findings(dataset_dir: Path) -> dict:
         print(f"  Found findings: {findings_path.relative_to(dataset_dir)}")
 
         try:
-            with open(findings_path) as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-
-                    finding = json.loads(line)
-                    findings_info["count"] += 1
-
-                    # Category tracking
-                    cat = finding.get("category", "Uncategorized")
-                    findings_info["by_category"][cat] = findings_info["by_category"].get(cat, 0) + 1
-
-                    # High priority
-                    if finding.get("priority") == "HIGH":
-                        findings_info["high_priority"].append({
-                            "id": finding.get("id"),
-                            "title": finding.get("title"),
-                        })
-
-                    # Track proteins
-                    for gene in finding.get("genes", []):
-                        proteins_with_findings.add(str(gene))
+            records.extend(load_findings_file(findings_path))
 
         except Exception as e:
             print(f"    Warning: Error reading {findings_path}: {e}")
 
-    return findings_info, len(proteins_with_findings)
+    findings_info, proteins_with_findings = build_findings_summary(records)
+    findings_info["high_priority"] = list(findings_info["key_findings"])
+    return findings_info, proteins_with_findings
 
 
 def scan_structures(dataset_dir: Path) -> list[dict]:

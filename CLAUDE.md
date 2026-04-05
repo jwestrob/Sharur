@@ -4,6 +4,8 @@
 
 **CLAUDE.md scope:** Project-level rules and navigation only. **NEVER write dataset-specific content here.** Dataset context belongs in each dataset's directory.
 
+`AGENTS.md` is a symlink to this file. Keep shared agent instructions here so both filenames stay equivalent.
+
 ## Project Overview
 
 Sharur is an agent-driven metagenomic exploration system. It's a data plane that makes large metagenomic datasets navigable by AI agents.
@@ -29,10 +31,14 @@ Detailed guides live in `docs/` and `.claude/skills/`. **Read the relevant doc b
 
 | Document | Purpose |
 |----------|---------|
-| `QUICKSTART.md` | **NEW DATASET INGESTION (START HERE)** |
+| `QUICKSTART.md` | **NEW DATASET INGESTION (START HERE; use `sharur-ingest`)** |
 | `DATA_ORGANIZATION.md` | Data directory structure, archival procedures |
-| `src/ingest/README.md` | Ingestion pipeline stages (00-07) |
+| `src/ingest/README.md` | Manual ingestion pipeline stages (00-07) |
 | `.claude/skills/_validation_protocols.md` | Shared validation protocols for all analysis skills |
+
+## Ingest Entry Point
+
+For standard dataset ingestion, use `sharur-ingest` by default. That is the primary CLI interface agents should call for the staged pipeline. Drop to the individual `src/ingest/` stage scripts only when debugging, rerunning a specific stage, or intentionally customizing the stage sequence. If `sharur-ingest` is missing, refresh the editable install with `pip install -e ".[dev]"`.
 
 ## Skills (Claude Code)
 
@@ -169,7 +175,11 @@ python -c "from sharur.predicates.vocabulary import ALL_PREDICATES, list_categor
 data/{dataset_name}/
 ├── sharur.duckdb                # Core database
 ├── manifest.json               # Analysis state
-├── source/                     # Input files (.faa)
+├── source/                     # Input assemblies (.fna/.fa/.fasta)
+├── stage00_prepared/           # Prepared assembly inputs
+├── stage03_prodigal/           # Gene calls and protein FASTAs
+├── stage04_astra/              # Stage 04 annotation outputs
+├── stage05c_crispr/            # CRISPR array outputs
 ├── annotations/                # Annotation results
 ├── embeddings/                 # ESM2 embeddings (H5 + FAISS)
 ├── structures/                 # ESM3 PDBs + Foldseek results

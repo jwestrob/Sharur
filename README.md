@@ -35,14 +35,14 @@ pip install -e ".[dev]"
 ### Ingest a dataset
 
 ```bash
-python scripts/ingest.py \
-  --input-dir /path/to/genomes \
+sharur-ingest \
+  --input-dir /path/to/genome_fastas \
   --data-dir data/my_dataset \
   --output data/my_dataset/sharur.duckdb \
   --force
 ```
 
-This runs Prodigal, Astra (PFAM/KEGG/HydDB), GECCO, dbCAN, minced, ESM2 embeddings, and builds the DuckDB knowledge base. See [`QUICKSTART.md`](QUICKSTART.md) for manual step-by-step instructions.
+`sharur-ingest` is the primary command-line interface for the standard ingest pipeline. Use it by default for new datasets. See [`QUICKSTART.md`](QUICKSTART.md) for the operator-facing guide and [`src/ingest/README.md`](src/ingest/README.md) for the manual stage-by-stage reference. [`scripts/ingest.py`](scripts/ingest.py) remains as a repo-local compatibility shim for the same implementation. If `sharur-ingest` is not on `PATH`, refresh the editable install with `pip install -e ".[dev]"`.
 
 ### Use the operators
 
@@ -139,17 +139,17 @@ The predicate system is a project very much in progress; there are tens of thous
 
 | Stage | Tool | Output |
 |-------|------|--------|
-| 00 | Prepare inputs | Organized genome/protein files |
-| 01 | QUAST | Assembly quality metrics |
-| 02 | DFAST (optional) | QC and taxonomic classification |
-| 03 | Prodigal | Gene calling (.faa, .gff) |
-| 04 | Astra | PFAM, KEGG, HydDB, DefenseFinder annotations |
-| 04 (opt-in) | Astra + VOGdb | Viral orthologous groups (`--databases ... VOGdb`) |
-| 05a | GECCO | Biosynthetic gene clusters |
-| 05b | dbCAN | CAZyme annotations |
-| 05c | minced | CRISPR arrays |
-| 06 | ESM2 | Protein embeddings (320-dim) |
-| 07 | Builder | DuckDB knowledge base + predicates |
+| 00 | Prepare inputs | Standard. Validate and organize genome FASTAs |
+| 01 | QUAST | Optional assembly QC metrics |
+| 02 | DFAST | Optional QC and taxonomy |
+| 03 | Prodigal | Standard gene calling (`.faa`, `.genes.fna`) |
+| 04 | Astra | Standard PFAM, KOFAM, HydDB, DefenseFinder, dbCAN annotation |
+| 04 (opt-in) | Astra + extra DBs | Optional VOGdb, TXSScan, CANT-HYD via repeated `-d` flags |
+| 05a | GECCO | Optional biosynthetic gene clusters |
+| 05b | Legacy dbCAN | Deprecated; standard CAZyme ingest comes from Stage 04 + Stage 07 |
+| 05c | minced | Standard CRISPR array detection |
+| 07 | Builder | Standard DuckDB knowledge base + predicates |
+| 06 | ESM2 | Standard post-pipeline protein embeddings (required for ELSA) |
 
 Stage 07 also runs **hydrogenase subgroup classification** when HydDB annotations are present: DIAMOND search against the HydDB reference database assigns NiFe/FeFe subgroups (e.g., Group 1a, Group 4e). All classified hits receive subgroup predicates (`nife_group1`, `fefe_groupB`, etc.). Hits lacking PFAM corroboration (including all Group 4 NiFe) are tagged `hyddb_needs_curation` for agent-level neighborhood validation. See `scripts/classify_hydrogenases.py`.
 
@@ -165,7 +165,8 @@ pytest tests/ --override-ini addopts=""
 | Document | Purpose |
 |----------|---------|
 | [`CLAUDE.md`](CLAUDE.md) | Agent knowledge base -- tools, patterns, protocols |
-| [`QUICKSTART.md`](QUICKSTART.md) | Step-by-step dataset ingestion guide |
+| [`QUICKSTART.md`](QUICKSTART.md) | Primary `sharur-ingest` workflow for new datasets |
+| [`src/ingest/README.md`](src/ingest/README.md) | Manual stage-by-stage ingest reference |
 | [`QUICK_REFERENCE.md`](QUICK_REFERENCE.md) | SQL patterns and operator cheatsheet |
 | [`DATA_ORGANIZATION.md`](DATA_ORGANIZATION.md) | Data directory conventions |
 

@@ -4,6 +4,8 @@ import json
 import os
 import sys
 
+from sharur.core.analysis_record_io import write_findings_records
+
 # Known superfamily traps: annotations that describe protein folds, not specific functions
 SUPERFAMILY_ACCESSIONS = {
     "PF00069", "PF07714",  # Pkinase / PK_Tyr_Ser-Thr
@@ -466,10 +468,11 @@ def read_genome(genome, short_name, db_path="data/susan_genomes/sharur.duckdb"):
 
     if findings:
         findings_path = os.path.join(out_dir, f"findings_{short_name}.jsonl")
-        with open(findings_path, "w") as f:
-            for finding in findings:
-                f.write(json.dumps(finding) + "\n")
+        results = write_findings_records(findings_path, findings, phase="atlas")
         print(f"Wrote {len(findings)} findings to {findings_path}")
+        issues = [r for r in results if r.issues]
+        if issues:
+            print(f"  {len(issues)} findings have validation issues (for example: {issues[0].issues[0]})")
     else:
         print(f"No notable findings for {short_name}")
 

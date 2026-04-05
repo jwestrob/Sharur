@@ -19,6 +19,9 @@ import duckdb
 from pathlib import Path
 from datetime import datetime
 
+from sharur.core.analysis_record_io import append_finding_record
+from sharur.core.analysis_record_compat import load_findings_file
+
 DB_PATH = "data/thorarchaeota_production/sharur.duckdb"
 FINDINGS_PATH = "data/thorarchaeota_production/genome_browser_findings.jsonl"
 SUMMARY_PATH = "data/thorarchaeota_production/genome_browser_summary.md"
@@ -165,22 +168,16 @@ def get_quarter_summary(quarter: int) -> dict:
 def record_finding(finding: dict):
     """Append a finding to the findings file."""
     finding['timestamp'] = datetime.now().isoformat()
-
-    with open(FINDINGS_PATH, 'a') as f:
-        f.write(json.dumps(finding) + '\n')
-
-    print(f"Recorded finding: {finding.get('title', 'Untitled')}")
+    result = append_finding_record(FINDINGS_PATH, finding, phase="exploration")
+    message = f"Recorded finding: {result.finding.get('title', 'Untitled')}"
+    if result.issues:
+        message += f" [validation issues: {'; '.join(result.issues)}]"
+    print(message)
 
 
 def get_all_findings() -> list:
     """Load all recorded findings."""
-    findings = []
-    if Path(FINDINGS_PATH).exists():
-        with open(FINDINGS_PATH) as f:
-            for line in f:
-                if line.strip():
-                    findings.append(json.loads(line))
-    return findings
+    return [record.finding for record in load_findings_file(FINDINGS_PATH)]
 
 
 def browse_quarter(quarter: int):
@@ -345,8 +342,8 @@ def generate_summary():
                 summary += "\n\n"
             if f.get('description'):
                 summary += f"{f['description']}\n\n"
-            if f.get('significance'):
-                summary += f"**Significance:** {f['significance']}\n\n"
+            if f.get('confidence') is not None:
+                summary += f"**Confidence:** {f['confidence']}\n\n"
             summary += "---\n\n"
 
     with open(SUMMARY_PATH, 'w') as f:

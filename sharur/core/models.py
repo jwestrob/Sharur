@@ -524,7 +524,12 @@ class ComparisonResult(BaseModel):
 
 
 class Hypothesis(BaseModel):
-    """A tracked scientific hypothesis."""
+    """Legacy session-history hypothesis model.
+
+    This model remains for backwards compatibility with older API surfaces.
+    The canonical dataset-local hypothesis record used by the persistent
+    registry lives in `sharur.core.types.Hypothesis`.
+    """
 
     model_config = ConfigDict(frozen=False)
 
@@ -561,6 +566,9 @@ class Hypothesis(BaseModel):
             self.status = "weakened"
 
         self.updated_at = datetime.now()
+
+
+LegacyHypothesis = Hypothesis
 
 
 # =============================================================================
@@ -615,5 +623,6 @@ __all__ = [
     "AnomalyHit",
     "ComparisonResult",
     "Hypothesis",
+    "LegacyHypothesis",
     "ExplorationStep",
 ]

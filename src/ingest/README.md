@@ -1,8 +1,22 @@
 # Sharur Ingestion Pipeline
 
-## Quick Start: End-to-End Pipeline
+## Quick Start: Primary CLI
 
-Copy-paste this. Do not modify flags. Do not add `--databases`. Do not skip Stage 05c.
+Use `sharur-ingest` as the default way to run the Sharur ingest pipeline. Do not add manual Astra database overrides unless you are intentionally doing a specialized run.
+
+```bash
+sharur-ingest \
+  --input-dir /path/to/genome_fastas \
+  --data-dir data/my_dataset \
+  --output data/my_dataset/sharur.duckdb \
+  --force
+```
+
+If `sharur-ingest` is missing, refresh the editable install with `pip install -e ".[dev]"`.
+
+## Manual Stage-by-Stage Pipeline
+
+Use the individual stage scripts below when you need direct stage control, debugging, or partial reruns. Do not modify flags casually. Do not add `--databases` unless you explicitly want a non-default database set. Do not skip Stage 05c.
 
 ```bash
 DATASET=my_dataset
@@ -27,7 +41,7 @@ python src/ingest/minced_crispr.py -i data/$DATASET/stage00_prepared -o data/$DA
 python src/ingest/07_build_knowledge_base.py -d data/$DATASET -o data/$DATASET/sharur.duckdb
 ```
 
-That is the complete standard pipeline. Stage 07 auto-discovers all `stage*` directories under `data/$DATASET/` and loads proteins, annotations, CRISPR arrays, and predicates.
+That is the manual stage sequence behind `sharur-ingest`. Stage 07 auto-discovers all `stage*` directories under `data/$DATASET/` and loads proteins, annotations, CRISPR arrays, and predicates.
 
 ```bash
 # Stage 06: ESM2 embeddings (standard — required for ELSA synteny discovery)
@@ -91,6 +105,7 @@ Stage 07  Knowledge Base          (consolidate everything -> sharur.duckdb)
 Stage 06  Embeddings              (ESM2: proteins -> vector embeddings for ELSA)
 ```
 
+**Primary CLI path:** `sharur-ingest`
 **Standard pipeline stages:** 00, 03, 04, 05c, 07, 06
 **Post-pipeline (standard):** 06 (embeddings — runs after 07, required for ELSA synteny)
 **Optional/deprecated:** 01 (QUAST QC), 02 (DFAST QC), 05a (GECCO BGC), 05b (dbCAN legacy)

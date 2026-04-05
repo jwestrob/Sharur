@@ -33,6 +33,11 @@ def clean_text(text: str) -> str:
     return text.encode('latin-1', 'replace').decode('latin-1')
 
 
+def clamp_rgb(*components: int) -> tuple[int, int, int]:
+    """Clamp RGB components into the 0-255 range expected by FPDF."""
+    return tuple(max(0, min(255, int(value))) for value in components)
+
+
 class SharurReport(FPDF):
     """
     Base report class with consistent styling.
@@ -134,7 +139,7 @@ class SharurReport(FPDF):
     def add_evidence_box(self, text: str):
         self.set_font('Helvetica', 'I', 9)
         r, g, b = self._rgb()
-        self.set_fill_color(r + 140, g + 100, b + 80)  # Lighter version
+        self.set_fill_color(*clamp_rgb(r + 140, g + 100, b + 80))
         self.set_text_color(r, g, b)
         self.set_x(self.l_margin)
         self.multi_cell(self.w - self.l_margin - self.r_margin, 5,
@@ -167,7 +172,7 @@ class SharurReport(FPDF):
         r, g, b = self._rgb()
         for row_idx, row in enumerate(data):
             if row_idx % 2 == 0:
-                self.set_fill_color(r + 160, g + 130, b + 110)
+                self.set_fill_color(*clamp_rgb(r + 160, g + 130, b + 110))
             else:
                 self.set_fill_color(255, 255, 255)
             self.set_x(self.l_margin + 2)
@@ -219,7 +224,7 @@ class SharurReport(FPDF):
     def add_separator(self):
         self.ln(2)
         r, g, b = self._rgb("secondary")
-        self.set_draw_color(r + 60, g + 60, b + 60)
+        self.set_draw_color(*clamp_rgb(r + 60, g + 60, b + 60))
         self.set_line_width(0.2)
         y = self.get_y()
         self.line(self.l_margin + 20, y, self.w - self.r_margin - 20, y)
@@ -400,11 +405,14 @@ def generate_report_from_manifest(
     status = exploration.get("status", "unknown")
     pdf.body_text(f"Analysis status: {status}")
 
-    # High priority findings
-    high_priority = manifest.get("findings", {}).get("high_priority", [])
-    if high_priority:
+    # Key findings
+    key_findings = (
+        manifest.get("findings", {}).get("key_findings")
+        or manifest.get("findings", {}).get("high_priority", [])
+    )
+    if key_findings:
         pdf.section_title("Key Findings")
-        for finding in high_priority[:5]:
+        for finding in key_findings[:5]:
             pdf.add_bullet(finding.get("title", "Untitled"))
 
     # Annotations section

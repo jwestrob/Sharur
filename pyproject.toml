@@ -72,6 +72,7 @@ Issues = "https://github.com/jwestrob/Sharur/issues"
 
 [project.scripts]
 sharur = "sharur.cli:main"
+sharur-ingest = "sharur.ingest_cli:main"
 
 [build-system]
 requires = ["hatchling"]

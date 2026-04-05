@@ -188,7 +188,11 @@ class Evidence(BaseModel):
 
 
 class Hypothesis(BaseModel):
-    """A tracked scientific hypothesis."""
+    """A tracked scientific hypothesis stored in the dataset-local registry.
+
+    This model backs `exploration/hypotheses.json`. It is intentionally
+    separate from the coordination-only hypothesis shapes in `sharur.ops`.
+    """
 
     hypothesis_id: UUID = Field(default_factory=uuid4)
     statement: str

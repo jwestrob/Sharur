@@ -21,6 +21,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, TYPE_CHECKING
 
+from sharur.core.analysis_record_compat import (
+    build_findings_summary,
+    load_dataset_findings,
+    load_findings_file,
+)
+
 if TYPE_CHECKING:
     from sharur.storage.duckdb_store import DuckDBStore
 
@@ -96,7 +102,10 @@ class AnalysisManifest:
             "findings": {
                 "count": 0,
                 "by_category": {},
+                "by_phase": {},
+                "key_findings": [],
                 "high_priority": [],
+                "validation_issues": [],
             },
             "structures": {
                 "predicted": 0,
@@ -365,55 +374,32 @@ class AnalysisManifest:
         Update findings summary from findings.jsonl.
 
         Args:
-            findings_path: Path to findings.jsonl (auto-detected if not provided)
+            findings_path: Optional findings file or dataset directory.
+                Auto-detects canonical survey/exploration files if omitted.
         """
         if not self.db_path:
             return
 
-        # Auto-detect findings file
-        if not findings_path:
-            for subdir in ["exploration", "survey"]:
-                candidate = self.db_path.parent / subdir / "findings.jsonl"
-                if candidate.exists():
-                    findings_path = str(candidate)
-                    break
-
-        if not findings_path or not Path(findings_path).exists():
-            return
-
         try:
-            findings = []
-            with open(findings_path) as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        findings.append(json.loads(line))
+            if findings_path:
+                findings_source = Path(findings_path)
+                if findings_source.is_dir():
+                    records = load_dataset_findings(findings_source)
+                else:
+                    records = load_findings_file(findings_source)
+            else:
+                records = load_dataset_findings(self.db_path.parent)
 
-            # Update counts
-            self.data["findings"]["count"] = len(findings)
+            findings_info, proteins_with_findings = build_findings_summary(records)
+            findings_info["high_priority"] = list(findings_info["key_findings"])
 
-            # Group by category
-            by_category: dict[str, int] = {}
-            high_priority: list[dict] = []
-            proteins_with_findings: set[str] = set()
-
-            for finding in findings:
-                cat = finding.get("category", "Uncategorized")
-                by_category[cat] = by_category.get(cat, 0) + 1
-
-                if finding.get("priority") == "HIGH":
-                    high_priority.append({
-                        "id": finding.get("id"),
-                        "title": finding.get("title"),
-                    })
-
-                # Track proteins mentioned in findings
-                for gene in finding.get("genes", []):
-                    proteins_with_findings.add(str(gene))
-
-            self.data["findings"]["by_category"] = by_category
-            self.data["findings"]["high_priority"] = high_priority
-            self.data["exploration"]["coverage"]["proteins_with_findings"] = len(proteins_with_findings)
+            self.data["findings"] = {
+                **self.data.get("findings", {}),
+                **findings_info,
+            }
+            self.data["exploration"]["coverage"]["proteins_with_findings"] = (
+                proteins_with_findings
+            )
 
         except Exception as e:
             self.log_session("error", f"Failed to update findings: {e}")
@@ -629,12 +615,16 @@ class AnalysisManifest:
             for step in next_steps[:5]:
                 lines.append(f"- {step}")
 
-        # High priority findings
-        high_priority = d.get("findings", {}).get("high_priority", [])
-        if high_priority:
-            lines.extend(["", "### High Priority Findings"])
-            for hp in high_priority[:5]:
-                lines.append(f"- [{hp.get('id')}] {hp.get('title', '')[:60]}")
+        key_findings = (
+            d.get("findings", {}).get("key_findings")
+            or d.get("findings", {}).get("high_priority", [])
+        )
+        if key_findings:
+            lines.extend(["", "### Key Findings"])
+            for finding in key_findings[:5]:
+                lines.append(
+                    f"- [{finding.get('id')}] {finding.get('title', '')[:60]}"
+                )
 
         return "\n".join(lines)
 

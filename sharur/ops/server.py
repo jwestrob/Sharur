@@ -6,6 +6,11 @@ Or:   python -m sharur.ops.server
 
 Agents POST findings/hypotheses/tasks. Orchestrator queries them.
 All writes serialized through a single SQLite connection in WAL mode.
+
+Important boundary: this server stores coordination records only. Dataset-local
+scientific records remain the canonical source of truth in
+`survey/findings.jsonl`, `exploration/findings.jsonl`, and
+`exploration/hypotheses.json`.
 """
 
 import sqlite3
@@ -153,7 +158,7 @@ class EventBus:
 _bus = EventBus()
 
 # ---------------------------------------------------------------------------
-# Pydantic models
+# Pydantic models for coordination records only
 # ---------------------------------------------------------------------------
 
 class FindingType(str, Enum):

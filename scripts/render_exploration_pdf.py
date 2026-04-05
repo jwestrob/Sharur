@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deprecated wrapper for the normalized exploration PDF generator."""
+"""Render a normalized exploration findings PDF report."""
 
 from __future__ import annotations
 
@@ -9,18 +9,11 @@ from sharur.reports.findings_pdf import generate_phase_report
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Deprecated: use scripts/render_exploration_pdf.py instead.",
-    )
-    parser.add_argument(
-        "--dataset",
-        default="data/hinthialibacterota_production",
-        help="Path to the dataset directory.",
-    )
+    parser = argparse.ArgumentParser(description="Render an exploration findings PDF.")
+    parser.add_argument("--dataset", required=True, help="Path to the dataset directory.")
     parser.add_argument("--output", help="Optional output PDF path.")
     args = parser.parse_args()
 
-    print("Deprecated: use scripts/render_exploration_pdf.py instead.")
     output = generate_phase_report(
         args.dataset,
         "exploration",
