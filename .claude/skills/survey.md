@@ -651,7 +651,7 @@ Generate **separate reports for major topics** (easier to navigate than one gian
 
 3. **`summary.md`** - Executive overview
    - Dataset characteristics
-   - Major findings (top 5-10)
+   - Major findings
    - Key patterns across genomes
    - Questions for follow-up
 

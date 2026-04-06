@@ -128,8 +128,7 @@ Each line in `findings.jsonl` should normalize to this stored shape:
   },
   "related_findings": ["survey-005"],
   "novelty": 3,
-  "confidence": 0.85,
-  "falsification": "Wrong if the AbiEii PFAM domain cross-reacts with non-defense proteins (e.g., SanaT toxins) making the co-occurrence an annotation artifact rather than a genuine functional association."
+  "confidence": 0.85
 }
 ```
 
@@ -284,30 +283,7 @@ Queries can be:
 
 The `falsification` field is a plain string answering: "This finding would be wrong if ___."
 
-**Examples:**
-
-```json
-{
-  "title": "SoxYZ carrier is part of the LanM operon",
-  "falsification": "Wrong if SoxYZ and LanM are on different strands, >5 genes apart, or the association disappears when restricted to same-contig same-strand genes within 500bp intergenic distance."
-}
-```
-
-```json
-{
-  "title": "YcaO + TfuA co-locate with LanM in 13 genomes",
-  "falsification": "Wrong if these 13 genomes are all from 2-3 closely related species sharing whole-genome synteny, making this genome conservation rather than functional co-selection."
-}
-```
-
-```json
-{
-  "title": "DUF6088 is a novel defense accessory component",
-  "falsification": "Wrong if DUF6088 is already annotated as part of a known defense system in DefenseFinder or if the AbiEii PFAM domain cross-reacts with non-defense proteins."
-}
-```
-
-**The falsification must be testable.** "This might not be real" is not a falsification. "This would be wrong if the 40/63 co-occurrence drops below 10/63 when restricted to same-contig same-strand pairs" is testable.
+**The falsification must be testable.** Vague doubt is not a falsification. A specific, checkable condition is.
 
 **When novelty >= 2, agents should test their own falsification before committing the finding.** If the test breaks the finding, revise or discard it. If it survives, include both the falsification statement and the result of the test.
 
