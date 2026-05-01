@@ -225,6 +225,90 @@ def format_shadow_diff_jsonl(diff: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n" if lines else ""
 
 
+def evaluate_shadow_gate(
+    diff: dict[str, Any],
+    min_match_rate_pct: float = 95.0,
+    max_diff_count: int | None = None,
+    max_v2_unresolved_atoms: int | None = None,
+    allowed_v1_only: set[str] | None = None,
+    allowed_v2_only: set[str] | None = None,
+) -> dict[str, Any]:
+    """Evaluate a V1/V2 shadow diff against rollout thresholds.
+
+    Args:
+        diff: Output from shadow_diff() or run_shadow_diff_on_store().
+        min_match_rate_pct: Minimum exact per-protein match rate.
+        max_diff_count: Optional maximum number of proteins with differences.
+        max_v2_unresolved_atoms: Optional maximum unresolved V2 atoms.
+        allowed_v1_only: Predicate IDs allowed to appear only in V1.
+        allowed_v2_only: Predicate IDs allowed to appear only in V2.
+
+    Returns:
+        Dict with passed, failures, and compact observed metrics.
+    """
+    summary = diff.get("summary", {})
+    per_protein = diff.get("per_protein", [])
+    allowed_v1_only = allowed_v1_only or set()
+    allowed_v2_only = allowed_v2_only or set()
+
+    failures = []
+    match_rate = float(summary.get("match_rate_pct", 0.0))
+    diff_count = int(summary.get("diff_count", 0))
+    unresolved_atoms = int(summary.get("v2_unresolved_atoms", 0))
+
+    if match_rate < min_match_rate_pct:
+        failures.append(
+            f"match_rate_pct {match_rate} < required {min_match_rate_pct}"
+        )
+
+    if max_diff_count is not None and diff_count > max_diff_count:
+        failures.append(f"diff_count {diff_count} > allowed {max_diff_count}")
+
+    if (
+        max_v2_unresolved_atoms is not None
+        and unresolved_atoms > max_v2_unresolved_atoms
+    ):
+        failures.append(
+            "v2_unresolved_atoms "
+            f"{unresolved_atoms} > allowed {max_v2_unresolved_atoms}"
+        )
+
+    unexpected_v1_only = Counter()
+    unexpected_v2_only = Counter()
+    for entry in per_protein:
+        unexpected_v1_only.update(
+            pred for pred in entry.get("v1_only", []) if pred not in allowed_v1_only
+        )
+        unexpected_v2_only.update(
+            pred for pred in entry.get("v2_only", []) if pred not in allowed_v2_only
+        )
+
+    if unexpected_v1_only:
+        failures.append(
+            "unexpected V1-only predicates: "
+            + ", ".join(sorted(unexpected_v1_only))
+        )
+
+    if unexpected_v2_only:
+        failures.append(
+            "unexpected V2-only predicates: "
+            + ", ".join(sorted(unexpected_v2_only))
+        )
+
+    return {
+        "passed": not failures,
+        "failures": failures,
+        "metrics": {
+            "total_proteins": summary.get("total_proteins", 0),
+            "match_rate_pct": match_rate,
+            "diff_count": diff_count,
+            "v2_unresolved_atoms": unresolved_atoms,
+            "unexpected_v1_only": dict(unexpected_v1_only),
+            "unexpected_v2_only": dict(unexpected_v2_only),
+        },
+    }
+
+
 def run_shadow_diff_on_store(
     store: "DuckDBStore",
     protein_ids: Optional[list[str]] = None,
@@ -303,6 +387,17 @@ def run_shadow_diff_on_store(
             )
         )
 
+    from sharur.predicates_v2.validated_systems import (
+        fetch_validated_system_annotations,
+    )
+
+    validated_systems = fetch_validated_system_annotations(
+        store,
+        protein_ids=set(protein_ids) if protein_ids else None,
+    )
+    for pid, records in validated_systems.items():
+        annotations_by_protein.setdefault(pid, []).extend(records)
+
     # Run diff
     result = shadow_diff(proteins, annotations_by_protein)
 
@@ -319,6 +414,7 @@ def run_shadow_diff_on_store(
 
 
 __all__ = [
+    "evaluate_shadow_gate",
     "format_shadow_diff_jsonl",
     "format_shadow_diff_report",
     "run_shadow_diff_on_store",

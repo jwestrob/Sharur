@@ -24,7 +24,7 @@ from sharur.predicates.mappings.pfam_map import get_predicates_for_pfam
 from sharur.predicates.mappings.kegg_map import get_predicates_for_kegg
 from sharur.predicates.mappings.cazy_map import get_predicates_for_cazy
 from sharur.predicates.mappings.vog_map import get_vog_predicates
-from sharur.predicates.vocabulary import get_hierarchy, PREDICATE_BY_ID
+from sharur.predicates.vocabulary import get_hierarchy
 
 if TYPE_CHECKING:
     from sharur.storage.duckdb_store import DuckDBStore
@@ -50,6 +50,111 @@ class ProteinRecord:
     contig_gc_mean: Optional[float] = None
     contig_gc_std: Optional[float] = None
     sequence: Optional[str] = None  # For topology prediction (requires pyTMHMM)
+
+
+_DEFENSE_SYSTEM_TYPE_PREDICATES = {
+    "acriii1": "defense_acriii1",
+    "apyc1": "defense_apyc1",
+    "atd1": "defense_atd",
+    "avs_ii": "defense_avs",
+    "avs_iv": "defense_avs",
+    "borvo": "defense_borvo",
+    "caprel": "defense_caprel",
+    "ceres": "defense_ceres",
+    "dctpdeaminase": "defense_dctp_deaminase",
+    "ds_8": "defense_ds",
+    "ds_10": "defense_ds",
+    "ds_12b": "defense_ds",
+    "ds_20": "defense_ds",
+    "ds_23": "defense_ds",
+    "ds_24": "defense_ds",
+    "ds_25": "defense_ds",
+    "ds_41": "defense_ds",
+    "eleos": "defense_eleos",
+    "esos": "defense_esos",
+    "gabija": "defense_gabija",
+    "gcu142": "defense_gcu142",
+    "hachiman": "defense_hachiman",
+    "hec_04": "defense_hec",
+    "hec_05": "defense_hec",
+    "hec_06": "defense_hec",
+    "hec_07": "defense_hec",
+    "hec_09": "defense_hec",
+    "hma": "defense_hma",
+    "kiwa": "defense_kiwa",
+    "lamassu_protease": "defense_lamassu",
+    "lit": "defense_lit",
+    "mokosh_type_i_b": "defense_mokosh",
+    "nlr_like_bnacht01": "defense_nlr",
+    "pago": "defense_pago",
+    "pago_longa": "defense_pago",
+    "pd_lambda_5": "defense_pd_lambda",
+    "pd_t4_1": "defense_pd_t4",
+    "pd_t4_4": "defense_pd_t4",
+    "pd_t4_8": "defense_pd_t4",
+    "pd_t7_4": "defense_pd_t7",
+    "prometheus": "defense_prometheus",
+    "prrc": "defense_prrc",
+    "retron_i_c": "defense_retron",
+    "retron_iii": "defense_retron",
+    "rloc": "defense_rloc",
+    "shedu": "defense_shedu",
+    "sofic": "defense_sofic",
+    "tiamat": "defense_tiamat",
+    "toutatis": "defense_toutatis",
+}
+
+_RM_SYSTEM_TYPE_PREDICATES = {
+    "rm_type_i": "rm_type_i",
+    "rm_type_ii": "rm_type_ii",
+    "rm_type_iii": "rm_type_iii",
+    "rm_type_iv": "rm_type_iv",
+    "rm_type_iig": "rm_type_iig",
+    "rm_type_iv_1": "rm_type_iv",
+}
+
+_ABI_SYSTEM_TYPE_PREDICATES = {
+    "abialpha": "abi_alpha",
+    "abie": "abi_e",
+    "abij": "abi_j",
+    "abil": "abi_l",
+    "abip2": "abi_p2",
+    "abiu": "abi_u",
+    "abiv": "abi_v",
+    "abiz": "abi_z",
+}
+
+_TA_SYSTEM_TYPE_PREDICATES = {
+    "psyrta": "psyrta",
+    "rosmerta": "rosmerta",
+    "shosta": "shosta",
+}
+
+
+def _normalize_system_name(value: str) -> str:
+    """Normalize DefenseFinder system labels to stable lookup keys."""
+    return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
+
+
+def _validated_defense_system_predicates(system_name: str) -> set[str]:
+    """Return controlled predicates for a validated DefenseFinder system name."""
+    predicates: set[str] = set()
+    pieces = [p for p in system_name.split("/") if p]
+    keys = {_normalize_system_name(system_name)}
+    keys.update(_normalize_system_name(piece) for piece in pieces)
+
+    for key in keys:
+        for mapping in (
+            _RM_SYSTEM_TYPE_PREDICATES,
+            _ABI_SYSTEM_TYPE_PREDICATES,
+            _TA_SYSTEM_TYPE_PREDICATES,
+            _DEFENSE_SYSTEM_TYPE_PREDICATES,
+        ):
+            pred = mapping.get(key)
+            if pred:
+                predicates.add(pred)
+
+    return predicates
 
 
 class PredicateGenerator:
@@ -267,8 +372,10 @@ class PredicateGenerator:
             # Add pfam_annotated
             predicates.add("pfam_annotated")
 
-        elif source == "kegg":
-            # KEGG ortholog mapping
+        elif source in ("kegg", "kofam"):
+            # KEGG ortholog mapping. KOFAM emits KEGG K accessions, so treat
+            # it as the same semantic source while preserving the annotation
+            # source label elsewhere.
             preds = get_predicates_for_kegg(
                 ann.accession,
                 ann.description or "",
@@ -404,6 +511,7 @@ class PredicateGenerator:
             # All system-validated hits are genuine defense systems
             predicates.add("defense_system")
             predicates.add("defensefinder_annotated")
+            predicates.update(_validated_defense_system_predicates(ann.name or ""))
 
             if self.include_direct_access:
                 predicates.add(f"defensefinder:{ann.accession or ''}")
@@ -444,29 +552,29 @@ class PredicateGenerator:
 
             # Type-specific predicates
             if "t1ss" in sys_name:
-                predicates.add("type_I_secretion")
+                predicates.add("type_i_secretion")
             if "t2ss" in sys_name:
-                predicates.add("type_II_secretion")
+                predicates.add("type_ii_secretion")
             if "t3ss" in sys_name:
-                predicates.add("type_III_secretion")
+                predicates.add("type_iii_secretion")
             if "t4ss" in sys_name:
-                predicates.add("type_IV_secretion")
+                predicates.add("type_iv_secretion")
             if "t5ss" in sys_name or "t5ass" in sys_name or "t5bss" in sys_name or "t5css" in sys_name:
-                predicates.add("type_V_secretion")
+                predicates.add("type_v_secretion")
             if "t6ss" in sys_name:
-                predicates.add("type_VI_secretion")
-            if "t9ss" in sys_name:
-                predicates.add("type_IX_secretion")
-            if "t4p" in sys_name:
-                predicates.add("type_IV_pilus")
+                predicates.add("type_vi_secretion")
+            if "t4p" in sys_name or "archaeal-t4p" in sys_name:
+                predicates.add("type_iv_pilus")
+                predicates.add("pilus")
             if "tad" in sys_name:
-                predicates.add("tad_pilus")
+                predicates.add("type_iv_pilus")
+                predicates.add("pilus")
             if "flagell" in sys_name:
-                predicates.add("flagellar")
+                predicates.add("flagellum")
             if "msh" in sys_name:
-                predicates.add("msh_pilus")
+                predicates.add("pilus")
             if "comm" in sys_name:
-                predicates.add("competence")
+                predicates.add("pilus")
 
         # Check for hypothetical annotations
         if self._is_hypothetical(ann):

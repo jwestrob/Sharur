@@ -74,6 +74,26 @@ class TestAtomGenerator:
         assert h_atoms[0].relation == ClaimRelation.implies
         assert h_atoms[0].facet == SemanticFacet.activity
 
+    def test_kofam_annotation_uses_kegg_mapping(self):
+        """KOFAM K accessions should generate KEGG-derived atoms."""
+        gen = AtomGenerator()
+        protein = ProteinRecord(protein_id="test", sequence_length=500)
+        annotations = [
+            AnnotationRecord(
+                source="kofam",
+                accession="K00532",
+                description="hydrogenase large subunit",
+                evalue=1e-40,
+                score=150.0,
+            )
+        ]
+        atoms = gen.generate_atoms(protein, annotations)
+
+        h_atoms = [a for a in atoms if a.atom_id == "hydrogenase"]
+        assert h_atoms
+        assert h_atoms[0].relation == ClaimRelation.implies
+        assert h_atoms[0].source_db == "kofam"
+
     def test_size_atoms(self):
         """Should generate size atoms from protein properties."""
         gen = AtomGenerator()
@@ -307,7 +327,55 @@ class TestAtomGenerator:
         atom_ids = {a.atom_id for a in atoms}
         assert "defense_system" in atom_ids
         assert "restriction_modification" in atom_ids
+        assert "rm_type_ii" in atom_ids
 
         # System-validated should be implies
         ds_atoms = [a for a in atoms if a.atom_id == "defense_system"]
         assert ds_atoms[0].relation == ClaimRelation.implies
+
+    @pytest.mark.parametrize(
+        ("system_name", "expected_atom"),
+        [
+            ("Eleos/Eleos", "defense_eleos"),
+            ("HEC-09/HEC-09", "defense_hec"),
+            ("Shedu/Shedu", "defense_shedu"),
+            ("pAgo_LongA/pAgo_LongA", "defense_pago"),
+            ("AbiE/AbiE", "abi_e"),
+            ("PD-Lambda-5/PD-Lambda-5", "defense_pd_lambda"),
+        ],
+    )
+    def test_defensefinder_system_subtype_atoms(self, system_name, expected_atom):
+        """Validated DefenseFinder system names should emit subtype atoms."""
+        gen = AtomGenerator()
+        protein = ProteinRecord(protein_id="test", sequence_length=400)
+        annotations = [
+            AnnotationRecord(
+                source="defensefinder_system",
+                accession="sys_def_1",
+                name=system_name,
+                evalue=1e-20,
+            )
+        ]
+        atoms = gen.generate_atoms(protein, annotations)
+
+        atom_ids = {a.atom_id for a in atoms}
+        assert "defense_system" in atom_ids
+        assert expected_atom in atom_ids
+
+    def test_txsscan_system_annotation_uses_vocabulary_ids(self):
+        """System-validated TXSScan should emit lower-case V2 atom IDs."""
+        gen = AtomGenerator()
+        protein = ProteinRecord(protein_id="test", sequence_length=400)
+        annotations = [
+            AnnotationRecord(
+                source="txsscan_system",
+                accession="sys_sec_1",
+                name="T5aSS/T5aSS",
+            )
+        ]
+        atoms = gen.generate_atoms(protein, annotations)
+
+        atom_ids = {a.atom_id for a in atoms}
+        assert "secretion_system" in atom_ids
+        assert "type_v_secretion" in atom_ids
+        assert "type_V_secretion" not in atom_ids

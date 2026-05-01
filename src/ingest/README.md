@@ -309,7 +309,7 @@ python src/ingest/minced_crispr.py -i data/DATASET/stage00_prepared -o data/DATA
 
 ### Stage 07: Build Knowledge Base (`07_build_knowledge_base.py`)
 
-**What it does:** Consolidates all upstream outputs into a single DuckDB database. Auto-discovers stage directories under the data directory. Loads proteins, annotations, CRISPR arrays, BGC loci (if present), generates predicates, classifies hydrogenases (if HydDB annotations exist), runs dbCAN 3-tool consensus CAZyme classification, and validates defense/secretion systems via MacSyFinder co-localization (if macsyfinder_compat output exists).
+**What it does:** Consolidates all upstream outputs into a single DuckDB database. Auto-discovers stage directories under the data directory. Loads proteins, annotations, CRISPR arrays, BGC loci (if present), classifies hydrogenases (if HydDB annotations exist), runs dbCAN 3-tool consensus CAZyme classification, validates defense/secretion systems via the co-location engine, then generates the V2 predicate tables and V2-derived legacy compatibility predicates.
 
 **Required inputs:** Data directory containing at minimum `stage03_prodigal/` and `stage04_astra/`. Loads additional data from any other stage directories that exist.
 
@@ -327,7 +327,8 @@ python src/ingest/minced_crispr.py -i data/DATASET/stage00_prepared -o data/DATA
 | `stage06_embeddings/` | Stage 06 | Embedding count metadata |
 
 **Outputs:**
-- `sharur.duckdb` -- complete knowledge base with tables: `bins`, `contigs`, `proteins`, `annotations`, `loci`, `locus_proteins`, `protein_predicates`, `feature_store`
+- `sharur.duckdb` -- complete knowledge base with tables: `bins`, `contigs`, `proteins`, `annotations`, `loci`, `locus_proteins`, `semantic_atoms`, `semantic_state`, `protein_predicates`, `feature_store`
+- `reports/predicates_v2_review_queue.tsv` -- unresolved annotation accessions ranked for curation
 
 **Minimal invocation:**
 ```bash
@@ -349,13 +350,14 @@ python src/ingest/07_build_knowledge_base.py -d data/DATASET -o data/DATASET/sha
 4. Loads CRISPR arrays from Stage 05c JSON files into `loci` table
 5. Loads BGC loci from Stage 05a (if present)
 6. Computes length z-scores per bin
-7. Generates semantic predicates for all proteins (parallelized)
-8. Flags proteins overlapping CRISPR arrays
-9. Runs HydDB subgroup classification (if HydDB annotations exist)
-10. Runs dbCAN 3-tool consensus CAZyme classification (DIAMOND + dbCAN.hmm + dbCAN-sub.hmm)
-11. Validates DefenseFinder hits via MacSyFinder co-localization (if `defensefinder_results/macsyfinder_compat/` exists) → `defense_systems` table + `defensefinder_system` annotations
-12. Validates TXSScan hits via MacSyFinder co-localization (if `txsscan_results/macsyfinder_compat/` exists) → `secretion_systems` table + `txsscan_system` annotations
-13. Creates indexes
+7. Runs HydDB subgroup classification (if HydDB annotations exist)
+8. Runs dbCAN 3-tool consensus CAZyme classification (DIAMOND + dbCAN.hmm + dbCAN-sub.hmm)
+9. Validates DefenseFinder hits via co-location rules → `defense_systems` table + `defensefinder_system` annotations
+10. Validates TXSScan hits via co-location rules → `secretion_systems` table + `txsscan_system` annotations
+11. Generates V2 semantic atoms/states for all proteins
+12. Materializes `protein_predicates` from V2 for legacy query compatibility
+13. Emits CRISPR-overlap quality flags in V2 and the compatibility table
+14. Creates indexes
 
 **E-value thresholds applied at load time:**
 
@@ -417,7 +419,9 @@ After a successful pipeline run, `sharur.duckdb` contains:
 | `annotations` | `protein_id`, `source`, `accession`, `name`, `description`, `evalue`, `score` | HMM annotation hits |
 | `loci` | `locus_id`, `locus_type`, `contig_id`, `start`, `end_coord` | CRISPR arrays, BGCs |
 | `locus_proteins` | `locus_id`, `protein_id`, `position` | Protein membership in loci |
-| `protein_predicates` | `protein_id`, `predicates` (list) | Semantic predicate tags |
+| `semantic_atoms` | `protein_id`, `atom_id`, `facet`, `relation`, `source_db`, `source_accession` | V2 evidence-backed semantic claims |
+| `semantic_state` | `protein_id`, `activities`, `roles`, `architecture`, `localization`, `quality_flags`, `composite_predicates` | V2 resolved per-protein state |
+| `protein_predicates` | `protein_id`, `predicates` (list) | V2-derived legacy compatibility predicate tags |
 | `defense_systems` | `system_id`, `genome_id`, `system_type`, `protein_ids` | MacSyFinder-validated defense systems (if DefenseFinder ran) |
 | `secretion_systems` | `system_id`, `genome_id`, `system_type`, `protein_ids` | MacSyFinder-validated secretion systems (if TXSScan ran) |
 | `feature_store` | `protein_id`, `metric_name`, `metric_value` | Computed metrics (length z-score) |

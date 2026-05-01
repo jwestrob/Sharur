@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 
 class SemanticFacet(str, Enum):
@@ -54,8 +54,8 @@ class SemanticAtom:
     relation: ClaimRelation  # How strong the evidence is
     source_accession: str  # Annotation accession that produced this atom
     source_db: str  # pfam, kegg, cazy, hyddb, defensefinder, vogdb, ...
-    evidence_evalue: Optional[float] = None  # Pass-through from HMM/DIAMOND
-    evidence_score: Optional[float] = None  # Pass-through bitscore
+    evidence_evalue: float | None = None  # Pass-through from HMM/DIAMOND
+    evidence_score: float | None = None  # Pass-through bitscore
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary for storage."""
@@ -153,6 +153,11 @@ CREATE TABLE IF NOT EXISTS semantic_atoms (
     evidence_score DOUBLE,
     PRIMARY KEY (protein_id, atom_id, source_accession)
 );
+CREATE INDEX IF NOT EXISTS idx_semantic_atoms_protein ON semantic_atoms(protein_id);
+CREATE INDEX IF NOT EXISTS idx_semantic_atoms_atom ON semantic_atoms(atom_id);
+CREATE INDEX IF NOT EXISTS idx_semantic_atoms_facet_atom ON semantic_atoms(facet, atom_id);
+CREATE INDEX IF NOT EXISTS idx_semantic_atoms_relation ON semantic_atoms(relation);
+CREATE INDEX IF NOT EXISTS idx_semantic_atoms_source ON semantic_atoms(source_db, source_accession);
 
 -- Per-protein aggregated state (resolved view)
 CREATE TABLE IF NOT EXISTS semantic_state (
@@ -168,6 +173,24 @@ CREATE TABLE IF NOT EXISTS semantic_state (
     unresolved_count INTEGER,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+CREATE INDEX IF NOT EXISTS idx_semantic_state_size ON semantic_state(size_class);
+CREATE INDEX IF NOT EXISTS idx_semantic_state_updated ON semantic_state(updated_at);
+
+-- Unified materialized search terms
+CREATE TABLE IF NOT EXISTS semantic_terms (
+    protein_id VARCHAR NOT NULL,
+    term_id VARCHAR NOT NULL,
+    term_kind VARCHAR NOT NULL,
+    facet VARCHAR,
+    relation VARCHAR,
+    source_db VARCHAR NOT NULL DEFAULT '',
+    source_accession VARCHAR NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_semantic_terms_term ON semantic_terms(term_id, protein_id);
+CREATE INDEX IF NOT EXISTS idx_semantic_terms_protein ON semantic_terms(protein_id);
+CREATE INDEX IF NOT EXISTS idx_semantic_terms_facet_term ON semantic_terms(facet, term_id);
+CREATE INDEX IF NOT EXISTS idx_semantic_terms_source ON semantic_terms(source_db, source_accession);
+CREATE INDEX IF NOT EXISTS idx_semantic_terms_kind ON semantic_terms(term_kind);
 """
 
 
@@ -177,17 +200,17 @@ def create_v2_tables(store: Any) -> None:
     Args:
         store: A DuckDBStore or any object with an execute() method.
     """
-    for statement in V2_SCHEMA.strip().split(";"):
-        statement = statement.strip()
+    for raw_statement in V2_SCHEMA.strip().split(";"):
+        statement = raw_statement.strip()
         if statement:
             store.execute(statement + ";")
 
 
 __all__ = [
-    "SemanticFacet",
+    "V2_SCHEMA",
     "ClaimRelation",
     "SemanticAtom",
+    "SemanticFacet",
     "SemanticState",
-    "V2_SCHEMA",
     "create_v2_tables",
 ]

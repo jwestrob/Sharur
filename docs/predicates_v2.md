@@ -2,7 +2,7 @@
 
 ## Overview
 
-V2 replaces V1's flat boolean predicates with **typed semantic atoms** -- structured claims about proteins that carry facet, relation, and provenance metadata. This enables:
+V2 replaces V1's flat boolean predicates with **typed semantic atoms** -- structured claims about proteins that carry facet, relation, and evidence metadata. This enables:
 
 - **Faceted reasoning**: know _what kind_ of claim an annotation makes (activity vs. role vs. architecture)
 - **Evidence strength tracking**: distinguish `implies` (KEGG ortholog) from `supports` (PFAM domain) from `flags` (superfamily hit)
@@ -10,7 +10,12 @@ V2 replaces V1's flat boolean predicates with **typed semantic atoms** -- struct
 - **Composite predicates**: declarative YAML rules that combine atoms into higher-order conclusions
 - **Unmapped accession review**: surfaces annotation accessions that produce no semantic mapping, prioritized by frequency
 
-V2 runs in **shadow mode** alongside V1. The compatibility layer (`semantic_state_to_predicates`) converts V2 output back to flat predicate lists, so all downstream code (search_by_predicates, reports) continues to work unchanged.
+V2 is the normal predicate backend for new Stage 07 knowledge-base builds.
+Stage 07 writes `semantic_atoms`, `semantic_state`, and `semantic_terms`, then
+materializes the legacy `protein_predicates` compatibility table from V2 output
+so downstream code (`search_by_predicates`, reports, older scripts) continues
+to work unchanged. Shadow comparison remains available for regression testing
+and backend changes.
 
 ## Data Model
 
@@ -88,12 +93,34 @@ The Sharur facade (`b = Sharur(...)`) exposes V2 through high-level methods. **T
 from sharur.operators import Sharur
 b = Sharur("data/my_dataset/sharur.duckdb")
 
-# Run the full V2 pipeline: generate atoms, aggregate, evaluate composites, persist
-states = b.generate_v2()
+# Run the full V2 pipeline: generate atoms, aggregate, evaluate composites, persist.
+# Full-dataset runs do not return all states by default; read them from DuckDB.
+b.generate_v2()
+
+# Subset runs return states in memory by default.
+states = b.generate_v2(protein_ids=["protein_123"])
 
 # With review queue output (unmapped accessions ranked by frequency)
-states = b.generate_v2(output_review_queue="review_queue.tsv")
+b.generate_v2(output_review_queue="review_queue.tsv")
+
+# Optional for ad hoc/manual runs: materialize V2-derived flat predicates into
+# the legacy compatibility table.
+b.generate_v2(update_legacy_predicates=True)
 ```
+
+Validated defense and secretion systems are folded in automatically during
+generation. V2 reads `defense_systems` and `secretion_systems` directly and
+creates synthetic `defensefinder_system` / `txsscan_system` evidence per member
+protein, so validated system atoms do not depend on duplicate rows existing in
+the generic `annotations` table. Membership is normalized into
+`system_proteins` during generation; the original delimited `protein_ids` fields
+remain only for compatibility.
+
+Validated DefenseFinder system rows also emit controlled subtype atoms for
+high-yield system families and obvious grouped subfamilies. Examples include
+`rm_type_i`, `rm_type_ii`, `defense_eleos`, `defense_hec`, `defense_shedu`,
+`defense_pago`, `abi_e`, `defense_pd_lambda`, `defense_retron`, and
+`defense_mokosh`.
 
 ### Query semantic state
 
@@ -106,11 +133,38 @@ state.architecture   # ["multi_domain"]
 state.size_class     # "giant"
 state.composite_predicates  # ["energy_conserving_hydrogenase"]
 
-# Get raw atoms (full provenance: which annotation produced each claim)
+# Get raw atoms (which annotation produced each claim)
 atoms = b.get_atoms("protein_123")
 for a in atoms:
     print(f"{a.atom_id} ({a.facet.value}): {a.relation.value} via {a.source_db}:{a.source_accession}")
 ```
+
+### Explain one protein
+
+Use `explain()` when you need to audit why a protein matched a search term.
+There is one facade method, not separate V1/V2 variants.
+
+```python
+explanation = b.explain("protein_123")
+explanation["semantic_state"]       # resolved V2 state dict
+explanation["atoms"]                # raw atom evidence
+explanation["direct_access_terms"]  # e.g. ["pfam:PF00005"]
+explanation["composite_terms"]      # matched YAML composites
+explanation["validated_systems"]    # normalized system membership rows
+
+# Why did a composite match?
+for witness in explanation["composite_explanations"]["restriction_modification_validated"]:
+    print(
+        witness["atom_id"],
+        witness["relation"],
+        witness["source_db"],
+        witness["source_accession"],
+    )
+```
+
+`composite_explanations` maps each matched composite to the positive atom
+witnesses that satisfied its rule. `none_of` clauses contribute no witnesses
+because their successful state is absence.
 
 ### Search by V2 facets and atoms
 
@@ -126,8 +180,23 @@ b.search_by_facet("activity", limit=500)                           # override de
 # Search by atom presence/absence (V2-native analog of search_by_predicates)
 b.search_by_atoms(has=["giant", "unannotated"])         # giant + unannotated
 b.search_by_atoms(has=["hydrogenase"], lacks=["membrane"])  # hydrogenase, not membrane
-b.search_by_atoms(has=["defense_system"], limit=5000)   # get all defense proteins
+b.search_by_atoms(has=["defense_system_validated"])     # validated DefenseFinder system members
+b.search_by_atoms(has=["secretion_system_validated"])   # validated TXSScan system members
+b.search_by_atoms(has=["pfam:PF00005"])                 # direct accession key
+
+# Source/relation-aware atom evidence search
+b.search_atoms(
+    atom_id="hydrogenase",
+    relation="implies",
+    source_db="hyddb",
+    limit=500,
+)
 ```
+
+Use the validated composites for system-level biological claims. Bare
+`defense_system` and `secretion_system` atoms can come from weaker component or
+domain evidence such as PFAM/supports or raw profile flags; they are useful for
+candidate discovery, not for reporting validated systems.
 
 ### Composite predicates (DSL)
 
@@ -151,19 +220,65 @@ queue = b.v2_review_queue(limit=20)
 for entry in queue:
     print(f"{entry['accession']} ({entry['source_db']}): {entry['n_proteins']} proteins")
 
+# SQL-native filters for curation runs
+b.v2_review_queue(
+    limit=10000,
+    source=["pfam", "kofam", "kegg"],
+    min_proteins=10,
+    exclude_raw_system_profiles=True,
+    output_tsv="reports/predicates_v2_review_queue.tsv",
+)
+
 # V1 vs V2 comparison
 diff = b.run_shadow_diff(output_report="shadow_report.md")
 print(f"Match rate: {diff['summary']['match_rate_pct']}%")
 ```
 
-### V1 compatibility
-
-V2 produces flat V1-compatible predicate lists via the compat layer, so `search_by_predicates()` continues to work unchanged:
+Use the shadow gate helper when promoting V2 into release or ingestion
+workflows:
 
 ```python
-# V1 predicate search still works
+from sharur.predicates_v2 import evaluate_shadow_gate
+
+gate = evaluate_shadow_gate(
+    diff,
+    min_match_rate_pct=95.0,
+    max_v2_unresolved_atoms=1000,
+)
+assert gate["passed"], gate["failures"]
+```
+
+### Legacy compatibility
+
+Normal Stage 07 builds write `semantic_atoms`, `semantic_state`, and a
+V2-derived `protein_predicates` compatibility table. For manual
+`b.generate_v2()` calls, pass `update_legacy_predicates=True` when you also
+want to refresh that compatibility table. The conversion preserves source
+flags, confidence flags, topology aliases, and direct accession keys
+(`pfam:PF00005`, `kegg:K00001`, etc.).
+
+`search_by_predicates()` treats a partial `protein_predicates` cache as stale.
+If complete V2 state is present, it repairs the compatibility table from
+`semantic_state`/`semantic_atoms` before searching. If neither complete V2 state
+nor a complete compatibility table exists, it fails loudly instead of returning
+truncated results.
+
+```python
+# Only p1/p2 V2 rows are replaced. Existing V2 rows for other proteins remain.
+b.generate_v2(protein_ids=["p1", "p2"])
+
+# Replace the legacy compatibility cache with V2-compatible output.
+b.generate_v2(update_legacy_predicates=True)
 b.search_by_predicates(has=["giant", "unannotated"])
-b.search_by_predicates(has=["hydrogenase"], lacks=["hypothetical"])
+```
+
+For shell refreshes, use the V2-backed regeneration script:
+
+```bash
+python scripts/regenerate_predicates.py \
+  --db data/my_dataset/sharur.duckdb \
+  --review-queue data/my_dataset/reports/predicates_v2_review_queue.tsv \
+  --chunk-size 100000
 ```
 
 ## Library API (Advanced)
@@ -177,12 +292,13 @@ from sharur.predicates_v2 import (
     # Pipeline components
     AtomGenerator, aggregate_atoms, evaluate_composites, load_composites,
     create_v2_tables, generate_and_persist_v2,
+    materialize_semantic_terms_from_v2, materialize_system_proteins,
     # V1 compatibility
     semantic_state_to_predicates,
     # Review queue
     build_review_queue, format_review_queue_tsv,
     # Shadow diff
-    shadow_diff, run_shadow_diff_on_store,
+    shadow_diff, run_shadow_diff_on_store, evaluate_shadow_gate,
 )
 ```
 
@@ -334,8 +450,8 @@ nife_hydrogenase_validated:
 | `giant_unannotated` | Giant + no annotation |
 | `giant_multi_domain` | Giant + multi_domain |
 | `defense_system_validated` | DefenseFinder system-level validation |
-| `crispr_validated` | CRISPR-Cas with validated components |
-| `restriction_modification_validated` | RM system confirmed |
+| `crispr_cas_supported` | CRISPR-Cas associated protein supported by curated component evidence |
+| `restriction_modification_validated` | RM system confirmed by DefenseFinder system-level validation |
 | `abc_transporter_complete` | ABC transporter + ATPase |
 | `polytopic_transporter` | Transporter + polytopic membrane |
 | `carbon_fixation_active` | RuBisCO + PRK (Calvin cycle) |
@@ -352,7 +468,7 @@ All config lives in `config/predicates_v2/`.
 
 ### `facet_assignments.yaml`
 
-Maps each V1 predicate ID to a SemanticFacet. 536 entries, grouped by facet.
+Maps each V1 predicate ID to a SemanticFacet. 592 entries, grouped by facet.
 
 ```yaml
 # Format: predicate_id: facet
@@ -442,7 +558,9 @@ To promote or demote a specific accession:
 
 ## DuckDB Tables
 
-V2 creates two tables (via `create_v2_tables(store)`):
+Current V2 tables are part of schema version 4. The core V2 tables can also be
+created explicitly via
+`create_v2_tables(store)`:
 
 ### `semantic_atoms`
 
@@ -463,7 +581,7 @@ Primary key: `(protein_id, atom_id, source_accession)`
 
 ### `semantic_state`
 
-Resolved per-protein view.
+Resolved per-protein view. One row per protein.
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -479,12 +597,37 @@ Resolved per-protein view.
 | unresolved_count | INTEGER | Number of unmapped accessions |
 | updated_at | TIMESTAMP | Last generation time |
 
+### `semantic_terms`
+
+Materialized search view. It stores:
+
+- `term_kind='atom'`: semantic atom IDs, with facet/relation/source metadata
+- `term_kind='direct_access'`: accession keys such as `pfam:PF00005`
+- `term_kind='composite'`: YAML composite predicate names
+
+`search_by_atoms()` uses this table when populated and falls back to
+`semantic_atoms`/`semantic_state` only for older databases that have not been
+backfilled.
+
+### `system_proteins`
+
+Normalized member table for validated systems:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| system_id | VARCHAR | Validated DefenseFinder/TXSScan system ID |
+| protein_id | VARCHAR | Member protein |
+| system_source | VARCHAR | `defensefinder_system` or `txsscan_system` |
+| position | INTEGER | Order within the validated system |
+| profile_name | VARCHAR | Matched system profile, when available |
+| score | DOUBLE | System-level score/count proxy |
+
 ## Testing
 
 ```bash
-# V2 tests only (131 tests)
+# V2 tests only
 python -m pytest tests/test_predicates_v2/ -v
 
-# All tests (excluding pre-existing infrastructure failures)
-python -m pytest tests/ --ignore=tests/test_ingest_smoke.py --ignore=tests/test_ingest_resources.py -q
+# V2 + schema migration tests
+python -m pytest tests/test_predicates_v2 tests/test_schema_migration.py -q --no-cov
 ```

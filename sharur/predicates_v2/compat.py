@@ -7,14 +7,16 @@ code that expects V1 format (e.g., search_by_predicates).
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import TYPE_CHECKING
 
-from sharur.predicates_v2.model import SemanticAtom, SemanticState
+
+if TYPE_CHECKING:
+    from sharur.predicates_v2.model import SemanticAtom, SemanticState
 
 
 def semantic_state_to_predicates(
     state: SemanticState,
-    atoms: Optional[list[SemanticAtom]] = None,
+    atoms: list[SemanticAtom] | None = None,
 ) -> list[str]:
     """Convert V2 state to V1-compatible flat predicate list.
 
@@ -53,6 +55,7 @@ def semantic_state_to_predicates(
     # Reconstruct V1 bookkeeping predicates from atom metadata
     if atoms:
         predicates.update(_bookkeeping_predicates_from_atoms(atoms))
+        predicates.update(_direct_access_predicates_from_atoms(atoms))
 
     return sorted(predicates)
 
@@ -61,6 +64,7 @@ def semantic_state_to_predicates(
 _SOURCE_TO_ANNOTATED = {
     "pfam": "pfam_annotated",
     "kegg": "kegg_annotated",
+    "kofam": "kegg_annotated",
     "cazy": "cazy_annotated",
     "vog": "vog_annotated",
     "vogdb": "vog_annotated",
@@ -70,6 +74,45 @@ _SOURCE_TO_ANNOTATED = {
     "txsscan_system": "txsscan_annotated",
     "cant_hyd": "cant_hyd_annotated",
 }
+
+
+# Source DB names that map to V1 "{source}:{accession}" direct-access predicates.
+SOURCE_TO_DIRECT_PREFIX = {
+    "pfam": "pfam",
+    "kegg": "kegg",
+    "kofam": "kegg",
+    "cazy": "cazy",
+    "vog": "vog",
+    "vogdb": "vog",
+    "hyddb": "hyddb",
+    "hyddb_subgroup": "hyddb_subgroup",
+    "defensefinder": "defensefinder",
+    "defensefinder_system": "defensefinder",
+    "txsscan": "txsscan",
+    "txsscan_system": "txsscan",
+    "cant_hyd": "cant_hyd",
+}
+
+
+def direct_access_predicate_from_atom(atom: SemanticAtom) -> str | None:
+    """Return a V1-style direct accession predicate for an atom, if valid."""
+    prefix = SOURCE_TO_DIRECT_PREFIX.get(atom.source_db)
+    if not prefix:
+        return None
+    if atom.atom_id.startswith("_source_witness:"):
+        return None
+    if not atom.source_accession or atom.source_accession.startswith("_"):
+        return None
+    return f"{prefix}:{atom.source_accession}"
+
+
+def direct_access_prefix_case_sql(source_column: str = "source_db") -> str:
+    """Return a DuckDB CASE expression for source -> direct-access prefix."""
+    cases = " ".join(
+        f"WHEN '{source}' THEN '{prefix}'"
+        for source, prefix in SOURCE_TO_DIRECT_PREFIX.items()
+    )
+    return f"CASE {source_column} {cases} ELSE NULL END"
 
 
 def _bookkeeping_predicates_from_atoms(atoms: list[SemanticAtom]) -> set[str]:
@@ -119,4 +162,20 @@ def _bookkeeping_predicates_from_atoms(atoms: list[SemanticAtom]) -> set[str]:
     return preds
 
 
-__all__ = ["semantic_state_to_predicates"]
+def _direct_access_predicates_from_atoms(atoms: list[SemanticAtom]) -> set[str]:
+    """Reconstruct V1 direct-access predicates from V2 evidence fields."""
+    preds: set[str] = set()
+
+    for atom in atoms:
+        if direct_access := direct_access_predicate_from_atom(atom):
+            preds.add(direct_access)
+
+    return preds
+
+
+__all__ = [
+    "SOURCE_TO_DIRECT_PREFIX",
+    "direct_access_prefix_case_sql",
+    "direct_access_predicate_from_atom",
+    "semantic_state_to_predicates",
+]

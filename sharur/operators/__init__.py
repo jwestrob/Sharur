@@ -15,7 +15,7 @@ Example usage:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from sharur.core.session import ExplorationSession
 from sharur.operators.base import SharurResult, OperatorContext, OperatorTrace, ResultMeta
@@ -54,6 +54,10 @@ from sharur.operators.validation import (
 )
 from sharur.operators.manifest import AnalysisManifest
 
+if TYPE_CHECKING:
+    from sharur.core.types import Hypothesis, ProvenanceEntry
+    from sharur.predicates_v2.model import SemanticState
+
 
 class Sharur:
     """
@@ -63,14 +67,22 @@ class Sharur:
     session and database management.
     """
 
-    def __init__(self, db_path: Optional[Path | str] = None):
+    def __init__(
+        self,
+        db_path: Optional[Path | str] = None,
+        *,
+        read_only: bool = False,
+    ):
         """
         Initialize Sharur instance.
 
         Args:
             db_path: Path to DuckDB database file. If None, uses in-memory DB.
+            read_only: Open file-backed DuckDB databases without taking a
+                writer lock or running schema initialization/migrations.
         """
         self._db_path = Path(db_path) if db_path else None
+        self._read_only = read_only
         self._session: Optional[ExplorationSession] = None
         self._manifest: Optional[AnalysisManifest] = None
         self._hypothesis_registry = None
@@ -79,7 +91,10 @@ class Sharur:
     def session(self) -> ExplorationSession:
         """Lazy-load exploration session."""
         if self._session is None:
-            self._session = ExplorationSession(db_path=self._db_path)
+            self._session = ExplorationSession(
+                db_path=self._db_path,
+                read_only=self._read_only,
+            )
         return self._session
 
     @property
@@ -912,168 +927,85 @@ class Sharur:
         self,
         protein_ids: Optional[list[str]] = None,
         output_review_queue: Optional[str] = None,
+        chunk_size: int = 25_000,
+        update_legacy_predicates: bool = False,
+        return_states: Optional[bool] = None,
+        predict_topology: bool = False,
     ) -> dict:
-        """Generate V2 semantic atoms + states and persist to DuckDB.
+        """Generate V2 semantic atoms + states and persist to DuckDB."""
+        from sharur.operators.predicates_v2 import generate_v2
 
-        Full pipeline: reads proteins + annotations, generates typed
-        SemanticAtoms, aggregates into SemanticState per protein,
-        evaluates composite predicates, writes to DB tables.
-
-        Args:
-            protein_ids: Optional subset (None = all proteins).
-            output_review_queue: Path to write unmapped-accession TSV.
-
-        Returns:
-            Dict mapping protein_id -> SemanticState.
-
-        Example:
-            states = b.generate_v2()
-            states = b.generate_v2(output_review_queue="review_queue.tsv")
-        """
-        from sharur.predicates_v2.persistence import generate_and_persist_v2
-
-        return generate_and_persist_v2(
+        return generate_v2(
             self.store,
             protein_ids=protein_ids,
             output_review_queue=output_review_queue,
+            chunk_size=chunk_size,
+            update_legacy_predicates=update_legacy_predicates,
+            return_states=return_states,
+            predict_topology=predict_topology,
         )
 
     def get_semantic_state(self, protein_id: str) -> Optional["SemanticState"]:
-        """Get the V2 semantic state for a protein.
+        """Get the V2 semantic state for a protein."""
+        from sharur.operators.predicates_v2 import get_semantic_state
 
-        Reads from the semantic_state table. Requires generate_v2() first.
-
-        Args:
-            protein_id: Protein ID.
-
-        Returns:
-            SemanticState dataclass, or None if not found.
-
-        Example:
-            state = b.get_semantic_state("protein_123")
-            print(state.activities)   # ["hydrogenase", "nife_hydrogenase"]
-            print(state.roles)        # ["defense_system"]
-            print(state.size_class)   # "giant"
-            print(state.composite_predicates)  # ["energy_conserving_hydrogenase"]
-        """
-        import json
-
-        from sharur.predicates_v2.model import SemanticState
-
-        rows = self.store.execute(
-            "SELECT activities, roles, architecture, localization, "
-            "topology, size_class, quality_flags, composite_predicates, "
-            "unresolved_count FROM semantic_state WHERE protein_id = ?",
-            [protein_id],
-        )
-        if not rows:
-            return None
-        row = rows[0]
-        topo = json.loads(row[4]) if isinstance(row[4], str) else (row[4] or {})
-        return SemanticState(
-            protein_id=protein_id,
-            activities=list(row[0] or []),
-            roles=list(row[1] or []),
-            architecture=list(row[2] or []),
-            localization=list(row[3] or []),
-            topology=topo,
-            size_class=row[5] or "",
-            quality_flags=list(row[6] or []),
-            composite_predicates=list(row[7] or []),
-        )
+        return get_semantic_state(self.store, protein_id)
 
     def get_atoms(self, protein_id: str) -> list:
-        """Get all V2 semantic atoms for a protein.
+        """Get all V2 semantic atoms for a protein."""
+        from sharur.operators.predicates_v2 import get_atoms
 
-        Reads from the semantic_atoms table. Requires generate_v2() first.
+        return get_atoms(self.store, protein_id)
 
-        Args:
-            protein_id: Protein ID.
+    def explain(self, protein_id: str) -> dict:
+        """Explain one protein using the active predicate tables."""
+        from sharur.operators.predicates_v2 import explain
 
-        Returns:
-            List of SemanticAtom dataclasses.
-
-        Example:
-            atoms = b.get_atoms("protein_123")
-            for a in atoms:
-                print(f"{a.atom_id} ({a.facet.value}): {a.relation.value} via {a.source_db}")
-        """
-        from sharur.predicates_v2.model import ClaimRelation, SemanticAtom, SemanticFacet
-
-        rows = self.store.execute(
-            "SELECT atom_id, facet, relation, source_accession, "
-            "source_db, evidence_evalue, evidence_score "
-            "FROM semantic_atoms WHERE protein_id = ?",
-            [protein_id],
-        )
-        return [
-            SemanticAtom(
-                protein_id=protein_id,
-                atom_id=row[0],
-                facet=SemanticFacet(row[1]),
-                relation=ClaimRelation(row[2]),
-                source_accession=row[3],
-                source_db=row[4],
-                evidence_evalue=row[5],
-                evidence_score=row[6],
-            )
-            for row in rows
-        ]
+        return explain(self.store, protein_id)
 
     def search_by_facet(
         self,
         facet: str,
         atom_ids: Optional[list[str]] = None,
         relation: Optional[str] = None,
+        source_db: Optional[str] = None,
+        source_accession: Optional[str] = None,
         limit: int = 50,
     ) -> list:
-        """Search proteins by V2 semantic facet.
+        """Search proteins by V2 semantic facet."""
+        from sharur.operators.predicates_v2 import search_by_facet
 
-        Queries the semantic_atoms table for proteins with atoms in
-        the given facet, optionally filtered by specific atom IDs
-        and/or relation strength.
-
-        Args:
-            facet: Facet name (activity, role, architecture, localization,
-                   topology, size_class, quality_flag).
-            atom_ids: Optional list of specific atoms to filter on.
-            relation: Optional relation filter (implies, supports, flags,
-                      excludes).
-            limit: Maximum results.
-
-        Returns:
-            List of (protein_id, atom_id, relation) tuples.
-
-        Example:
-            # All proteins with any activity atom
-            b.search_by_facet("activity")
-
-            # Proteins with hydrogenase activity, strong evidence only
-            b.search_by_facet("activity", atom_ids=["hydrogenase"], relation="implies")
-
-            # All defense-role proteins
-            b.search_by_facet("role", atom_ids=["defense_system"])
-        """
-        params: list = [facet]
-        clauses = ["facet = ?"]
-
-        if atom_ids:
-            placeholders = ",".join(["?"] * len(atom_ids))
-            clauses.append(f"atom_id IN ({placeholders})")
-            params.extend(atom_ids)
-
-        if relation:
-            clauses.append("relation = ?")
-            params.append(relation)
-
-        where = " AND ".join(clauses)
-        rows = self.store.execute(
-            f"SELECT DISTINCT protein_id, atom_id, relation "
-            f"FROM semantic_atoms WHERE {where} "
-            f"ORDER BY protein_id LIMIT ?",
-            params + [limit],
+        return search_by_facet(
+            self.store,
+            facet=facet,
+            atom_ids=atom_ids,
+            relation=relation,
+            source_db=source_db,
+            source_accession=source_accession,
+            limit=limit,
         )
-        return [tuple(row) for row in rows]
+
+    def search_atoms(
+        self,
+        atom_id: Optional[str | list[str]] = None,
+        facet: Optional[str] = None,
+        relation: Optional[str] = None,
+        source_db: Optional[str] = None,
+        source_accession: Optional[str] = None,
+        limit: int = 50,
+    ) -> list[dict]:
+        """Search raw V2 atom evidence with optional source/relation filters."""
+        from sharur.operators.predicates_v2 import search_atoms
+
+        return search_atoms(
+            self.store,
+            atom_id=atom_id,
+            facet=facet,
+            relation=relation,
+            source_db=source_db,
+            source_accession=source_accession,
+            limit=limit,
+        )
 
     def search_by_atoms(
         self,
@@ -1081,127 +1013,36 @@ class Sharur:
         lacks: Optional[list[str]] = None,
         limit: int = 50,
     ) -> list[str]:
-        """Search proteins by V2 atom or composite predicate presence/absence.
+        """Search proteins by V2 atom or composite predicate presence/absence."""
+        from sharur.operators.predicates_v2 import search_by_atoms
 
-        V2-native analog of search_by_predicates. Searches both
-        semantic_atoms and composite_predicates in semantic_state.
-
-        Args:
-            has: Atoms/composites that must ALL be present (AND logic).
-            lacks: Atoms/composites that must ALL be absent (AND NOT logic).
-            limit: Maximum results.
-
-        Returns:
-            List of protein_id strings.
-
-        Example:
-            # Giant unannotated proteins
-            b.search_by_atoms(has=["giant", "unannotated"])
-
-            # Hydrogenases that are NOT membrane proteins
-            b.search_by_atoms(has=["hydrogenase"], lacks=["membrane"])
-
-            # Composite predicates work too
-            b.search_by_atoms(has=["nife_hydrogenase_validated"])
-        """
-        has = has or []
-        lacks = lacks or []
-        if not has and not lacks:
-            return []
-
-        params: list = []
-
-        # Search both semantic_atoms and composite_predicates
-        # UNION gives us a unified view of atom_ids + composite names
-        unified = (
-            "SELECT protein_id, atom_id FROM semantic_atoms "
-            "UNION ALL "
-            "SELECT protein_id, UNNEST(composite_predicates) as atom_id "
-            "FROM semantic_state WHERE LEN(composite_predicates) > 0"
-        )
-
-        if has:
-            placeholders = ",".join(["?"] * len(has))
-            base = (
-                f"SELECT protein_id FROM ({unified}) u "
-                f"WHERE atom_id IN ({placeholders}) "
-                f"GROUP BY protein_id "
-                f"HAVING COUNT(DISTINCT atom_id) = ?"
-            )
-            params.extend(has)
-            params.append(len(has))
-        else:
-            base = f"SELECT DISTINCT protein_id FROM ({unified}) u"
-
-        if lacks:
-            placeholders = ",".join(["?"] * len(lacks))
-            query = (
-                f"WITH base AS ({base}) "
-                f"SELECT protein_id FROM base "
-                f"WHERE protein_id NOT IN ("
-                f"  SELECT DISTINCT protein_id FROM ({unified}) u2 "
-                f"  WHERE atom_id IN ({placeholders})"
-                f") LIMIT ?"
-            )
-            params.extend(lacks)
-            params.append(limit)
-        else:
-            query = f"{base} LIMIT ?"
-            params.append(limit)
-
-        rows = self.store.execute(query, params)
-        return [row[0] for row in rows]
+        return search_by_atoms(self.store, has=has, lacks=lacks, limit=limit)
 
     def list_composites(self) -> list:
-        """List available composite predicate definitions.
+        """List available composite predicate definitions."""
+        from sharur.operators.predicates_v2 import list_composites
 
-        Returns composite definitions from config/predicates_v2/composites.yaml.
-        Each has name, description, facet, and requires (DSL condition).
+        return list_composites()
 
-        Returns:
-            List of CompositeDefinition objects.
+    def v2_review_queue(
+        self,
+        limit: int = 50,
+        source: Optional[str | list[str]] = None,
+        min_proteins: int = 1,
+        exclude_raw_system_profiles: bool = False,
+        output_tsv: Optional[str | Path] = None,
+    ) -> list[dict]:
+        """Get unmapped accession review queue."""
+        from sharur.operators.predicates_v2 import v2_review_queue
 
-        Example:
-            for comp in b.list_composites():
-                print(f"{comp.name}: {comp.description}")
-        """
-        from sharur.predicates_v2.composites import load_composites
-
-        return load_composites()
-
-    def v2_review_queue(self, limit: int = 50) -> list[dict]:
-        """Get unmapped accession review queue.
-
-        Queries semantic_atoms for unresolved atoms and ranks by
-        frequency. Use this to identify annotation accessions that
-        need curation rules added to the mapping files.
-
-        Requires generate_v2() to have been run first.
-
-        Args:
-            limit: Maximum entries.
-
-        Returns:
-            List of dicts with accession, source_db, n_proteins.
-
-        Example:
-            queue = b.v2_review_queue(limit=20)
-            for entry in queue:
-                print(f"{entry['accession']} ({entry['source_db']}): "
-                      f"{entry['n_proteins']} proteins")
-        """
-        rows = self.store.execute(
-            "SELECT source_accession, source_db, "
-            "COUNT(DISTINCT protein_id) as n_proteins "
-            "FROM semantic_atoms WHERE relation = 'unresolved' "
-            "GROUP BY source_accession, source_db "
-            "ORDER BY n_proteins DESC LIMIT ?",
-            [limit],
+        return v2_review_queue(
+            self.store,
+            limit=limit,
+            source=source,
+            min_proteins=min_proteins,
+            exclude_raw_system_profiles=exclude_raw_system_profiles,
+            output_tsv=output_tsv,
         )
-        return [
-            {"accession": row[0], "source_db": row[1], "n_proteins": row[2]}
-            for row in rows
-        ]
 
     def run_shadow_diff(
         self,
@@ -1209,27 +1050,10 @@ class Sharur:
         output_report: Optional[str] = None,
         output_jsonl: Optional[str] = None,
     ) -> dict:
-        """Run V1 vs V2 shadow comparison.
+        """Run V1 vs V2 shadow comparison."""
+        from sharur.operators.predicates_v2 import run_shadow_diff
 
-        Generates both V1 flat predicates and V2 atoms for the same
-        proteins and compares the outputs. Useful for validating V2
-        coverage before switching.
-
-        Args:
-            protein_ids: Optional subset (None = all).
-            output_report: Path to write Markdown report.
-            output_jsonl: Path to write per-protein JSONL diffs.
-
-        Returns:
-            Dict with 'per_protein' diffs and 'summary' statistics.
-
-        Example:
-            diff = b.run_shadow_diff(output_report="shadow_report.md")
-            print(f"Match rate: {diff['summary']['match_rate_pct']}%")
-        """
-        from sharur.predicates_v2.shadow import run_shadow_diff_on_store
-
-        return run_shadow_diff_on_store(
+        return run_shadow_diff(
             self.store,
             protein_ids=protein_ids,
             output_report=output_report,

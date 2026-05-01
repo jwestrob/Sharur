@@ -9,9 +9,7 @@ from __future__ import annotations
 
 import csv
 import io
-import re
-from collections import defaultdict
-from typing import Any, Optional
+from typing import Any
 
 from sharur.predicates_v2.model import ClaimRelation, SemanticAtom
 
@@ -52,7 +50,7 @@ _FACET_KEYWORDS: dict[str, str] = {
 
 def build_review_queue(
     all_atoms: list[SemanticAtom],
-    protein_genomes: Optional[dict[str, str]] = None,
+    protein_genomes: dict[str, str] | None = None,
     total_proteins: int = 0,
 ) -> list[dict[str, Any]]:
     """Build a prioritized review queue from unresolved atoms.
@@ -67,23 +65,25 @@ def build_review_queue(
         List of review queue entries, sorted by priority (descending).
     """
     # Collect unresolved accessions
-    unresolved: dict[str, dict[str, Any]] = {}
+    unresolved: dict[tuple[str, str], dict[str, Any]] = {}
 
     for atom in all_atoms:
         if atom.relation != ClaimRelation.unresolved:
             continue
 
         acc = atom.source_accession
-        if acc not in unresolved:
-            unresolved[acc] = {
+        source_db = atom.source_db
+        key = (source_db, acc)
+        if key not in unresolved:
+            unresolved[key] = {
                 "accession": acc,
-                "source_db": atom.source_db,
+                "source_db": source_db,
                 "protein_ids": set(),
                 "genome_ids": set(),
                 "example_protein_ids": [],
             }
 
-        entry = unresolved[acc]
+        entry = unresolved[key]
         entry["protein_ids"].add(atom.protein_id)
 
         # Track genomes if mapping provided
@@ -91,19 +91,21 @@ def build_review_queue(
             entry["genome_ids"].add(protein_genomes[atom.protein_id])
 
         # Keep up to 5 example protein IDs
-        if len(entry["example_protein_ids"]) < 5:
-            if atom.protein_id not in entry["example_protein_ids"]:
-                entry["example_protein_ids"].append(atom.protein_id)
+        if (
+            len(entry["example_protein_ids"]) < 5
+            and atom.protein_id not in entry["example_protein_ids"]
+        ):
+            entry["example_protein_ids"].append(atom.protein_id)
 
     # Build output rows
     rows = []
-    for acc, entry in unresolved.items():
+    for (_source_db, acc), entry in unresolved.items():
         n_proteins = len(entry["protein_ids"])
         n_genomes = len(entry["genome_ids"])
         pct_proteome = (n_proteins / total_proteins * 100) if total_proteins > 0 else 0.0
 
         # Suggest a facet based on accession name
-        suggested_facet = _suggest_facet(acc)
+        suggested_facet = suggest_facet(acc)
 
         rows.append({
             "accession": acc,
@@ -123,7 +125,7 @@ def build_review_queue(
     return rows
 
 
-def _suggest_facet(accession: str) -> str:
+def suggest_facet(accession: str) -> str:
     """Suggest a facet based on accession name keywords.
 
     Returns empty string if no suggestion.
@@ -133,6 +135,9 @@ def _suggest_facet(accession: str) -> str:
         if keyword in lower:
             return facet
     return ""
+
+
+_suggest_facet = suggest_facet
 
 
 def format_review_queue_tsv(rows: list[dict[str, Any]]) -> str:
@@ -175,4 +180,5 @@ def format_review_queue_tsv(rows: list[dict[str, Any]]) -> str:
 __all__ = [
     "build_review_queue",
     "format_review_queue_tsv",
+    "suggest_facet",
 ]

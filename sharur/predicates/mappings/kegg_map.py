@@ -6,9 +6,9 @@ Maps KEGG KO accessions to semantic predicates using:
 2. Direct KO mappings for key pathways
 3. Pattern-based matching on definitions
 """
-
-from typing import Optional
 import re
+from functools import lru_cache
+from pathlib import Path
 
 
 # ============================================================================
@@ -626,6 +626,42 @@ KEGG_TO_PREDICATES: dict[str, list[str]] = {
     "K19091": ["crispr_associated", "cas_domain", "nuclease", "defense_system"],  # Cas6 endoribonuclease
     "K19144": ["crispr_associated", "cas_domain", "nuclease", "defense_system"],  # Csx3 (CRISPR-associated)
 
+    # High-volume generic KOFAM assignments with specific definitions
+    "K00610": ["transferase", "pyrimidine_metabolism"],  # aspartate carbamoyltransferase regulatory subunit
+    "K01999": ["transporter", "amino_acid_transporter", "abc_substrate_binding"],  # branched-chain AA transport substrate-binding
+    "K02600": ["transcription", "transcription_termination"],  # NusA
+    "K03154": ["sulfur_metabolism"],  # sulfur carrier protein
+    "K03498": ["transporter", "ion_transporter"],  # Trk/Ktr potassium uptake
+    "K03568": ["protease", "hydrolase"],  # TldD protein
+    "K03701": ["dna_repair", "nucleotide_excision_repair"],  # excinuclease ABC subunit A
+    "K03702": ["dna_repair", "nucleotide_excision_repair"],  # excinuclease ABC subunit B
+    "K03703": ["dna_repair", "nucleotide_excision_repair"],  # excinuclease ABC subunit C
+    "K03926": ["metal_homeostasis", "periplasmic"],  # periplasmic divalent cation tolerance protein
+    "K02238": ["transporter", "membrane"],  # competence protein ComEC
+    "K03499": ["transporter", "ion_transporter"],  # Trk/Ktr potassium uptake protein
+    "K03555": ["dna_repair", "mismatch_repair"],  # DNA mismatch repair protein MutS
+    "K03572": ["dna_repair", "mismatch_repair"],  # DNA mismatch repair protein MutL
+    "K03699": ["transporter", "ion_transporter", "metal_transporter", "metal_homeostasis"],  # magnesium/cobalt exporter, CNNM family
+    "K04488": ["iron_sulfur_biosynthesis", "iron_sulfur"],  # NifU and related Fe-S scaffold proteins
+    "K04795": ["rna_processing", "rrna_modification"],  # fibrillarin-like pre-rRNA processing protein
+    "K05770": ["translocase", "transporter", "membrane"],  # translocator protein
+    "K06196": ["cytochrome", "heme_biosynthesis"],  # cytochrome c-type biogenesis protein
+    "K07059": ["protease", "hydrolase", "membrane"],  # rhomboid family protein
+    "K07341": ["toxin_antitoxin"],  # death-on-curing addiction module protein
+    "K07465": ["exonuclease", "nuclease", "hydrolase", "dna_repair"],  # putative RecB family exonuclease
+    "K07463": ["exonuclease", "nuclease", "hydrolase", "dna_repair"],  # archaeal RecJ-like exonuclease
+    "K07477": ["dna_binding", "rna_binding"],  # translin
+    "K07579": ["methyltransferase", "transferase"],  # putative methylase
+    "K09741": ["trna_modification"],  # KEOPS complex subunit Pcc1
+    "K09119": ["trna_modification"],  # KEOPS complex subunit Cgi121
+    "K13993": ["small_hsp", "chaperone", "stress_response"],  # HSP20 family protein
+    "K14623": ["dna_repair", "sos_response"],  # DNA-damage-inducible protein D
+    "K15977": ["oxidoreductase"],  # putative oxidoreductase
+    "K18882": ["primase", "replication"],  # DNA primase large subunit
+    "K12063": ["conjugation", "mobile_element", "atpase", "atp_binding"],  # conjugal transfer ATP-binding protein TraC
+    "K25156": ["transporter", "abc_transporter", "atp_binding"],  # viologen exporter ATP-binding protein
+    "K26996": ["immune_related"],  # immunity protein, SdpI family
+
     # ATPases
     "K03924": ["atpase", "atp_binding", "chaperone"],  # MoxR-like ATPase
 
@@ -693,18 +729,20 @@ KEGG_PATTERNS: list[tuple[str, list[str]]] = [
 
     # Transporters
     (r"\btransporter\b|\bpermease\b", ["transporter"]),
-    (r"ABC.*transporter|ATP-binding cassette", ["transporter", "abc_transporter", "atp_binding"]),
+    (r"ABC.*transporter|ABC.*transport system|ATP-binding cassette", ["transporter", "abc_transporter", "atp_binding"]),
     (r"\bchannel\b", ["transporter", "ion_channel"]),
     (r"\bsymporter\b", ["transporter", "symporter"]),
     (r"\bantiporter\b", ["transporter", "antiporter"]),
     (r"efflux", ["transporter", "efflux_pump"]),
 
     # Regulators
-    (r"transcription.*regulator|regulator.*transcription", ["regulator", "transcription_factor"]),
+    (r"transcription.*regulator|regulator.*transcription|transcriptional repressor", ["regulator", "transcription_factor"]),
     (r"response.*regulator", ["response_regulator", "two_component"]),
     (r"sensor.*kinase|histidine.*kinase", ["sensor_kinase", "two_component"]),
     (r"sigma.*factor", ["sigma_factor"]),
     (r"transcription.*factor|TFIIB|TBP", ["transcription", "dna_binding"]),
+    (r"HTH-type|DNA[-/ ].*binding|DNA/RNA-binding", ["dna_binding"]),
+    (r"nucleotide binding protein", ["nucleotide_binding", "binding"]),
 
     # Metabolism keywords
     # NOTE: \b word boundary prevents "dehydrogenase" from matching "hydrogenase"
@@ -735,7 +773,25 @@ KEGG_PATTERNS: list[tuple[str, list[str]]] = [
     (r"flagell", ["flagellum"]),
     (r"pil[iu]s|fimbr", ["pilus"]),
     (r"\bribosom", ["ribosomal_protein", "translation"]),
-    (r"\bchaperone\b", ["chaperone", "stress_response"]),
+    (r"\bchaperone\b|chaperonin|prefoldin", ["chaperone", "stress_response"]),
+    (r"zinc finger|Zn-ribbon", ["zinc_finger", "zinc_binding"]),
+    (r"uncharacterized protein|hypothetical protein|unknown function", ["hypothetical"]),
+
+    # Information processing
+    (r"(translation )?(initiation|elongation|release) factor|peptide chain release factor", ["translation"]),
+    (r"tRNA synthetase|aminoacyl-tRNA", ["translation", "trna_synthetase", "synthetase", "ligase"]),
+    (r"proliferating cell nuclear antigen|\bPCNA\b", ["replication", "sliding_clamp"]),
+    (r"replication factor C", ["replication", "clamp_loader", "atp_binding"]),
+    (r"DNA replication factor|archaeal cell division control protein 6|\bcdc6", ["replication", "atpase", "dna_binding"]),
+    (r"DNA repair|\bRad[AB]\b|\bRad50\b|\bMre11\b|\bSbc[CD]\b|\bRecB\b|DNA polymerase", ["dna_repair"]),
+    (r"endonuclease", ["endonuclease", "nuclease", "hydrolase"]),
+    (r"exosome complex|ribonuclease|[mr]RNA .*processing|RNA-binding|ribonucleoprotein", ["rna_binding", "rnase"]),
+    (r"signal recognition particle receptor|\bftsY\b", ["signal_recognition", "gtp_binding"]),
+    (r"protein pelota|\bpelA\b", ["translation"]),
+    (r"protein archease", ["chaperone"]),
+    (r"\btranslin\b", ["dna_binding", "rna_binding"]),
+    (r"segregation and condensation protein|chromosome.*partition", ["chromosome_partitioning"]),
+    (r"cell division protein|septum site", ["cell_division"]),
 
     # Mobile elements
     (r"\btransposase\b", ["transposase", "mobile_element"]),
@@ -747,9 +803,11 @@ KEGG_PATTERNS: list[tuple[str, list[str]]] = [
     (r"circadian|clock.*protein|KaiC", ["signaling"]),
     (r"ATPase", ["atpase", "atp_binding"]),
     (r"GTPase", ["gtpase", "gtp_binding"]),
+    (r"GTP-binding", ["gtp_binding"]),
 
     # Cofactor/coenzyme related
     (r"radical.*SAM", ["radical_sam", "iron_sulfur"]),
+    (r"Fe-S cluster assembly", ["iron_sulfur_biosynthesis", "iron_sulfur"]),
     (r"cobalamin|B12", ["cobalamin_binding", "cobalt_binding"]),
     (r"ferredoxin", ["iron_sulfur", "electron_transport"]),
     (r"flavin|FAD|FMN", ["fad_binding"]),
@@ -759,6 +817,8 @@ KEGG_PATTERNS: list[tuple[str, list[str]]] = [
     # Defense systems
     (r"CRISPR|Cas\d+", ["crispr_associated", "defense_system"]),
     (r"restriction|methylase.*DNA|DNA.*methylase", ["restriction_modification"]),
+    (r"mRNA interferase", ["toxin_antitoxin", "rnase"]),
+    (r"antitoxin", ["toxin_antitoxin", "antitoxin"]),
 
     # Cell division
     (r"\bFts[AZWLNQKX]\b", ["cell_division", "divisome"]),
@@ -767,6 +827,12 @@ KEGG_PATTERNS: list[tuple[str, list[str]]] = [
     # Stress response
     (r"heat.*shock|cold.*shock", ["stress_response"]),
     (r"superoxide.*dismutase|catalase|peroxiredoxin", ["oxidative_stress"]),
+
+    # Envelope / localization
+    (r"SEC61|protein transport protein", ["transporter", "membrane"]),
+    (r"membrane-associated protein|membrane protein|transmembrane protein", ["membrane"]),
+    (r"MscS", ["membrane", "ion_channel"]),
+    (r"multiple antibiotic resistance", ["antibiotic_resistance", "membrane"]),
 ]
 
 
@@ -811,6 +877,7 @@ def get_predicates_for_kegg(
     Returns:
         List of predicate IDs
     """
+    definition = _resolve_ko_definition(ko_id, definition)
     predicates = set()
 
     # Direct mapping
@@ -830,11 +897,58 @@ def get_predicates_for_kegg(
     return sorted(predicates)
 
 
+def _resolve_ko_definition(ko_id: str, definition: str = "") -> str:
+    """Use local KO metadata when an annotation only stores score labels."""
+    if not _is_informative_definition(ko_id, definition):
+        return _load_ko_definitions().get(ko_id, definition or "")
+    return definition
+
+
+def _is_informative_definition(ko_id: str, definition: str = "") -> bool:
+    """Return whether a KEGG definition can drive pattern/EC mapping."""
+    text = (definition or "").strip()
+    if not text:
+        return False
+    if text == ko_id:
+        return False
+    return not (text == "GA" or text.startswith("evalue_"))
+
+
+@lru_cache(maxsize=1)
+def _load_ko_definitions() -> dict[str, str]:
+    """Load optional local KOFAM KO definitions."""
+    ko_list = _ko_list_path()
+    if not ko_list.exists():
+        return {}
+
+    definitions: dict[str, str] = {}
+    with open(ko_list) as handle:
+        header = handle.readline().rstrip("\n").split("\t")
+        try:
+            ko_idx = header.index("knum")
+            definition_idx = header.index("definition")
+        except ValueError:
+            return {}
+
+        for line in handle:
+            fields = line.rstrip("\n").split("\t")
+            if len(fields) <= max(ko_idx, definition_idx):
+                continue
+            definitions[fields[ko_idx]] = fields[definition_idx]
+
+    return definitions
+
+
+def _ko_list_path() -> Path:
+    """Return the repo-local KO list path."""
+    return Path(__file__).resolve().parents[3] / "data" / "reference" / "ko_list"
+
+
 __all__ = [
     "EC_TO_PREDICATES",
-    "KEGG_TO_PREDICATES",
     "KEGG_PATTERNS",
-    "parse_ec_numbers",
+    "KEGG_TO_PREDICATES",
     "get_predicates_for_ec",
     "get_predicates_for_kegg",
+    "parse_ec_numbers",
 ]

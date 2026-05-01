@@ -9,6 +9,7 @@ import duckdb
 import pandas as pd
 
 from sharur.core.types import Annotation, Protein
+from sharur.storage.migrations import run_migrations
 
 from .schema import SCHEMA
 
@@ -16,13 +17,19 @@ from .schema import SCHEMA
 class DuckDBStore:
     """DuckDB storage backend."""
 
-    def __init__(self, db_path: Optional[Path] = None):
+    def __init__(
+        self,
+        db_path: Optional[Path] = None,
+        *,
+        read_only: bool = False,
+    ):
         """
         Initialize store.
 
         If db_path is None, uses in-memory database.
         """
         self.db_path = Path(db_path) if db_path else None
+        self.read_only = read_only
         self._conn: Optional[duckdb.DuckDBPyConnection] = None
 
     # ------------------------------------------------------------------ #
@@ -32,18 +39,22 @@ class DuckDBStore:
     def conn(self) -> duckdb.DuckDBPyConnection:
         """Lazy connection initialization."""
         if self._conn is None:
-            self._conn = duckdb.connect(str(self.db_path) if self.db_path else ":memory:")
-            self._initialize_schema()
+            if self.db_path:
+                self._conn = duckdb.connect(
+                    str(self.db_path),
+                    read_only=self.read_only,
+                )
+            else:
+                self._conn = duckdb.connect(":memory:")
+
+            if not self.read_only:
+                self._initialize_schema()
         return self._conn
 
     def _initialize_schema(self) -> None:
         """Create tables if they don't exist, then run pending migrations."""
         self._conn.execute(SCHEMA)
-        from sharur.storage.migrations import get_current_version, run_migrations
-
-        current = get_current_version(self._conn)
-        if current == 0:
-            run_migrations(self._conn)
+        run_migrations(self._conn)
 
     # ------------------------------------------------------------------ #
     # Generic execution helpers

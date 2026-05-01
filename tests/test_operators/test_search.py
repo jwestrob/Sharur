@@ -4,6 +4,7 @@ import pytest
 
 from sharur.operators.search import search_by_predicates, search_proteins
 from sharur.operators.base import SharurResult
+from sharur.predicates_v2.persistence import generate_and_persist_v2
 
 
 class TestSearchByPredicates:
@@ -54,6 +55,58 @@ class TestSearchByPredicates:
         result = search_by_predicates(store, has=["giant"], lacks=["massive"])
         # prot_004 is giant but not massive
         assert result.meta.total_rows == 1
+
+    def test_repairs_partial_legacy_cache_from_complete_v2_state(self, store):
+        """Partial protein_predicates should be rebuilt from complete V2 state."""
+        generate_and_persist_v2(
+            store,
+            chunk_size=5,
+            update_legacy_predicates=True,
+            return_states=False,
+        )
+        store.execute("DELETE FROM protein_predicates WHERE protein_id = 'prot_001'")
+
+        result = search_by_predicates(store, has=["giant"])
+
+        assert result.meta.total_rows == 2
+        protein_count = store.execute("SELECT COUNT(*) FROM proteins")[0][0]
+        legacy_count = store.execute("SELECT COUNT(*) FROM protein_predicates")[0][0]
+        assert legacy_count == protein_count
+
+    def test_repairs_stale_legacy_cache_from_complete_v2_state(self, store):
+        """Complete but older protein_predicates should be rebuilt from V2."""
+        generate_and_persist_v2(
+            store,
+            chunk_size=5,
+            update_legacy_predicates=True,
+            return_states=False,
+        )
+        store.execute("""
+            UPDATE protein_predicates
+            SET updated_at = updated_at - INTERVAL 1 HOUR
+            WHERE protein_id = 'prot_001'
+        """)
+
+        result = search_by_predicates(store, has=["giant"])
+
+        assert result.meta.total_rows == 2
+        stale = store.execute("""
+            SELECT COUNT(*)
+            FROM semantic_state ss
+            JOIN protein_predicates pp ON pp.protein_id = ss.protein_id
+            WHERE pp.updated_at < ss.updated_at
+        """)[0][0]
+        assert stale == 0
+
+    def test_partial_legacy_cache_without_complete_v2_state_fails(self, store):
+        """Partial precomputed predicates should not silently truncate search."""
+        store.execute("""
+            INSERT INTO protein_predicates (protein_id, predicates, updated_at)
+            VALUES ('prot_004', ['giant'], CURRENT_TIMESTAMP)
+        """)
+
+        with pytest.raises(RuntimeError, match="compatibility cache is incomplete"):
+            search_by_predicates(store, has=["giant"])
 
 
 class TestSearchProteins:

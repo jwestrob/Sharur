@@ -95,7 +95,7 @@ integrate_secretion_results(db_path, systems_df, genes_df)
 **Script:** `scripts/classify_cazymes.py`
 **Requires:** `data/dbcan_db/` with CAZy.dmnd, dbCAN.hmm, dbCAN-sub.hmm
 **Method:** DIAMOND (1e-18) + dbCAN.hmm (1e-15) + dbCAN-sub.hmm (1e-15), consensus ≥2 tools.
-**Pipeline:** Integrated into stage 07 after predicates + hydrogenase classification.
+**Pipeline:** Integrated into stage 07 before final V2 predicate generation.
 
 ## ESM2 Embeddings
 **Script:** `src/ingest/06_esm2_embeddings.py`
@@ -186,6 +186,8 @@ Full docs: `docs/predicates_v2.md`
 
 ```python
 b = Sharur("data/YOUR_DATASET/sharur.duckdb")
+# New Stage 07 builds already materialize V2. Use generate_v2() for manual
+# refreshes or subsets.
 b.generate_v2(output_review_queue="review_queue.tsv")
 
 state = b.get_semantic_state("protein_id")
@@ -193,7 +195,9 @@ state = b.get_semantic_state("protein_id")
 
 b.search_by_facet("activity", atom_ids=["hydrogenase"], relation="implies")
 b.search_by_atoms(has=["giant", "unannotated"])
+b.search_atoms(atom_id="hydrogenase", relation="implies", source_db="hyddb")
 atoms = b.get_atoms("protein_id")  # each has facet, relation, source_db, source_accession
+explanation = b.explain("protein_id")  # includes composite_explanations witnesses
 b.list_composites()  # YAML-declared rules (config/predicates_v2/composites.yaml)
 ```
 

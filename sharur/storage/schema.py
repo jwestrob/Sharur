@@ -1,6 +1,6 @@
 """DuckDB schema for Sharur."""
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 4
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS bins (
@@ -94,11 +94,6 @@ CREATE TABLE IF NOT EXISTS feature_store (
 CREATE INDEX IF NOT EXISTS idx_features_metric ON feature_store(metric_name);
 
 -- Helpful secondary indexes
-CREATE INDEX IF NOT EXISTS idx_proteins_contig ON proteins(contig_id);
-CREATE INDEX IF NOT EXISTS idx_proteins_bin ON proteins(bin_id);
-CREATE INDEX IF NOT EXISTS idx_proteins_coords ON proteins(contig_id, start, end_coord);
-CREATE INDEX IF NOT EXISTS idx_annotations_protein ON annotations(protein_id);
-CREATE INDEX IF NOT EXISTS idx_annotations_source_acc ON annotations(source, accession);
 CREATE INDEX IF NOT EXISTS idx_annotations_accession ON annotations(accession);
 CREATE INDEX IF NOT EXISTS idx_loci_contig ON loci(contig_id, start, end_coord);
 CREATE INDEX IF NOT EXISTS idx_loci_type ON loci(locus_type);
@@ -136,6 +131,60 @@ CREATE TABLE IF NOT EXISTS protein_scores (
 );
 CREATE INDEX IF NOT EXISTS idx_protein_scores_interest ON protein_scores(interest_score DESC);
 
+-- Predicate V2 semantic atom storage
+CREATE TABLE IF NOT EXISTS semantic_atoms (
+    protein_id VARCHAR NOT NULL,
+    atom_id VARCHAR NOT NULL,
+    facet VARCHAR NOT NULL,
+    relation VARCHAR NOT NULL,
+    source_accession VARCHAR,
+    source_db VARCHAR,
+    evidence_evalue DOUBLE,
+    evidence_score DOUBLE,
+
+    PRIMARY KEY (protein_id, atom_id, source_accession)
+);
+CREATE INDEX IF NOT EXISTS idx_semantic_atoms_protein ON semantic_atoms(protein_id);
+CREATE INDEX IF NOT EXISTS idx_semantic_atoms_atom ON semantic_atoms(atom_id);
+CREATE INDEX IF NOT EXISTS idx_semantic_atoms_facet_atom ON semantic_atoms(facet, atom_id);
+CREATE INDEX IF NOT EXISTS idx_semantic_atoms_relation ON semantic_atoms(relation);
+CREATE INDEX IF NOT EXISTS idx_semantic_atoms_source ON semantic_atoms(source_db, source_accession);
+
+-- Predicate V2 per-protein resolved state
+CREATE TABLE IF NOT EXISTS semantic_state (
+    protein_id VARCHAR PRIMARY KEY,
+    activities VARCHAR[],
+    roles VARCHAR[],
+    architecture VARCHAR[],
+    localization VARCHAR[],
+    topology JSON,
+    size_class VARCHAR,
+    quality_flags VARCHAR[],
+    composite_predicates VARCHAR[],
+    unresolved_count INTEGER,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_semantic_state_size ON semantic_state(size_class);
+CREATE INDEX IF NOT EXISTS idx_semantic_state_updated ON semantic_state(updated_at);
+
+-- Predicate V2 unified search terms. This materializes atom IDs, V1-style
+-- direct accession keys, and composite predicates so search does not rebuild
+-- that union for every query.
+CREATE TABLE IF NOT EXISTS semantic_terms (
+    protein_id VARCHAR NOT NULL,
+    term_id VARCHAR NOT NULL,
+    term_kind VARCHAR NOT NULL,
+    facet VARCHAR,
+    relation VARCHAR,
+    source_db VARCHAR NOT NULL DEFAULT '',
+    source_accession VARCHAR NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_semantic_terms_term ON semantic_terms(term_id, protein_id);
+CREATE INDEX IF NOT EXISTS idx_semantic_terms_protein ON semantic_terms(protein_id);
+CREATE INDEX IF NOT EXISTS idx_semantic_terms_facet_term ON semantic_terms(facet, term_id);
+CREATE INDEX IF NOT EXISTS idx_semantic_terms_source ON semantic_terms(source_db, source_accession);
+CREATE INDEX IF NOT EXISTS idx_semantic_terms_kind ON semantic_terms(term_kind);
+
 -- Defense system validation (MacSyFinder co-localization)
 CREATE TABLE IF NOT EXISTS defense_systems (
     system_id VARCHAR PRIMARY KEY,
@@ -172,6 +221,24 @@ CREATE TABLE IF NOT EXISTS secretion_systems (
 );
 CREATE INDEX IF NOT EXISTS idx_secretion_systems_genome ON secretion_systems(genome_id);
 CREATE INDEX IF NOT EXISTS idx_secretion_systems_type ON secretion_systems(system_type);
+
+-- Normalized validated-system membership. The summary tables above retain
+-- their string protein_ids fields for compatibility; this table is the query
+-- substrate used by V2 and downstream operators.
+CREATE TABLE IF NOT EXISTS system_proteins (
+    system_id VARCHAR NOT NULL,
+    protein_id VARCHAR NOT NULL,
+    system_source VARCHAR NOT NULL,
+    position INTEGER,
+    profile_name VARCHAR,
+    score DOUBLE,
+
+    PRIMARY KEY (system_id, protein_id, system_source),
+    FOREIGN KEY (protein_id) REFERENCES proteins(protein_id)
+);
+CREATE INDEX IF NOT EXISTS idx_system_proteins_protein ON system_proteins(protein_id);
+CREATE INDEX IF NOT EXISTS idx_system_proteins_system ON system_proteins(system_id);
+CREATE INDEX IF NOT EXISTS idx_system_proteins_source ON system_proteins(system_source);
 
 -- Refs for expand() pagination
 CREATE TABLE IF NOT EXISTS refs (

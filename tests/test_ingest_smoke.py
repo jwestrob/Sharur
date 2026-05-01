@@ -99,8 +99,18 @@ def test_ingest_smoke(tmp_path):
     assert stats["proteins"] == 1
     assert stats["annotations"] >= 1
     assert stats["loci"] >= 1
+    assert stats["predicates"] == 1
+    assert stats["semantic_state"] == 1
+    assert stats["semantic_atoms"] >= 1
 
     # Quick SQL check
     conn = duckdb.connect(str(db_path))
     count = conn.execute("SELECT COUNT(*) FROM proteins").fetchone()[0]
     assert count == 1
+    semantic_state = conn.execute("SELECT COUNT(*) FROM semantic_state").fetchone()[0]
+    semantic_atoms = conn.execute("SELECT COUNT(*) FROM semantic_atoms").fetchone()[0]
+    legacy = conn.execute("SELECT COUNT(*) FROM protein_predicates").fetchone()[0]
+    assert semantic_state == 1
+    assert semantic_atoms >= 1
+    assert legacy == 1
+    assert (data_dir / "reports" / "predicates_v2_review_queue.tsv").exists()

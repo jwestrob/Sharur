@@ -9,18 +9,26 @@ Requires the 'topology' extra: pip install sharur[topology]
 
 from __future__ import annotations
 
+import contextlib
+import io
+import re
 from dataclasses import dataclass
 from typing import Optional
-import re
 
 
 # Try to import pyTMHMM, but don't fail if not installed or ABI-incompatible
 _PYTMHMM_AVAILABLE = False
+_PYTMHMM = None
 try:
-    import pyTMHMM
+    # Some pyTMHMM wheels compiled against NumPy 1.x print an ABI traceback to
+    # stderr before raising under NumPy 2.x.  This is an optional dependency, so
+    # keep imports quiet and expose availability through is_available().
+    with contextlib.redirect_stderr(io.StringIO()):
+        import pyTMHMM as _pyTMHMM
+    _PYTMHMM = _pyTMHMM
     _PYTMHMM_AVAILABLE = True
 except Exception:
-    pyTMHMM = None  # type: ignore
+    _PYTMHMM = None
 
 
 def is_available() -> bool:
@@ -90,7 +98,7 @@ def predict_topology(sequence: str, compute_posterior: bool = False) -> Optional
         sequence = ''.join(c if c in valid_aa else 'X' for c in sequence)
 
     # Run pyTMHMM prediction
-    annotation = pyTMHMM.predict(sequence, compute_posterior=compute_posterior)
+    annotation = _PYTMHMM.predict(sequence, compute_posterior=compute_posterior)
 
     # If posterior was requested, annotation is a tuple
     if compute_posterior:

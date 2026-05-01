@@ -163,7 +163,7 @@ class AtomGenerator:
             # Skip direct-access predicates (pfam:PF00005, kegg:K00001, etc.)
             # These are not semantic atoms — they're index keys
             if ":" in pred_id and pred_id.split(":")[0] in (
-                "pfam", "kegg", "cazy", "vog", "hyddb",
+                "pfam", "kegg", "kofam", "cazy", "vog", "hyddb",
                 "hyddb_subgroup", "defensefinder", "txsscan",
             ):
                 continue

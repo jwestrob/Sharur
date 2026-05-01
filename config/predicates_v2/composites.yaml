@@ -78,8 +78,8 @@ defense_system_validated:
         relation: implies
         source_db: defensefinder_system
 
-crispr_validated:
-  description: "CRISPR-Cas system with validated components"
+crispr_cas_supported:
+  description: "CRISPR-Cas associated protein supported by curated component evidence"
   facet: role
   requires:
     all_of:
@@ -87,13 +87,16 @@ crispr_validated:
         relation_in: [implies, supports]
 
 restriction_modification_validated:
-  description: "RM system with validated components"
+  description: "Restriction-modification system confirmed by DefenseFinder co-localization"
   facet: role
   requires:
     all_of:
       - has_atom: restriction_modification
-        relation_in: [implies, supports]
+        relation: implies
+        source_db: defensefinder_system
       - has_atom: defense_system
+        relation: implies
+        source_db: defensefinder_system
 
 abc_transporter_complete:
   description: "ABC transporter with ATPase domain"

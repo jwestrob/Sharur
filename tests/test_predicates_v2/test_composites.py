@@ -6,6 +6,7 @@ from sharur.predicates_v2.composites import (
     CompositeDefinition,
     clear_composites_cache,
     evaluate_composites,
+    explain_composites,
     load_composites,
 )
 from sharur.predicates_v2.model import ClaimRelation, SemanticAtom, SemanticFacet
@@ -49,7 +50,7 @@ class TestLoadComposites:
         """Each composite should have name, description, facet, requires."""
         composites = load_composites()
         for comp in composites:
-            assert comp.name, f"Composite missing name"
+            assert comp.name, "Composite missing name"
             assert comp.facet, f"Composite {comp.name} missing facet"
             assert comp.requires, f"Composite {comp.name} missing requires"
 
@@ -399,6 +400,102 @@ class TestCompositeEvaluation:
         ]
         result = evaluate_composites(atoms, composites)
         assert "defense_system_validated" in result
+
+    def test_restriction_modification_validated_requires_system_evidence(self):
+        """RM validation should require DefenseFinder system-level evidence."""
+        composites = load_composites()
+        broad_atoms = [
+            _atom("restriction_modification", facet=SemanticFacet.role),
+            _atom("defense_system", facet=SemanticFacet.role),
+        ]
+        result = evaluate_composites(broad_atoms, composites)
+        assert "restriction_modification_validated" not in result
+
+        system_atoms = [
+            _atom(
+                "restriction_modification",
+                facet=SemanticFacet.role,
+                relation=ClaimRelation.implies,
+                source_db="defensefinder_system",
+            ),
+            _atom(
+                "defense_system",
+                facet=SemanticFacet.role,
+                relation=ClaimRelation.implies,
+                source_db="defensefinder_system",
+            ),
+        ]
+        result = evaluate_composites(system_atoms, composites)
+        assert "restriction_modification_validated" in result
+
+    def test_crispr_composite_is_supported_not_validated(self):
+        """CRISPR component evidence should not be named as validation."""
+        composites = load_composites()
+        atoms = [
+            _atom(
+                "crispr_associated",
+                facet=SemanticFacet.role,
+                relation=ClaimRelation.supports,
+            ),
+        ]
+        result = evaluate_composites(atoms, composites)
+        assert "crispr_cas_supported" in result
+        assert "crispr_validated" not in result
+
+    def test_explain_composites_returns_atom_witnesses(self):
+        """Composite explanations should expose the atoms that satisfied rules."""
+        composites = load_composites()
+        atoms = [
+            _atom("abc_transporter", facet=SemanticFacet.role),
+            _atom("atp_binding", facet=SemanticFacet.role, source_accession="PF00005"),
+        ]
+
+        explanations = explain_composites(
+            atoms,
+            composites,
+            only=["abc_transporter_complete"],
+        )
+
+        assert set(explanations) == {"abc_transporter_complete"}
+        assert [witness["atom_id"] for witness in explanations["abc_transporter_complete"]] == [
+            "abc_transporter",
+            "atp_binding",
+        ]
+
+    def test_explain_composites_uses_validated_system_witnesses(self):
+        """Validated composites should explain themselves with system atoms."""
+        composites = load_composites()
+        atoms = [
+            _atom(
+                "restriction_modification",
+                facet=SemanticFacet.role,
+                relation=ClaimRelation.implies,
+                source_db="defensefinder_system",
+                source_accession="sys_def_1",
+            ),
+            _atom(
+                "defense_system",
+                facet=SemanticFacet.role,
+                relation=ClaimRelation.implies,
+                source_db="defensefinder_system",
+                source_accession="sys_def_1",
+            ),
+        ]
+
+        explanations = explain_composites(
+            atoms,
+            composites,
+            only=["restriction_modification_validated"],
+        )
+
+        witnesses = explanations["restriction_modification_validated"]
+        assert {witness["atom_id"] for witness in witnesses} == {
+            "restriction_modification",
+            "defense_system",
+        }
+        assert {witness["source_db"] for witness in witnesses} == {
+            "defensefinder_system",
+        }
 
     def test_multiple_composites_can_match(self):
         """Multiple composites should be able to match for one protein."""

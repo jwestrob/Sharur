@@ -18,7 +18,6 @@ Example usage:
 """
 
 from pathlib import Path
-import sys
 from typing import Optional
 
 import typer
@@ -242,12 +241,14 @@ def search(
 def compute_predicates(
     db: str = typer.Option(DEFAULT_DB, "--db", "-d", help="Path to DuckDB database"),
     protein_id: Optional[str] = typer.Option(None, "--protein", "-p", help="Compute for specific protein only"),
+    chunk_size: int = typer.Option(100_000, "--chunk-size", help="V2 generation batch size"),
 ):
     """
-    Compute and store predicates for proteins.
+    Compute and store V2 predicates for proteins.
 
-    This analyzes annotations and properties to compute semantic
-    predicates like 'transporter', 'hydrogenase', 'giant', etc.
+    This writes semantic_atoms and semantic_state, then materializes the
+    V2-derived protein_predicates compatibility table used by legacy
+    search and reports.
 
     Run this after loading annotations to enable predicate-based search.
 
@@ -255,10 +256,7 @@ def compute_predicates(
         sharur compute-predicates --db data/sharur.duckdb
         sharur compute-predicates --protein PROT_001 --db data/sharur.duckdb
     """
-    from sharur.predicates.generator import (
-        generate_predicates_for_proteins,
-        persist_generated_predicates,
-    )
+    from sharur.predicates_v2.persistence import generate_and_persist_v2
     from sharur.storage.duckdb_store import DuckDBStore
 
     db_path = Path(db)
@@ -269,27 +267,50 @@ def compute_predicates(
     store = DuckDBStore(db_path=db_path)
 
     if protein_id:
-        typer.echo(f"Computing predicates for {protein_id}...", err=True)
-        predicates = generate_predicates_for_proteins(store, protein_ids=[protein_id])
-        if protein_id in predicates:
-            preds = predicates[protein_id]
-            typer.echo(f"\nPredicates for {protein_id}:")
-            for pred in preds:
-                typer.echo(f"  - {pred}")
-            typer.echo(f"\nTotal: {len(preds)} predicates")
-        else:
+        typer.echo(f"Computing V2 predicates for {protein_id}...", err=True)
+        states = generate_and_persist_v2(
+            store,
+            protein_ids=[protein_id],
+            chunk_size=chunk_size,
+            update_legacy_predicates=True,
+            return_states=True,
+            predict_topology=False,
+        )
+        if protein_id not in states:
             typer.echo(f"No predicates generated for {protein_id}")
-    else:
-        typer.echo("Computing predicates for all proteins...", err=True)
-        predicates = generate_predicates_for_proteins(store)
-        count = persist_generated_predicates(store, predicates)
-        typer.echo(f"\nComputed and stored predicates for {count} proteins")
+            return
 
-        # Show summary
-        all_preds = set()
-        for preds in predicates.values():
-            all_preds.update(preds)
-        typer.echo(f"Unique predicates: {len(all_preds)}")
+        rows = store.execute(
+            "SELECT predicates FROM protein_predicates WHERE protein_id = ?",
+            [protein_id],
+        )
+        preds = rows[0][0] if rows else []
+        typer.echo(f"\nPredicates for {protein_id}:")
+        for pred in preds:
+            typer.echo(f"  - {pred}")
+        typer.echo(f"\nTotal: {len(preds)} predicates")
+    else:
+        typer.echo("Computing V2 predicates for all proteins...", err=True)
+        generate_and_persist_v2(
+            store,
+            chunk_size=chunk_size,
+            update_legacy_predicates=True,
+            return_states=False,
+            predict_topology=False,
+        )
+        count = store.execute("SELECT COUNT(*) FROM protein_predicates")[0][0]
+        atoms = store.execute("SELECT COUNT(*) FROM semantic_atoms")[0][0]
+        states = store.execute("SELECT COUNT(*) FROM semantic_state")[0][0]
+        terms = store.execute("SELECT COUNT(*) FROM semantic_terms")[0][0]
+        system_members = store.execute("SELECT COUNT(*) FROM system_proteins")[0][0]
+        unique = store.execute(
+            "SELECT COUNT(DISTINCT atom_id) FROM semantic_atoms"
+        )[0][0]
+        typer.echo(
+            f"\nComputed V2 predicates for {count} proteins "
+            f"({states} semantic states, {atoms} atoms, {terms} search terms, "
+            f"{unique} unique atoms, {system_members} system members)"
+        )
 
 
 # ------------------------------------------------------------------ #

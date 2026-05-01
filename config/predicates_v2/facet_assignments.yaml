@@ -1,10 +1,10 @@
-# Facet assignments for all V1 predicates (547 total, deduplicated).
+# Facet assignments for all V1 predicates (541 total, deduplicated).
 # Generated programmatically from vocabulary.py categories + manual overrides.
 #
 # Format: predicate_id: facet
 # Facets: activity, role, architecture, localization, topology, size_class, quality_flag
 
-# === activity (195 predicates) ===
+# === activity (198 predicates) ===
 3hp_bicycle: activity
 acetyltransferase: activity
 aerobic_respiration: activity
@@ -47,6 +47,8 @@ cobalamin_biosynthesis: activity
 cofactor_biosynthesis: activity
 cysteine_protease: activity
 cytochrome: activity
+cytochrome_bd_oxidase: activity
+cytochrome_c_oxidase: activity
 cytoplasmic_hydrogenase: activity
 decarboxylase: activity
 dehalogenase: activity
@@ -190,6 +192,7 @@ tca_cycle: activity
 terpene_synthesis: activity
 thiamine_biosynthesis: activity
 thiosulfate: activity
+terminal_oxidase: activity
 transferase: activity
 translocase: activity
 ubiquitin_activation: activity
@@ -201,7 +204,7 @@ viral_replication: activity  # override from viral
 wood_ljungdahl: activity
 xylanase: activity
 
-# === role (259 predicates) ===
+# === role (261 predicates) ===
 2fe2s: role
 abc_atpase: role
 abc_permease: role
@@ -228,9 +231,19 @@ base_excision_repair: role
 beta_lactamase: role
 binding: role
 biotin_binding: role
+brex: role
+abi_alpha: role
+abi_e: role
+abi_j: role
+abi_l: role
+abi_p2: role
+abi_u: role
+abi_v: role
+abi_z: role
 calcium_binding: role
 cas_domain: role
 cas_nuclease: role
+cbass: role
 cell_division: role
 chaperone: role
 chemotaxis: role  # override from envelope
@@ -246,6 +259,7 @@ cold_shock: role
 conjugation: role
 copper_binding: role
 copper_resistance: role
+cdgmp_binding: role
 crispr_accessory: role
 crispr_adaptation: role
 crispr_associated: role
@@ -279,6 +293,39 @@ dam_methylase: role
 dcm_methylase: role
 deaminase: role
 defense_system: role
+defense_acriii1: role
+defense_apyc1: role
+defense_atd: role
+defense_avs: role
+defense_borvo: role
+defense_caprel: role
+defense_ceres: role
+defense_dctp_deaminase: role
+defense_ds: role
+defense_eleos: role
+defense_esos: role
+defense_gabija: role
+defense_gcu142: role
+defense_hachiman: role
+defense_hec: role
+defense_hma: role
+defense_kiwa: role
+defense_lamassu: role
+defense_lit: role
+defense_mokosh: role
+defense_nlr: role
+defense_pago: role
+defense_pd_lambda: role
+defense_pd_t4: role
+defense_pd_t7: role
+defense_prometheus: role
+defense_prrc: role
+defense_retron: role
+defense_rloc: role
+defense_shedu: role
+defense_sofic: role
+defense_tiamat: role
+defense_toutatis: role
 diguanylate_cyclase: role
 divisome: role
 dna_binding: role
@@ -376,6 +423,7 @@ porin: role
 pqq_binding: role
 primase: role
 protein_binding: role
+psyrta: role
 receptor_binding: role
 recombinase: role
 recombinational_repair: role
@@ -388,7 +436,13 @@ resolvase: role
 response_regulator: role
 restriction_enzyme: role
 restriction_modification: role
+rm_type_i: role
+rm_type_ii: role
+rm_type_iig: role
+rm_type_iii: role
+rm_type_iv: role
 ribosomal_protein: role
+rosmerta: role
 rna_binding: role
 rna_helicase: role
 rna_polymerase: role
@@ -401,6 +455,7 @@ secretion_system: role
 sensor_kinase: role
 serine_threonine_kinase: role
 sigma_factor: role
+shosta: role
 signal_recognition: role
 signaling: role
 sliding_clamp: role
@@ -437,6 +492,7 @@ transporter: role
 transposase: role
 trna_modification: role
 trna_synthetase: role
+tonb_dependent_receptor: role
 two_component: role
 type_i_secretion: role
 type_ii_secretion: role

@@ -56,6 +56,9 @@ def test_build_and_query_duckdb(tmp_path):
     assert stats["annotations"] >= 1700  # pfam+kofam+cazy combined
     assert stats["loci"] == 2  # GECCO clusters
     assert stats["embeddings"] == 10102
+    assert stats["predicates"] == 10102
+    assert stats["semantic_state"] == 10102
+    assert stats["semantic_atoms"] >= 10102
 
     conn = duckdb.connect(str(db_path))
 
@@ -91,3 +94,7 @@ def test_build_and_query_duckdb(tmp_path):
         "SELECT COUNT(*) FROM annotations WHERE source='cazy'"
     ).fetchone()[0]
     assert cazy > 0
+
+    semantic_state = conn.execute("SELECT COUNT(*) FROM semantic_state").fetchone()[0]
+    legacy_predicates = conn.execute("SELECT COUNT(*) FROM protein_predicates").fetchone()[0]
+    assert semantic_state == legacy_predicates == stats["proteins"]

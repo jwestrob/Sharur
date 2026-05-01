@@ -13,28 +13,20 @@ from __future__ import annotations
 
 import json
 import logging
-import multiprocessing
 import os
 import re
 import shutil
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, List, Optional
 
 import duckdb
 import pandas as pd
 import typer
 from rich.console import Console
-from rich.progress import Progress
 
 from sharur.storage.schema import SCHEMA
-from sharur.predicates.generator import (
-    PredicateGenerator,
-    AnnotationRecord,
-    ProteinRecord,
-)
 
 console = Console()
 logger = logging.getLogger(__name__)
@@ -157,45 +149,6 @@ def _dedup_kegg_best_hit(df: "pd.DataFrame") -> "pd.DataFrame":
 
 
 # --------------------------------------------------------------------------- #
-# Top-level worker function for parallel predicate generation (must be
-# picklable, so it lives at module scope rather than as a method).
-# --------------------------------------------------------------------------- #
-
-def _generate_predicates_chunk(item: tuple) -> tuple:
-    """Generate predicates for a single protein.  Called by Pool.imap_unordered.
-
-    Args:
-        item: (pid, length, gc, gc_mean, gc_std, ann_tuples)
-              where ann_tuples is a list of (source, accession, name, desc, evalue, score)
-
-    Returns:
-        (protein_id, predicate_list)
-    """
-    pid, length, gc, gc_mean, gc_std, ann_tuples = item
-
-    # Each worker lazily initialises its own generator (cached on the function object)
-    gen = getattr(_generate_predicates_chunk, "_gen", None)
-    if gen is None:
-        gen = PredicateGenerator(predict_topology=False)
-        _generate_predicates_chunk._gen = gen
-
-    protein = ProteinRecord(
-        protein_id=pid,
-        sequence_length=length,
-        gc_content=gc,
-        contig_gc_mean=gc_mean,
-        contig_gc_std=gc_std,
-    )
-    annotations = [
-        AnnotationRecord(source=t[0], accession=t[1], name=t[2],
-                         description=t[3], evalue=t[4], score=t[5])
-        for t in ann_tuples
-    ]
-    predicates = gen.generate_for_protein(protein, annotations)
-    return (pid, predicates)
-
-
-# --------------------------------------------------------------------------- #
 # Store adapter for predicate generation (matches DuckDBStore.execute interface)
 # --------------------------------------------------------------------------- #
 class _StoreAdapter:
@@ -253,6 +206,9 @@ class KnowledgeBaseBuilder:
             "loci": 0,
             "embeddings": 0,
             "predicates": 0,
+            "semantic_atoms": 0,
+            "semantic_state": 0,
+            "review_queue": 0,
         }
         # reference maps for annotation names
         self.ref_dir = Path(__file__).resolve().parents[2] / "data" / "reference"
@@ -309,11 +265,11 @@ class KnowledgeBaseBuilder:
             ("Load loci", self._load_loci),
             ("Load embeddings info", self._load_embeddings_info),
             ("Compute metrics", self._compute_basic_metrics),
-            ("Generate predicates", self._generate_predicates),
             ("Classify hydrogenases", self._classify_hydrogenases),
             *([("Classify CAZymes", self._classify_cazymes)] if self.enable_cazymes else []),
             ("Validate defense systems", self._validate_defense_systems),
             ("Validate secretion systems", self._validate_secretion_systems),
+            ("Generate predicates", self._generate_predicates),
             ("Finalize indexes", self._finalize),
         ]
 
@@ -885,167 +841,58 @@ class KnowledgeBaseBuilder:
 
     # --- predicates ----------------------------------------------------- #
     def _generate_predicates(self) -> None:
-        """Generate semantic predicates for all proteins based on annotations.
+        """Generate semantic atoms and V2-derived legacy predicates.
 
-        Uses multiprocessing (spawn context for macOS safety) to parallelize
-        the pure-function predicate generation across CPU cores, then bulk-inserts.
+        Stage 07 treats V2 as the normal predicate product. The compatibility
+        table is still materialized so existing operators and analysis scripts
+        that read protein_predicates continue to work.
         """
-        t0 = time.time()
-        console.print("  Loading protein and annotation data...")
+        from sharur.predicates_v2.persistence import generate_and_persist_v2
 
-        # Get GC stats per contig
-        gc_stats = {}
-        gc_rows = self.conn.execute("""
-            SELECT contig_id, AVG(gc_content), STDDEV(gc_content)
-            FROM proteins
-            WHERE gc_content IS NOT NULL
-            GROUP BY contig_id
-        """).fetchall()
-        for row in gc_rows:
-            gc_stats[row[0]] = (row[1], row[2] if row[2] else 0.0)
-
-        # Get all proteins (without sequences — not needed for predicates)
-        proteins = self.conn.execute("""
-            SELECT protein_id, sequence_length, gc_content, contig_id
-            FROM proteins
-        """).fetchall()
-
-        console.print(f"  {len(proteins):,} proteins loaded ({time.time() - t0:.1f}s)")
-
-        # Get all annotations grouped by protein
-        t1 = time.time()
-        annotations_by_protein: Dict[str, List[tuple]] = {}
-        ann_rows = self.conn.execute("""
-            SELECT protein_id, source, accession, name, description, evalue, score
-            FROM annotations
-        """).fetchall()
-        for row in ann_rows:
-            pid = row[0]
-            if pid not in annotations_by_protein:
-                annotations_by_protein[pid] = []
-            # Store as plain tuples for pickle-ability across processes
-            annotations_by_protein[pid].append(
-                (row[1], row[2], row[3], row[4], row[5], row[6])
-            )
-
-        console.print(f"  {len(ann_rows):,} annotations loaded ({time.time() - t1:.1f}s)")
-
-        # Build work items
-        t2 = time.time()
-        work_items = []
-        for row in proteins:
-            pid, length, gc, contig = row[0], row[1], row[2], row[3]
-            gc_mean, gc_std = gc_stats.get(contig, (None, None))
-            anns = annotations_by_protein.get(pid, [])
-            work_items.append((pid, length, gc, gc_mean, gc_std, anns))
-
-        console.print(f"  {len(work_items):,} work items built ({time.time() - t2:.1f}s)")
-
-        # Determine worker count — cap chunk_size for progress granularity
-        n_workers = min(os.cpu_count() or 4, 12)
-        chunk_size = min(5000, max(1, len(work_items) // (n_workers * 4)))
-
-        console.print(
-            f"  Generating predicates: {n_workers} workers, "
-            f"chunk_size={chunk_size:,}, {len(work_items):,} items"
-        )
-
-        # Use 'spawn' context to avoid macOS fork + DuckDB deadlocks
-        ctx = multiprocessing.get_context("spawn")
-        results = []
-        t3 = time.time()
-        last_log = t3
-        with ctx.Pool(n_workers) as pool:
-            for batch_result in pool.imap_unordered(
-                _generate_predicates_chunk, work_items, chunksize=chunk_size
-            ):
-                results.append(batch_result)
-                now = time.time()
-                # Log every 10 seconds or every 100k proteins
-                if len(results) % 100_000 == 0 or (now - last_log > 10):
-                    elapsed = now - t3
-                    rate = len(results) / elapsed if elapsed > 0 else 0
-                    eta = (len(work_items) - len(results)) / rate if rate > 0 else 0
-                    console.print(
-                        f"  {len(results):,}/{len(work_items):,} "
-                        f"({len(results)*100//len(work_items)}%) "
-                        f"{rate:.0f}/s ETA {eta:.0f}s"
-                    )
-                    last_log = now
-
-        pool_elapsed = time.time() - t3
-        console.print(
-            f"  Pool complete: {len(results):,} proteins in {pool_elapsed:.1f}s "
-            f"({len(results)/pool_elapsed:.0f}/s)"
-        )
-
-        # Bulk insert via DataFrame register
-        t4 = time.time()
-        insert_batch_size = 100_000
-        for i in range(0, len(results), insert_batch_size):
-            batch = results[i:i + insert_batch_size]
-            df = pd.DataFrame(batch, columns=["protein_id", "predicates"])
-            df["updated_at"] = datetime.now(timezone.utc)
-            self.conn.register("tmp_pred_batch", df)
-            self.conn.execute("""
-                INSERT INTO protein_predicates (protein_id, predicates, updated_at)
-                SELECT protein_id, predicates, updated_at FROM tmp_pred_batch
-            """)
-            self.conn.unregister("tmp_pred_batch")
-            console.print(
-                f"  Inserted batch {i//insert_batch_size + 1} "
-                f"({min(i + insert_batch_size, len(results)):,}/{len(results):,})"
-            )
-
-        insert_elapsed = time.time() - t4
-        console.print(f"  DB insert complete in {insert_elapsed:.1f}s")
-
-        self.stats["predicates"] = len(proteins)
-        console.print(f"  Predicates: {len(proteins):,} proteins total")
-
-        # Flag proteins overlapping CRISPR arrays
-        self._flag_crispr_array_overlaps()
-
-    def _flag_crispr_array_overlaps(self) -> None:
-        """Add 'in_crispr_array' predicate to proteins overlapping CRISPR arrays."""
-        # Check if any CRISPR loci exist first (skip the join entirely if not)
-        crispr_count = self.conn.execute(
-            "SELECT COUNT(*) FROM loci WHERE locus_type = 'crispr'"
-        ).fetchone()[0]
-        if crispr_count == 0:
-            console.print("  No CRISPR loci found, skipping overlap flagging")
+        protein_count = self.conn.execute("SELECT COUNT(*) FROM proteins").fetchone()[0]
+        if protein_count == 0:
+            console.print("  No proteins found, skipping predicate generation")
             return
 
-        # Bulk update — single UPDATE with subquery instead of row-by-row
-        self.conn.execute("""
-            UPDATE protein_predicates
-            SET predicates = list_append(predicates, 'in_crispr_array'),
-                updated_at = CURRENT_TIMESTAMP
-            WHERE protein_id IN (
-                SELECT DISTINCT p.protein_id
-                FROM proteins p
-                JOIN loci l ON p.contig_id = l.contig_id
-                WHERE l.locus_type = 'crispr'
-                  AND p.start < l.end_coord
-                  AND p.end_coord > l.start
-            )
-            AND NOT list_contains(predicates, 'in_crispr_array')
-        """)
-        console.print(f"  Flagged CRISPR array overlaps ({crispr_count} arrays)")
+        reports_dir = self.db_path.parent / "reports"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        review_queue_path = reports_dir / "predicates_v2_review_queue.tsv"
+        chunk_size = int(os.environ.get("SHARUR_V2_CHUNK_SIZE", "100000"))
 
-    def _insert_predicate_batch(self, batch: List[tuple]) -> None:
-        """Insert batch of predicates into protein_predicates table.
-        Legacy row-by-row method kept for compatibility; _generate_predicates
-        now uses bulk DataFrame insert instead.
-        """
-        for protein_id, predicates in batch:
-            self.conn.execute(
-                """
-                INSERT INTO protein_predicates (protein_id, predicates, updated_at)
-                VALUES (?, ?, CURRENT_TIMESTAMP)
-                """,
-                [protein_id, predicates],
-            )
+        console.print(
+            f"  Generating V2 atoms/states for {protein_count:,} proteins "
+            f"(chunk_size={chunk_size:,})"
+        )
+        generate_and_persist_v2(
+            _StoreAdapter(self.conn),
+            output_review_queue=str(review_queue_path),
+            chunk_size=chunk_size,
+            update_legacy_predicates=True,
+            return_states=False,
+            predict_topology=False,
+        )
+
+        self.stats["predicates"] = self.conn.execute(
+            "SELECT COUNT(*) FROM protein_predicates"
+        ).fetchone()[0]
+        self.stats["semantic_atoms"] = self.conn.execute(
+            "SELECT COUNT(*) FROM semantic_atoms"
+        ).fetchone()[0]
+        self.stats["semantic_state"] = self.conn.execute(
+            "SELECT COUNT(*) FROM semantic_state"
+        ).fetchone()[0]
+
+        if review_queue_path.exists():
+            # Header-only TSV is one line; queue entries are line_count - 1.
+            line_count = sum(1 for _ in review_queue_path.open())
+            self.stats["review_queue"] = max(0, line_count - 1)
+
+        console.print(
+            "  V2 predicates: "
+            f"{self.stats['semantic_state']:,} states, "
+            f"{self.stats['semantic_atoms']:,} atoms, "
+            f"{self.stats['review_queue']:,} review entries"
+        )
 
     # --- hydrogenase classification --------------------------------------- #
     def _classify_hydrogenases(self) -> None:
@@ -1247,10 +1094,19 @@ class KnowledgeBaseBuilder:
                 logger.warning(f"Index creation warning: {exc}")
 
     def _update_stats(self) -> None:
-        for table in ["bins", "contigs", "proteins", "annotations", "loci", "protein_predicates"]:
+        for table in [
+            "bins",
+            "contigs",
+            "proteins",
+            "annotations",
+            "loci",
+            "protein_predicates",
+            "semantic_atoms",
+            "semantic_state",
+        ]:
             try:
                 count = self.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-                # Map protein_predicates -> predicates for stats key
+                # Map protein_predicates -> predicates for stats key.
                 key = "predicates" if table == "protein_predicates" else table
                 self.stats[key] = count
             except Exception:

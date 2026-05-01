@@ -127,6 +127,7 @@ _SOURCE_ALIASES: dict[str, str] = {
     "vogdb": "vogdb",
     "pfam": "pfam",
     "kegg": "kegg",
+    "kofam": "kegg",
     "cazy": "cazy",
     "hyddb": "hyddb",
     "hyddb_subgroup": "hyddb_subgroup",

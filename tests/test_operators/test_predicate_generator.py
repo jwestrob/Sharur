@@ -15,6 +15,7 @@ from sharur.predicates.vocabulary import (
     get_hierarchy,
 )
 from sharur.predicates.mappings.pfam_map import get_predicates_for_pfam
+from sharur.predicates.mappings import pfam_map
 from sharur.predicates.mappings.kegg_map import get_predicates_for_kegg, get_predicates_for_ec
 from sharur.predicates.mappings.cazy_map import get_predicates_for_cazy
 from sharur.predicates.mappings.vog_map import get_vog_predicates
@@ -129,6 +130,102 @@ class TestPfamMapping:
         preds = get_predicates_for_pfam("Rad17", "Rad17", "")
         assert "clamp_loader" in preds
 
+    def test_sufbd_n_mapping(self):
+        """Should map SufBD N-terminal region to Fe-S assembly."""
+        preds = get_predicates_for_pfam("PF19295", "SufBD_N", "SufBD protein N-terminal region")
+        assert "iron_sulfur_biosynthesis" in preds
+        assert "iron_sulfur" in preds
+
+    def test_tnib_mapping(self):
+        """Should map TniB as mobile-element associated."""
+        preds = get_predicates_for_pfam("PF05621", "TniB", "Bacterial TniB protein")
+        assert "mobile_element" in preds
+        assert "transposase" in preds
+
+    def test_hhh_pattern_mapping(self):
+        """Should map helix-hairpin-helix domains as DNA-binding."""
+        preds = get_predicates_for_pfam("PF14716", "HhH", "Helix-hairpin-helix domain")
+        assert "dna_binding" in preds
+
+    def test_high_volume_residual_pfam_mappings(self):
+        """Common DPANN residual PFAM domains should map directly."""
+        preds = get_predicates_for_pfam("PF00856", "SET", "SET domain")
+        assert "methyltransferase" in preds
+
+        preds = get_predicates_for_pfam("PF01475", "FUR", "Ferric uptake regulator family")
+        assert "transcription_factor" in preds
+        assert "metal_homeostasis" in preds
+
+        preds = get_predicates_for_pfam("PF21436", "STT3-PglB_core", "STT3/PglB/AglB core domain")
+        assert "glycosyltransferase" in preds
+
+        preds = get_predicates_for_pfam("PF01119", "DNA_mis_repair", "DNA mismatch repair protein, C-terminal domain")
+        assert "dna_repair" in preds
+        assert "mismatch_repair" in preds
+
+        preds = get_predicates_for_pfam("PF08676", "MutL_C", "MutL C terminal dimerisation domain")
+        assert "dna_repair" in preds
+        assert "mismatch_repair" in preds
+
+        preds = get_predicates_for_pfam("PF21984", "DnaD_N", "DnaD N-terminal domain")
+        assert "replication" in preds
+        assert "dna_binding" in preds
+
+        preds = get_predicates_for_pfam(
+            "PF24827",
+            "AstE_AspA_cat",
+            "Succinylglutamate desuccinylase/Aspartoacylase catalytic domain",
+        )
+        assert "hydrolase" in preds
+        assert "amidase" in preds
+
+    def test_duplicate_pfam_mappings_are_merged(self):
+        """Duplicate in-code PFAM keys should retain the union of meanings."""
+        preds = get_predicates_for_pfam("PF00374", "NiFeSe_Hases", "NiFeSe hydrogenase")
+        assert "nife_hydrogenase" in preds
+        assert "nifese_hydrogenase" in preds
+        assert "metal_binding" in preds
+
+        preds = get_predicates_for_pfam("PF00485", "PRK", "Phosphoribulokinase")
+        assert "calvin_cycle" in preds
+        assert "carbon_fixation" in preds
+        assert "carbohydrate_active" in preds
+
+        preds = get_predicates_for_pfam("PF01061", "ABC2_membrane", "ABC-2 type transporter")
+        assert "abc_transporter" in preds
+        assert "zinc_binding" in preds
+
+        preds = get_predicates_for_pfam("PF02518", "HATPase_c", "Histidine kinase-like ATPase")
+        assert "two_component" in preds
+        assert "chaperone" in preds
+
+    def test_packaged_pfam_mapping_file_loads(self):
+        """Curated PFAM mappings should load from the packaged TSV."""
+        mappings = pfam_map._load_pfam_mapping_file(pfam_map.PFAM_MAPPING_FILE)
+
+        assert "PF00374" in mappings
+        assert "nife_hydrogenase" in mappings["PF00374"]
+
+    def test_pfam_mapping_file_rejects_implicit_duplicates(self, tmp_path):
+        """Duplicate PFAM TSV rows must explicitly opt into merge semantics."""
+        path = tmp_path / "pfam.tsv"
+        path.write_text(
+            "PF00001\tmembrane\t\t\n"
+            "PF00001\ttransporter\t\t\n"
+        )
+
+        with pytest.raises(ValueError, match="duplicate PFAM mapping"):
+            pfam_map._load_pfam_mapping_file(path)
+
+        path.write_text(
+            "PF00001\tmembrane\t\t\n"
+            "PF00001\ttransporter\t\tmerge\n"
+        )
+        assert pfam_map._load_pfam_mapping_file(path)["PF00001"] == [
+            "membrane",
+            "transporter",
+        ]
+
 
 class TestKeggMapping:
     """Tests for KEGG mapping."""
@@ -191,6 +288,69 @@ class TestKeggMapping:
         preds = get_predicates_for_kegg("K15343", "")
         assert "ubiquitin_ligase" in preds
         assert "protein_modification" in preds
+
+    def test_local_ko_definition_used_for_kofam_score_label(self):
+        """KOFAM score labels should resolve through the local KO list."""
+        preds = get_predicates_for_kegg("K01424", "GA")
+        assert "hydrolase" in preds
+        assert "amidase" in preds
+
+    def test_local_ko_definition_used_for_kofam_evalue_label(self):
+        """KOFAM e-value labels should resolve through the local KO list."""
+        preds = get_predicates_for_kegg("K23356", "evalue_1e-15")
+        assert "regulator" in preds
+        assert "transcription_factor" in preds
+
+    def test_local_ko_definition_maps_uncharacterized(self):
+        """Uncharacterized KO definitions should become hypothetical."""
+        preds = get_predicates_for_kegg("K07041", "GA")
+        assert "hypothetical" in preds
+
+    def test_local_ko_definition_maps_replication(self):
+        """Core replication KO definitions should map by keyword."""
+        preds = get_predicates_for_kegg("K04802", "GA")
+        assert "replication" in preds
+        assert "sliding_clamp" in preds
+
+    def test_local_ko_definition_maps_elongation_factor(self):
+        """Translation factor definitions should map by keyword."""
+        preds = get_predicates_for_kegg("K03231", "GA")
+        assert "translation" in preds
+
+    def test_local_ko_definition_maps_abc_transport_system(self):
+        """ABC transport system definitions should map by keyword."""
+        preds = get_predicates_for_kegg("K01990", "GA")
+        assert "abc_transporter" in preds
+        assert "atp_binding" in preds
+
+    def test_high_volume_residual_kofam_mappings(self):
+        """Common DPANN residual KOFAM definitions should map directly."""
+        preds = get_predicates_for_kegg("K07477", "GA")
+        assert "dna_binding" in preds
+        assert "rna_binding" in preds
+
+        preds = get_predicates_for_kegg("K14623", "GA")
+        assert "dna_repair" in preds
+        assert "sos_response" in preds
+
+        preds = get_predicates_for_kegg("K18882", "GA")
+        assert "primase" in preds
+        assert "replication" in preds
+
+        preds = get_predicates_for_kegg("K03699", "GA")
+        assert "metal_transporter" in preds
+        assert "metal_homeostasis" in preds
+
+        preds = get_predicates_for_kegg("K07463", "GA")
+        assert "exonuclease" in preds
+        assert "dna_repair" in preds
+
+        preds = get_predicates_for_kegg("K12063", "GA")
+        assert "conjugation" in preds
+        assert "atp_binding" in preds
+
+        preds = get_predicates_for_kegg("K03555", "GA")
+        assert "mismatch_repair" in preds
 
 
 class TestVogMapping:
@@ -401,6 +561,25 @@ class TestPredicateGenerator:
         assert "pfam:PF00005" in preds
         assert "kegg:K00001" in preds
         assert "cazy:GH5" in preds
+
+    def test_kofam_maps_as_kegg_ortholog(self):
+        """KOFAM K accessions should use the KEGG predicate mapping."""
+        gen = PredicateGenerator(include_direct_access=True)
+        protein = ProteinRecord(protein_id="test", sequence_length=500)
+        annotations = [
+            AnnotationRecord(
+                source="kofam",
+                accession="K00532",
+                description="hydrogenase large subunit",
+                evalue=1e-40,
+            ),
+        ]
+        preds = gen.generate_for_protein(protein, annotations)
+
+        assert "hydrogenase" in preds
+        assert "hydrogen_metabolism" in preds
+        assert "kegg_annotated" in preds
+        assert "kegg:K00532" in preds
 
     def test_direct_access_disabled(self):
         """Should not add direct access predicates when disabled."""

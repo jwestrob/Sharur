@@ -170,8 +170,14 @@ def test_ingest_pipeline_with_dummy_dataset(tmp_path):
     assert stats["proteins"] == total_proteins
     assert stats["annotations"] >= len(pfam_rows) + len(cazy_rows)
     assert stats["loci"] >= len(gecco_clusters)
+    assert stats["predicates"] == total_proteins
+    assert stats["semantic_state"] == total_proteins
+    assert stats["semantic_atoms"] >= total_proteins
 
     # Feature store should have one row per protein
     conn = duckdb.connect(str(db_path))
     feature_count = conn.execute("SELECT COUNT(*) FROM feature_store").fetchone()[0]
     assert feature_count == total_proteins
+    assert conn.execute("SELECT COUNT(*) FROM semantic_state").fetchone()[0] == total_proteins
+    assert conn.execute("SELECT COUNT(*) FROM protein_predicates").fetchone()[0] == total_proteins
+    assert (data_dir / "reports" / "predicates_v2_review_queue.tsv").exists()

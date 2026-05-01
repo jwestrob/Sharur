@@ -1,9 +1,7 @@
 """Tests for V2 compatibility layer."""
 
-import pytest
-
 from sharur.predicates_v2.compat import semantic_state_to_predicates
-from sharur.predicates_v2.model import SemanticState
+from sharur.predicates_v2.model import ClaimRelation, SemanticAtom, SemanticFacet, SemanticState
 
 
 class TestSemanticStateToPredicates:
@@ -173,3 +171,29 @@ class TestSemanticStateToPredicates:
         preds = semantic_state_to_predicates(state)
         assert "PF12345" not in preds
         assert "PF67890" not in preds
+
+    def test_direct_access_predicates_from_atoms(self):
+        """Evidence atoms should reconstruct V1 direct-access predicates."""
+        state = SemanticState(protein_id="prot_001", activities=["atpase"])
+        atoms = [
+            SemanticAtom(
+                protein_id="prot_001",
+                atom_id="atpase",
+                facet=SemanticFacet.activity,
+                relation=ClaimRelation.supports,
+                source_accession="PF00005",
+                source_db="pfam",
+            ),
+            SemanticAtom(
+                protein_id="prot_001",
+                atom_id="_source_witness:pfam",
+                facet=SemanticFacet.quality_flag,
+                relation=ClaimRelation.implies,
+                source_accession="_witness",
+                source_db="pfam",
+            ),
+        ]
+
+        preds = semantic_state_to_predicates(state, atoms=atoms)
+        assert "pfam:PF00005" in preds
+        assert "_witness" not in preds

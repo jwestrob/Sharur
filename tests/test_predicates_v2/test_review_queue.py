@@ -76,6 +76,19 @@ class TestBuildReviewQueue:
         assert queue[0]["n_proteins"] == 3
         assert queue[0]["pct_proteome"] == 3.0
 
+    def test_same_accession_from_different_sources_stays_separate(self):
+        """Same accession strings from different sources should not merge."""
+        atoms = [
+            _unresolved_atom("K00001", protein_id="prot_001", source_db="kegg"),
+            _unresolved_atom("K00001", protein_id="prot_002", source_db="kofam"),
+        ]
+        queue = build_review_queue(atoms, total_proteins=100)
+        assert len(queue) == 2
+        assert {(row["source_db"], row["accession"]) for row in queue} == {
+            ("kegg", "K00001"),
+            ("kofam", "K00001"),
+        }
+
     def test_priority_ordering(self):
         """Should sort by n_proteins * n_genomes descending."""
         atoms = [

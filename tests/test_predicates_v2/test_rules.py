@@ -88,6 +88,7 @@ class TestGetRelation:
     def test_source_defaults(self):
         """Should return correct source-level defaults."""
         assert get_relation("kegg") == ClaimRelation.implies
+        assert get_relation("kofam") == ClaimRelation.implies
         assert get_relation("pfam") == ClaimRelation.supports
         assert get_relation("cazy") == ClaimRelation.supports
         assert get_relation("vogdb") == ClaimRelation.flags
@@ -108,6 +109,7 @@ class TestGetRelation:
         """Accession without override should use source default."""
         assert get_relation("pfam", "PF99999") == ClaimRelation.supports
         assert get_relation("kegg", "K99999") == ClaimRelation.implies
+        assert get_relation("kofam", "K99999") == ClaimRelation.implies
 
     def test_unknown_source_defaults_to_supports(self):
         """Unknown sources should default to supports."""

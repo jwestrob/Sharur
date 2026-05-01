@@ -8,6 +8,7 @@
 
 source_defaults:
   kegg: implies
+  kofam: implies
   pfam: supports
   cazy: supports
   vogdb: flags

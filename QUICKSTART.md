@@ -80,7 +80,7 @@ python src/ingest/minced_crispr.py \
   -i data/$DATASET/stage00_prepared \
   -o data/$DATASET/stage05c_crispr
 
-# Stage 07: build DuckDB knowledge base + predicates
+# Stage 07: build DuckDB knowledge base + V2 predicates
 python src/ingest/07_build_knowledge_base.py \
   -d data/$DATASET \
   -o data/$DATASET/sharur.duckdb
@@ -91,7 +91,7 @@ python src/ingest/06_esm2_embeddings.py \
   data/$DATASET/embeddings/
 ```
 
-This is the manual reference sequence behind `sharur-ingest`. `04_astra_scan.py` supplies the correct per-database flags, and `07_build_knowledge_base.py` is the loader that consolidates proteins, annotations, loci, and predicates.
+This is the manual reference sequence behind `sharur-ingest`. `04_astra_scan.py` supplies the correct per-database flags, and `07_build_knowledge_base.py` is the loader that consolidates proteins, annotations, loci, validated systems, and V2 predicates.
 
 ## What Each Stage Does
 
@@ -99,7 +99,7 @@ This is the manual reference sequence behind `sharur-ingest`. `04_astra_scan.py`
 - `03_prodigal.py`: produces per-genome protein FASTAs and the `all_protein_symlinks/` directory used by Stage 04
 - `04_astra_scan.py`: runs PFAM, KOFAM, HydDB, DefenseFinder, and dbCAN with Sharur's expected settings
 - `minced_crispr.py`: finds CRISPR repeat-spacer arrays from nucleotide assemblies
-- `07_build_knowledge_base.py`: loads stage outputs into `sharur.duckdb`, computes predicates, and integrates supported validation steps
+- `07_build_knowledge_base.py`: loads stage outputs into `sharur.duckdb`, integrates supported validation steps, writes `semantic_atoms`/`semantic_state`, and materializes legacy-compatible predicates
 - `06_esm2_embeddings.py`: produces `embeddings/protein_embeddings.h5` for similarity search and ELSA
 
 ## Verify the Dataset
@@ -111,9 +111,13 @@ from sharur.operators import Sharur
 b = Sharur("data/my_dataset/sharur.duckdb")
 total = b.store.execute("SELECT COUNT(*) FROM proteins")[0][0]
 annotated = b.store.execute("SELECT COUNT(DISTINCT protein_id) FROM annotations")[0][0]
+v2_states = b.store.execute("SELECT COUNT(*) FROM semantic_state")[0][0]
+flat_predicates = b.store.execute("SELECT COUNT(*) FROM protein_predicates")[0][0]
 
 print(f"Total proteins: {total}")
 print(f"Annotated proteins: {annotated}")
+print(f"V2 semantic states: {v2_states}")
+print(f"Compatibility predicate rows: {flat_predicates}")
 print(f"Embeddings loaded: {b.session.vector_store is not None}")
 PY
 ```
@@ -121,6 +125,8 @@ PY
 Sanity checks:
 - `proteins` should be non-zero
 - `annotations` should be non-zero after Stage 04 + Stage 07
+- `semantic_state` should match the protein count after Stage 07
+- `protein_predicates` should match the protein count after Stage 07
 - `Embeddings loaded: True` after Stage 06
 
 ## Start Exploring

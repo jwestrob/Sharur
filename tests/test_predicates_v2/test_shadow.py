@@ -4,6 +4,7 @@ import pytest
 
 from sharur.predicates.generator import AnnotationRecord, ProteinRecord
 from sharur.predicates_v2.shadow import (
+    evaluate_shadow_gate,
     format_shadow_diff_jsonl,
     format_shadow_diff_report,
     shadow_diff,
@@ -153,6 +154,82 @@ class TestShadowDiff:
             assert "total_count" in atom_info
             assert "facets" in atom_info
             assert "relations" in atom_info
+
+
+class TestEvaluateShadowGate:
+    """Tests for shadow rollout gate evaluation."""
+
+    def test_gate_passes_when_metrics_are_within_thresholds(self):
+        """Gate should pass a clean diff."""
+        diff = {
+            "summary": {
+                "total_proteins": 10,
+                "match_rate_pct": 100.0,
+                "diff_count": 0,
+                "v2_unresolved_atoms": 0,
+            },
+            "per_protein": [],
+        }
+
+        gate = evaluate_shadow_gate(
+            diff,
+            min_match_rate_pct=99.0,
+            max_diff_count=0,
+            max_v2_unresolved_atoms=0,
+        )
+
+        assert gate["passed"] is True
+        assert gate["failures"] == []
+
+    def test_gate_fails_on_metric_regression(self):
+        """Gate should report threshold failures explicitly."""
+        diff = {
+            "summary": {
+                "total_proteins": 10,
+                "match_rate_pct": 80.0,
+                "diff_count": 2,
+                "v2_unresolved_atoms": 5,
+            },
+            "per_protein": [],
+        }
+
+        gate = evaluate_shadow_gate(
+            diff,
+            min_match_rate_pct=95.0,
+            max_diff_count=1,
+            max_v2_unresolved_atoms=4,
+        )
+
+        assert gate["passed"] is False
+        assert len(gate["failures"]) == 3
+
+    def test_gate_flags_unexpected_predicate_diffs(self):
+        """Gate should separate allowed and unexpected predicate diffs."""
+        diff = {
+            "summary": {
+                "total_proteins": 1,
+                "match_rate_pct": 100.0,
+                "diff_count": 1,
+                "v2_unresolved_atoms": 0,
+            },
+            "per_protein": [
+                {
+                    "protein_id": "p1",
+                    "v1_only": ["allowed_old", "unexpected_old"],
+                    "v2_only": ["unexpected_new"],
+                }
+            ],
+        }
+
+        gate = evaluate_shadow_gate(
+            diff,
+            min_match_rate_pct=90.0,
+            allowed_v1_only={"allowed_old"},
+        )
+
+        assert gate["passed"] is False
+        assert gate["metrics"]["unexpected_v1_only"] == {"unexpected_old": 1}
+        assert gate["metrics"]["unexpected_v2_only"] == {"unexpected_new": 1}
 
 
 class TestFormatShadowDiffReport:

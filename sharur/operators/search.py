@@ -72,13 +72,7 @@ def search_by_predicates(
                 total_rows=0,
             )
 
-        # Check if protein_predicates table has data
-        has_precomputed = False
-        try:
-            count = store.execute("SELECT COUNT(*) FROM protein_predicates")[0][0]
-            has_precomputed = count > 0
-        except Exception:
-            pass
+        has_precomputed = _ensure_compatible_predicate_cache(store)
 
         if has_precomputed:
             # Use pre-computed predicates with DuckDB array functions
@@ -86,6 +80,84 @@ def search_by_predicates(
         else:
             # Evaluate predicates on-the-fly
             return _search_dynamic(store, has, lacks, limit, offset, ctx)
+
+
+def _ensure_compatible_predicate_cache(store: "DuckDBStore") -> bool:
+    """Ensure protein_predicates is complete, repairing from V2 when possible."""
+    try:
+        protein_count = store.execute("SELECT COUNT(*) FROM proteins")[0][0]
+        legacy_count = store.execute("SELECT COUNT(*) FROM protein_predicates")[0][0]
+        legacy_join_count = store.execute(
+            """
+            SELECT COUNT(*)
+            FROM protein_predicates pp
+            JOIN proteins p ON p.protein_id = pp.protein_id
+            """
+        )[0][0]
+    except Exception:
+        return False
+
+    if protein_count == 0:
+        return False
+
+    legacy_complete = legacy_count == protein_count and legacy_join_count == protein_count
+    if legacy_complete and not _legacy_cache_is_older_than_v2(store):
+        return True
+
+    semantic_complete = False
+    try:
+        semantic_count = store.execute("SELECT COUNT(*) FROM semantic_state")[0][0]
+        semantic_join_count = store.execute(
+            """
+            SELECT COUNT(*)
+            FROM semantic_state ss
+            JOIN proteins p ON p.protein_id = ss.protein_id
+            """
+        )[0][0]
+        semantic_complete = (
+            semantic_count == protein_count
+            and semantic_join_count == protein_count
+        )
+    except Exception:
+        semantic_count = 0
+        semantic_join_count = 0
+
+    if semantic_complete:
+        from sharur.predicates_v2.persistence import (
+            materialize_legacy_predicates_from_v2,
+        )
+
+        materialize_legacy_predicates_from_v2(store)
+        return True
+
+    if legacy_count > 0:
+        raise RuntimeError(
+            "protein_predicates compatibility cache is incomplete "
+            f"({legacy_join_count:,}/{protein_count:,} proteins match current "
+            "proteins table), and semantic_state is not complete enough to "
+            f"repair it ({semantic_join_count:,}/{protein_count:,}). Run "
+            "b.generate_v2(update_legacy_predicates=True) or "
+            "scripts/regenerate_predicates.py --db <path>."
+        )
+
+    return False
+
+
+def _legacy_cache_is_older_than_v2(store: "DuckDBStore") -> bool:
+    """Return whether any complete legacy row predates its V2 state."""
+    try:
+        rows = store.execute("""
+            SELECT 1
+            FROM semantic_state ss
+            JOIN protein_predicates pp ON pp.protein_id = ss.protein_id
+            WHERE pp.updated_at IS NULL
+               OR ss.updated_at IS NULL
+               OR pp.updated_at < ss.updated_at
+            LIMIT 1
+        """)
+    except Exception:
+        return False
+    return bool(rows)
 
 
 def _search_precomputed(
