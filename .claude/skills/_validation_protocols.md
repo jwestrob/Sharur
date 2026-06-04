@@ -102,6 +102,39 @@ result = b.get_neighborhood(protein_id, window=5, all_annotations=True)
 - No informative neighbors → State uncertainty
 - Protein at contig edge → Note potential fragmentation
 
+### Reading V2 Semantic State (preferred for facet-level claims)
+
+Stage 07 now writes typed semantic atoms to `semantic_atoms` and aggregated
+`semantic_state` rows in `sharur.duckdb`. **When making a functional claim,
+read the atoms — not the raw annotation row.**
+
+```python
+# What does V2 actually claim about this protein?
+state = b.get_semantic_state("CoronaMine_..._IL_777_6")
+# state.activities = {"hydrogenase": {"relation": "implies", ...}}
+# state.roles      = {"defense_system": {"relation": "supports", ...}}
+
+# Pull every atom for finer detail (which source DB, which accession)
+atoms = b.get_atoms("CoronaMine_..._IL_777_6")
+```
+
+Atom relations are the leverage that closes the iconic-member trap:
+
+- `implies` — strong evidence (HydDB classification, KEGG ortholog). Cite this.
+- `supports` — moderate (PFAM domain in family). Use as one line of evidence.
+- `flags`   — weak / superfamily / pre-system-validation. Do NOT report as function.
+- `excludes` — counter-evidence (Complex I subunit excludes hydrogenase).
+- `unresolved` — no curated mapping; the accession needs human triage.
+
+**Rule:** never report `(activity, X)` based on a single `flags` atom. If the
+only support for "this protein does X" is a flags-level atom, write
+"fold consistent with X family — substrate undetermined."
+
+The compat layer materializes `protein_predicates` from V2 so
+`b.search_by_predicates(has=[...])` continues to work, but it loses the relation
+metadata. For high-stakes claims (manuscript-bound findings, novelty >= 2),
+go through the V2 facade.
+
 ### Batch Neighborhood Validation (preferred for >5 candidates)
 
 When you have a list of hits to validate (defense system candidates, hydrogenase candidates, CAZy guild members), **do not loop calling `get_neighborhood` one at a time** — that's the open-coded pattern defense/prophage/hydrogenase used to share. Call `batch_context_validate` instead: one SQL pass for N hits, returns a typed verdict per hit.

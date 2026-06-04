@@ -240,6 +240,16 @@ def bundle(
             parts.append("## Shared Validation Protocols\n")
             parts.append(vproto)
 
+        # V2 is now the normal predicate backend (commit ebc141a). Subagents
+        # need the V2 data-model overview so they can query the right tables
+        # and read atom relations correctly instead of falling back to V1's
+        # flat boolean predicates.
+        v2_doc = _read(repo / "docs/predicates_v2.md")
+        if v2_doc:
+            parts.append("\n---\n")
+            parts.append("## Predicate V2 (the normal backend)\n")
+            parts.append(v2_doc)
+
     if include_skill and skill_name:
         spec = _read(repo / f".claude/skills/{skill_name}.md")
         if spec:
