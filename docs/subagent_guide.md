@@ -39,6 +39,31 @@ Use the Read tool to load any doc when you need its protocol. Don't guess — lo
 
 **For survey/explore subagents**, read the full skill spec and paste the protocol sections, finding schema, and validation rules into the prompt.
 
+## Preferred Pattern: `sharur.agent_context.bundle()`
+
+Hand-pasting context is error-prone — easy to forget the SLURM rules, easy to skip the feedback memories, easy to use a stale copy of `_validation_protocols.md`. Use the bundler instead:
+
+```python
+from sharur.agent_context import bundle
+from claude_code_tools import Task  # or whatever your orchestrator harness uses
+
+preamble = bundle(
+    skill_name="defense",
+    dataset_path="data/srvp_bacteria_pb",
+)
+specific_task = '''
+Validate the 1,842 raw DefenseFinder hits in this dataset. Pull from the
+defense_systems table (NOT raw HMM hits). Produce findings.jsonl entries
+for any system with >= 3 supporting genes.
+'''
+
+Task(prompt=preamble + "\n\n" + specific_task, ...)
+```
+
+The bundle includes: core CLAUDE.md rules, `_validation_protocols.md`, the skill spec, every `feedback_*.md` memory, and a one-line dataset presence-check. Roughly 15K tokens for a domain skill like defense; bigger for explore/survey. Worth it — the leaked-lesson failure modes cost more.
+
+Override the project root / memory dir via `SHARUR_REPO` and `SHARUR_MEMORY` env vars when calling from outside this repo.
+
 ## Sub-Agent Protocol
 - Sub-agents CAN spawn further sub-agents for specialist tasks (literature, foldseek, hydrogenase curation)
 - Each sub-agent produces a discrete output (markdown report, JSONL findings)
