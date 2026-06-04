@@ -51,6 +51,15 @@ from sharur.operators.validation import (
     validate_context,
     analyze_crispr_systems,
     detect_annotation_errors,
+    # Batch neighborhood validation — shared by defense/prophage/hydrogenase
+    ContextVerdict,
+    batch_context_validate,
+    summarize_verdicts,
+    VERDICT_VALIDATED,
+    VERDICT_NO_CONTEXT,
+    VERDICT_BLOCKED,
+    VERDICT_AMBIGUOUS,
+    VERDICT_MISSING,
 )
 from sharur.operators.manifest import AnalysisManifest
 

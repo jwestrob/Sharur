@@ -102,6 +102,39 @@ result = b.get_neighborhood(protein_id, window=5, all_annotations=True)
 - No informative neighbors → State uncertainty
 - Protein at contig edge → Note potential fragmentation
 
+### Batch Neighborhood Validation (preferred for >5 candidates)
+
+When you have a list of hits to validate (defense system candidates, hydrogenase candidates, CAZy guild members), **do not loop calling `get_neighborhood` one at a time** — that's the open-coded pattern defense/prophage/hydrogenase used to share. Call `batch_context_validate` instead: one SQL pass for N hits, returns a typed verdict per hit.
+
+```python
+from sharur.operators import batch_context_validate, summarize_verdicts
+
+# Example: validate Group 4 NiFe hydrogenase candidates as Mbh-type
+candidates = [r[0] for r in b.store.execute(
+    "SELECT DISTINCT protein_id FROM annotations WHERE name LIKE '%MbhD%'"
+)]
+verdicts = batch_context_validate(
+    b.store, candidates,
+    required_any=["Mbh", "MnhA", "MnhD"],          # any of these in window = real
+    blocklist=["NuoD", "NuoH", "NuoL", "NuoM"],    # Complex I markers = FP
+    window=8,
+)
+print(summarize_verdicts(verdicts))
+# → {"total": 132, "counts": {"validated": 63, "rejected_no_context": 65, "rejected_superfamily_match": 4}, ...}
+
+# Iterate validated set for follow-up
+real = [v.protein_id for v in verdicts if v.verdict == "validated"]
+```
+
+Verdicts: `validated`, `rejected_no_context`, `rejected_superfamily_match`, `ambiguous`, `protein_not_found`.
+
+**When to use which:**
+- `required_any` — "at least one of these markers nearby" (most common). E.g., any Mbh subunit, any Cas accessory.
+- `required_all` — "all of these markers nearby". E.g., a complete cassette where each subunit is mandatory.
+- `blocklist` — superfamily / Complex I-style false-positive tokens. Always include when a known superfamily collision exists.
+
+The function does NOT consult the `defense_systems` table. For DefenseFinder hits, query that table directly (per CLAUDE.md: 80%+ FP rate on raw HMM hits).
+
 ### Claim Escalation Ladder
 
 | Claim Level | Evidence Required |

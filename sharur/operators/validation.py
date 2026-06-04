@@ -691,10 +691,240 @@ def detect_annotation_errors(store, limit: int = 50) -> SharurResult:
         )
 
 
+# ---------------------------------------------------------------------------
+# Batch context validation
+# ---------------------------------------------------------------------------
+#
+# Shared by defense.md / prophage.md / hydrogenase.md / future domain skills.
+# Each of those previously open-coded the same neighborhood scan + co-occurrence
+# check + superfamily blocklist pattern (~30-50 lines per skill). The batch
+# version below runs in O(1) SQL per N hits, not O(N), and returns a typed
+# verdict list. Domain skills should call this instead of re-implementing.
+
+VERDICT_VALIDATED = "validated"
+VERDICT_NO_CONTEXT = "rejected_no_context"
+VERDICT_BLOCKED = "rejected_superfamily_match"
+VERDICT_AMBIGUOUS = "ambiguous"
+VERDICT_MISSING = "protein_not_found"
+
+
+@dataclass
+class ContextVerdict:
+    """Per-protein outcome from batch_context_validate."""
+
+    protein_id: str
+    verdict: str          # one of VERDICT_*
+    contig_id: Optional[str] = None
+    gene_index: Optional[int] = None
+    matched_required: list[str] = None       # required tokens found in window
+    matched_blocked: list[str] = None        # blocklist tokens found in window
+    neighbor_annotations: list[str] = None   # raw annotation names in the window
+    note: str = ""
+
+    def __post_init__(self) -> None:
+        if self.matched_required is None:
+            self.matched_required = []
+        if self.matched_blocked is None:
+            self.matched_blocked = []
+        if self.neighbor_annotations is None:
+            self.neighbor_annotations = []
+
+
+def batch_context_validate(
+    store,
+    protein_ids: list[str],
+    *,
+    required_any: Optional[list[str]] = None,
+    required_all: Optional[list[str]] = None,
+    blocklist: Optional[list[str]] = None,
+    window: int = 8,
+    case_insensitive: bool = True,
+) -> list[ContextVerdict]:
+    """Validate a batch of protein hits against neighborhood co-occurrence rules.
+
+    Use this when a domain skill has a list of annotation hits (e.g. all NiFe
+    Group 4 hydrogenase candidates) and needs to filter false positives by
+    genomic context. Replaces per-skill open-coded loops.
+
+    Args:
+        store: DuckDBStore (the same one Sharur uses).
+        protein_ids: candidate proteins to validate.
+        required_any: hit is VALIDATED if ANY of these tokens appears in the
+            window (case-insensitive substring match against annotation names).
+            Example for Mbh-type Group 4: ["MbhD", "MbhE", "MbhH"].
+        required_all: hit is VALIDATED only if ALL of these appear.
+            Mutually exclusive with required_any — pick one.
+        blocklist: superfamily / false-positive tokens. If any appears in the
+            window, the hit is REJECTED_BLOCKED even if required_any/all matched.
+            Example for "not Complex I": ["NuoD", "NuoH", "NuoL", "NuoM", "NuoN"].
+        window: gene-index window on each side. Default 8.
+        case_insensitive: token match mode. Default True.
+
+    Returns:
+        list[ContextVerdict] — one entry per input protein_id, in input order.
+
+    Notes:
+        - "Annotations" here means the `annotations.name` column. If your
+          rule needs description-level matching, prepend the substring with '~'
+          (NOT YET IMPLEMENTED — placeholder for future extension).
+        - This function does NOT consult the `defense_systems` table. For
+          DefenseFinder hits per CLAUDE.md, query that table directly; this
+          function is for cases where you start from raw annotation hits.
+    """
+    if not protein_ids:
+        return []
+    if required_any and required_all:
+        raise ValueError("Pass required_any OR required_all, not both.")
+
+    required_any = required_any or []
+    required_all = required_all or []
+    blocklist = blocklist or []
+
+    norm = (lambda s: s.lower()) if case_insensitive else (lambda s: s)
+    req_any_n = [norm(t) for t in required_any]
+    req_all_n = [norm(t) for t in required_all]
+    block_n = [norm(t) for t in blocklist]
+
+    # Single SQL: anchor proteins joined to their own contigs, gene_index range
+    # picks up neighbors. We pull annotation names per neighbor in one shot.
+    placeholders = ",".join(["?"] * len(protein_ids))
+    rows = store.execute(f"""
+        WITH anchors AS (
+            SELECT protein_id, contig_id, gene_index
+            FROM proteins
+            WHERE protein_id IN ({placeholders})
+        )
+        SELECT
+            a.protein_id            AS anchor_id,
+            a.contig_id             AS contig_id,
+            a.gene_index            AS anchor_gene_index,
+            n.protein_id            AS neighbor_id,
+            COALESCE(ann.name, '')  AS neighbor_name
+        FROM anchors a
+        LEFT JOIN proteins n
+          ON n.contig_id = a.contig_id
+         AND n.gene_index BETWEEN a.gene_index - ? AND a.gene_index + ?
+         AND n.protein_id != a.protein_id
+        LEFT JOIN annotations ann
+          ON ann.protein_id = n.protein_id
+        ORDER BY a.protein_id, n.gene_index
+    """, list(protein_ids) + [window, window])
+
+    # Group: anchor_id -> (contig, gene_index, [neighbor_names])
+    per_anchor: dict[str, dict] = {}
+    for anchor_id, contig_id, anchor_gi, neighbor_id, neighbor_name in rows:
+        slot = per_anchor.setdefault(anchor_id, {
+            "contig_id": contig_id,
+            "gene_index": anchor_gi,
+            "names": [],
+        })
+        if neighbor_name:
+            slot["names"].append(neighbor_name)
+
+    verdicts: list[ContextVerdict] = []
+    for pid in protein_ids:
+        slot = per_anchor.get(pid)
+        if slot is None or slot["contig_id"] is None:
+            verdicts.append(ContextVerdict(
+                protein_id=pid, verdict=VERDICT_MISSING,
+                note="Protein not in `proteins` table.",
+            ))
+            continue
+
+        names = slot["names"]
+        names_n = [norm(n) for n in names]
+
+        matched_blocked = [
+            tok for tok in block_n
+            if any(tok in n for n in names_n)
+        ]
+        if matched_blocked:
+            verdicts.append(ContextVerdict(
+                protein_id=pid, verdict=VERDICT_BLOCKED,
+                contig_id=slot["contig_id"], gene_index=slot["gene_index"],
+                matched_blocked=matched_blocked,
+                neighbor_annotations=names,
+                note=f"Neighborhood contains superfamily marker(s): {', '.join(matched_blocked)}",
+            ))
+            continue
+
+        if req_any_n:
+            matched = [tok for tok in req_any_n if any(tok in n for n in names_n)]
+            if matched:
+                verdicts.append(ContextVerdict(
+                    protein_id=pid, verdict=VERDICT_VALIDATED,
+                    contig_id=slot["contig_id"], gene_index=slot["gene_index"],
+                    matched_required=matched, neighbor_annotations=names,
+                ))
+            else:
+                verdicts.append(ContextVerdict(
+                    protein_id=pid, verdict=VERDICT_NO_CONTEXT,
+                    contig_id=slot["contig_id"], gene_index=slot["gene_index"],
+                    neighbor_annotations=names,
+                    note="None of required_any tokens found in window.",
+                ))
+            continue
+
+        if req_all_n:
+            matched = [tok for tok in req_all_n if any(tok in n for n in names_n)]
+            if len(matched) == len(req_all_n):
+                verdicts.append(ContextVerdict(
+                    protein_id=pid, verdict=VERDICT_VALIDATED,
+                    contig_id=slot["contig_id"], gene_index=slot["gene_index"],
+                    matched_required=matched, neighbor_annotations=names,
+                ))
+            else:
+                missing = [t for t in req_all_n if t not in matched]
+                verdicts.append(ContextVerdict(
+                    protein_id=pid, verdict=VERDICT_NO_CONTEXT,
+                    contig_id=slot["contig_id"], gene_index=slot["gene_index"],
+                    matched_required=matched, neighbor_annotations=names,
+                    note=f"Missing required tokens: {', '.join(missing)}",
+                ))
+            continue
+
+        # No requirements specified — caller only cared about blocklist.
+        # Empty blocklist + empty requirements = AMBIGUOUS (caller should
+        # have passed one of them).
+        verdicts.append(ContextVerdict(
+            protein_id=pid, verdict=VERDICT_AMBIGUOUS,
+            contig_id=slot["contig_id"], gene_index=slot["gene_index"],
+            neighbor_annotations=names,
+            note="No required_any/required_all/blocklist; nothing to check.",
+        ))
+
+    return verdicts
+
+
+def summarize_verdicts(verdicts: list[ContextVerdict]) -> dict:
+    """Compact summary suitable for a finding's `evidence` field."""
+    counts: dict[str, int] = {}
+    for v in verdicts:
+        counts[v.verdict] = counts.get(v.verdict, 0) + 1
+    total = len(verdicts)
+    return {
+        "total": total,
+        "counts": counts,
+        "validated_fraction": (counts.get(VERDICT_VALIDATED, 0) / total) if total else 0.0,
+        "rejected_fraction": (
+            (counts.get(VERDICT_BLOCKED, 0) + counts.get(VERDICT_NO_CONTEXT, 0)) / total
+        ) if total else 0.0,
+    }
+
+
 __all__ = [
     "PROBLEM_DOMAINS",
     "validate_annotation",
     "validate_context",
     "analyze_crispr_systems",
     "detect_annotation_errors",
+    # Batch context validation (shared by domain skills)
+    "ContextVerdict",
+    "batch_context_validate",
+    "summarize_verdicts",
+    "VERDICT_VALIDATED",
+    "VERDICT_NO_CONTEXT",
+    "VERDICT_BLOCKED",
+    "VERDICT_AMBIGUOUS",
+    "VERDICT_MISSING",
 ]
