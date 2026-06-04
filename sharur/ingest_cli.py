@@ -254,6 +254,18 @@ def run(
         bool,
         typer.Option(help="Print the planned stage commands without executing them"),
     ] = False,
+    emit_slurm: Annotated[
+        bool,
+        typer.Option(
+            "--emit-slurm",
+            help=(
+                "Instead of running, emit SLURM scripts honoring CLAUDE.md rules "
+                "(--exclusive, no --time, Astra array, --dependency=afterok). "
+                "Scripts land in <data-dir>/pipeline/. Then run "
+                "`bash <data-dir>/pipeline/submit.sh` to launch the chain."
+            ),
+        ),
+    ] = False,
 ) -> list[list[str]] | None:
     """
     Run the staged ingest pipeline from the primary CLI entrypoint.
@@ -266,6 +278,35 @@ def run(
     data_dir.mkdir(parents=True, exist_ok=True)
     stages = StagePaths.from_root(data_dir)
     planned: list[list[str]] = []
+
+    if emit_slurm:
+        # Short-circuit: emit scripts honoring CLAUDE.md SLURM rules.
+        from sharur.slurm_templates import PipelineSpec, emit_pipeline
+
+        repo_root = Path(__file__).resolve().parents[1]
+        # Dataset name = last path segment of data_dir
+        dataset_name = data_dir.resolve().name
+        pipeline_dir = data_dir / "pipeline"
+        log_dir = data_dir / "logs"
+
+        spec = PipelineSpec(
+            dataset_name=dataset_name,
+            sharur_root=repo_root,
+            input_dir=input_dir.resolve() if input_dir.exists() else input_dir,
+            data_dir=data_dir,
+            log_dir=log_dir.resolve(),
+            pipeline_dir=pipeline_dir.resolve(),
+            skip_astra=skip_astra,
+            skip_crispr=skip_crispr,
+            skip_embeddings=skip_embeddings,
+        )
+        written = emit_pipeline(spec)
+        console.print(f"[green]Emitted {len(written)} SLURM scripts to {pipeline_dir}[/green]")
+        for name, path in written.items():
+            console.print(f"  - {name} -> {path}")
+        console.print()
+        console.print(f"Run: [bold]bash {pipeline_dir}/submit.sh[/bold]")
+        return None
 
     if mode == "fast":
         if dry_run:
