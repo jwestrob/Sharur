@@ -631,3 +631,68 @@ python -m pytest tests/test_predicates_v2/ -v
 # V2 + schema migration tests
 python -m pytest tests/test_predicates_v2 tests/test_schema_migration.py -q --no-cov
 ```
+
+---
+
+## Appendix: Design rationale & history
+
+> Lifted from the original `PREDICATE_V2_SPEC.md` build plan (now retired). Preserved here
+> for the *why* behind V2. Note one premise of that spec is now obsolete: V2 was designed to
+> run in **shadow mode** alongside V1 with switchover "deferred to a separate PR." That
+> switchover has since happened — V2 is the normal Stage 07 backend and materializes the
+> legacy `protein_predicates` compat table (commit `ebc141a`).
+
+### Why V2 — the three V1 limitations it set out to fix
+
+The flat V1 predicate system (≈547 predicates, ~8000 lines of vocabulary + mappings +
+generator) worked but had three structural limitations:
+
+1. **Flat booleans.** `hydrogenase`, `membrane`, and `giant` were all the same type — no
+   way to ask "give me all activity-type predicates" or "what localization claims exist for
+   this protein," and no way to distinguish a structural observation from a functional claim.
+2. **Hard-coded composite logic.** Rules like "NiFe hydrogenase requires PF00374 AND not
+   Complex I" lived in Python methods, so adding a validation rule meant editing code, not
+   config.
+3. **No curation feedback.** Every new dataset had hundreds of annotation accessions that hit
+   no mapping and silently produced no predicates, with no mechanism to surface
+   "PF12345 appears in 847 proteins and has no mapping."
+
+### Rule-loading strategy (why V1 mappings were not rewritten as YAML)
+
+V2 deliberately **imports the existing V1 mapping dicts directly** rather than porting ~6200
+lines of Python mappings to YAML:
+
+1. `rules.py` imports `PFAM_TO_PREDICATES`/`PFAM_PATTERNS`, `KEGG_TO_PREDICATES`, etc. from
+   `sharur/predicates/mappings/`.
+2. For each emitted V1 predicate, V2 looks up its facet in `facet_assignments.yaml` and its
+   relation in `relation_overrides.yaml`. Defaults: facet from the V1 category→facet table
+   (below); relation by source — `kegg`/`hyddb`/`defensefinder_system` → `implies`,
+   `pfam`/`cazy` → `supports`, `vogdb`/`defensefinder` (raw HMM) → `flags`.
+3. YAML overrides take precedence — this is how specific PFAMs get promoted from `supports`
+   to `implies` (e.g. PF00374 NiFeSe_Hases → `implies hydrogenase`).
+4. Genuinely new rules with no V1 equivalent go directly in YAML.
+
+### V1 category → V2 facet default mapping
+
+```yaml
+enzyme: activity        metabolism: activity     cazy: activity
+transport: role         regulation: role         binding: role
+mobile: role            stress: role             info_processing: role
+division: role          viral: role
+structure: architecture
+envelope: localization
+size: size_class
+annotation: quality_flag   composition: quality_flag
+topology: topology
+```
+
+Predicates needing a manual override (e.g. `membrane`, V1 category `transport` but facet
+`localization`) are pinned in `facet_assignments.yaml`.
+
+### Original non-goals (V2 v1 scope)
+
+- DSL query language for agents (was future work; `search_by_atoms`/composites now cover much of this)
+- Neighborhood/context-based atoms — V2 is intrinsic (per-protein) only; locus-level semantics remain future work
+- Automatic curation of the review queue — curation is manual (agents add YAML entries)
+- ~~Production switchover~~ — **done** (see note above)
+- Migration of V1 mapping files to YAML — V2 imports the Python dicts; YAML is for overrides/new rules only
