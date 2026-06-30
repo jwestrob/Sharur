@@ -284,6 +284,52 @@ This creates an audit trail that reviewers can independently verify.
 
 ---
 
+## 8. Cas12f / TnpB / OrfB — the non-Cas RuvC trap (HARD RULE)
+
+**Do not report Cas12f as a finding.** Cas12f, TnpB, and IS200/IS605 OrfB share a RuvC-like nuclease fold. PFAM `Cas12f`/`Cas12f1` matches all three with high false-positive rates. In metagenomes — especially archaeal — the overwhelming majority of "Cas12f" PFAM hits are non-Cas TnpB or IS-OrfB transposases. This trap has produced spurious "novel CRISPR effector" findings on multiple datasets despite existing guidance to discount it.
+
+**Default behavior**: treat any PFAM `Cas12f*` hit as a TnpB-family RuvC homolog, NOT as a CRISPR effector. Inventory at PFAM-completeness level only; do not survey, explore, or characterize.
+
+**The only exception** — a Cas12f finding may be elevated only when ALL of these hold:
+1. The protein is **not** carrying IS200/IS605 OrfB co-annotation on the same protein record
+2. The protein is **within 5 kb of a MinCED-detected CRISPR array** in the same bin
+3. The locus carries **either Cas4-Cas1-Cas2 adaptation OR Tn7 (TnsB/C/TniQ) CAST machinery** within 20 genes
+4. The locus is **not within 10 genes of a TnpA/Y1_Tnp transposase** (that combination is the diagnostic TnpB pairing)
+
+A single failing condition disqualifies the finding. Drop it.
+
+**Do not** open a Cas12f explore agent unless a survey-phase finding meets all four conditions for at least one locus.
+
+**Reviewer_2 must reject** any finding that elevates "Cas12f" without all four conditions evidenced in the verification queries.
+
+This rule supersedes any softer "watch for TnpB confusion" comments elsewhere in the skill set (`defense.md`, `manuscript_guide.md`).
+
+---
+
+## 9. Confidence in catalytic function from single-HMM annotations
+
+Catalytic substrate identity is typically not well-resolved by a single PFAM domain hit alone. PFAM HMMs frequently match multiple protein families that share a fold but catalyze different reactions on different substrates — for instance, the same RubisCO large-subunit HMM scores across form I, form II, form III, and RuBisCO-like proteins, which span substantively different substrate ranges. KOFAM HMMs exhibit a comparable pattern at a different scale of divergence: a top-scoring KO assignment can sit just above many near-tied KO models that together indicate a fold superfamily rather than a confident substrate-specific call. The Sharur database surfaces only the best hit per protein, which removes the multi-hit evidence that would otherwise signal this ambiguity. Substrate-level claims from a single PFAM or KEGG annotation generally benefit from supporting context — neighboring partner subunits, pathway co-localization, or other contig-resident evidence — before the call is treated as confident.
+
+---
+
+## 10. KEGG / KOFAM scope of confidence
+
+KEGG annotations are most reliable in canonical model-organism contexts. For non-model lineages — uncultured archaea, environmental anaerobes, novel phyla, divergent or basal clades — KOFAM HMM coverage has uneven gaps that vary by pathway and lineage, with the gaps often invisible at the time of analysis. In these contexts, default to PFAM-first scoring, cross-reference with KEGG where the KO is available, and read KEGG absence as uninformative rather than as evidence of pathway absence. KEGG remains the canonical pathway atlas — narrowing its scope of high-confidence inference for non-model lineages preserves its strengths without overstating its coverage.
+
+---
+
+## 11. Figure construction
+
+Figures begin with the argument they make, not the data they show. Write the argument in one sentence before opening a plotting tool. The visualization type follows from the argument. After rendering, `Read` the PNG and verify the argument lands at a glance; iterate the layout until it does. The minimum protocol is render → Read → critique → adjust, repeated until the figure communicates clearly at the size humans will read it.
+
+---
+
+## 12. Lineage biology cross-reference
+
+Before shipping a quantitative claim about a named lineage, verify the claim is consistent with published biology for that lineage. Where the claim contradicts standard pathway biology for a well-studied lineage — for instance, a documented producer scoring zero for the biosynthesis pathway, or an obligate anaerobe carrying a pathway whose markers require oxygen — web-search to confirm or to identify the methodological gap behind the apparent contradiction. The literature-validation step is cheap and catches the highest-impact errors.
+
+---
+
 ## Self-Contained Finding Titles
 
 Finding titles must include ALL qualifiers. A reader should understand the scope from the title alone:

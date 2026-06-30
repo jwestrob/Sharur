@@ -42,6 +42,14 @@ DEFAULT_MEMORY_DIR = Path(os.environ.get(
     "-groups-banfield-users-jwestrob-bin-Sharur/memory",
 ))
 
+# User-level CLAUDE.md (research-track context, vault pointers, hardware notes,
+# folding/ELSA conventions). Auto-injected for the main Claude Code session but
+# NOT inherited by Task() subagents — bundle pulls it in.
+DEFAULT_USER_CLAUDE_MD = Path(os.environ.get(
+    "SHARUR_USER_CLAUDE_MD",
+    str(Path.home() / ".claude" / "CLAUDE.md"),
+))
+
 
 # Sections of CLAUDE.md worth including verbatim in every subagent preamble.
 # Headings to match (level-2 markdown headings under "Core Rules" and the SLURM
@@ -189,10 +197,12 @@ def bundle(
     dataset_path: Optional[Path | str] = None,
     repo_root: Optional[Path | str] = None,
     memory_dir: Optional[Path | str] = None,
+    user_claude_md: Optional[Path | str] = None,
     include_memories: bool = True,
     include_skill: bool = True,
     include_core: bool = True,
     include_validation: bool = True,
+    include_user_claude_md: bool = True,
 ) -> str:
     """Build a subagent preamble blob.
 
@@ -215,6 +225,7 @@ def bundle(
     """
     repo = Path(repo_root) if repo_root else DEFAULT_REPO
     mem = Path(memory_dir) if memory_dir else DEFAULT_MEMORY_DIR
+    user_md = Path(user_claude_md) if user_claude_md else DEFAULT_USER_CLAUDE_MD
 
     parts: list[str] = [
         "# Sharur Subagent Preamble",
@@ -225,12 +236,27 @@ def bundle(
         "not reach you.",
     ]
 
+    if include_user_claude_md:
+        user_md_text = _read(user_md)
+        if user_md_text:
+            parts.append("\n---\n")
+            parts.append(
+                "## User-Level CLAUDE.md (`~/.claude/CLAUDE.md`)\n"
+                "Auto-injected for the parent session, NOT inherited by Task() "
+                "subagents. Includes: user profile, vault layout, hardware/SLURM "
+                "conventions, related software (fold, ELSA, etc.). When the task "
+                "touches Omnitrophota / SR-VP / DPANN / giant proteins / "
+                "lanthanide binding / structural biology, the vault project "
+                "directories pointed at here are likely the deepest context.\n"
+            )
+            parts.append(user_md_text)
+
     if include_core:
         claude_md = _read(repo / "CLAUDE.md")
         core = _extract_core_rules(claude_md) if claude_md else ""
         if core:
             parts.append("\n---\n")
-            parts.append("## Core Rules (from CLAUDE.md)\n")
+            parts.append("## Project Core Rules (from `<repo>/CLAUDE.md`)\n")
             parts.append(core)
 
     if include_validation:

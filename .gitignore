@@ -143,3 +143,12 @@ test_dataset/
 
 # Claude Code local settings (user-specific permissions)
 .claude/settings.local.json
+# Claude Code runtime locks & NFS lock files (transient)
+.claude/*.lock
+.claude/.nfs*
+
+# Local-only PDB CIF reference cache (multi-GB; not a checked-in artifact)
+mmcif/
+
+# Local-only swarm/dossier scripts (per-host scratch work, not shared)
+src/swarm/

@@ -344,7 +344,11 @@ KEGG_TO_PREDICATES: dict[str, list[str]] = {
     # -------------------------------------------------------------------------
     "K07481": ["transposase", "mobile_element"],  # IS transposase
     "K01356": ["integrase", "mobile_element", "recombinase"],  # int (phage integrase)
-    "K03529": ["crispr_associated", "defense_system"],  # cas1
+    # K03529 was previously mapped here with comment "# cas1" — that was wrong.
+    # K03529 is SMC (structural maintenance of chromosomes), not Cas1. Confirmed
+    # via KEGG REST and reviewer_2 wave-1 audit (54% inflation of cas_domain).
+    # The real Cas1 ortholog is K15342.
+    "K15342": ["crispr_associated", "defense_system"],  # cas1
     "K09951": ["crispr_associated", "defense_system"],  # cas2
     "K07012": ["crispr_associated", "cas_nuclease", "defense_system"],  # cas3
     "K19086": ["crispr_associated", "cas_nuclease", "defense_system"],  # cas9

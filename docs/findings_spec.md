@@ -238,6 +238,12 @@ Structure the `evidence` field based on what was found.
 
 ---
 
+## Revision Discipline
+
+When a finding is revised (e.g., after Reviewer_2 corrections), **rewrite the affected fields cleanly**. Do NOT append "UPDATED PER REVIEWER_2:" or "CORRECTION:" or wave-number markers to `description`, `title`, or `evidence`. Process metadata lives in a separate `revisions: [{wave, by, summary, ts}]` array on the finding, and in `review/wave{N}_corrections.{md,jsonl}`. The `description` field should always read as the current best understanding — a reader who never saw the prior version should not be able to tell one existed.
+
+---
+
 ## Verification
 
 **Every specific number must have a verification query.** This is the single most important field. Without it, findings are unauditable.

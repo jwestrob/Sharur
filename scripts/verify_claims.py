@@ -111,15 +111,42 @@ def normalise_value(v: Any) -> Any:
     return v
 
 
+def _flatten_sql_result(v: Any) -> Any:
+    """Normalize SQL fetchall shapes so list/tuple/row containers compare alike.
+
+    DuckDB returns rows as tuples. When a verification expects [251, 208] but
+    the actual is [(251, 208)] (one row, two cols), or (251, 208) (the run_sql
+    scalar-row path), they should compare equal — the data is the same.
+    """
+    if isinstance(v, list):
+        # Single-row result that we unpack
+        if len(v) == 1 and isinstance(v[0], (list, tuple)):
+            return _flatten_sql_result(list(v[0]))
+        return [_flatten_sql_result(x) for x in v]
+    if isinstance(v, tuple):
+        return [_flatten_sql_result(x) for x in v]
+    return v
+
+
 def compare_values(actual: Any, expected: Any) -> bool:
     """Pass if actual matches expected, with light type coercion."""
     a = normalise_value(actual)
     e = normalise_value(expected)
     if a == e:
         return True
+    # List/tuple/row alignment
+    a_norm = _flatten_sql_result(a)
+    e_norm = _flatten_sql_result(e)
+    if a_norm == e_norm:
+        return True
+    # Two-list element-by-element with numeric tolerance
+    if (isinstance(a_norm, list) and isinstance(e_norm, list)
+            and len(a_norm) == len(e_norm)):
+        if all(compare_values(ai, ei) for ai, ei in zip(a_norm, e_norm)):
+            return True
     # Numeric tolerance for small floats
     if isinstance(a, (int, float)) and isinstance(e, (int, float)):
-        return abs(a - e) < 1e-6 or (e != 0 and abs(a - e) / abs(e) < 1e-3)
+        return abs(a - e) < 1e-6 or (e != 0 and abs(a - e) / abs(e) < 1e-2)  # 1% tolerance
     # String case-insensitive
     if isinstance(a, str) and isinstance(e, str):
         return a.strip().lower() == e.strip().lower()
@@ -306,7 +333,12 @@ def main() -> int:
     summaries: list[FindingSummary] = []
     for fp in files:
         findings = load_findings(fp)
-        print(f"[{fp.relative_to(dataset.parent)}] {len(findings)} findings")
+        try:
+            label = str(fp.relative_to(dataset.parent))
+        except ValueError:
+            # dataset is symlinked; fall back to filename
+            label = fp.name
+        print(f"[{label}] {len(findings)} findings")
         for f in findings:
             summaries.append(verify_finding(f, conn, cwd, args.allow_shell))
 

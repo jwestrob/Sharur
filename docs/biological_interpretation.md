@@ -114,7 +114,7 @@ If all three find nothing AND genome is high-quality (<50 contigs), absence is p
 | Literature | "similar to", "consistent with" |
 | Experimental | "demonstrates", "confirms" (OK!) |
 
-**Common errors:** Domain presence ≠ function proof. MAG absence ≠ biological absence. Single marker ≠ pathway presence. Transposase ≠ mobile element proof (could be Cas12f). "First in analysis" ≠ "first ever."
+**Common errors:** Domain presence ≠ function proof. MAG absence ≠ biological absence. Single marker ≠ pathway presence. **PFAM `Cas12f*` ≠ Cas effector — by default it is TnpB or IS-OrfB; see `.claude/skills/_validation_protocols.md` §8 for the elevation rule.** "First in analysis" ≠ "first ever."
 
 ## Predicate System Design Principles
 

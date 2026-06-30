@@ -764,14 +764,24 @@ class KnowledgeBaseBuilder:
             except Exception as exc:
                 logger.warning(f"Failed to load GECCO loci: {exc}")
 
+        # MinCED numbers arrays per-file starting at CRISPR1, so every bin
+        # produces a "CRISPR1" that collides on the `loci.locus_id` PRIMARY KEY.
+        # Disambiguate by prefixing the per-file locus_id with the bin_id
+        # (derived from the json filename: `<bin_id>_crispr_arrays.json`).
+        # Before this fix, the per-file try/except caught every PK collision
+        # silently and only the first file's CRISPR arrays survived.
         for crispr_json in (self.outputs.stage05c_dir.glob("*_crispr_arrays.json") if self.outputs.stage05c_dir.exists() else []):
             try:
                 arrays = json.loads(crispr_json.read_text()).get("arrays", [])
+                # Strip the suffix to get the source bin_id; matches Stage 00's
+                # bin naming for the contig table.
+                bin_id_from_file = crispr_json.name.replace("_crispr_arrays.json", "")
                 loci_rows = []
                 for arr in arrays:
+                    orig_id = arr.get("id", "CRISPR")  # e.g. "CRISPR1"
                     loci_rows.append(
                         {
-                            "locus_id": arr.get("id"),
+                            "locus_id": f"{bin_id_from_file}::{orig_id}",
                             "locus_type": "crispr",
                             "contig_id": arr.get("contig"),
                             "start": arr.get("startCoordinate", 0),
@@ -797,6 +807,9 @@ class KnowledgeBaseBuilder:
                     # Filter to contigs that exist in the DB (CRISPR arrays
                     # may land on contigs with no predicted genes)
                     n_before = len(ldf)
+                    n_loci_before = self.conn.execute(
+                        "SELECT COUNT(*) FROM loci WHERE locus_type='crispr'"
+                    ).fetchone()[0]
                     self.conn.execute(
                         """
                         INSERT INTO loci (
@@ -806,13 +819,14 @@ class KnowledgeBaseBuilder:
                         WHERE contig_id IN (SELECT contig_id FROM contigs)
                         """,
                     )
-                    actual = self.conn.execute(
-                        "SELECT COUNT(*) FROM loci WHERE locus_type = 'crispr'"
+                    n_loci_after = self.conn.execute(
+                        "SELECT COUNT(*) FROM loci WHERE locus_type='crispr'"
                     ).fetchone()[0]
-                    skipped = n_before - actual if actual < n_before else 0
+                    inserted = n_loci_after - n_loci_before
+                    skipped = n_before - inserted if inserted < n_before else 0
                     if skipped > 0:
-                        logger.info(f"  crispr: skipped {skipped}/{n_before} arrays on contigs without genes")
-                    self.stats["loci"] += actual
+                        logger.info(f"  crispr: skipped {skipped}/{n_before} arrays on contigs without genes ({crispr_json.name})")
+                    self.stats["loci"] += inserted
             except Exception as exc:
                 logger.warning(f"Failed to load CRISPR arrays from {crispr_json}: {exc}")
 

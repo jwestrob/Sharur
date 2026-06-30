@@ -213,24 +213,10 @@ print(f"Type III systems (Cas10): {len(cas10)} proteins")
 ```
 
 **Type V** (signature: Cas12):
-```python
-# Cas12 variants - watch for TnpB confusion!
-# Use Context-First protocol: check neighborhood to distinguish real CRISPR loci
-# from orphan transposase-like domains
-cas12_candidates = b.store.execute("""
-    SELECT p.protein_id, a.name
-    FROM proteins p
-    JOIN annotations a ON p.protein_id = a.protein_id
-    WHERE a.name ILIKE '%cas12%'
-""")
 
-# Validate via neighborhood - true Cas12 should be near CRISPR arrays and other cas genes
-for pid, domain in cas12_candidates:
-    nbr = b.get_neighborhood(pid, window=8, all_annotations=True)
-    # Check for CRISPR array, other cas genes, or repeat-spacer structures nearby
-    # Isolated Cas12-like proteins without CRISPR context are likely TnpB transposases
-    print(f"  {pid}: {domain} — check neighborhood for CRISPR array context")
-```
+For **Cas12a/b/c/d/e** (the larger, well-characterized effectors): use the standard `b.get_neighborhood(...)` validation pattern from `_validation_protocols.md` §3 (Context-First Protocol). Real Cas12a-e effectors are 1000-1500 aa, near CRISPR arrays, with adaptation modules.
+
+For **Cas12f / Cas12f1 — DO NOT REPORT as a Cas finding by default.** The PFAM `Cas12f*` model cross-matches TnpB and IS200/IS605 OrfB at high rates. See `_validation_protocols.md` §8 for the four conditions that must ALL hold before elevating a Cas12f hit to a finding. If any condition fails, treat as TnpB-family RuvC homolog, inventory at PFAM-completeness level only, and do not open an explore agent on it.
 
 ### Step 4: Restriction-Modification Systems
 

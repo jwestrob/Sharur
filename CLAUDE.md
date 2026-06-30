@@ -121,6 +121,8 @@ b.get_neighborhood(protein_id, window=5, all_annotations=True)
 
 **Common errors:** Domain presence ≠ function proof. MAG absence ≠ biological absence. Single marker ≠ pathway presence. "First in analysis" ≠ "first ever."
 
+**Outputs reflect the current best understanding, not the editing trail.** Reviewer corrections, wave numbers, and "UPDATED PER reviewer_2" phrasing belong in dedicated metadata (`revisions` on a finding, `review/wave{N}_corrections.md`), never in the prose of a description, title, or narrative section. Apply edits as clean rewrites. The reader of the final artifact should see the truth as if it were always known; the editing history is available out of band.
+
 ### MAG Interpretation
 
 **Absence of evidence ≠ evidence of absence.** MAGs are inherently incomplete. Say "not detected in this MAG (N contigs)" — NOT "genome lacks X." Before claiming "A has X but B doesn't", verify B isn't just more fragmented.
@@ -134,9 +136,11 @@ b.get_neighborhood(protein_id, window=5, all_annotations=True)
 **Don't stop at generic predicates — drill into subgroup-level detail.**
 
 - **Hydrogenases:** `hydrogenase` → check `nife_group1`–`nife_group4`, `fefe_groupA`–`fefe_groupC`. Group 3 vs 4 reveals uptake vs evolution.
-- **CRISPR:** `cas_domain` → check `type_i_crispr`/`type_ii_crispr`/`type_iii_crispr`, effectors, `loci` table.
+- **CRISPR:** `cas_domain` → check `type_i_crispr`/`type_ii_crispr`/`type_iii_crispr`, effectors, `loci` table. **Cas12f/TnpB trap:** PFAM `Cas12f*` hits are TnpB/OrfB by default; do NOT survey, explore, or characterize them as Cas. See `.claude/skills/_validation_protocols.md` §8 for the four hard conditions that must all hold before any Cas12f hit can be elevated.
 - **Defense:** `defense_system` → check DefenseFinder system annotations for specific types. **CRITICAL: NEVER report raw DefenseFinder HMM hits as defense systems.** Raw hits have an 80%+ false positive rate. Only the `defense_systems` table (from MacSyFinder validation via `validate_defense_systems.py`) contains genuine system calls.
 - **CAZy:** `carbohydrate_active` → check `cazy:GH5`, `cazy:GT2`, etc. GH families reveal substrate specificity.
+
+For single-HMM catalytic-function calls, KEGG / KOFAM coverage in non-model lineages, figure construction (render → Read → critique → adjust), and the lineage-biology web-search cross-reference, see `.claude/skills/_validation_protocols.md` §9–§12.
 
 ---
 

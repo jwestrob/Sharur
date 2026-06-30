@@ -130,11 +130,20 @@ def main() -> int:
             print(f"  {ds.name}: synced {n} findings from sharur_ops.db")
         elif args.backfill_jsonl:
             for phase in ("survey", "exploration"):
-                jp = ds / phase / "findings.jsonl"
-                if jp.exists():
+                # Canonical findings.jsonl, plus any per-topic <topic>_findings.jsonl
+                # that some surveys produce (e.g. defense_findings.jsonl).
+                phase_dir = ds / phase
+                if not phase_dir.exists():
+                    continue
+                jsonls = list(phase_dir.glob("findings.jsonl")) + list(phase_dir.glob("*_findings.jsonl"))
+                seen = set()
+                for jp in jsonls:
+                    if jp in seen:
+                        continue
+                    seen.add(jp)
                     sub = mirror_from_findings_jsonl(g, jp, dataset_root=ds, min_novelty=args.min_novelty)
                     n += sub
-                    print(f"  {ds.name}/{phase}: backfilled {sub} findings from jsonl")
+                    print(f"  {ds.name}/{phase}/{jp.name}: backfilled {sub} findings from jsonl")
         else:
             print(f"  {ds.name}: no sharur_ops.db; skipped (--backfill-jsonl to use findings.jsonl)")
         total += n
