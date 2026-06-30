@@ -19,8 +19,9 @@ Sharur makes large metagenomic datasets navigable by AI agents. It combines a Du
 Given a set of metagenome-assembled genomes (MAGs), Sharur:
 
 1. **Ingests** proteins, annotations (PFAM, KEGG, HydDB, VOGdb, CAZy, DefenseFinder), CRISPR arrays, biosynthetic gene clusters, and ESM2 embeddings into a unified database
-2. **Computes predicates** -- functional tags derived from annotation combinations (e.g., `nife_group3`, `crispr_associated`, `giant_unannotated`) that make semantic search possible
+2. **Computes predicates** -- functional tags derived from annotation combinations (e.g., `nife_group3`, `crispr_associated`, `giant_unannotated`) that make semantic search possible. The current backend is **Predicate V2**, a typed semantic-atom system (see below)
 3. **Exposes operators** that agents call to explore the data: search by predicate, navigate genomic neighborhoods, find similar proteins by embedding, detect loci, export results
+4. **Maps synteny** with ELSA -- embedding-based conserved gene-block discovery over a per-dataset FAISS synteny store, loaded back into DuckDB as synteny blocks/clusters
 
 Agents bring the reasoning; Sharur brings the data access.
 
@@ -75,12 +76,29 @@ b.export_fasta(protein_ids, "output.faa")
 Sharur ships with skill specs in `.claude/skills/` that give Claude Code structured workflows for metagenomic analysis:
 
 ```
-/survey    # Systematic comprehensive survey of a dataset
-/explore   # Curiosity-driven hypothesis testing
-/defense   # Defense system inventory
-/metabolism # Metabolic pathway reconstruction
-/literature # Literature search for functional claims
+# Analysis
+/survey       # Systematic comprehensive survey of a dataset
+/explore      # Curiosity-driven hypothesis testing
 /characterize # Deep-dive on unknown proteins
+/compare      # Cross-genome comparative analysis
+/atlas        # Exhaustive genome-by-genome reading
+/metabolism   # Metabolic pathway reconstruction
+/pathway      # KEGG pathway completeness check
+
+# Domain specialists
+/defense      # Defense system inventory (MacSyFinder-validated)
+/prophage     # Prophage & viral element detection
+/hydrogenase  # NiFe/FeFe hydrogenase subgroup validation
+/synteny      # ELSA-powered conserved gene-block discovery
+/foldseek     # ESM3 structure prediction + Foldseek homology
+/visualize    # Publication-quality neighborhood/domain figures
+
+# Reasoning & orchestration
+/literature   # Literature search for functional claims
+/reviewer_2   # Adversarial manuscript claim verification
+/brainstorm   # Cross-domain synthesis + investigation proposals
+/coordinator  # Multi-agent analysis orchestration
+/query        # Fast ad-hoc database queries
 ```
 
 ## Architecture
@@ -89,18 +107,19 @@ Sharur ships with skill specs in `.claude/skills/` that give Claude Code structu
 ┌─────────────────────────────────────────────────────────┐
 │                   Agent (Claude Code, etc.)              │
 │  Skills • Workflows • Multi-turn reasoning              │
+│  sharur/ops: multi-agent coordination (FastAPI+SQLite)  │
 └────────────────────────┬────────────────────────────────┘
                          │
 ┌────────────────────────┴────────────────────────────────┐
 │                    Operator Layer                        │
 │  search • navigate • similarity • export • structure    │
-│  predicates • visualization • introspection             │
+│  predicates (V2 atoms) • synteny • visualization        │
 └────────────────────────┬────────────────────────────────┘
                          │
 ┌────────────────────────┴────────────────────────────────┐
 │                     Data Layer                           │
-│  DuckDB (proteins, annotations, loci, predicates)       │
-│  FAISS (ESM2 embeddings, similarity search)           │
+│  DuckDB (proteins, annotations, loci, semantic atoms)   │
+│  FAISS (ESM2 embeddings + ELSA synteny store)           │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -111,11 +130,15 @@ Sharur ships with skill specs in `.claude/skills/` that give Claude Code structu
 │   ├── core/              # Data models, session state, types
 │   ├── storage/           # DuckDB store, vector store, schema, migrations
 │   ├── operators/         # Search, navigation, similarity, export, visualization
-│   ├── predicates/        # Functional predicate system + PFAM/KEGG/CAZy/VOG mappings
+│   ├── predicates/        # V1 predicate system + PFAM/KEGG/CAZy/VOG mappings
+│   ├── predicates_v2/     # V2 semantic-atom backend (atoms, composites, review queue)
+│   ├── ops/               # Multi-agent coordination server + client
 │   └── reports/           # PDF report generation
+├── config/predicates_v2/  # V2 YAML config: facets, relations, composites
 ├── src/ingest/            # Ingestion pipeline (stages 00-07)
 ├── scripts/               # Reusable CLI utilities
 ├── tests/                 # Unit and integration tests
+├── docs/                  # On-demand reference guides (routed from CLAUDE.md)
 ├── .claude/skills/        # Claude Code skill specifications
 ├── CLAUDE.md              # Agent knowledge base (protocols, patterns, tools)
 └── pyproject.toml
@@ -125,7 +148,7 @@ Sharur ships with skill specs in `.claude/skills/` that give Claude Code structu
 
 The predicate system is what makes Sharur more than a database wrapper. Annotations are mapped to functional predicates via curated rules:
 
-- **PFAM**: 2000+ domain-to-predicate mappings + regex patterns
+- **PFAM**: domain-to-predicate mappings (~1,900 rows in `sharur/predicates/mappings/data/pfam_predicates.tsv`) + regex patterns
 - **KEGG**: KO-to-predicate mappings for metabolic functions
 - **CAZy**: Carbohydrate-active enzyme families
 - **VOGdb**: Viral orthologous groups
@@ -133,7 +156,11 @@ The predicate system is what makes Sharur more than a database wrapper. Annotati
 
 This lets agents ask functional questions ("find electron-bifurcating hydrogenases") instead of remembering accession numbers.
 
-The predicate system is a project very much in progress; there are tens of thousands of accessions that need to be described. Around 2-3,000 have been tagged so far. Pull requests to add more predicate tags to our system are more than welcome; they require careful attention and review. Please notify if you find any errors in classification among the predicate system. 
+### Predicate V2 (current backend)
+
+New Stage 07 builds use **Predicate V2**, a typed semantic-atom system. Instead of flat booleans, each atom is a structured claim carrying **facet** (activity / role / architecture / localization / topology / size_class / quality_flag), **relation** (how strongly the evidence implies/supports/flags the claim), and evidence metadata. Composite YAML rules combine atoms into higher-order conclusions, and unmapped accessions are surfaced in a frequency-ranked review queue. For backward compatibility, Stage 07 still materializes the legacy flat `protein_predicates` table from V2 output, so `search_by_predicates`, reports, and older scripts work unchanged. See [`docs/predicates_v2.md`](docs/predicates_v2.md) and `config/predicates_v2/`.
+
+The predicate system is a project very much in progress; there are tens of thousands of accessions that need to be described. Pull requests to add more predicate tags are more than welcome; they require careful attention and review. Please notify if you find any errors in classification.
 
 ## Ingest pipeline
 
@@ -164,11 +191,18 @@ pytest tests/ --override-ini addopts=""
 
 | Document | Purpose |
 |----------|---------|
-| [`CLAUDE.md`](CLAUDE.md) | Agent knowledge base -- tools, patterns, protocols |
+| [`CLAUDE.md`](CLAUDE.md) | Agent knowledge base -- core rules + routing table to `docs/` |
 | [`QUICKSTART.md`](QUICKSTART.md) | Primary `sharur-ingest` workflow for new datasets |
 | [`src/ingest/README.md`](src/ingest/README.md) | Manual stage-by-stage ingest reference |
 | [`QUICK_REFERENCE.md`](QUICK_REFERENCE.md) | SQL patterns and operator cheatsheet |
 | [`DATA_ORGANIZATION.md`](DATA_ORGANIZATION.md) | Data directory conventions |
+| [`docs/predicates_v2.md`](docs/predicates_v2.md) | Predicate V2 semantic-atom system |
+| [`docs/tools_reference.md`](docs/tools_reference.md) | Astra, ELSA, ESM3, Foldseek, V2 atoms |
+| [`docs/findings_spec.md`](docs/findings_spec.md) | Canonical schema for structured, verifiable findings |
+| [`docs/biological_interpretation.md`](docs/biological_interpretation.md) | Annotation provenance and claim discipline |
+| [`docs/analysis_workflow.md`](docs/analysis_workflow.md) | Full 5-phase analysis pipeline |
+| [`docs/manuscript_guide.md`](docs/manuscript_guide.md) | Manuscript and report compilation |
+| [`agent_ops_spec.md`](agent_ops_spec.md) | Multi-agent coordination layer (`sharur/ops/`) |
 
 ## Citation
 

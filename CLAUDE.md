@@ -59,6 +59,9 @@ For standard dataset ingestion, use `sharur-ingest` by default. That is the prim
 | `synteny.md` | ELSA-powered synteny discovery |
 | `coordinator.md` | Multi-agent analysis orchestration |
 | `brainstorm.md` | Cross-domain synthesis and investigation proposals |
+| `pathway.md` | KEGG metabolic pathway completeness check |
+| `query.md` | Fast ad-hoc database queries |
+| `visualize.md` | Publication-quality neighborhood & domain figures |
 
 ---
 
