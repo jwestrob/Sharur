@@ -16,7 +16,8 @@ data/
 │   ├── manifest.json                  # Analysis state and session continuity
 │   │
 │   ├── source/                        # Input files
-│   │   └── *.fna / *.fa / *.fasta     # Source genome assemblies
+│   │   ├── *.fna / *.fa / *.fasta     # Source genome assemblies (standard path)
+│   │   └── *.faa                      # Pre-called proteins (protein-only fallback path)
 │   │
 │   ├── stage00_prepared/              # Validated + organized assemblies
 │   ├── stage03_prodigal/              # Gene calls and protein FASTAs
@@ -34,6 +35,10 @@ data/
 │   ├── structures/                    # ESM3 structure predictions
 │   │   ├── *.pdb                      # Predicted PDB files
 │   │   └── foldseek_results.tsv       # Structural homology searches
+│   │
+│   ├── synteny/                       # ELSA synteny results + FAISS store
+│   │   ├── store/                     # FAISS synteny vector store + metadata
+│   │   └── results/                   # Anchors, blocks, clusters (loaded into DuckDB)
 │   │
 │   ├── exploration/                   # Exploration phase outputs
 │   │   ├── findings.jsonl             # Documented loci
@@ -55,9 +60,16 @@ data/
 │       └── *.png
 │
 ├── dbcan_db/                          # Reference databases (shared)
+├── antismash_hmms/                    # antiSMASH/BGC reference HMMs (shared)
 ├── reference/                         # Reference data (shared)
 └── example/                           # Test data (version controlled)
 ```
+
+> **Archival note:** `data/archives/` below is the in-repo convention. In practice,
+> completed datasets are usually moved to **external cold storage** (e.g. an external
+> drive) to reclaim space rather than kept under `data/`. Use whichever fits, but keep
+> the database + `exploration/` + `reports/` + `figures/` together so the analysis stays
+> reproducible.
 
 ## New Genome Checklist
 

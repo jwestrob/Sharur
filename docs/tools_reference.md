@@ -31,7 +31,7 @@ The stage 04 script handles all of this automatically.
 
 **Notes:**
 - `--prot_in` expects a **directory** containing `.faa` files, not a single file
-- Output: `<outdir>/<database>_results/tmp_results/bulk_results.tsv`
+- Output: consolidated hits at `<outdir>/<database_lowercase>_results/<DATABASE>_hits_df.tsv` (per-genome intermediates land in `tmp_results/*_results.tsv`)
 - For single files: `mkdir source/ && cp proteins.faa source/`
 
 ### Secretion System Identification (TXSScan)
