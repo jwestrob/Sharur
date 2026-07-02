@@ -1,0 +1,34 @@
+# Keep the build context small and avoid leaking local datasets / caches.
+.git/
+.github/
+data/
+docs/
+examples/
+assets/
+reports/
+figures/
+
+# Python / build caches
+__pycache__/
+*.egg-info/
+build/
+dist/
+sdist/
+coverage_html/
+.coverage*
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environments
+.venv/
+.pixi/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Sharur runtime artifacts
+sharur_ops.db*
+*.duckdb

@@ -165,10 +165,37 @@ b.get_neighborhood(protein_id, window=5, all_annotations=True)
 - **MinCED is single-threaded.** Run on the login node, not SLURM. A single-threaded job doesn't justify a cluster allocation.
 - **KOFAM is slow.** On large datasets (>100k proteins) KOFAM can take many hours. This is normal. Submit as a SLURM job with generous walltime (48h+).
 
-## Testing
+## Development Setup
+
+Sharur uses **pixi** as the source of truth for the environment and task runner
+(`pixi.toml` / `pixi.lock`). See `CONTRIBUTING.md` for the full workflow.
 
 ```bash
-python -m pytest tests/test_operators/test_predicate_generator.py -v
+pixi install                 # materialize the locked environment
+pixi run precommit-install   # install pre-commit hooks (once)
+pixi run doctor              # verify external tools / reference DBs (or: sharur doctor)
+```
+
+Astra & ELSA (git-source tools) and defense-finder are installed out-of-band — see
+`CONTRIBUTING.md` / `INSTALL.md`. A no-pixi conda fallback exists in `environment.yml`.
+
+## Testing / Lint / Typecheck
+
+Canonical commands run through pixi:
+
+```bash
+pixi run lint          # ruff check
+pixi run typecheck     # mypy sharur
+pixi run test          # full pytest suite
+pixi run test-fast     # pytest -m "not slow and not integration"
+pixi run cov           # pytest with coverage
+pixi run ci            # lint + typecheck + test-fast + doctor (what CI runs)
+```
+
+Ad hoc single-file example:
+
+```bash
+pytest tests/test_operators/test_predicate_generator.py -v
 python -c "from sharur.predicates.vocabulary import ALL_PREDICATES, list_categories; print(f'Total: {len(ALL_PREDICATES)}'); print(f'Categories: {list_categories()}')"
 ```
 

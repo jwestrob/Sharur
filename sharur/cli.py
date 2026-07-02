@@ -22,6 +22,7 @@ from typing import Optional
 
 import typer
 
+from sharur import __version__
 from sharur.operators import Sharur
 
 # Default DB path
@@ -34,6 +35,25 @@ app = typer.Typer(
     help="Sharur - Metagenomic dataset exploration CLI",
     rich_markup_mode=None,  # Disable rich to work around Typer 0.15 bug
 )
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(f"sharur {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def _main(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        callback=_version_callback,
+        is_eager=True,
+        help="Show the Sharur version and exit.",
+    ),
+) -> None:
+    """Sharur - Metagenomic dataset exploration CLI."""
 
 
 # ------------------------------------------------------------------ #
@@ -373,6 +393,72 @@ def predicates(
             typer.echo(f"**{pred.predicate_id}**: {pred.description}")
 
     typer.echo(f"\nTotal: {len(preds)} predicates")
+
+
+# ------------------------------------------------------------------ #
+# Doctor command — install verification
+# ------------------------------------------------------------------ #
+
+
+@app.command()
+def doctor(
+    strict: bool = typer.Option(
+        False,
+        "--strict",
+        help="Exit non-zero if any core tool/database is missing.",
+    ),
+):
+    """Verify external tools, reference databases, and API keys are available.
+
+    Default is informational (always exits 0) so it is safe as a CI smoke check
+    and container HEALTHCHECK. Pass --strict to fail when a core component is
+    missing.
+    """
+    from rich.console import Console
+    from rich.table import Table
+
+    from sharur import diagnostics
+
+    checks = diagnostics.run_all_checks()
+
+    console = Console()
+    table = Table(title=f"sharur doctor  (v{__version__})", show_lines=False)
+    table.add_column("", width=6)
+    table.add_column("Component", style="bold")
+    table.add_column("Version / Detail")
+    table.add_column("Purpose", style="dim")
+
+    style_for = {
+        diagnostics.OK: ("[green]ok[/green]", ""),
+        diagnostics.WARN: ("[yellow]WARN[/yellow]", ""),
+        diagnostics.MISSING: ("[red]MISS[/red]", "bold red"),
+    }
+    n_warn = 0
+    n_miss = 0
+    for c in checks:
+        badge, detail_style = style_for.get(c.status, ("?", ""))
+        if c.status == diagnostics.WARN:
+            n_warn += 1
+        elif c.status == diagnostics.MISSING:
+            n_miss += 1
+        table.add_row(
+            badge,
+            c.label if c.core else f"{c.label} [dim](optional)[/dim]",
+            f"[{detail_style}]{c.detail}[/{detail_style}]" if detail_style else c.detail,
+            c.purpose,
+        )
+
+    console.print(table)
+
+    core_failure = diagnostics.has_core_failure(checks)
+    summary = f"{n_miss} missing, {n_warn} warnings"
+    if core_failure:
+        console.print(f"[red]{summary} — core pipeline components missing.[/red]")
+    else:
+        console.print(f"[green]{summary} — core pipeline OK.[/green]")
+
+    if strict and core_failure:
+        raise typer.Exit(code=1)
 
 
 # ------------------------------------------------------------------ #

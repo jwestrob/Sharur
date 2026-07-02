@@ -1,0 +1,33 @@
+name: Dependency Audit
+# Manually triggered only. Runs pip-audit (OSV-backed) and generates a CycloneDX
+# SBOM. Dependabot is intentionally NOT enabled (it auto-runs on a schedule),
+# consistent with keeping all automation manual for now.
+on:
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install project + audit tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pip-audit cyclonedx-bom
+
+      - name: pip-audit
+        run: pip-audit --strict --desc
+
+      - name: Generate SBOM
+        run: cyclonedx-py environment -o sbom.cyclonedx.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sharur-sbom
+          path: sbom.cyclonedx.json
+          if-no-files-found: error

@@ -1,0 +1,32 @@
+# Pre-commit hooks for Sharur. Install with `pixi run precommit-install`.
+# Tool configuration (line length, rule selection, etc.) lives in pyproject.toml;
+# these hooks just invoke the already-configured tools. Bump `rev`s periodically.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+
+  - repo: https://github.com/psf/black
+    rev: 24.10.0
+    hooks:
+      - id: black
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.11.2
+    hooks:
+      - id: mypy
+        files: ^sharur/
+        additional_dependencies: [pydantic>=2.0.0]
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-added-large-files
+        args: [--maxkb=5000]
+      - id: check-merge-conflict
+      - id: check-toml
+      - id: check-yaml

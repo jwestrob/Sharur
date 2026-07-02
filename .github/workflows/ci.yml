@@ -1,0 +1,24 @@
+name: CI
+# Manually triggered only — no push/pull_request/schedule triggers, so the CI
+# strategy stays reviewable until we opt into automatic runs.
+on:
+  workflow_dispatch:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up pixi
+        uses: prefix-dev/setup-pixi@v0.8.1
+        with:
+          pixi-version: v0.34.0
+          environments: default
+          locked: true
+
+      # lint + typecheck + test-fast + doctor. `doctor` is non-strict, so a bare
+      # runner lacking the git-source tools (Astra/ELSA) still passes. Tests are
+      # scoped to "not slow and not integration" via the test-fast task.
+      - name: Run CI task
+        run: pixi run ci

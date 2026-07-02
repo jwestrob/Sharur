@@ -1,0 +1,38 @@
+name: Release
+# Manually triggered only. Builds the package and cuts a GitHub Release with the
+# wheel/sdist attached. Container images are published separately via
+# build-container.yml (with push=true). This is the scaffold future PyPI/bioconda
+# publishing would hang off.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.1.0). Must match VERSION."
+        required: true
+        type: string
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build wheel + sdist
+        run: |
+          python -m pip install --upgrade build
+          python -m build
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          name: Sharur ${{ inputs.tag }}
+          body_path: CHANGELOG.md
+          files: dist/*
+          draft: true

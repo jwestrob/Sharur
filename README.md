@@ -182,10 +182,17 @@ Stage 07 also runs **hydrogenase subgroup classification** when HydDB annotation
 
 ## Development
 
+Sharur uses [pixi](https://pixi.sh) for a reproducible environment and task runner
+(see [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full workflow and
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for deployment):
+
 ```bash
-pip install -e ".[dev]"
-pytest tests/ --override-ini addopts=""
+pixi install            # locked conda + PyPI environment
+pixi run doctor         # verify tools / reference DBs (sharur doctor)
+pixi run ci             # lint + typecheck + test-fast + doctor
 ```
+
+No-pixi fallback: `conda env create -f environment.yml && pip install -e ".[dev]"`.
 
 ## Key documents
 

@@ -1,3 +1,12 @@
+# Conda environment — a NO-PIXI FALLBACK only.
+#
+# pixi.toml / pixi.lock are the authoritative, reproducible environment (see
+# CONTRIBUTING.md). This file is kept for contributors who don't use pixi and
+# may lag behind pixi.toml.
+#
+# Usage:
+#   conda env create -f environment.yml && conda activate sharur
+#   pip install -e ".[dev]"     # editable install is a separate, explicit step
 name: sharur
 channels:
   - conda-forge
@@ -21,6 +30,7 @@ dependencies:
   - diamond
   - hmmer
   - quast
+  - dfast_qc            # invoked by src/ingest/02_dfast_qc.py
   - minced
   - gecco
   - dbcan               # run_dbcan / dbCAN HMMdb
@@ -30,9 +40,9 @@ dependencies:
   # Document generation (conda-forge)
   - pandoc
 
-  # pip-only packages
+  # pip-only packages (defense-system validation; installed --no-deps to avoid
+  # a click version clash with typer)
   - pip:
-      - -e ".[dev]"
       # Defense system co-location validation
       - macsyfinder==2.1.4
       - --no-deps mdmparis-defense-finder

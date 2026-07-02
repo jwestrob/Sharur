@@ -1,0 +1,95 @@
+# pixi manifest — the source of truth for Sharur's environment and task runner.
+#
+# `pixi.lock` (generated from this file with `pixi install`) pins the conda
+# (conda-forge + bioconda) and PyPI dependency layers together. `environment.yml`
+# remains only as a no-pixi conda fallback and may lag this file.
+#
+# Generate/refresh the lock:   pixi install
+# Run a task:                  pixi run <task>
+
+[workspace]
+name = "sharur"
+description = "Agent-driven metagenomic discovery system"
+channels = ["conda-forge", "bioconda"]
+# Resolution risk: some bioconda tools may lack an osx-arm64 build. If the solve
+# fails on osx-arm64, drop it here (keep linux-64 as primary) or platform-gate
+# the offending deps rather than removing the tool.
+platforms = ["linux-64", "osx-arm64"]
+
+[dependencies]
+python = "3.12.*"
+pip = "*"
+
+# Compiled scientific libraries (conda-forge)
+numpy = "*"
+scipy = "*"
+pandas = "*"
+pyarrow = "*"
+h5py = "*"
+matplotlib = "*"
+pandoc = "*"
+
+# Bioinformatics CLI tools (bioconda)
+prodigal = "*"
+diamond = "*"
+hmmer = "*"
+quast = "*"
+minced = "*"
+gecco = "*"
+dbcan = "*"          # provides run_dbcan / dbCAN HMM database
+kalign3 = "*"        # multiple sequence alignment
+foldseek = "*"
+dfast_qc = "*"       # invoked by src/ingest/02_dfast_qc.py — was missing from environment.yml
+
+[pypi-dependencies]
+# The Sharur package itself, editable, with its dev extra (pytest/ruff/black/mypy/pre-commit).
+sharur = { path = ".", editable = true, extras = ["dev"] }
+# Tooling for the build/audit/sbom tasks.
+build = "*"
+pip-audit = "*"
+cyclonedx-bom = "*"  # provides `cyclonedx-py` for the SBOM task
+
+# --- git-source tools: left as TODO(user), excluded from the lock until supplied ---
+# Astra (HMM annotation, stage 04). Canonical repo per CITATIONS.md; pin a rev:
+#   astra = { git = "https://github.com/jwestrob/astra.git", rev = "<TODO(user): SHA>" }
+# ELSA (synteny). Repository URL is not recorded anywhere in the codebase:
+#   elsa = { git = "<TODO(user): ELSA repo URL>", rev = "<TODO(user): SHA>" }
+#
+# Defense-system validation (macsyfinder + mdmparis-defense-finder) is a manual
+# install: mdmparis-defense-finder pins click==8.0.3, which conflicts with typer's
+# newer click under pixi's unified resolver. Install it out-of-band as
+# environment.yml does (`pip install --no-deps mdmparis-defense-finder`), then run
+# `defense-finder update`. See CONTRIBUTING.md / docs/DEPLOYMENT.md.
+
+[tasks]
+lint = "ruff check sharur tests src"
+format = "black . && ruff check --fix sharur tests src"
+typecheck = "mypy sharur"
+test = "pytest tests"
+test-fast = "pytest tests -m 'not slow and not integration'"
+cov = "pytest tests --cov=sharur --cov-report=term-missing"
+doctor = "sharur doctor"
+build = "python -m build"
+audit = "pip-audit"
+sbom = "cyclonedx-py environment -o sbom.cyclonedx.json"
+precommit-install = "pre-commit install"
+ci = { depends-on = ["lint", "typecheck", "test-fast", "doctor"] }
+
+# GPU variant: a CUDA-enabled PyTorch for the runtime-gpu container image.
+# Selected via the `gpu` environment (`pixi run -e gpu ...`).
+#
+# NOTE(lock-time): sharur's pyproject lists `torch` as a PyPI dependency, which
+# pixi pulls into every environment — including `gpu`. Adding conda `pytorch-gpu`
+# here can therefore clash with the CPU torch wheel. When generating the lock,
+# resolve this deliberately (e.g. provide a CUDA torch via a pypi index-url for
+# the gpu feature, or override torch to the conda build) so the gpu env has a
+# single, GPU-enabled torch.
+[feature.gpu]
+platforms = ["linux-64"]
+
+[feature.gpu.dependencies]
+pytorch-gpu = "*"
+
+[environments]
+default = { solve-group = "default" }
+gpu = { features = ["gpu"] }

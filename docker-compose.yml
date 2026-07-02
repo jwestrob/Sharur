@@ -1,0 +1,77 @@
+# Sharur deployment (homelab). See docs/DEPLOYMENT.md.
+#
+#   docker compose build
+#   docker compose --profile init run --rm db-init   # one-time reference DBs
+#   docker compose up sharur-ops                      # coordination server :8811
+#   docker compose run --rm sharur-cli overview --db data/<dataset>/sharur.duckdb
+#
+# Partial-container note: Astra (stage 04) and ELSA (synteny) are not in the image
+# yet (TODO(user) pins). The library + bioconda tools work; those two stages don't.
+
+services:
+  # Multi-agent coordination server (FastAPI + SQLite).
+  sharur-ops:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: sharur:cpu
+    command: ["uvicorn", "sharur.ops.server:app", "--host", "0.0.0.0", "--port", "8811"]
+    ports:
+      - "8811:8811"
+    environment:
+      SHARUR_OPS_DB_PATH: /data/ops/sharur_ops.db
+    volumes:
+      - ops-db:/data/ops
+      - ./data:/app/data
+
+  # One-shot CLI runner. `docker compose run --rm sharur-cli <args>`.
+  sharur-cli:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: sharur:cpu
+    entrypoint: ["/bin/bash", "/shell-hook.sh", "sharur"]
+    environment:
+      ESM_API_KEY: ${ESM_API_KEY:-}
+    volumes:
+      - ./data:/app/data
+      - astra-hmms:/root/.config/Astra
+      - foldseek-dbs:/root/.foldseek
+      - macsyfinder-models:/root/.macsyfinder
+
+  # One-time reference-database provisioning. Never runs implicitly (profile-gated):
+  #   docker compose --profile init run --rm db-init
+  # FOLDSEEK_DBS controls which (large) structure DBs to fetch.
+  db-init:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: sharur:cpu
+    profiles: ["init"]
+    entrypoint: ["/bin/bash", "/shell-hook.sh", "bash", "-lc"]
+    environment:
+      FOLDSEEK_DBS: ${FOLDSEEK_DBS:-Alphafold/UniProt50}
+    command:
+      - |
+        set -e
+        for db in $${FOLDSEEK_DBS//,/ }; do
+          echo "Downloading Foldseek DB: $$db"
+          foldseek databases "$$db" "/root/.foldseek/$$db" /tmp/foldseek-tmp
+        done
+        # TODO(user): enable once Astra is baked into the image (see Dockerfile):
+        #   astra initialize --hmms PFAM KOFAM HydDB DefenseFinder dbCAN
+        # TODO(user): enable once defense-finder is installed (manual, see CONTRIBUTING.md):
+        #   defense-finder update
+    volumes:
+      - astra-hmms:/root/.config/Astra
+      - foldseek-dbs:/root/.foldseek
+      - macsyfinder-models:/root/.macsyfinder
+
+volumes:
+  ops-db:
+  astra-hmms:
+  foldseek-dbs:
+  macsyfinder-models:

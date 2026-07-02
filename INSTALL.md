@@ -18,9 +18,16 @@ conda env create -f environment.yml
 
 # Activate the environment
 conda activate sharur
+
+# Install Sharur in editable mode (a separate, explicit step)
+pip install -e ".[dev]"
 ```
 
-The `environment.yml` installs Sharur in editable mode with all dependencies plus dev tools via `pip install -e ".[dev]"`. It also installs `macsyfinder` and `mdmparis-defense-finder` (the latter with `--no-deps` to avoid a click version conflict — see Troubleshooting).
+> **Prefer pixi.** `pixi.toml` / `pixi.lock` are the authoritative, reproducible
+> environment and task runner (`pixi install`); `environment.yml` is a no-pixi
+> fallback and may lag. See `CONTRIBUTING.md`.
+
+The `environment.yml` provides Python, compiled libs, and the bioinformatics CLI tools. It also installs `macsyfinder` and `mdmparis-defense-finder` (the latter with `--no-deps` to avoid a click version conflict — see Troubleshooting). The editable install of Sharur itself is the explicit `pip install -e ".[dev]"` step above.
 
 After environment creation, download the DefenseFinder model definitions:
 
