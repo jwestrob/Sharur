@@ -21,6 +21,7 @@ dependencies:
   - diamond
   - hmmer
   - quast
+  - dfast_qc            # invoked by src/ingest/02_dfast_qc.py
   - minced
   - gecco
   - dbcan               # run_dbcan / dbCAN HMMdb

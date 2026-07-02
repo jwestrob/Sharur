@@ -15,6 +15,7 @@ scientific records remain the canonical source of truth in
 
 import sqlite3
 import json
+import os
 import time
 import uuid
 import threading
@@ -28,12 +29,17 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from sharur import __version__
+
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
 
-DB_PATH = Path("sharur_ops.db")
-app = FastAPI(title="Sharur Ops", version="0.1.0")
+# DB path is configurable so containers can point it at a persistent volume.
+# A bare relative default resolves against the process CWD, which loses
+# coordination state across container restarts — hence the env override.
+DB_PATH = Path(os.environ.get("SHARUR_OPS_DB_PATH", "sharur_ops.db"))
+app = FastAPI(title="Sharur Ops", version=__version__)
 
 # ---------------------------------------------------------------------------
 # Database setup — single connection, WAL mode, serialized writes via lock
