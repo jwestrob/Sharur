@@ -33,6 +33,17 @@ cd Sharur
 pip install -e ".[dev]"
 ```
 
+### Verify your toolchain
+
+```bash
+sharur doctor        # report which external tools, reference DBs, and API keys are present
+sharur --version
+```
+
+`pip install` above gets you the Python library; the external bioinformatics tools (Prodigal,
+DIAMOND, HMMER, Astra, Foldseek, …) and reference databases install separately — see
+[`INSTALL.md`](INSTALL.md). `sharur doctor` shows exactly what's present and what's still missing.
+
 ### Ingest a dataset
 
 ```bash

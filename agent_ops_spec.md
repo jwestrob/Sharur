@@ -55,6 +55,15 @@ python sharur_ops.py
 
 Works identically on laptop (localhost:8811) and cluster (node:8811). Agents just change the base URL.
 
+The coordination DB defaults to `sharur_ops.db` in the process working directory. Set
+`SHARUR_OPS_DB_PATH` to pin it somewhere stable — a persistent volume, or a fixed path so the
+coordination state survives starting the server from a different directory:
+
+```bash
+export SHARUR_OPS_DB_PATH=/data/ops/sharur_ops.db
+uvicorn sharur.ops.server:app --host 0.0.0.0 --port 8811
+```
+
 ## Database
 
 SQLite in WAL mode. Single connection, writes serialized via threading lock. This eliminates all concurrency issues — WAL gives concurrent reads, the lock serializes writes, and each write (one finding row insert) takes microseconds.

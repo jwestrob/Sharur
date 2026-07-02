@@ -172,6 +172,9 @@ python -m pytest tests/test_operators/test_predicate_generator.py -v
 python -c "from sharur.predicates.vocabulary import ALL_PREDICATES, list_categories; print(f'Total: {len(ALL_PREDICATES)}'); print(f'Categories: {list_categories()}')"
 ```
 
+Run `sharur doctor` to verify external tools, reference DBs, and API keys are visible before an
+analysis run — `sharur doctor --strict` exits non-zero if a core tool/DB is missing.
+
 ## Standard Directory Structure
 
 ```

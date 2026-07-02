@@ -144,7 +144,15 @@ foldseek databases AlphaFoldDB50 ~/.foldseek/afdb50/afdb50 /tmp/foldseek
 
 ## Verification
 
-Run these commands to confirm everything is installed correctly:
+The quickest check is **`sharur doctor`**, which reports every external tool, reference
+database, and API key it can find and flags whatever is missing:
+
+```bash
+sharur doctor            # one-shot health check (tools, reference DBs, API keys)
+sharur doctor --strict   # exit non-zero if a core tool/DB is missing (for scripts)
+```
+
+For granular manual checks:
 
 ```bash
 # Core Python import
