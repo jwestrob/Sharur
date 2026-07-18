@@ -18,14 +18,14 @@ If you only have pre-called proteins and no assemblies, see [Alternative: Protei
 ## Prerequisites
 
 ### Software
-- Python 3.10+ with Sharur installed: `pip install -e ".[dev]"`
+- Python 3.10+ with Sharur installed: `pip install -e ".[embeddings]"`
 - Prodigal
 - [Astra](https://github.com/Dreycey/Astra)
 - MinCED
 - Optional but recommended GPU access for Stage 06 embeddings
 
 If `sharur-ingest` is not available after install, refresh the editable install:
-`pip install -e ".[dev]"`
+`pip install -e ".[embeddings]"`
 
 ### Astra databases
 - Standard: `PFAM`, `KOFAM`, `HydDB`, `DefenseFinder`, `dbCAN`

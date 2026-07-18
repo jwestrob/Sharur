@@ -16,9 +16,15 @@ import yaml
 from sharur.predicates_v2.model import SemanticAtom
 
 # ---------------------------------------------------------------------------
-# Config path
+# Prefer wheel-packaged config, with the source-tree path for editable work.
 # ---------------------------------------------------------------------------
-_CONFIG_DIR = Path(__file__).parent.parent.parent / "config" / "predicates_v2"
+_PACKAGED_CONFIG_DIR = Path(__file__).parent / "config"
+_SOURCE_CONFIG_DIR = Path(__file__).parent.parent.parent / "config" / "predicates_v2"
+_CONFIG_DIR = (
+    _PACKAGED_CONFIG_DIR
+    if _PACKAGED_CONFIG_DIR.is_dir()
+    else _SOURCE_CONFIG_DIR
+)
 _COMPOSITES_FILE = _CONFIG_DIR / "composites.yaml"
 
 

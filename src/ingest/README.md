@@ -12,7 +12,8 @@ sharur-ingest \
   --profile auto
 ```
 
-If `sharur-ingest` is missing, refresh the editable install with `pip install -e ".[dev]"`.
+If `sharur-ingest` is missing, refresh the editable install with
+`pip install -e ".[embeddings]"`.
 
 The default plan runs the core stages and skips optional QUAST, DFAST, GECCO, and the
 deprecated legacy dbCAN helper. Opt in with `--with-quast`, `--with-dfast`,

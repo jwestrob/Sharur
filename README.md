@@ -30,7 +30,7 @@ Agents bring the reasoning; Sharur brings the data access.
 ```bash
 git clone https://github.com/jwestrob/Sharur.git
 cd Sharur
-pip install -e ".[dev]"
+pip install -e ".[all,dev]"
 ```
 
 ### Verify your toolchain
@@ -40,9 +40,13 @@ sharur doctor        # report which external tools, reference DBs, and API keys 
 sharur --version
 ```
 
-`pip install` above gets you the Python library; the external bioinformatics tools (Prodigal,
-DIAMOND, HMMER, Astra, Foldseek, …) and reference databases install separately — see
-[`INSTALL.md`](INSTALL.md). `sharur doctor` shows exactly what's present and what's still missing.
+The command above installs every optional Python surface for a development checkout.
+`pip install -e "."` is the lean query/ingest-orchestration core; focused extras include
+`parquet`, `vectors`, `embeddings`, `ops`, `visualization`, `structure`, `reports`, and
+`notebooks`.
+External bioinformatics tools (Prodigal, DIAMOND, HMMER, Astra, Foldseek, …) and reference
+databases install separately — see [`INSTALL.md`](INSTALL.md). `sharur doctor` shows exactly
+what's present and what's still missing.
 
 ### Ingest a dataset
 
@@ -54,7 +58,7 @@ sharur-ingest \
   --profile auto
 ```
 
-`sharur-ingest` is the primary command-line interface for the standard ingest pipeline. Use it by default for new datasets. See [`QUICKSTART.md`](QUICKSTART.md) for the operator-facing guide and [`src/ingest/README.md`](src/ingest/README.md) for the manual stage-by-stage reference. [`scripts/ingest.py`](scripts/ingest.py) remains as a repo-local compatibility shim for the same implementation. If `sharur-ingest` is not on `PATH`, refresh the editable install with `pip install -e ".[dev]"`.
+`sharur-ingest` is the primary command-line interface for the standard ingest pipeline. Use it by default for new datasets. See [`QUICKSTART.md`](QUICKSTART.md) for the operator-facing guide and [`src/ingest/README.md`](src/ingest/README.md) for the manual stage-by-stage reference. [`scripts/ingest.py`](scripts/ingest.py) remains as a repo-local compatibility shim for the same implementation. If `sharur-ingest` is not on `PATH`, refresh the editable install with `pip install -e ".[embeddings]"`.
 
 The default plan runs the core stages and builds DuckDB before launching embeddings. Optional
 QC/BGC stages are opt-in with `--with-quast`, `--with-dfast`, or `--with-gecco`;
@@ -218,7 +222,7 @@ Stage 07 also runs **hydrogenase subgroup classification** when HydDB annotation
 ## Development
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[dev,vectors,ops,reports]"
 pytest tests/ --override-ini addopts=""
 ```
 

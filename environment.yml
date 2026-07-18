@@ -33,7 +33,7 @@ dependencies:
 
   # pip-only packages
   - pip:
-      - -e ".[dev]"
+      - -e ".[all,dev]"
       # Defense system co-location validation
       - macsyfinder==2.1.4
       - --no-deps mdmparis-defense-finder

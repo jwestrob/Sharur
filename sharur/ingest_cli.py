@@ -21,13 +21,12 @@ minced_crispr.py, 07_build_knowledge_base.py, and 06_esm2_embeddings.py.
 from __future__ import annotations
 
 import contextlib
-import json
 import shlex
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
 import typer
 from rich.console import Console
@@ -43,9 +42,6 @@ from sharur.ingest.stage_runner import execute_stage
 from sharur.ops.ledger import RunLedger
 
 
-if TYPE_CHECKING:
-    from collections.abc import Iterable
-
 console = Console()
 app = typer.Typer(
     no_args_is_help=True,
@@ -58,24 +54,18 @@ app = typer.Typer(
 )
 
 
-def _parse_contigs(fasta_path: Path) -> Iterable[tuple[str, str]]:
-    """Yield (contig_id, sequence) pairs from FASTA."""
-    header = None
-    seq_parts: list[str] = []
-    with open(fasta_path) as fh:
-        for raw_line in fh:
-            line = raw_line.strip()
-            if not line:
-                continue
-            if line.startswith(">"):
-                if header is not None:
-                    yield header, "".join(seq_parts)
-                header = line[1:].split()[0]
-                seq_parts = []
-            else:
-                seq_parts.append(line)
-        if header is not None:
-            yield header, "".join(seq_parts)
+def _stage_script_dir() -> Path:
+    """Resolve ingest stages from a wheel or the editable source tree."""
+    packaged = Path(__file__).resolve().parent / "ingest" / "stages"
+    if packaged.is_dir():
+        return packaged
+    source_tree = Path(__file__).resolve().parents[1] / "src" / "ingest"
+    if source_tree.is_dir():
+        return source_tree
+    raise FileNotFoundError(
+        "Sharur ingest stage scripts are missing from this installation; "
+        "reinstall Sharur from a current wheel or editable checkout"
+    )
 
 
 @dataclass
@@ -105,111 +95,6 @@ class StagePaths:
         )
 
 
-def _synthesize_pipeline(raw_dir: Path, data_dir: Path) -> None:
-    """
-    Build minimal stage outputs from contig FASTAs for smoke tests only.
-
-    Produces:
-      - stage02 manifest
-      - stage03 Prodigal-like FAA (1 gene per contig)
-      - stage04 PFAM-like TSV (one annotation per bin)
-      - stage05a GECCO-like BGC JSON (one cluster per bin)
-      - stage05b dbCAN-like CAZy JSON (empty ok)
-      - stage05c CRISPR JSON (empty)
-    """
-    stages = StagePaths.from_root(data_dir)
-    stages.stage02.mkdir(parents=True, exist_ok=True)
-    stages.stage03.mkdir(parents=True, exist_ok=True)
-    stages.stage04.mkdir(parents=True, exist_ok=True)
-    stages.stage05a.mkdir(parents=True, exist_ok=True)
-    stages.stage05b.mkdir(parents=True, exist_ok=True)
-    stages.stage05c.mkdir(parents=True, exist_ok=True)
-
-    genomes_manifest = {"genomes": []}
-    pfam_rows = []
-    gecco_clusters = []
-
-    fasta_paths = (
-        sorted(raw_dir.glob("*.fna"))
-        + sorted(raw_dir.glob("*.fa"))
-        + sorted(raw_dir.glob("*.fasta"))
-    )
-    if not fasta_paths:
-        raise FileNotFoundError(f"No FASTA files found in {raw_dir}")
-
-    for fasta_path in fasta_paths:
-        raw_bin_id = fasta_path.stem.replace(".contigs", "")
-        bin_id = raw_bin_id.replace("_", "")
-        contigs = list(_parse_contigs(fasta_path))
-
-        genomes_manifest["genomes"].append(
-            {
-                "genome_id": bin_id,
-                "taxonomy": {"name": "unknown", "completeness": 90.0, "contamination": 1.0},
-                "n_contigs": len(contigs),
-                "total_length": sum(len(seq) for _, seq in contigs),
-            }
-        )
-
-        bin_dir = stages.stage03 / "genomes" / bin_id
-        bin_dir.mkdir(parents=True, exist_ok=True)
-        faa_path = bin_dir / f"{bin_id}.faa"
-        with open(faa_path, "w") as faa:
-            for idx, (_contig_id, seq) in enumerate(contigs):
-                pid = f"{bin_id}_ctg{idx:05d}_00001"
-                faa.write(f">{pid} # 1 # {min(len(seq), 300)} # 1 # ID={pid};partial=00\n")
-                faa.write("M" * min(len(seq), 100) + "\n")
-                if idx == 0:
-                    pfam_rows.append(
-                        {
-                            "sequence_id": pid,
-                            "hmm_name": "PF00001",
-                            "e_value": 1e-5,
-                            "bit_score": 42.0,
-                            "ali_from": 1,
-                            "ali_to": 30,
-                            "name": "MockDomain",
-                            "description": "Synthetic annotation",
-                        }
-                    )
-                    gecco_clusters.append(
-                        {
-                            "cluster_id": f"{bin_id}_cluster1",
-                            "contig": pid.rsplit("_", 1)[0],
-                            "start": 1,
-                            "end": 100,
-                            "bgc_type": "nrps",
-                            "protein_list": [pid],
-                        }
-                    )
-
-    (stages.stage02 / "processing_manifest.json").write_text(json.dumps(genomes_manifest))
-
-    if pfam_rows:
-        header = [
-            "sequence_id",
-            "hmm_name",
-            "e_value",
-            "bit_score",
-            "ali_from",
-            "ali_to",
-            "name",
-            "description",
-        ]
-        lines = ["\t".join(header)]
-        for row in pfam_rows:
-            lines.append("\t".join(str(row[h]) for h in header))
-        (stages.stage04 / "synthetic_hits_df.tsv").write_text("\n".join(lines) + "\n")
-
-    (stages.stage05a / "combined_bgc_data.json").write_text(
-        json.dumps({"clusters": gecco_clusters})
-    )
-    (stages.stage05b / "synthetic_cazyme_results.json").write_text(json.dumps({"annotations": []}))
-    (stages.stage05c / "synthetic_crispr_arrays.json").write_text(json.dumps({"arrays": []}))
-
-    console.print(f"[green]Synthetic stages written under {data_dir}[/green]")
-
-
 def _build_tools_dag(
     *,
     input_dir: Path,
@@ -228,7 +113,7 @@ def _build_tools_dag(
     enable_cazymes: bool,
 ) -> IngestDAG:
     """Build the selected stage graph and its concrete resource-tuned commands."""
-    repo_root = Path(__file__).resolve().parents[1]
+    stage_dir = _stage_script_dir()
     nodes: list[StageNode] = []
 
     def add(
@@ -262,7 +147,7 @@ def _build_tools_dag(
         "00",
         "Prepare inputs",
         [
-            str(repo_root / "src" / "ingest" / "00_prepare_inputs.py"),
+            str(stage_dir / "00_prepare_inputs.py"),
             "-i",
             str(input_dir),
             "-o",
@@ -277,7 +162,7 @@ def _build_tools_dag(
             "01",
             "QUAST",
             [
-                str(repo_root / "src" / "ingest" / "01_run_quast.py"),
+                str(stage_dir / "01_run_quast.py"),
                 "-i",
                 str(stages.stage00),
                 "-o",
@@ -296,7 +181,7 @@ def _build_tools_dag(
             "02",
             "DFAST QC",
             [
-                str(repo_root / "src" / "ingest" / "02_dfast_qc.py"),
+                str(stage_dir / "02_dfast_qc.py"),
                 "-i",
                 str(stages.stage00),
                 "-o",
@@ -315,7 +200,7 @@ def _build_tools_dag(
             "03",
             "Prodigal",
             [
-                str(repo_root / "src" / "ingest" / "03_prodigal.py"),
+                str(stage_dir / "03_prodigal.py"),
                 "-i",
                 str(stages.stage00),
                 "-o",
@@ -335,7 +220,7 @@ def _build_tools_dag(
             "04",
             "Astra annotation",
             [
-                str(repo_root / "src" / "ingest" / "04_astra_scan.py"),
+                str(stage_dir / "04_astra_scan.py"),
                 "-i",
                 str(stages.stage03),
                 "-o",
@@ -353,7 +238,7 @@ def _build_tools_dag(
             "05a",
             "GECCO",
             [
-                str(repo_root / "src" / "ingest" / "gecco_bgc.py"),
+                str(stage_dir / "gecco_bgc.py"),
                 str(stages.stage00),
                 str(stages.stage05a),
                 "--threads",
@@ -373,7 +258,7 @@ def _build_tools_dag(
             "05b",
             "Legacy dbCAN",
             [
-                str(repo_root / "src" / "ingest" / "dbcan_cazyme.py"),
+                str(stage_dir / "dbcan_cazyme.py"),
                 "--input-dir",
                 str(stages.stage03 / "genomes" / "all_protein_symlinks"),
                 "--output-dir",
@@ -393,7 +278,7 @@ def _build_tools_dag(
             "05c",
             "MinCED arrays",
             [
-                str(repo_root / "src" / "ingest" / "minced_crispr.py"),
+                str(stage_dir / "minced_crispr.py"),
                 "--input-dir",
                 str(stages.stage00),
                 "--output-dir",
@@ -406,7 +291,7 @@ def _build_tools_dag(
 
     upstream_ids = tuple(node.stage_id for node in nodes)
     builder_command = [
-        str(repo_root / "src" / "ingest" / "07_build_knowledge_base.py"),
+        str(stage_dir / "07_build_knowledge_base.py"),
         "--data-dir",
         str(data_dir),
         "--output",
@@ -442,7 +327,7 @@ def _build_tools_dag(
             "06",
             "ESM2 embeddings",
             [
-                str(repo_root / "src" / "ingest" / "06_esm2_embeddings.py"),
+                str(stage_dir / "06_esm2_embeddings.py"),
                 "--device",
                 request.accelerator,
                 "--skip-index",
@@ -461,7 +346,7 @@ def _build_tools_dag(
             "06i",
             "Persistent FAISS index",
             [
-                str(repo_root / "sharur" / "ingest" / "vector_index_runner.py"),
+                str(Path(__file__).resolve().parent / "ingest" / "vector_index_runner.py"),
                 "--embeddings",
                 str(stages.stage06 / "protein_embeddings.h5"),
                 "--threads",
@@ -863,17 +748,31 @@ def run(
     if mode == "fast":
         if resource_profile.name == "slurm":
             raise typer.BadParameter("fast smoke mode does not support the slurm profile")
-        if dry_run:
-            console.print(
-                "[yellow]Dry run: fast mode would synthesize fixtures, then build Stage 07.[/yellow]"
-            )
-            return []
-        data_dir.mkdir(parents=True, exist_ok=True)
-        _synthesize_pipeline(input_dir, data_dir)
-        # Treat synthesized fixtures as external inputs to a one-node Stage 07 DAG.
-        repo_root = Path(__file__).resolve().parents[1]
-        command = [
-            str(repo_root / "src" / "ingest" / "07_build_knowledge_base.py"),
+        stage_dir = _stage_script_dir()
+        synthetic_command = [
+            str(Path(__file__).resolve().parent / "ingest" / "synthetic_stage.py"),
+            "--input-dir",
+            str(input_dir),
+            "--data-dir",
+            str(data_dir),
+        ]
+        fixture_node = StageNode(
+            stage_id="00",
+            label="Synthesize smoke-test fixtures",
+            command=synthetic_command,
+            required_outputs=(
+                stages.stage02 / "processing_manifest.json",
+                stages.stage03 / "genomes",
+                stages.stage04 / "synthetic_hits_df.tsv",
+                stages.stage05a / "combined_bgc_data.json",
+                stages.stage05b / "synthetic_cazyme_results.json",
+                stages.stage05c / "synthetic_crispr_arrays.json",
+            ),
+            input_paths=(input_dir,),
+            resource=resource_profile.request("00"),
+        )
+        builder_command = [
+            str(stage_dir / "07_build_knowledge_base.py"),
             "--data-dir",
             str(data_dir),
             "--output",
@@ -881,16 +780,16 @@ def run(
             "--force",
         ]
         if enable_cazymes:
-            command.append("--enable-cazymes")
-        node = StageNode(
+            builder_command.append("--enable-cazymes")
+        builder_node = StageNode(
             stage_id="07",
             label="Build synthetic knowledge base",
-            command=command,
+            command=builder_command,
+            dependencies=("00",),
             required_outputs=(output,),
-            input_paths=(stages.stage02 / "processing_manifest.json",),
             resource=resource_profile.request("07"),
         )
-        dag = IngestDAG([node])
+        dag = IngestDAG([fixture_node, builder_node])
         dag.compute_signatures(resource_profile)
     elif mode == "tools":
         dag = _build_tools_dag(

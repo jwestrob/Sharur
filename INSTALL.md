@@ -20,7 +20,10 @@ conda env create -f environment.yml
 conda activate sharur
 ```
 
-The `environment.yml` installs Sharur in editable mode with all dependencies plus dev tools via `pip install -e ".[dev]"`. It also installs `macsyfinder` and `mdmparis-defense-finder` (the latter with `--no-deps` to avoid a click version conflict — see Troubleshooting).
+The `environment.yml` installs Sharur in editable mode with all optional Python surfaces plus
+development tools via `pip install -e ".[all,dev]"`. It also installs `macsyfinder` and
+`mdmparis-defense-finder` (the latter with `--no-deps` to avoid a click version conflict —
+see Troubleshooting).
 
 After environment creation, download the DefenseFinder model definitions:
 
@@ -28,15 +31,33 @@ After environment creation, download the DefenseFinder model definitions:
 defense-finder update
 ```
 
-All runtime dependencies (torch, transformers, matplotlib, biopython, plotly, reportlab, jupyter, etc.) are installed by default with a bare `pip install -e "."`. The only optional extra is `[dev]` for testing and linting tools (pytest, ruff, mypy).
+The base install contains the DuckDB query/predicate surface and ingest orchestration without
+model frameworks, vector libraries, web serving, plotting, or notebooks. Add only the
+capabilities needed:
+
+| Extra | Adds |
+|---|---|
+| `parquet` | Optional PyArrow interoperability |
+| `vectors` | H5 inspection and persistent FAISS similarity |
+| `embeddings` | `vectors` dependencies plus Torch/Transformers embedding inference |
+| `ops` | FastAPI/uvicorn multi-agent coordination service |
+| `visualization` | Matplotlib, Plotly, and neighborhood rendering |
+| `structure` | Biopython and ESM structure prediction |
+| `reports` | PDF report backends |
+| `notebooks` | Jupyter and ipywidgets |
+| `all` | Every optional runtime surface |
+| `dev` | Tests, HTTP test client, linting, typing, and wheel building |
 
 ### Minimal install (no conda)
 
 If you only need the Python library without bioinformatics CLI tools:
 
 ```bash
-pip install -e "."        # all runtime deps
-pip install -e ".[dev]"   # + pytest, ruff, mypy
+pip install -e "."                              # lean core
+pip install -e ".[embeddings]"                  # standard ingest including Stage 06
+pip install -e ".[ops]"                         # optional coordination server
+pip install -e ".[dev,vectors,ops,reports]"     # regression-test surfaces
+pip install -e ".[all,dev]"                     # full development environment
 ```
 
 ## External Tools (not in conda)

@@ -1,0 +1,103 @@
+name: CI
+
+"on":
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install tested surfaces
+        run: python -m pip install -e ".[dev,vectors,ops,reports]"
+      - name: Check syntax and undefined names
+        run: python -m ruff check --select E9,F63,F7,F82 sharur src/ingest tests
+      - name: Run regression suite without coverage artifacts
+        run: python -m pytest --override-ini addopts="" -q
+      - name: Validate installed dependencies
+        run: python -m pip check
+      - name: Smoke-test optional ops launcher
+        run: sharur-ops --help
+
+  minimal-install:
+    name: Minimal wheel and CLI smoke
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install build frontend
+        run: python -m pip install build
+      - name: Build sdist and wheel outside the worktree
+        run: python -m build --outdir "${RUNNER_TEMP}/sharur-dist"
+      - name: Verify packaged configs and ingest stages
+        run: |
+          python - <<'PY'
+          import glob
+          import os
+          import zipfile
+
+          wheel, = glob.glob(os.path.join(os.environ["RUNNER_TEMP"], "sharur-dist", "*.whl"))
+          with zipfile.ZipFile(wheel) as archive:
+              names = set(archive.namelist())
+          required = {
+              "sharur/predicates_v2/config/composites.yaml",
+              "sharur/ingest/stages/00_prepare_inputs.py",
+              "sharur/ingest/stages/07_build_knowledge_base.py",
+          }
+          missing = required - names
+          if missing:
+              raise SystemExit(f"wheel is missing required runtime files: {sorted(missing)}")
+          PY
+      - name: Install minimal wheel
+        run: python -m pip install "${RUNNER_TEMP}"/sharur-dist/*.whl
+      - name: Smoke-test core entrypoints
+        run: |
+          scratch="$(mktemp -d)"
+          cd "${scratch}"
+          python -c "from sharur.operators import Sharur; print(Sharur)"
+          sharur --version
+          sharur-ingest --help
+          mkdir -p "${scratch}/input"
+          python -c "from pathlib import Path; Path('${scratch}/input/smoke.fna').write_text('>contig_1\\n' + 'ACGT' * 100 + '\\n')"
+          sharur-ingest \
+            --mode tools \
+            --profile local \
+            --dry-run \
+            --input-dir "${scratch}/input" \
+            --data-dir "${scratch}/data" \
+            --output "${scratch}/data/sharur.duckdb" \
+            --skip-prodigal \
+            --skip-astra \
+            --skip-crispr \
+            --skip-embeddings
+          sharur-ingest \
+            --mode fast \
+            --profile local \
+            --input-dir "${scratch}/input" \
+            --data-dir "${scratch}/fast" \
+            --output "${scratch}/fast/sharur.duckdb"
+          test -s "${scratch}/fast/sharur.duckdb"

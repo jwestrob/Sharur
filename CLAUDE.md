@@ -42,7 +42,8 @@ For standard dataset ingestion, use `sharur-ingest` by default. It runs a depend
 ledger-backed DAG with verified resume and explicit `auto`, `local`, `mps`, and `slurm`
 resource profiles. Drop to the individual `src/ingest/` stage scripts only when debugging,
 rerunning a specific stage, or intentionally customizing the stage sequence. If
-`sharur-ingest` is missing, refresh the editable install with `pip install -e ".[dev]"`.
+`sharur-ingest` is missing, refresh the editable install with
+`pip install -e ".[embeddings]"`.
 
 ## Skills (Claude Code)
 

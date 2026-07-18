@@ -1,6 +1,7 @@
+import json
+import shutil
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
-import shutil
 
 import duckdb
 import pytest
