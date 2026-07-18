@@ -2,7 +2,8 @@
 
 Validate, classify, and interpret [NiFe]- and [FeFe]-hydrogenases in metagenomic datasets with mandatory neighborhood curation for all Group 4 calls.
 
-**CONCURRENCY: DuckDB does not support concurrent writes. Only ONE agent should access a database at a time. The coordinator must run DB-accessing skills sequentially, not in parallel.**
+**CONCURRENCY:** Independent `read_only=True` validation sessions may query in parallel.
+Serialize subgroup-classification or other DuckDB write steps.
 
 > **Mandatory:** Follow the shared validation protocols in `_validation_protocols.md`.
 > Verify accession names before reporting. Use COUNT(DISTINCT protein_id) for protein
@@ -52,7 +53,7 @@ You are validating hydrogenase classifications in a metagenomic dataset. Every G
 
 ```python
 from sharur.operators import Sharur
-b = Sharur("data/DATASET/sharur.duckdb")
+b = Sharur("data/DATASET/sharur.duckdb", read_only=True)
 
 # Total HydDB NiFe and FeFe hits
 nife_all = b.store.execute("""

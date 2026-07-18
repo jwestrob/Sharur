@@ -2,7 +2,8 @@
 
 Analyze energy and carbon metabolism: electron transport, hydrogenases, carbon fixation, fermentation.
 
-**CONCURRENCY: DuckDB does not support concurrent writes. Only ONE agent should access a database at a time. The coordinator must run DB-accessing skills sequentially, not in parallel.**
+**CONCURRENCY:** Independent `read_only=True` metabolic sessions may query in parallel.
+Serialize any operation that writes DuckDB.
 
 > **Mandatory:** Read `docs/findings_spec.md` for the structured findings format.
 > Write `findings.jsonl` alongside your prose reports. Every quantitative claim needs a verification query.
@@ -36,7 +37,7 @@ You are analyzing metabolic capabilities in a metagenomic dataset. Focus on ener
 
 ```python
 from sharur.operators import Sharur
-b = Sharur("data/DATASET/sharur.duckdb")
+b = Sharur("data/DATASET/sharur.duckdb", read_only=True)
 
 # Key metabolic predicates
 metabolic_predicates = [

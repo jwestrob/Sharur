@@ -12,10 +12,10 @@ mappings, and neighborhood logic for you.
 ```python
 from sharur.operators import Sharur
 
-b = Sharur("data/my_dataset/sharur.duckdb")
+b = Sharur("data/my_dataset/sharur.duckdb", read_only=True)
 
-# Predicate search -> result.​_raw is the underlying rows
-result = b.search_by_predicates(has=["unannotated", "giant"]); proteins = result._raw
+# Predicate search -> records is the public programmatic payload
+result = b.search_by_predicates(has=["unannotated", "giant"]); proteins = result.records
 b.search_by_predicates(has=["nife_group3", "bidirectional_hydrogenase"])
 
 # Genomic neighborhood (all_annotations pulls every source, not just PFAM)
@@ -30,6 +30,23 @@ b.export_fasta(protein_ids, "out.faa")
 ```
 
 Drop to raw SQL (below) only for ad-hoc shapes the facade doesn't cover.
+For shell pipelines, the main read commands accept
+`--format markdown|json|jsonl|tsv`.
+
+## Operator preflight
+
+```bash
+# Typed, non-mutating capability brief
+sharur preflight --db data/my_dataset/sharur.duckdb
+sharur preflight --db data/my_dataset/sharur.duckdb --format json --skip-tools
+
+# Prepare persistent similarity sidecars for a legacy embedding H5
+sharur build-vector-index --db data/my_dataset/sharur.duckdb
+```
+
+Capability states are `available`, `unavailable`, `stale`, and `failed`. The brief discovers
+live `annotations`-table sources and structured caller resources separately; it does not
+assume a closed annotation list or treat every annotation source as a system caller.
 
 ## Schema (live as of schema v4)
 
@@ -47,7 +64,10 @@ Drop to raw SQL (below) only for ad-hoc shapes the facade doesn't cover.
 ### annotations
 `annotation_id, protein_id, source, accession, name, description, evalue, score, start_aa, end_aa`
 - `accession` = e.g. `PF00142`; `name` = short label; `score` (NOT `bitscore`).
-- `source` values: `pfam, kofam, kegg, hyddb, hyddb_subgroup, defensefinder, defensefinder_system, txsscan, txsscan_system`.
+- Annotation sources are dataset-dependent. Examples include `pfam`, `kofam`,
+  `hyddb`, and validated-caller products. Inspect the live set with
+  `SELECT DISTINCT source FROM annotations ORDER BY source`; also inspect the
+  live curated system tables rather than assuming annotations are the complete caller surface.
 - **Always `COUNT(DISTINCT protein_id)`** — repeat domains inflate `COUNT(*)`.
 
 ### Predicates (V2 backend + V1 compat)

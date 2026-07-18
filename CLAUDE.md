@@ -38,7 +38,11 @@ Detailed guides live in `docs/` and `.claude/skills/`. **Read the relevant doc b
 
 ## Ingest Entry Point
 
-For standard dataset ingestion, use `sharur-ingest` by default. That is the primary CLI interface agents should call for the staged pipeline. Drop to the individual `src/ingest/` stage scripts only when debugging, rerunning a specific stage, or intentionally customizing the stage sequence. If `sharur-ingest` is missing, refresh the editable install with `pip install -e ".[dev]"`.
+For standard dataset ingestion, use `sharur-ingest` by default. It runs a dependency-aware,
+ledger-backed DAG with verified resume and explicit `auto`, `local`, `mps`, and `slurm`
+resource profiles. Drop to the individual `src/ingest/` stage scripts only when debugging,
+rerunning a specific stage, or intentionally customizing the stage sequence. If
+`sharur-ingest` is missing, refresh the editable install with `pip install -e ".[dev]"`.
 
 ## Skills (Claude Code)
 
@@ -111,10 +115,14 @@ Queries can be SQL, shell commands, or Python one-liners — whatever reproduces
 # Always COUNT(DISTINCT protein_id) — repeat domains inflate COUNT(*)
 # NEVER use correlated subqueries — rewrite as JOINs
 # Prefer Sharur operators over raw DuckDB:
-result = b.search_by_predicates(has=["unannotated", "giant"]); proteins = result._raw
+result = b.search_by_predicates(has=["unannotated", "giant"]); proteins = result.records
 b.get_neighborhood(protein_id, window=10)
 b.get_neighborhood(protein_id, window=5, all_annotations=True)
 ```
+
+Open analytical sessions with `Sharur(path, read_only=True)`. Multiple independent
+read-only agents may query the same DuckDB concurrently. Serialize any operation that
+writes DuckDB; writing separate report/draft files does not require serializing database reads.
 
 ### Scientific Rigor
 
@@ -138,7 +146,10 @@ b.get_neighborhood(protein_id, window=5, all_annotations=True)
 
 - **Hydrogenases:** `hydrogenase` → check `nife_group1`–`nife_group4`, `fefe_groupA`–`fefe_groupC`. Group 3 vs 4 reveals uptake vs evolution.
 - **CRISPR:** `cas_domain` → check `type_i_crispr`/`type_ii_crispr`/`type_iii_crispr`, effectors, `loci` table.
-- **Defense:** `defense_system` → check DefenseFinder system annotations for specific types. **CRITICAL: NEVER report raw DefenseFinder HMM hits as defense systems.** Raw hits have an 80%+ false positive rate. Only the `defense_systems` table (from MacSyFinder validation via `validate_defense_systems.py`) contains genuine system calls.
+- **Defense:** `defense_system` → inspect whichever curated callers exist in the live
+  schema for specific types. **CRITICAL: NEVER report raw system-profile HMM hits as
+  systems.** Only purpose-built caller output such as the current `defense_systems`
+  table (materialized by `sharur/colocation.py`) supports a named system claim.
 - **CAZy:** `carbohydrate_active` → check `cazy:GH5`, `cazy:GT2`, etc. GH families reveal substrate specificity.
 
 ---
@@ -172,15 +183,20 @@ python -m pytest tests/test_operators/test_predicate_generator.py -v
 python -c "from sharur.predicates.vocabulary import ALL_PREDICATES, list_categories; print(f'Total: {len(ALL_PREDICATES)}'); print(f'Categories: {list_categories()}')"
 ```
 
-Run `sharur doctor` to verify external tools, reference DBs, and API keys are visible before an
-analysis run — `sharur doctor --strict` exits non-zero if a core tool/DB is missing.
+Run `sharur doctor` to verify the core entry point, external tools, reference directories,
+and API keys are visible before an analysis run — `sharur doctor --strict` exits non-zero
+if a core requirement is missing.
+
+For an existing dataset, run `sharur preflight --db data/DATASET/sharur.duckdb` to inspect
+the typed live capability contract. Use `--format json` for agents and automation.
 
 ## Standard Directory Structure
 
 ```
 data/{dataset_name}/
 ├── sharur.duckdb                # Core database
-├── manifest.json               # Analysis state
+├── sharur_ops.db                # Unified run ledger + coordination/task state
+├── manifest.json               # Derived continuity/status cache
 ├── source/                     # Input assemblies (.fna/.fa/.fasta)
 ├── stage00_prepared/           # Prepared assembly inputs
 ├── stage03_prodigal/           # Gene calls and protein FASTAs
@@ -198,5 +214,7 @@ data/{dataset_name}/
 
 ## TODO
 
-- [ ] **Bake superfamily validation deeper into `/survey`** — known traps (HydDB, Mokosh/BREX, Radical_SAM), co-annotation checks, automatic specialist dispatch
+- [ ] **Bake ambiguity-class validation deeper into `/survey`** — discover live caller
+      resources, run appropriate co-annotation/context checks, and dispatch specialists
+      without priming agents with expected named errors
 - [ ] **Co-location engine (`sharur/colocation.py`) regression test** — run on Susan genomes and DPANN, compare against MacSyFinder output. Spec: `COLOCATION_ENGINE_SPEC.md`

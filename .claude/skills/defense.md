@@ -2,7 +2,8 @@
 
 Analyze defense systems: CRISPR-Cas, restriction-modification, toxin-antitoxin, and other anti-phage mechanisms.
 
-**CONCURRENCY: DuckDB does not support concurrent writes. Only ONE agent should access a database at a time. The coordinator must run DB-accessing skills sequentially, not in parallel.**
+**CONCURRENCY:** Read-only reconnaissance may run in parallel, but this workflow can
+persist validated loci. Serialize its DuckDB write section and never overlap it with another writer.
 
 > **Mandatory:** Read `docs/findings_spec.md` for the structured findings format.
 > Write `findings.jsonl` alongside your prose reports. Every quantitative claim needs a verification query.

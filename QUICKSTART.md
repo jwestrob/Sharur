@@ -42,10 +42,32 @@ sharur-ingest \
   --input-dir /path/to/genome_fastas \
   --data-dir data/my_dataset \
   --output data/my_dataset/sharur.duckdb \
-  --force
+  --profile auto
 ```
 
-This is the primary interface for running the standard pipeline. It orchestrates the staged workflow, including the standard stages 00, 03, 04, 05c, 07, and 06, while exposing skip flags for optional stages when needed.
+This is the primary interface for running the standard pipeline. It orchestrates the staged workflow, including the standard stages 00, 03, 04, 05c, 07, and 06 plus the internal `06i` persistent-index attempt, while exposing skip flags for optional stages when needed.
+
+Ingest is a dependency-aware DAG, not an unconditional script list. It records runs and
+stage attempts in `data/my_dataset/sharur_ops.db`. Resume is on by default: a stage is reused
+only when its command, inputs, script, resource request, and dependency signatures match a
+successful ledger entry and all declared outputs still match that attempt's recorded
+snapshots. Use `--no-resume` or `--force` for an intentional rerun.
+If any dependency executes instead of being reused, its downstream stages execute as well;
+this prevents a stale derived artifact from surviving an upstream repair.
+
+Execution profiles are explicit:
+
+- `--profile auto`: MPS when a usable PyTorch MPS backend is detected, local CPU otherwise
+- `--profile local`: bounded local CPU workers
+- `--profile mps`: local CPU stages plus one exclusively locked MPS Stage 06 process
+- `--profile slurm`: write a dependency-linked bundle under `data/my_dataset/slurm/`;
+  add `--submit-slurm` only when ready to submit it
+
+The default plan skips optional QUAST, DFAST, GECCO, and the deprecated legacy dbCAN
+helper. Enable them deliberately with `--with-quast`, `--with-dfast`, `--with-gecco`,
+or `--with-legacy-dbcan`. The distinct Stage 07 dbCAN three-tool consensus classifier is
+opt-in with `--enable-cazymes`. Use `--dry-run` to inspect stage order and paths
+without creating the dataset directory.
 
 ## Manual Stage-by-Stage Pipeline
 
@@ -88,7 +110,8 @@ python src/ingest/07_build_knowledge_base.py \
 # Stage 06: embeddings (run after Stage 07)
 python src/ingest/06_esm2_embeddings.py \
   data/$DATASET/stage03_prodigal \
-  data/$DATASET/embeddings/
+  data/$DATASET/embeddings/ \
+  --device mps
 ```
 
 This is the manual reference sequence behind `sharur-ingest`. `04_astra_scan.py` supplies the correct per-database flags, and `07_build_knowledge_base.py` is the loader that consolidates proteins, annotations, loci, validated systems, and V2 predicates.
@@ -99,35 +122,38 @@ This is the manual reference sequence behind `sharur-ingest`. `04_astra_scan.py`
 - `03_prodigal.py`: produces per-genome protein FASTAs and the `all_protein_symlinks/` directory used by Stage 04
 - `04_astra_scan.py`: runs PFAM, KOFAM, HydDB, DefenseFinder, and dbCAN with Sharur's expected settings
 - `minced_crispr.py`: finds CRISPR repeat-spacer arrays from nucleotide assemblies
-- `07_build_knowledge_base.py`: loads stage outputs into `sharur.duckdb`, integrates supported validation steps, writes `semantic_atoms`/`semantic_state`, and materializes legacy-compatible predicates
-- `06_esm2_embeddings.py`: produces `embeddings/protein_embeddings.h5` for similarity search and ELSA
+- `07_build_knowledge_base.py`: loads stage outputs into `sharur.duckdb`, integrates supported validation steps, writes `semantic_atoms`/`semantic_state`, and materializes legacy-compatible predicates. Its slower dbCAN three-tool consensus path runs only with `--enable-cazymes`.
+- `06_esm2_embeddings.py`: streams FASTA records through ESM2 into an atomically published
+  canonical H5 without retaining the proteome in memory. Direct use builds the sidecars in a
+  Torch-free child process; `sharur-ingest` records that CPU build separately as `06i`.
+- `vector_index_runner.py`: produces the generation-scoped persistent FAISS sidecar, the
+  disk-backed stable protein-ID map, and the atomic index manifest
 
 ## Verify the Dataset
 
 ```bash
-python - <<'PY'
-from sharur.operators import Sharur
-
-b = Sharur("data/my_dataset/sharur.duckdb")
-total = b.store.execute("SELECT COUNT(*) FROM proteins")[0][0]
-annotated = b.store.execute("SELECT COUNT(DISTINCT protein_id) FROM annotations")[0][0]
-v2_states = b.store.execute("SELECT COUNT(*) FROM semantic_state")[0][0]
-flat_predicates = b.store.execute("SELECT COUNT(*) FROM protein_predicates")[0][0]
-
-print(f"Total proteins: {total}")
-print(f"Annotated proteins: {annotated}")
-print(f"V2 semantic states: {v2_states}")
-print(f"Compatibility predicate rows: {flat_predicates}")
-print(f"Embeddings loaded: {b.session.vector_store is not None}")
-PY
+sharur preflight --db data/my_dataset/sharur.duckdb
+# Machine-readable:
+sharur preflight --db data/my_dataset/sharur.duckdb --format json
 ```
 
-Sanity checks:
-- `proteins` should be non-zero
-- `annotations` should be non-zero after Stage 04 + Stage 07
-- `semantic_state` should match the protein count after Stage 07
-- `protein_predicates` should match the protein count after Stage 07
-- `Embeddings loaded: True` after Stage 06
+The typed brief inspects the live dataset without mutating it. It reports
+`available`, `unavailable`, `stale`, or `failed` for core tables/schema,
+`annotations`-table sources, whatever structured caller resources actually exist, V2 and
+compatibility coverage,
+embeddings, persistent similarity index, dataset run ledger, execution profiles, and the
+external toolchain. Add `--strict` for a non-zero exit when a required dataset capability is
+not available; add `--skip-tools` when binary/version probes are not needed.
+
+For a legacy H5 without sidecars:
+
+```bash
+sharur build-vector-index --db data/my_dataset/sharur.duckdb
+```
+
+Ordinary session startup discovers these artifacts but does not open H5 or FAISS. The first
+similarity call opens the committed FAISS generation read-only with mmap and uses the SQLite
+row-to-protein map; if sidecars are missing or stale, that call can build them.
 
 ## Start Exploring
 
@@ -143,11 +169,12 @@ Sanity checks:
 ```python
 from sharur.operators import Sharur
 
-b = Sharur("data/my_dataset/sharur.duckdb")
+b = Sharur("data/my_dataset/sharur.duckdb", read_only=True)
 
 giants = b.search_by_predicates(has=["giant", "unannotated"])
 defense = b.search_by_predicates(has=["crispr_associated"])
-similar = b.find_similar(giants._raw[0], k=20)
+if giants.records:
+    similar = b.find_similar(giants.records[0]["protein_id"], k=20)
 ```
 
 ## Alternative: Protein-Only Ingest

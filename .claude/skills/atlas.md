@@ -55,7 +55,7 @@ Run atlas AFTER survey to fill coverage gaps, or INSTEAD of survey when you want
 from sharur.operators import Sharur
 import json, os
 
-b = Sharur("data/DATASET/sharur.duckdb")
+b = Sharur("data/DATASET/sharur.duckdb", read_only=True)
 
 genomes = b.store.execute("""
     SELECT bin_id,
@@ -153,10 +153,10 @@ This is the prompt the coordinator sends to each genome-batch subagent. Copy it 
 You are reading through {N} genomes exhaustively for the Atlas skill.
 
 DB: data/{DATASET}/sharur.duckdb
-Import: from sharur.operators import Sharur; b = Sharur("data/{DATASET}/sharur.duckdb")
+Import: from sharur.operators import Sharur; b = Sharur("data/{DATASET}/sharur.duckdb", read_only=True)
 Genomes in this batch: {genome_list}
 Output directory: data/{DATASET}/atlas/
-Findings file: data/{DATASET}/survey/findings.jsonl
+Draft findings file: data/{DATASET}/atlas/findings_{agent_id}.jsonl
 
 ## Database Column Reference
 - Annotations table: 'name' (not annotation_id), 'score' (not bitscore)
@@ -179,8 +179,8 @@ Use the Read tool to load any doc when you need it. Don't guess — look it up.
 ## Your Task
 
 For EACH genome in your batch, perform the following steps and write one inventory
-entry to atlas/inventories.jsonl. Log notable findings to survey/findings.jsonl
-with phase="atlas".
+entry to the agent's unique inventory spool. Log notable findings to the agent's
+unique draft findings spool with phase="atlas"; the coordinator performs a strict merge.
 
 ### Step 1: Annotation Source Census
 
@@ -318,10 +318,10 @@ with open("data/{DATASET}/atlas/inventories.jsonl", "a") as f:
 
 ### Step 8: Log Notable Findings
 
-For anything genuinely notable (not routine), write to survey/findings.jsonl:
+For anything genuinely notable (not routine), write to the unique draft spool:
 
 ```python
-import json
+from sharur.core.analysis_record_io import append_finding_record
 
 finding = {
     "id": "atlas-{genome}-NNN",  # e.g., atlas-mb104-001
@@ -329,6 +329,9 @@ finding = {
     "category": "appropriate_category",
     "description": "Prose paragraph with biological interpretation.",
     "evidence": {"genome": bin_id, ...},
+    "verification": [
+        {"claim": "...", "query": "...", "expected": "..."},
+    ],
     "n_genomes": 1,
     "provenance": {
         "query": "the SQL that produced this",
@@ -340,8 +343,12 @@ finding = {
     "phase": "atlas"
 }
 
-with open("data/{DATASET}/survey/findings.jsonl", "a") as f:
-    f.write(json.dumps(finding) + "\n")
+append_finding_record(
+    "data/{DATASET}/atlas/findings_{agent_id}.jsonl",
+    finding,
+    phase="atlas",
+    strict=False,  # draft only; canonical merge must be strict
+)
 ```
 
 What is "notable" — worth a finding entry:
@@ -359,25 +366,13 @@ What is NOT worth a finding entry:
 - Single unannotated proteins under 1000 aa
 - Annotations already captured by survey findings
 
-## Known Superfamily Traps
+## Ambiguity Checks Without Priming
 
-Include this list in every subagent prompt. These are empirically observed false positive
-sources in metagenomic datasets:
-
-| Annotation | Source | Actual Fold/Superfamily | False Positive Pattern |
-|-----------|--------|------------------------|----------------------|
-| NiFe Group 4 | HydDB | [NiFe] binding fold | ~50% are Complex I NuoD (check for nuoA-N neighbors) |
-| Mokosh_type_I | DefenseFinder | Serine/threonine kinase | PK_Tyr_Ser-Thr co-annotation = generic kinase |
-| BREX pglW | DefenseFinder | Serine/threonine kinase | Same kinase superfamily as Mokosh |
-| Radical_SAM (PF04055) | PFAM | S-adenosylmethionine fold | Huge superfamily: >50 distinct enzyme families |
-| Complex1_49kDa (PF00346) | PFAM | MBL-fold oxidoreductase | Shared by Complex I, Hyf, Hox, FDH |
-| HD domain (PF01966) | PFAM | Phosphohydrolase superfamily | Not all are c-di-GMP PDEs |
-| CBASS | DefenseFinder | Multiple superfamilies | >90% prevalence = inflated (5-7x published rates) |
-| TPR (PF00515) | PFAM | Repeat scaffold | Protein interaction domain, no enzymatic function |
-| WD40 (PF00400) | PFAM | Beta-propeller repeat | Scaffold domain, inflated counts from repeats |
-
-When a subagent encounters any of these, the context_first_checks entry must record
-the co-annotation results and a verdict.
+Do not give subagents a named list of expected false positives. Require them to inspect
+the live schema for whatever curated callers exist, separate raw observed domains from
+named caller output, and trigger co-annotation/neighborhood/specialist validation when
+the evidence class is broad or unexpectedly prevalent. Record the check and verdict
+without prescribing the answer in advance.
 
 ## Flag Types
 
@@ -458,7 +453,9 @@ append contention. The coordinator merges all per-genome files after completion.
 - Each agent writes: `atlas/inventory_{short_name}.jsonl` (single JSON line)
 - Each agent appends findings to its own: `atlas/findings_{short_name}.jsonl`
 - Coordinator merges: `cat atlas/inventory_*.jsonl > atlas/inventories.jsonl`
-- Coordinator merges: `cat atlas/findings_*.jsonl >> survey/findings.jsonl`
+- Coordinator reads every draft finding, resolves duplicate IDs or conflicting claims,
+  and appends accepted records to `survey/findings.jsonl` with
+  `append_finding_record(..., strict=True)`. Never use `cat` for canonical findings.
 
 **Performance:**
 - Each subagent typically takes 2-5 minutes per genome

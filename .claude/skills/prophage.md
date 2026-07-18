@@ -2,7 +2,8 @@
 
 Identify integrated prophage regions, viral remnants, and potentially misbinned phage contigs within metagenomic assemblies. Outputs structured loci to the `loci`/`locus_proteins` tables and findings to `findings.jsonl`.
 
-**CONCURRENCY: DuckDB does not support concurrent writes. Only ONE agent should access a database at a time.**
+**CONCURRENCY:** Read-only detection may run in parallel, but this workflow persists
+curated loci. Serialize its DuckDB write section and never overlap it with another writer.
 
 > **Mandatory:** Follow the shared validation protocols in `_validation_protocols.md`.
 > Use COUNT(DISTINCT protein_id) for protein counts. Verify annotation accessions before reporting.
@@ -707,15 +708,18 @@ EXPLORE_DIR = DB_DIR / "exploration"
 EXPLORE_DIR.mkdir(exist_ok=True)
 FINDINGS_FILE = EXPLORE_DIR / "findings.jsonl"
 
-def log_finding(finding_id, category, title, description, evidence, n_genomes=None,
-                priority="medium", provenance=None, figures=None, related_findings=None):
+from sharur.core.analysis_record_io import append_finding_record
+
+def log_finding(category, title, description, evidence, verification=None,
+                finding_id=None, n_genomes=None, priority="medium",
+                provenance=None, figures=None, related_findings=None):
     finding = {
-        "id": finding_id,
         "timestamp": datetime.now().isoformat(),
         "category": category,
         "title": title,
         "description": description,
         "evidence": evidence,
+        "verification": verification,
         "n_genomes": n_genomes,
         "priority": priority,
         "provenance": provenance or {},
@@ -723,9 +727,14 @@ def log_finding(finding_id, category, title, description, evidence, n_genomes=No
         "related_findings": related_findings or [],
         "phase": "exploration",
     }
-    with open(FINDINGS_FILE, "a") as f:
-        f.write(json.dumps(finding) + "\n")
-    print(f"[LOGGED] {finding_id}: {title}")
+    if finding_id:
+        finding["id"] = finding_id
+    result = append_finding_record(FINDINGS_FILE, finding, phase="exploration")
+    print(f"[LOGGED] {result.finding['id']}: {title}")
+    return result.finding
+
+# verification=None exists only so the strict canonical validator can emit a
+# useful error. Every real call must supply claim/query/expected records.
 
 # Log the main prophage finding
 genomes_with_prophage = len(genome_dist)
@@ -749,6 +758,7 @@ log_finding(
         "pct_genomes": round(genomes_with_prophage / n_genomes * 100, 1),
         "diagnostic_composition": dict(diag_composition),
     },
+    verification=verification_records,
     n_genomes=genomes_with_prophage,
     priority="high",
     provenance={
@@ -772,6 +782,7 @@ if misbinned:
             "n_misbinned": len(misbinned),
             "contigs": [m["contig_id"] for m in misbinned[:10]],
         },
+        verification=misbinned_verification_records,
         n_genomes=len(set(m["bin_id"] for m in misbinned)),
         priority="high",
     )

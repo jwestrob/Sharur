@@ -13,6 +13,7 @@ data/
 │   └── ...
 ├── {organism}_production/              # Active analysis
 │   ├── sharur.duckdb                   # Main database
+│   ├── sharur_ops.db                  # Run ledger + coordination/task state
 │   ├── manifest.json                  # Analysis state and session continuity
 │   │
 │   ├── source/                        # Input files
@@ -30,7 +31,12 @@ data/
 │   │
 │   ├── embeddings/                    # ESM2 protein embeddings
 │   │   ├── embedding_manifest.json
-│   │   └── protein_embeddings.h5      # ESM2 embeddings (FAISS index built at runtime)
+│   │   ├── protein_embeddings.h5      # Canonical ESM2 embeddings
+│   │   ├── protein_embeddings.index.json   # Atomic active-generation manifest
+│   │   ├── protein_embeddings.*.faiss      # Persistent mmap-ready generation
+│   │   └── protein_embeddings.*.ids.sqlite # Stable row ↔ protein-ID map
+│   │
+│   ├── slurm/                         # Generated ingest bundle/logs (SLURM profile)
 │   │
 │   ├── structures/                    # ESM3 structure predictions
 │   │   ├── *.pdb                      # Predicted PDB files
@@ -106,10 +112,12 @@ sharur-ingest \
   --input-dir /path/to/genomes \
   --data-dir data/${NEW_ORGANISM}_production \
   --output data/${NEW_ORGANISM}_production/sharur.duckdb \
-  --force
+  --profile auto
 ```
 
-For manual stage-by-stage execution, see `QUICKSTART.md` and `src/ingest/README.md`.
+Resume is ledger-backed and enabled by default. Use `--no-resume` or `--force` for an
+intentional rerun. For manual stage-by-stage execution and resource-profile details, see
+`QUICKSTART.md` and `src/ingest/README.md`.
 
 If you only have pre-called proteins, you can bootstrap a database with:
 
@@ -130,7 +138,7 @@ That fallback path does not replace the standard stage pipeline, and it does not
 | Source file | `source/{sample}.fna` | `source/Heimdall_Megavirus.fna` |
 | Stage outputs | `stageXX_*` | `stage04_astra/` |
 | Annotations | `annotations/{db}.tsv` | `annotations/pfam.tsv` |
-| Embeddings | `embeddings/` | H5 file with FAISS index built at runtime |
+| Embeddings | `embeddings/` | Canonical H5 + persistent FAISS/SQLite sidecars |
 | Reports | `reports/{type}.pdf` | `reports/final.pdf` |
 | Figures | `figures/{locus_name}.png` | `figures/escrt_locus.png` |
 
@@ -138,6 +146,7 @@ That fallback path does not replace the standard stage pipeline, and it does not
 
 **Always archive:**
 - `sharur.duckdb` - Main database
+- `sharur_ops.db` - Run/stage history, task leases, and coordination state
 - `manifest.json` - Analysis state
 - `exploration/` - All findings and state
 - `reports/` - Synthesis documents

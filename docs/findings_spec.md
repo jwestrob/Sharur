@@ -21,7 +21,8 @@ Boundary rules:
 - `survey/findings.jsonl` and `exploration/findings.jsonl` are the canonical findings archive.
 - `exploration/hypotheses.json` is the canonical local hypothesis store.
 - `manifest.json` is a derived summary/cache only. It may be regenerated from canonical findings and other dataset outputs.
-- `sharur_ops.db` is coordination-only state for multi-agent runs. It is not the long-term scientific archive.
+- `sharur_ops.db` is operational state: run/stage history, leases, tasks, and multi-agent
+  coordination. It is not the long-term scientific findings archive.
 
 ---
 
@@ -51,6 +52,43 @@ Agents do **not** need to hand-author these in normal workflows:
 - `confidence`
 
 The system may fill or derive those fields during normalization/storage.
+
+---
+
+## Write and Merge Contract
+
+Never append canonical JSONL with `open(..., "a")`, shell redirection, or `cat`.
+Use the locked writer so ID allocation, normalization, validation, and `fsync` occur
+inside one critical section:
+
+```python
+from sharur.core.analysis_record_io import append_finding_record
+
+append_finding_record(
+    "data/DATASET/survey/findings.jsonl",
+    finding,
+    phase="survey",
+)  # strict=True is the canonical default
+```
+
+Canonical writes reject missing/invalid verification, duplicate explicit IDs, and malformed
+existing JSONL. Omit `id` and let the writer allocate it under the file lock. Parallel
+agents may safely call this helper against one canonical file, but per-agent draft spools
+are easier to review and recover:
+
+```python
+append_finding_record(
+    "data/DATASET/survey/parts/agent-07.jsonl",
+    finding,
+    phase="survey",
+    strict=False,
+)
+```
+
+`strict=False` is permitted only for an explicitly non-canonical draft spool. A coordinator
+must read, resolve duplicate IDs or conflicting claims, and append every accepted record to
+the canonical archive with `strict=True`. Never concatenate draft files into a canonical
+archive.
 
 ---
 
@@ -351,7 +389,8 @@ defense-001, defense-002, ...
 metabolism-001, metabolism-002, ...
 ```
 
-When generating a new ID, count existing entries in the phase file and emit the next `{phase}-{NNN}` value.
+For new records, omit `id` and use `append_finding_record`; it allocates the next
+`{phase}-{NNN}` value while holding the inter-process lock. Do not count lines yourself.
 
 Legacy IDs such as `E001` or `D001` may still appear in older datasets. Preserve them on read; do not emit new ones.
 
@@ -378,7 +417,8 @@ Do **not** write findings for:
 Every analytical skill should:
 
 1. Read this spec before writing findings
-2. Write `findings.jsonl` alongside the prose `.md` report
+2. Write canonical records with `append_finding_record`, or write a clearly named
+   per-agent draft spool for strict coordinator merge
 3. Include verification queries for every quantitative claim
 4. Use canonical slug-style IDs for new findings
 
@@ -386,5 +426,5 @@ Reference snippet for skill prompts:
 
 ```text
 Read docs/findings_spec.md for the required findings format.
-Write findings to {output_dir}/findings.jsonl alongside your prose report.
+Write findings through sharur.core.analysis_record_io; never manually append canonical JSONL.
 ```

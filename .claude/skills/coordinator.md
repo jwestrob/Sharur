@@ -13,13 +13,15 @@ You (Coordinator)
   │
   ├── OpsStore (sharur_ops.db) ── findings, hypotheses, tasks, your reasoning log
   │
-  ├── Survey agents ──────────── write survey/*.md + survey/findings.jsonl
-  ├── Explore agents ─────────── write exploration/*.md + exploration/findings.jsonl
+  ├── Survey agents ──────────── write survey/*.md + per-agent draft spools
+  ├── Explore agents ─────────── write exploration/*.md + per-agent draft spools
   ├── Specialist agents ──────── defense, metabolism, hydrogenase, foldseek, etc.
   └── Reviewer agents ────────── reviewer_2 for verification of high-novelty findings
 ```
 
-All coordination state flows through the OpsStore. Your reasoning goes to `coordinator_log`. This means you survive context compaction — query `ops.recent_log()` to recover your train of thought.
+Run coordination state flows through the OpsStore. Scientific source-of-truth records
+remain the canonical findings archives. Your operational log survives context compaction
+through `ops.recent_log()`.
 
 ---
 
@@ -37,7 +39,7 @@ DB_PATH = f"{DATASET}/sharur.duckdb"
 ops = OpsStore(f"{DATASET}/sharur_ops.db", agent_id="coordinator")
 
 # Load the Sharur database for quick reconnaissance
-b = Sharur(DB_PATH)
+b = Sharur(DB_PATH, read_only=True)
 ```
 
 ---
@@ -95,12 +97,14 @@ ops.finding(finding_type="...", domain="...", summary="...", ...)
 ```
 
 Write your prose report to {output_path}.
-Write structured findings to {findings_jsonl_path}.
+Write structured findings to the unique draft spool {findings_jsonl_path}.
+Do not append canonical JSONL manually. The coordinator performs a strict merge.
 
 {task_specific_instructions}
 ```
 
-**Run agents sequentially** (DuckDB single-writer constraint). If agents only read the DB and write to separate files/ops tables, they can run in parallel.
+Agents with independent read-only sessions and separate draft files may run in parallel.
+Serialize any task that writes DuckDB.
 
 ### Phase 3: Synthesize
 
@@ -196,12 +200,12 @@ tasks = [
 ```
 Wave 1: Survey
   → Census, genome profiles, topic reports
-  → findings.jsonl extracted
+  → per-agent drafts strictly merged into canonical findings
   → Synthesis: identify top questions
 
 Wave 2: Targeted Exploration
   → Dispatch agents for top questions from survey
-  → Each agent writes report + findings.jsonl + posts to ops store
+  → Each agent writes report + unique draft spool + posts coordination state
   → Synthesis: connect findings across agents
   → Auto-dispatch reviewer_2 for novelty >= 3
 
@@ -213,7 +217,7 @@ Wave 3: Follow-up
 Wave N: Convergence
   → Diminishing returns detection: if last wave produced no novelty >= 2, stop
   → Final synthesis report
-  → Compile all findings.jsonl into unified findings
+  → Strictly validate and merge accepted records into unified findings
 ```
 
 ---
@@ -222,7 +226,8 @@ Wave N: Convergence
 
 - **Don't analyze data yourself.** You're the coordinator. Spawn an agent.
 - **Don't hold findings in your context.** Post them to the ops store.
-- **Don't run agents in parallel if they write to the same DuckDB.** Sequential for DB writers.
+- **Don't run database writers in parallel.** Independent read-only queries are safe.
+- **Don't concatenate finding drafts.** Resolve conflicts and merge through the strict writer.
 - **Don't skip logging.** Every synthesis decision goes to `ops.log()`.
 - **Don't forget verification.** High-novelty findings get a reviewer before they're trusted.
 - **Don't keep running when returns diminish.** Declare convergence and write the final report.

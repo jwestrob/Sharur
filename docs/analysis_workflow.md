@@ -41,13 +41,15 @@ Orchestrator (reads state, crafts prompts, dispatches subagents)
 │
 ├── 1. Survey (systematic coverage)
 │   ├── Dispatch parallel topic subagents: metabolic, defense, surface, etc.
-│   │   Each subagent → survey/findings.jsonl entries + summary figures
+│   │   Each subagent → unique survey draft spool + summary figures
+│   ├── Strict merge → survey/findings.jsonl
 │   └── Orchestrator reads all survey findings, plans Explore
 │
 ├── 2. Explore (hypothesis-driven discovery)
 │   ├── Orchestrator reads survey → generates hypotheses
 │   ├── Dispatch hypothesis-testing subagents (parallel)
-│   │   Each subagent → exploration/findings.jsonl entries + locus figures
+│   │   Each subagent → unique exploration draft spool + locus figures
+│   ├── Strict merge → exploration/findings.jsonl
 │   └── Orchestrator reads results, decides if more exploration needed
 │
 ├── 3. Deepen (successive rounds — see below)
@@ -99,7 +101,7 @@ Task(subagent_type="general-purpose",
      DB: data/DATASET/sharur.duckdb
      Task: Pick 3-5 Group 4 hits, run get_neighborhood(pid, window=8),
      check for Hyf/Hyc operon context. Generate neighborhood figures.
-     Output: Append findings to exploration/findings.jsonl with id='D001'.
+     Output: Write a unique exploration/parts/<agent_id>.jsonl draft spool.
      Save figures to figures/.""",
      run_in_background=True)
 
@@ -108,7 +110,7 @@ Task(subagent_type="general-purpose",
      prompt="""Literature search for finding E001 (DsrAB in 9/41 genomes).
      Questions: Is DsrAB known in other candidate phyla? What is the typical
      operon structure? Are reverse-DsrAB variants reported in non-sulfate-reducers?
-     Output: Append to exploration/findings.jsonl with literature provenance.""",
+     Output: Write a unique draft spool with literature provenance.""",
      run_in_background=True)
 ```
 
@@ -155,7 +157,9 @@ python scripts/compile_comprehensive_report.py --dataset data/DATASET_NAME/
 - The orchestrator decides what's worth investing in — not every finding needs deepening
 - Focus on: findings likely to be headline results, claims reviewers will challenge, unknowns that could change the story
 - **Successive rounds** prevent single-pass gaps
-- Each round's subagents are independent and can run in parallel
+- Each round's subagents are independent and can run in parallel when they use
+  read-only database sessions and unique draft outputs. The orchestrator strictly
+  validates and merges accepted records afterward.
 
 ## Review Agent Responsibilities
 

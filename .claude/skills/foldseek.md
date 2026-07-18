@@ -8,7 +8,8 @@ Structure-based functional annotation for proteins where sequence annotation fai
 - Proteins where fold might reveal function (DUFs, orphan proteins)
 - Validating weak sequence-based annotations with structural evidence
 
-**CONCURRENCY: DuckDB does not support concurrent writes. Only ONE agent should access a database at a time.**
+**CONCURRENCY:** DuckDB reads may run in parallel with `read_only=True`. Structure/model
+work must also obey the project-wide one-MPS-process rule.
 
 > **Mandatory:** Follow the shared validation protocols in `_validation_protocols.md`.
 
@@ -29,7 +30,7 @@ Structure-based functional annotation for proteins where sequence annotation fai
 
 ```python
 from sharur.operators import Sharur
-b = Sharur("data/DATASET/sharur.duckdb")
+b = Sharur("data/DATASET/sharur.duckdb", read_only=True)
 
 # Requires ESM_API_KEY for structure prediction
 # export ESM_API_KEY=your_key
@@ -216,7 +217,7 @@ Standard PFAM bitscore cutoffs (`--cut_ga`) are LENGTH-BIASED. Giant proteins (>
 # 1. Extract the protein sequence
 python3 -c "
 from sharur.operators import Sharur
-b = Sharur('data/DATASET/sharur.duckdb')
+b = Sharur('data/DATASET/sharur.duckdb', read_only=True)
 rows = b.store.execute('''
     SELECT protein_id, sequence FROM proteins WHERE protein_id = ?
 ''', ['PROTEIN_ID'])
@@ -261,7 +262,7 @@ A 3572 aa protein in the susan_genomes dataset had zero standard PFAM hits. Runn
 
 ```python
 from sharur.operators import Sharur
-b = Sharur("data/DATASET/sharur.duckdb")
+b = Sharur("data/DATASET/sharur.duckdb", read_only=True)
 
 protein_id = "TARGET_PROTEIN"
 

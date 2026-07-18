@@ -183,11 +183,12 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, '.')
+from sharur.core.analysis_record_io import append_finding_record
 from sharur.operators import Sharur
 
 # Initialize Sharur
 DB_PATH = "data/altiarchaeota_production/sharur.duckdb"  # Adjust as needed
-b = Sharur(DB_PATH)
+b = Sharur(DB_PATH, read_only=True)
 
 # Set up persistence directory
 EXPLORE_DIR = Path(DB_PATH).parent / "exploration"
@@ -197,36 +198,22 @@ FINDINGS_FILE = EXPLORE_DIR / "findings.jsonl"
 STATE_FILE = EXPLORE_DIR / "exploration_state.json"
 SUMMARY_FILE = EXPLORE_DIR / "exploration_summary.md"
 
-# Auto-increment finding ID counter
-# Convention: exploration findings use "E" prefix (E001, E002, ...)
-# Survey uses "survey-" prefix, Deepen uses "D" prefix.
-_finding_counter = 0
-if FINDINGS_FILE.exists():
-    with open(FINDINGS_FILE) as _f:
-        for _line in _f:
-            _finding_counter += 1
-
-def next_finding_id() -> str:
-    """Return the next auto-incremented finding ID."""
-    global _finding_counter
-    _finding_counter += 1
-    return f"E{_finding_counter:03d}"
-
 def log_finding(category: str, title: str, description: str,
-                finding_id: str = None,
+                verification: list = None, finding_id: str = None,
                 proteins: list = None, evidence: dict = None,
                 n_genomes: int = None,
                 location: str = None, priority: str = "medium",
                 provenance: dict = None,
                 figures: list = None,
                 related_findings: list = None):
-    """Append a finding to the persistent findings log.
+    """Validate and append one canonical exploration finding.
 
     Args:
         category: Finding category (e.g. "defense", "metabolism", "mega_proteins")
         title: Self-contained title with all qualifiers
         description: Prose description with biological interpretation
-        finding_id: Stable ID (auto-generated as E001, E002... if omitted)
+        verification: Claim/query/expected records for every concrete datum
+        finding_id: Existing stable ID when intentionally preserving one; otherwise omit
         proteins: List of protein_ids involved
         evidence: Dict or string with quantitative evidence
         n_genomes: Number of genomes where finding applies
@@ -248,6 +235,7 @@ def log_finding(category: str, title: str, description: str,
             category="defense",
             title="CRISPR-Cas Type I-C with extensive spacer array in genome X",
             description="A complete Type I-C CRISPR-Cas system spans genes 145-152...",
+            verification=verification_records,
             n_genomes=1,
             provenance={
                 "query": "SELECT COUNT(*) FROM annotations WHERE accession = 'PF01396'...",
@@ -259,15 +247,14 @@ def log_finding(category: str, title: str, description: str,
             related_findings=["survey-008"],
         )
     """
-    fid = finding_id or next_finding_id()
     finding = {
-        "id": fid,
         "timestamp": datetime.now().isoformat(),
         "category": category,
         "title": title,
         "description": description,
         "proteins": proteins or [],
         "evidence": evidence or {},
+        "verification": verification,
         "n_genomes": n_genomes,
         "location": location,
         "priority": priority,  # high, medium, low
@@ -276,10 +263,15 @@ def log_finding(category: str, title: str, description: str,
         "related_findings": related_findings or [],
         "phase": "exploration",
     }
-    with open(FINDINGS_FILE, "a") as f:
-        f.write(json.dumps(finding) + "\n")
-    print(f"[LOGGED] {fid} | {category}: {title}")
-    return finding
+    if finding_id:
+        finding["id"] = finding_id
+    result = append_finding_record(FINDINGS_FILE, finding, phase="exploration")
+    print(f"[LOGGED] {result.finding['id']} | {category}: {title}")
+    return result.finding
+
+# verification=None exists only so the strict canonical validator can emit a
+# useful error. Every real call must pass claim/query/expected records for
+# every total and breakdown.
 
 def load_findings():
     """Load all findings from the log."""
@@ -439,6 +431,7 @@ log_finding(
     description="33kb prophage region with uncharacterized tail fiber (3140aa)",
     proteins=["WJJK01000031.1_9", "WJJK01000031.1_12"],
     evidence={"foldseek_hit": "tip_attachment_protein", "evalue": "5.7e-84"},
+    verification=verification_records,
     location="WJJK01000031.1:1-33000",
     priority="high"
 )
@@ -953,6 +946,7 @@ def synthesize_genome_findings(bin_id, loci):
         title=f"Genome {bin_id}: {', '.join(summary_parts)}",
         description=f"Browsed {bin_id}, found {len(loci)} interesting loci",
         evidence={"genome": bin_id, "loci_counts": {k: len(v) for k,v in by_type.items()}},
+        verification=verification_records_for_genome,
         priority="medium"
     )
 
@@ -965,6 +959,7 @@ def synthesize_genome_findings(bin_id, loci):
                 description=describe_locus(locus_type, proteins),
                 proteins=[p['protein_id'] for p in proteins[:10]],
                 location=f"{proteins[0]['protein_id'].rsplit('_',1)[0]}",
+                verification=verification_records_for_locus,
                 priority="high" if locus_type == 'giant_protein' else "medium"
             )
 
@@ -1041,6 +1036,7 @@ def cross_genome_synthesis():
                 "n_genomes": n_genomes,
                 "conservation_pct": round(conservation, 1)
             },
+            verification=verification_records_for_pattern,
             priority="high" if conservation > 50 else "medium"
         )
 
@@ -1286,7 +1282,7 @@ result = b.get_neighborhood(protein_id, window=5, all_annotations=True)
 print(result)  # Shows every annotation source per gene
 
 # Programmatic access to neighbor annotations
-for p in result._raw['proteins']:
+for p in result.raw['proteins']:
     print(p['protein_id'], p['length_aa'], 'aa')
     for source, annots in p.get('annotations', {}).items():
         for a in annots:
@@ -1517,7 +1513,8 @@ log_finding(
         "n_genomes": 45,
         "n_proteins": 127,
         "conservation": "36% of genomes"  # ALWAYS INCLUDE THIS
-    }
+    },
+    verification=verification_records,
 )
 ```
 
@@ -1544,6 +1541,7 @@ log_finding(
     title="CORRECTION: [Original claim] is incorrect",
     description="[Why it's wrong and what the correct interpretation is]",
     evidence={"original_claim": "...", "why_wrong": "...", "correct_interpretation": "..."},
+    verification=verification_records,
     priority="high"
 )
 ```
@@ -1867,6 +1865,7 @@ log_finding(
         "n_genomes": len(genome_profiles),
         "output_files": ["genome_profiles.tsv", "genome_comparison.md"]
     },
+    verification=verification_records,
     priority="high"
 )
 

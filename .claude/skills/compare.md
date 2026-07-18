@@ -2,7 +2,8 @@
 
 Comparative genomics between genomes or genome groups.
 
-**CONCURRENCY: DuckDB does not support concurrent writes. Only ONE agent should access a database at a time. The coordinator must run DB-accessing skills sequentially, not in parallel.**
+**CONCURRENCY:** Independent `read_only=True` comparison sessions may query in parallel.
+Serialize any operation that writes DuckDB.
 
 > **Mandatory:** Follow the shared validation protocols in `_validation_protocols.md`.
 > Verify accession names before reporting. Use COUNT(DISTINCT protein_id) for protein
@@ -34,7 +35,7 @@ You are performing comparative genomic analysis between genomes in a metagenomic
 from sharur.operators import Sharur
 import pandas as pd
 
-b = Sharur("data/DATASET/sharur.duckdb")
+b = Sharur("data/DATASET/sharur.duckdb", read_only=True)
 
 genome_a = "GENOME_A"
 genome_b = "GENOME_B"

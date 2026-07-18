@@ -2,7 +2,8 @@
 
 Fast, ad-hoc queries against the Sharur database. No ceremony, just answers.
 
-**CONCURRENCY: DuckDB does not support concurrent writes. Only ONE agent should access a database at a time. The coordinator must run DB-accessing skills sequentially, not in parallel.**
+**CONCURRENCY:** Independent `read_only=True` sessions may query the same DuckDB in
+parallel. Serialize operations that write the database.
 
 > **Mandatory:** Follow the shared validation protocols in `_validation_protocols.md`.
 > Verify accession names before reporting. Use COUNT(DISTINCT protein_id) for protein
@@ -34,7 +35,7 @@ You are running quick queries against a Sharur metagenomic database. Answer the 
 **Predicate searches:**
 ```python
 from sharur.operators import Sharur
-b = Sharur("data/DATASET/sharur.duckdb")
+b = Sharur("data/DATASET/sharur.duckdb", read_only=True)
 
 # Combine predicates with AND logic
 b.search_by_predicates(has=["giant", "unannotated"])

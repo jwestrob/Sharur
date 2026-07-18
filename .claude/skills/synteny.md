@@ -68,7 +68,7 @@ These are the SAME protein (gene_index=25 → protein_id ending in _26 for Prodi
 import pandas as pd, json
 from sharur.operators import Sharur
 
-b = Sharur("data/DATASET/sharur.duckdb")
+b = Sharur("data/DATASET/sharur.duckdb", read_only=True)
 clusters = pd.read_csv("data/DATASET/synteny/results/micro_chain_clusters.csv")
 top = clusters.nlargest(10, "genome_support")
 

@@ -232,5 +232,6 @@ Legacy IDs like `E001` and `D001` may still be read from older datasets, but new
 - **Compile report:** `python scripts/compile_comprehensive_report.py --dataset data/DATASET_NAME/`
 - **Validate provenance:** `python scripts/validate_provenance.py --dataset data/DATASET_NAME/`
 - **Verify claims:** `python scripts/verify_claims.py --dataset data/DATASET_NAME/ --auto-extract`
-- **Validate defense systems:** `python scripts/validate_defense_systems.py data/DATASET_NAME/`
-- **Validate secretion systems:** `python scripts/validate_secretion_systems.py data/DATASET_NAME/`
+- **Validate system calls:** use the in-process co-location engine documented in
+  `docs/tools_reference.md`, then read the resulting curated system tables. Do not
+  promote raw profile hits or use the retired per-dataset validation scripts.

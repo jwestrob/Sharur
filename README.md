@@ -51,17 +51,36 @@ sharur-ingest \
   --input-dir /path/to/genome_fastas \
   --data-dir data/my_dataset \
   --output data/my_dataset/sharur.duckdb \
-  --force
+  --profile auto
 ```
 
 `sharur-ingest` is the primary command-line interface for the standard ingest pipeline. Use it by default for new datasets. See [`QUICKSTART.md`](QUICKSTART.md) for the operator-facing guide and [`src/ingest/README.md`](src/ingest/README.md) for the manual stage-by-stage reference. [`scripts/ingest.py`](scripts/ingest.py) remains as a repo-local compatibility shim for the same implementation. If `sharur-ingest` is not on `PATH`, refresh the editable install with `pip install -e ".[dev]"`.
+
+The default plan runs the core stages and builds DuckDB before launching embeddings. Optional
+QC/BGC stages are opt-in with `--with-quast`, `--with-dfast`, or `--with-gecco`;
+the deprecated helper is available only as `--with-legacy-dbcan`. The slower dbCAN
+three-tool consensus classifier is a separate Stage 07 opt-in,
+`--enable-cazymes`. Ingest is a ledger-backed dependency DAG and resumes matching successful
+stages by default. Embedding inference and the CPU FAISS build are separate attempts, so an
+index failure never forces re-embedding or imports FAISS into the Torch process. Choose
+`--profile local`, `--profile mps`, or `--profile slurm` explicitly when `auto` is not
+appropriate. Inspect the exact plan with `--dry-run`.
+
+After ingest, get one machine-readable view of what the dataset and runtime can actually do:
+
+```bash
+sharur preflight --db data/my_dataset/sharur.duckdb --format json
+```
+
+This inspects live sources/caller resources, semantic coverage, persistent similarity
+sidecars, the run ledger, resource profiles, and tool availability without mutating data.
 
 ### Use the operators
 
 ```python
 from sharur.operators import Sharur
 
-b = Sharur("data/my_dataset/sharur.duckdb")
+b = Sharur("data/my_dataset/sharur.duckdb", read_only=True)
 
 # Predicate search
 hydrogenases = b.search_by_predicates(has=["nife_group3", "bidirectional_hydrogenase"])
@@ -81,6 +100,11 @@ hits = b.search_foldseek_for_protein(protein_id)
 # Export
 b.export_fasta(protein_ids, "output.faa")
 ```
+
+Operator results expose `result.records`, `result.raw`, `result.status`, and
+`result.to_json()` for programmatic use. The CLI commands `overview`, `genomes`,
+`proteins`, `neighborhood`, and `search` accept
+`--format markdown|json|jsonl|tsv`.
 
 ### Use with Claude Code
 
@@ -186,7 +210,7 @@ The predicate system is a project very much in progress; there are tens of thous
 | 05a | GECCO | Optional biosynthetic gene clusters |
 | 05b | Legacy dbCAN | Deprecated; standard CAZyme ingest comes from Stage 04 + Stage 07 |
 | 05c | minced | Standard CRISPR array detection |
-| 07 | Builder | Standard DuckDB knowledge base + predicates |
+| 07 | Builder | Standard DuckDB knowledge base + predicates; optional dbCAN consensus with `--enable-cazymes` |
 | 06 | ESM2 | Standard post-pipeline protein embeddings (required for ELSA) |
 
 Stage 07 also runs **hydrogenase subgroup classification** when HydDB annotations are present: DIAMOND search against the HydDB reference database assigns NiFe/FeFe subgroups (e.g., Group 1a, Group 4e). All classified hits receive subgroup predicates (`nife_group1`, `fefe_groupB`, etc.). Hits lacking PFAM corroboration (including all Group 4 NiFe) are tagged `hyddb_needs_curation` for agent-level neighborhood validation. See `scripts/classify_hydrogenases.py`.

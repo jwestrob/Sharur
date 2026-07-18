@@ -2,7 +2,8 @@
 
 Adversarial manuscript claim verification. Named after the notoriously thorough Reviewer 2, this skill independently re-derives every quantitative claim from the database and scrutinizes interpretive claims for evidence calibration.
 
-**CONCURRENCY: DuckDB does not support concurrent writes. Only ONE agent should access a database at a time.**
+**CONCURRENCY:** Independent `read_only=True` review sessions may query in parallel.
+Serialize any corrective operation that writes DuckDB.
 
 > **Mandatory:** Follow the shared validation protocols in `_validation_protocols.md`.
 > Apply Context-First protocol, superfamily awareness, COUNT(DISTINCT protein_id), and
@@ -70,7 +71,7 @@ import json
 sys.path.insert(0, '.')
 from sharur.operators import Sharur
 
-b = Sharur(f"{DATASET}/sharur.duckdb")
+b = Sharur(f"{DATASET}/sharur.duckdb", read_only=True)
 
 REVIEW_DIR = dataset_dir / "review"
 REVIEW_DIR.mkdir(exist_ok=True)

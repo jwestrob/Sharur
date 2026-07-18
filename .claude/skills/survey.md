@@ -679,64 +679,55 @@ Generate **separate reports for major topics** (easier to navigate than one gian
     - Optional provenance-chain fields: `figures` (list of figure paths), `related_findings` (list of finding IDs), `phase` (e.g. "survey")
     - These fields are consumed by `scripts/compile_comprehensive_report.py` and `reports/report_manifest.json`
 
-**Finding helper** — use this to log findings with auto-incremented IDs:
+**Finding helper** — use the locked canonical writer:
 
 ```python
-import json
-from datetime import datetime
+from sharur.core.analysis_record_io import append_finding_record
 
 FINDINGS_FILE = survey_dir / "findings.jsonl"
 
-# Auto-increment finding ID counter
-# Convention: survey findings use "survey-" prefix (survey-001, survey-002, ...)
-_survey_counter = 0
-if FINDINGS_FILE.exists():
-    with open(FINDINGS_FILE) as _f:
-        for _line in _f:
-            _survey_counter += 1
-
-def next_survey_id() -> str:
-    global _survey_counter
-    _survey_counter += 1
-    return f"survey-{_survey_counter:03d}"
-
 def log_finding(category: str, title: str, description: str,
-                finding_id: str = None,
+                verification: list = None, finding_id: str = None,
                 evidence=None, n_genomes: int = None,
                 provenance: dict = None,
                 figures: list = None,
                 related_findings: list = None):
-    """Append a finding to survey/findings.jsonl with a stable ID.
+    """Validate and append one canonical survey finding.
 
     Args:
         category: e.g. "energy_metabolism", "cell_surface", "defense_systems"
         title: Self-contained title with all qualifiers
         description: Prose paragraph with biological interpretation
-        finding_id: Stable ID (auto-generated as survey-001, survey-002... if omitted)
+        verification: Claim/query/expected records for every concrete datum
+        finding_id: Existing stable ID when intentionally preserving one; otherwise omit
         evidence: Quantitative evidence (dict or string)
         n_genomes: Number of genomes where finding applies
         provenance: Dict with query, raw_result, accession_verified, interpretation
         figures: List of figure paths produced for this finding
         related_findings: List of IDs of related findings in any phase
     """
-    fid = finding_id or next_survey_id()
     finding = {
-        "id": fid,
         "title": title,
         "category": category,
         "description": description,
         "evidence": evidence or {},
+        "verification": verification,
         "n_genomes": n_genomes,
         "provenance": provenance or {},
         "figures": figures or [],
         "related_findings": related_findings or [],
         "phase": "survey",
     }
-    with open(FINDINGS_FILE, "a") as f:
-        f.write(json.dumps(finding) + "\n")
-    print(f"[LOGGED] {fid} | {category}: {title}")
-    return finding
+    if finding_id:
+        finding["id"] = finding_id
+    result = append_finding_record(FINDINGS_FILE, finding, phase="survey")
+    print(f"[LOGGED] {result.finding['id']} | {category}: {title}")
+    return result.finding
 ```
+
+`verification=None` exists only to make the failure come from the canonical validator with
+a useful message. Every real call must pass one independently executable
+`claim/query/expected` record for each total and each breakdown.
 
 ### Post-Survey Findings Extraction
 
@@ -752,6 +743,7 @@ log_finding(
     title="12 of 15 genomes encode complete TCA cycle",
     description="...",
     evidence={"complete": 12, "partial": 2, "absent": 1},
+    verification=verification_records,  # separate records for 12, 2, and 1
     n_genomes=12,
     provenance={"source_report": "survey/metabolic_reconstruction.md", "section": "TCA cycle completeness"},
 )
@@ -889,7 +881,7 @@ Use all three methods before claiming cytochrome absence. If all three find noth
 from sharur.operators import Sharur
 from pathlib import Path
 
-b = Sharur("data/YOUR_DATASET/sharur.duckdb")
+b = Sharur("data/YOUR_DATASET/sharur.duckdb", read_only=True)
 output_dir = Path("data/YOUR_DATASET/survey")
 output_dir.mkdir(exist_ok=True)
 

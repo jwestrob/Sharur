@@ -9,10 +9,39 @@ sharur-ingest \
   --input-dir /path/to/genome_fastas \
   --data-dir data/my_dataset \
   --output data/my_dataset/sharur.duckdb \
-  --force
+  --profile auto
 ```
 
 If `sharur-ingest` is missing, refresh the editable install with `pip install -e ".[dev]"`.
+
+The default plan runs the core stages and skips optional QUAST, DFAST, GECCO, and the
+deprecated legacy dbCAN helper. Opt in with `--with-quast`, `--with-dfast`,
+`--with-gecco`, or `--with-legacy-dbcan`. The separate Stage 07 dbCAN three-tool
+consensus classifier is opt-in with `--enable-cazymes`. `--dry-run` prints the exact
+stage order and paths without creating the dataset directory.
+
+The primary CLI builds a dependency DAG and writes its run, stage attempts, signatures,
+heartbeats, resources, commands, and output snapshots to `data/my_dataset/sharur_ops.db`.
+`--resume` is the default. Reuse requires an identical stage signature plus live, non-empty
+declared outputs that match the successful attempt's recorded snapshots; missing or modified
+outputs invalidate reuse. Signatures cover concrete commands, stage script content/stat,
+resource requests, dependency signatures, and artifact snapshots. Directory snapshots use a
+recursive metadata fingerprint, while Stage 00's checksum manifest remains the authoritative
+content inventory. If an upstream stage executes rather than being reused, every downstream
+dependent stage executes too.
+
+Resource profiles:
+
+| Flag | Execution |
+|---|---|
+| `--profile auto` | MPS when PyTorch reports a usable backend; bounded local CPU otherwise |
+| `--profile local` | All stages local; Stage 06 CPU |
+| `--profile mps` | Stage 06 MPS under a cross-process exclusive lock; other stages local |
+| `--profile slurm` | Generate `slurm/*.sbatch`, local wrappers, logs, and dependency-linked `submit.sh` |
+
+The SLURM profile gives Astra a 72-hour allocation and Stage 06 one CUDA GPU. MinCED remains
+single-threaded and local. Bundle generation does not submit jobs unless
+`--submit-slurm` is supplied.
 
 ## Manual Stage-by-Stage Pipeline
 
@@ -49,7 +78,11 @@ That is the manual stage sequence behind `sharur-ingest`. Stage 07 auto-discover
 python src/ingest/06_esm2_embeddings.py data/$DATASET/stage03_prodigal data/$DATASET/embeddings/
 ```
 
-Stage 06 produces `protein_embeddings.h5` (HDF5: `protein_ids` string array + `embeddings` float32 matrix) which is the input format for ELSA synteny discovery. See § ELSA Synteny Discovery in CLAUDE.md.
+Stage 06 streams the Stage 03 FASTAs into the canonical `protein_embeddings.h5` (HDF5:
+`protein_ids` string array + `embeddings` float32 matrix), writes an embedding manifest, and
+then builds a persistent FAISS index, stable SQLite row-to-protein map, and atomic
+active-generation manifest in a Torch-free process. The H5 remains the ELSA input and
+canonical embedding artifact.
 
 **ELSA synteny + genome browser (after Stage 06 + 07):**
 ```bash
@@ -103,11 +136,13 @@ Stage 03  Gene Calling            (Prodigal: genomes -> proteins + GFF)
 Stage 07  Knowledge Base          (consolidate everything -> sharur.duckdb)
    |
 Stage 06  Embeddings              (ESM2: proteins -> vector embeddings for ELSA)
+   |
+Stage 06i Persistent index        (CPU FAISS + stable protein-ID map)
 ```
 
 **Primary CLI path:** `sharur-ingest`
-**Standard pipeline stages:** 00, 03, 04, 05c, 07, 06
-**Post-pipeline (standard):** 06 (embeddings — runs after 07, required for ELSA synteny)
+**Standard pipeline stages:** 00, 03, 04, 05c, 07, 06, 06i
+**Post-pipeline (standard):** 06 (embeddings) then 06i (persistent similarity index)
 **Optional/deprecated:** 01 (QUAST QC), 02 (DFAST QC), 05a (GECCO BGC), 05b (dbCAN legacy)
 
 ---
@@ -125,6 +160,7 @@ Stage 06  Embeddings              (ESM2: proteins -> vector embeddings for ELSA)
 | 05b | `dbcan_cazyme.py` | Deprecated | Legacy dbCAN (replaced by Stage 07 built-in) |
 | 05c | `minced_crispr.py` | **Standard** | CRISPR repeat-spacer array detection |
 | 06 | `06_esm2_embeddings.py` | **Standard** | Protein vector embeddings (ELSA input) |
+| 06i | `vector_index_runner.py` | **Internal** | Persistent FAISS/ID sidecars in a Torch-free process |
 | 07 | `07_build_knowledge_base.py` | **Standard** | Build DuckDB knowledge base |
 
 Stages 01, 02, 05a, and 05b exist as scripts but are not required for a standard pipeline run. Stage 07 gracefully handles their absence.
@@ -309,7 +345,7 @@ python src/ingest/minced_crispr.py -i data/DATASET/stage00_prepared -o data/DATA
 
 ### Stage 07: Build Knowledge Base (`07_build_knowledge_base.py`)
 
-**What it does:** Consolidates all upstream outputs into a single DuckDB database. Auto-discovers stage directories under the data directory. Loads proteins, annotations, CRISPR arrays, BGC loci (if present), classifies hydrogenases (if HydDB annotations exist), runs dbCAN 3-tool consensus CAZyme classification, validates defense/secretion systems via the co-location engine, then generates the V2 predicate tables and V2-derived legacy compatibility predicates.
+**What it does:** Consolidates all upstream outputs into a single DuckDB database. Auto-discovers stage directories under the data directory. Loads proteins, annotations, CRISPR arrays, BGC loci (if present), classifies hydrogenases (if HydDB annotations exist), optionally runs dbCAN three-tool consensus with `--enable-cazymes`, validates defense/secretion systems via the co-location engine, then generates the V2 predicate tables and V2-derived legacy compatibility predicates.
 
 **Required inputs:** Data directory containing at minimum `stage03_prodigal/` and `stage04_astra/`. Loads additional data from any other stage directories that exist.
 
@@ -324,7 +360,9 @@ python src/ingest/minced_crispr.py -i data/DATASET/stage00_prepared -o data/DATA
 | `stage05a_gecco/` | GECCO | BGC loci (if present) |
 | `stage05b_dbcan/` | Legacy dbCAN | Legacy CAZyme JSON (backward compat) |
 | `stage05c_crispr/` | Stage 05c | CRISPR array loci from `*_crispr_arrays.json` |
-| `stage06_embeddings/` | Stage 06 | Embedding count metadata |
+| `embeddings/` | Stage 06 | Canonical embeddings and count metadata |
+
+Stage 07 also recognizes the legacy `stage06_embeddings/` layout when reading older datasets.
 
 **Outputs:**
 - `sharur.duckdb` -- complete knowledge base with tables: `bins`, `contigs`, `proteins`, `annotations`, `loci`, `locus_proteins`, `semantic_atoms`, `semantic_state`, `protein_predicates`, `feature_store`
@@ -342,6 +380,7 @@ python src/ingest/07_build_knowledge_base.py -d data/DATASET -o data/DATASET/sha
 | `-d`, `--data-dir` | `data` | Parent directory containing `stage*` subdirectories |
 | `-o`, `--output` | `data/sharur.duckdb` | Output DuckDB path |
 | `--force` | off | Overwrite existing database |
+| `--enable-cazymes` | off | Run the slower dbCAN three-tool consensus classifier |
 
 **What Stage 07 does automatically (no user intervention needed):**
 1. Loads bins from Stage 02 manifest (or infers bins from Stage 03 FAA files)
@@ -351,7 +390,7 @@ python src/ingest/07_build_knowledge_base.py -d data/DATASET -o data/DATASET/sha
 5. Loads BGC loci from Stage 05a (if present)
 6. Computes length z-scores per bin
 7. Runs HydDB subgroup classification (if HydDB annotations exist)
-8. Runs dbCAN 3-tool consensus CAZyme classification (DIAMOND + dbCAN.hmm + dbCAN-sub.hmm)
+8. Optionally runs dbCAN three-tool consensus CAZyme classification when `--enable-cazymes` is set
 9. Validates DefenseFinder hits via co-location rules → `defense_systems` table + `defensefinder_system` annotations
 10. Validates TXSScan hits via co-location rules → `secretion_systems` table + `txsscan_system` annotations
 11. Generates V2 semantic atoms/states for all proteins
@@ -395,14 +434,33 @@ Biosynthetic gene cluster detection using GECCO. Stage 07 loads results from `st
 
 ### Stage 05b: Legacy dbCAN (`dbcan_cazyme.py`)
 
-**Deprecated.** Stage 07 now runs dbCAN 3-tool consensus classification internally using `scripts/classify_cazymes.py`. Do not run this separately for new datasets.
+**Deprecated.** For new datasets, use Stage 04 dbCAN annotations or opt into Stage 07's
+three-tool consensus with `--enable-cazymes`; do not run this helper separately.
 
 ### Stage 06: ESM2 Embeddings (`06_esm2_embeddings.py`)
 
-Generates 320-dimensional protein embeddings using ESM2. Requires PyTorch and Transformers. GPU recommended. Can run any time after Stage 03 (reads .faa files from the Prodigal output directory, does NOT need the DuckDB database).
+Generates 320-dimensional protein embeddings using ESM2. Requires PyTorch and Transformers.
+GPU recommended. It streams `.faa` records and extendable H5 batches, so neither the
+proteome nor the complete embedding matrix is accumulated in RAM. Pooling excludes padding
+and special tokens; invalid or zero model output fails the stage. The manifest reports the
+number of proteins truncated at the model residue limit. This stage can run any time after
+Stage 03 and does not need the DuckDB database.
 
 ```bash
-python src/ingest/06_esm2_embeddings.py data/DATASET/stage03_prodigal data/DATASET/embeddings/
+python src/ingest/06_esm2_embeddings.py \
+  data/DATASET/stage03_prodigal \
+  data/DATASET/embeddings/ \
+  --device mps
+```
+
+Use `--device cpu|mps|cuda` to make placement explicit, `--skip-index` to defer sidecar
+construction, and `--index-threads N` to bound the CPU FAISS build. The standard DAG uses
+`--skip-index` and records the Torch-free CPU build as a separate `06i` attempt, so index
+retries reuse the completed H5. Direct Stage 06 use launches the same builder in an isolated
+child process. For an existing H5:
+
+```bash
+sharur build-vector-index --embeddings data/DATASET/embeddings/protein_embeddings.h5
 ```
 
 ---

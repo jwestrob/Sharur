@@ -144,13 +144,23 @@ foldseek databases AlphaFoldDB50 ~/.foldseek/afdb50/afdb50 /tmp/foldseek
 
 ## Verification
 
-The quickest check is **`sharur doctor`**, which reports every external tool, reference
-database, and API key it can find and flags whatever is missing:
+The quickest check is **`sharur doctor`**, which checks the installed ingest entry point,
+external tools, reference directories, and API keys and flags whatever is missing:
 
 ```bash
 sharur doctor            # one-shot health check (tools, reference DBs, API keys)
-sharur doctor --strict   # exit non-zero if a core tool/DB is missing (for scripts)
+sharur doctor --strict   # exit non-zero if a core requirement is missing (for scripts)
 ```
+
+Once a dataset exists, `doctor` is complemented by the non-mutating, dataset-aware brief:
+
+```bash
+sharur preflight --db data/DATASET/sharur.duckdb
+sharur preflight --db data/DATASET/sharur.duckdb --format json --strict
+```
+
+This distinguishes unavailable, stale, and failed dataset/runtime capabilities instead of
+reducing the result to a single install check.
 
 For granular manual checks:
 

@@ -18,7 +18,7 @@
 **Minimum boilerplate for any analysis subagent prompt:**
 ```
 DB: data/DATASET/sharur.duckdb
-Import: from sharur.operators import Sharur; b = Sharur("data/DATASET/sharur.duckdb")
+Import: from sharur.operators import Sharur; b = Sharur("data/DATASET/sharur.duckdb", read_only=True)
 Columns: 'name' (not annotation_id), 'score' (not bitscore)
 Counts: always COUNT(DISTINCT protein_id) — repeat domains inflate COUNT(*)
 MAG caveat: "Not detected" not "absent"
@@ -43,7 +43,8 @@ Use the Read tool to load any doc when you need its protocol. Don't guess — lo
 - Sub-agents CAN spawn further sub-agents for specialist tasks (literature, foldseek, hydrogenase curation)
 - Each sub-agent produces a discrete output (markdown report, JSONL findings)
 - Parent agent synthesizes outputs from all sub-agents
-- **DuckDB write locks** — run subagents SEQUENTIALLY if they write to the database
+- Multiple read-only DuckDB sessions may run concurrently. Run database writers
+  sequentially. Use separate output files or the locked findings writer for report records.
 
 ## Practical Tips
 - **Parallel genome browser agents** work well (quarters or groups)
@@ -56,7 +57,7 @@ Use the Read tool to load any doc when you need its protocol. Don't guess — lo
 
 **Rules:**
 1. **Never** `b.search_proteins(query="")` on large datasets — use SQL counts or specific predicates
-2. **Always** check result size before iterating (use `result._raw`)
+2. **Always** check result size before iterating (use `result.records`)
 3. **Always** limit iteration (e.g., `for pid in proteins[:10]`)
 4. **Aggregate** in SQL, not Python loops
 5. **If query takes >5 seconds**, stop and refine
@@ -65,12 +66,12 @@ Use the Read tool to load any doc when you need its protocol. Don't guess — lo
 ```python
 # BAD
 all_proteins = b.search_proteins(query="")
-for pid in all_proteins._raw: ...
+for protein in all_proteins.records: ...
 
 # GOOD
 result = b.search_by_predicates(has=["hydrogenase", "membrane_protein"])
-proteins = result._raw
-for pid in proteins[:10]: ...
+proteins = result.records
+for protein in proteins[:10]: ...
 
 # GOOD — SQL aggregation
 stats = b.store.execute("""

@@ -89,7 +89,7 @@ Lightweight neighborhood diagrams accessible directly from the Sharur API. Color
 
 ```python
 from sharur.operators import Sharur
-b = Sharur("data/DATASET/sharur.duckdb")
+b = Sharur("data/DATASET/sharur.duckdb", read_only=True)
 
 # Neighborhood diagram
 result = b.visualize_neighborhood(
@@ -194,14 +194,12 @@ When inserting a new figure, renumber all subsequent figures and their cross-ref
 
 ---
 
-## Defense System Figure Caveats
+## System Figure Caveats
 
-When generating defense system heatmaps or inventory figures, exclude known superfamily false positives:
-
-- **Mokosh Type I (MkoA_B)**: serine/threonine kinase superfamily hit, not a genuine defense system at high prevalence
-- **BREX (pglW)**: serine/threonine kinase superfamily hit
-
-These inflate defense system counts. Reference finding `survey-014` for documentation of this issue. Always cross-check DefenseFinder prevalence against published rates: if a "defense system" appears in >90% of genomes, it is almost certainly a superfamily false positive.
+Build system heatmaps only from purpose-built caller output found in the live schema.
+Raw per-profile/domain hits may be visualized as observed evidence, but must not be
+relabeled as systems. If prevalence is surprising, inspect caller membership,
+co-annotations, and validation status without priming the review with a named expected error.
 
 ---
 

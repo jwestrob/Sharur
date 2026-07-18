@@ -95,13 +95,34 @@ integrate_secretion_results(db_path, systems_df, genes_df)
 **Script:** `scripts/classify_cazymes.py`
 **Requires:** `data/dbcan_db/` with CAZy.dmnd, dbCAN.hmm, dbCAN-sub.hmm
 **Method:** DIAMOND (1e-18) + dbCAN.hmm (1e-15) + dbCAN-sub.hmm (1e-15), consensus ≥2 tools.
-**Pipeline:** Integrated into stage 07 before final V2 predicate generation.
+**Pipeline:** Optional in Stage 07 before final V2 predicate generation. Enable it with
+`sharur-ingest --enable-cazymes` or standalone Stage 07 `--enable-cazymes`.
 
 ## ESM2 Embeddings
 **Script:** `src/ingest/06_esm2_embeddings.py`
 **Usage:** `python src/ingest/06_esm2_embeddings.py data/DATASET/stage03_prodigal data/DATASET/embeddings/`
 **Model:** `facebook/esm2_t6_8M_UR50D` (320-dim, auto-detects MPS/CUDA/CPU)
-**Output:** `embeddings/protein_embeddings.h5` + `embedding_manifest.json` (FAISS index built at runtime from H5)
+**Output:** canonical `embeddings/protein_embeddings.h5`, `embedding_manifest.json`,
+an atomic `protein_embeddings.index.json`, a generation-scoped `.faiss` index, and a
+generation-scoped `.ids.sqlite` stable row-to-protein map. Stage 06 builds the sidecars by
+default in a Torch-free subprocess; use `--skip-index` only when deliberately deferring the
+CPU build. The standard ingest DAG deliberately does defer it and records the follow-on CPU
+build as `06i`, allowing index retry without another model run.
+
+FASTA input and H5 output are streamed in batches. Residue pooling excludes padding and
+special tokens, invalid/zero embeddings fail closed, the H5 is published atomically, and the
+embedding manifest counts sequences truncated at the model limit.
+
+Sharur discovers artifact paths at session creation but does not open H5 or FAISS until the
+first similarity call, so ordinary DuckDB operators stay lightweight. A valid generation is
+opened read-only with mmap. Missing or stale sidecars are rebuilt on first use, or explicitly:
+
+```bash
+sharur build-vector-index --db data/DATASET/sharur.duckdb
+```
+
+The H5 remains canonical. The index manifest is the atomic commit point, and its source
+signature prevents reuse after the H5 changes.
 **Status:** Standard pipeline stage — run after stage 07. Required for ELSA synteny.
 
 ## ELSA Synteny Discovery
@@ -140,7 +161,7 @@ elsa synteny \
 ## Structure Prediction & Foldseek
 
 ```python
-b = Sharur("data/DATASET/sharur.duckdb")
+b = Sharur("data/DATASET/sharur.duckdb", read_only=True)
 
 # Database proteins
 result = b.predict_structure("protein_id", output_path="structures/protein.pdb")  # requires ESM_API_KEY
@@ -178,14 +199,20 @@ Features: Multi-source annotation priority (Foldseek > DefenseFinder > PADLOC > 
 
 ## Analysis Manifest System
 
-Each dataset has a `manifest.json` for session continuity. Key APIs: `b.resume()` (status overview), `b.manifest.log_session(phase, note)`, `b.manifest.save()`. Migration: `python scripts/migrate_to_manifest.py data/my_dataset/`
+Each dataset may have a `manifest.json` derived continuity/status cache. Canonical findings
+and live database/artifact state remain authoritative. `b.resume()` refreshes the manifest
+view in memory from those sources; call `b.manifest.save()` explicitly to persist the
+reconciled cache. Legacy manifest shapes are normalized with a warning, and malformed
+manifests are not overwritten automatically. Other APIs:
+`b.manifest.log_session(phase, note)`. Migration:
+`python scripts/migrate_to_manifest.py data/my_dataset/`.
 
 ## V2 Semantic Atoms
 
 Full docs: `docs/predicates_v2.md`
 
 ```python
-b = Sharur("data/YOUR_DATASET/sharur.duckdb")
+b = Sharur("data/YOUR_DATASET/sharur.duckdb", read_only=True)
 # New Stage 07 builds already materialize V2. Use generate_v2() for manual
 # refreshes or subsets.
 b.generate_v2(output_review_queue="review_queue.tsv")
@@ -204,7 +231,7 @@ b.list_composites()  # YAML-declared rules (config/predicates_v2/composites.yaml
 ## Hypothesis Tracking & Provenance
 
 ```python
-b = Sharur("data/YOUR_DATASET/sharur.duckdb")
+b = Sharur("data/YOUR_DATASET/sharur.duckdb", read_only=True)
 h = b.propose_hypothesis("Group 4 NiFe hydrogenases are energy-conserving")
 b.add_evidence(h.hypothesis_id, "NiFe Group 4 survey", "12/41 genomes", True, 0.8)
 print(b.hypothesis_summary())

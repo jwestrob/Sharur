@@ -19,7 +19,7 @@ No agent ever writes to another agent's context. All coordination flows through 
 │  Agent 1    │─────────────────────┐
 └─────────────┘                     │
 ┌─────────────┐      POST /findings │     ┌──────────────────┐     ┌────────────────┐
-│  Agent 2    │─────────────────────┼────▶│  sharur_ops.py   │────▶│ sharur_ops.db  │
+│  Agent 2    │─────────────────────┼────▶│ sharur.ops.server│────▶│ sharur_ops.db  │
 └─────────────┘                     │     │  FastAPI + SQLite │     │ (WAL mode)     │
 ┌─────────────┐      POST /findings │     └──────────────────┘     └────────────────┘
 │  Agent N    │─────────────────────┘           ▲    │
@@ -33,12 +33,14 @@ No agent ever writes to another agent's context. All coordination flows through 
 
 Agents also read from the server (checking what others have found, polling for tasks). The coordinator reads findings, assigns tasks, proposes hypotheses, and logs its own reasoning — all via HTTP.
 
-Domain databases (DuckDB files) remain read-only reference data. Agents ATTACH them directly for analytical queries. The ops server handles only coordination state.
+Domain databases (DuckDB files) remain read-only reference data. Agents ATTACH them directly
+for analytical queries. The ops server handles only coordination state; canonical scientific
+records remain the dataset findings and hypothesis files.
 
 ## Dependencies
 
 ```
-pip install fastapi uvicorn pydantic
+pip install -e .
 ```
 
 No other dependencies. Python 3.10+.
@@ -47,28 +49,34 @@ No other dependencies. Python 3.10+.
 
 ```bash
 # Start the server (creates sharur_ops.db on first run)
-uvicorn sharur_ops:app --host 0.0.0.0 --port 8811
+uvicorn sharur.ops.server:app --host 0.0.0.0 --port 8811
 
 # Or directly
-python sharur_ops.py
+python -m sharur.ops.server
 ```
 
 Works identically on laptop (localhost:8811) and cluster (node:8811). Agents just change the base URL.
 
-The coordination DB defaults to `sharur_ops.db` in the process working directory. Set
-`SHARUR_OPS_DB_PATH` to pin it somewhere stable — a persistent volume, or a fixed path so the
-coordination state survives starting the server from a different directory:
+The server defaults to `sharur_ops.db` in the process working directory. Pin it to the
+dataset-local ledger created by `sharur-ingest` so coordination tasks and execution history
+share one operational record:
 
 ```bash
-export SHARUR_OPS_DB_PATH=/data/ops/sharur_ops.db
+export SHARUR_OPS_DB_PATH=/absolute/path/data/DATASET/sharur_ops.db
 uvicorn sharur.ops.server:app --host 0.0.0.0 --port 8811
 ```
 
 ## Database
 
-SQLite in WAL mode. Single connection, writes serialized via threading lock. This eliminates all concurrency issues — WAL gives concurrent reads, the lock serializes writes, and each write (one finding row insert) takes microseconds.
+SQLite runs in WAL mode with a busy timeout. The HTTP server serializes writes through
+an in-process lock; direct `OpsStore` instances use SQLite transactions plus a per-instance
+lock. Task claim and completion paths use conditional ownership and live-lease checks.
+Expired work is recovered transactionally, and run/stage heartbeats make abandoned ingest
+attempts visible on the next run.
 
-Four tables: `findings`, `hypotheses`, `tasks`, `coordinator_log`.
+Coordination tables are `findings`, `hypotheses`, `tasks`, and `coordinator_log`. The unified
+execution ledger adds `runs`, `run_events`, and `run_stages`; `ops_schema_meta` records
+migration state. Existing four-table databases migrate in place when opened.
 
 ---
 
@@ -83,8 +91,8 @@ CREATE TABLE findings (
     id TEXT PRIMARY KEY,                -- UUID, generated server-side
     agent_id TEXT NOT NULL,             -- which agent produced this
     ts REAL NOT NULL,                   -- unix timestamp, set server-side
-    finding_type TEXT NOT NULL,         -- see enum below
-    domain TEXT NOT NULL,               -- see enum below
+    finding_type TEXT NOT NULL,         -- caller-defined non-empty category
+    domain TEXT NOT NULL,               -- caller-defined dataset/domain slug
     summary TEXT NOT NULL,              -- one-line human-readable
     evidence TEXT NOT NULL DEFAULT '{}', -- JSON, type-specific payload
     confidence REAL NOT NULL DEFAULT 0.5, -- 0.0-1.0
@@ -101,9 +109,8 @@ CREATE INDEX idx_findings_type ON findings(finding_type);
 CREATE INDEX idx_findings_domain ON findings(domain);
 ```
 
-**finding_type enum:** `gene`, `neighborhood`, `cassette`, `domain_architecture`, `phylogenetic`, `observation`
-
-**domain enum:** `omnitrophota`, `dpann`, `bathyarchaeia`, `hinthialibacterota`, `cross_domain`
+`finding_type` and `domain` are intentionally open strings. Use stable project slugs;
+the examples below are conventions, not exhaustive enums.
 
 **Evidence payload by finding_type:**
 
@@ -164,19 +171,38 @@ CREATE TABLE tasks (
     ts REAL NOT NULL,
     claimed_ts REAL,
     completed_ts REAL,
-    status TEXT NOT NULL DEFAULT 'pending',  -- pending|claimed|in_progress|complete|failed
+    status TEXT NOT NULL DEFAULT 'pending',  -- pending|claimed|in_progress|retry_wait|complete|failed
     priority INTEGER NOT NULL DEFAULT 1,     -- 0=low, 1=normal, 2=high, 3=urgent
     task_type TEXT NOT NULL,                  -- investigate|validate_hypothesis|cross_domain_search|follow_up|survey
     description TEXT NOT NULL,
     params TEXT NOT NULL DEFAULT '{}',        -- JSON, task-specific parameters
     domain_hint TEXT,                         -- suggested domain DB
-    result_finding_ids TEXT NOT NULL DEFAULT '[]'  -- populated on completion
+    result_finding_ids TEXT NOT NULL DEFAULT '[]', -- populated on completion
+    run_id TEXT,                            -- optional parent run
+    idempotency_key TEXT,                   -- unique caller-stable creation key
+    dependency_ids TEXT NOT NULL DEFAULT '[]', -- JSON task IDs; all must complete
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 3,
+    lease_seconds INTEGER NOT NULL DEFAULT 900,
+    lease_expires_ts REAL,
+    heartbeat_ts REAL,
+    retry_after_ts REAL,
+    last_error TEXT
 );
 
 CREATE INDEX idx_tasks_status ON tasks(status);
 CREATE INDEX idx_tasks_assigned ON tasks(assigned_to);
 CREATE INDEX idx_tasks_priority ON tasks(priority);
+CREATE INDEX idx_tasks_run ON tasks(run_id);
+CREATE INDEX idx_tasks_lease ON tasks(status, lease_expires_ts);
+CREATE UNIQUE INDEX idx_tasks_idempotency
+    ON tasks(idempotency_key) WHERE idempotency_key IS NOT NULL;
 ```
+
+Only dependency-satisfied tasks are claimable. Claiming atomically increments
+`attempt_count` and starts a finite lease. The owning worker must heartbeat before expiry;
+completion/failure is rejected after lease loss. Retryable failures enter `retry_wait`, then
+return to `pending` after `retry_after_ts` until `max_attempts` is exhausted.
 
 ### coordinator_log
 
@@ -196,13 +222,30 @@ CREATE TABLE coordinator_log (
 CREATE INDEX idx_coordlog_ts ON coordinator_log(ts);
 ```
 
+### runs, run_events, and run_stages
+
+`runs` is one durable execution record keyed by dataset path and run type. Status is
+`pending`, `submitted`, `running`, `complete`, or `failed`; `submitted` represents a scheduler
+bundle that has been handed off but has no stage currently executing, including time between
+dependent jobs, so queue latency is not mistaken for a stale worker. The row records
+idempotency key, lifecycle timestamps, heartbeat, parent run, current stage, config, result,
+and terminal error. `run_events` is the append-only event stream. `run_stages` records each
+stage attempt with its signature, command, input/output snapshots, resource profile,
+heartbeats, terminal error, and reuse origin.
+
+For ingest resume, a stage is reusable only when dataset, run type, stage ID, and signature
+match a prior successful/reused attempt and its required outputs match that attempt's recorded
+snapshots. A reused attempt is itself recorded (`attempt=0`) with the source run and attempt.
+Reuse is dependency-conservative: when any upstream stage executes, all transitive downstream
+stages execute rather than reusing artifacts derived from the previous upstream attempt.
+
 ---
 
 ## API Endpoints
 
 ### Findings
 
-| Method | Path | Description |
+| Endpoint | Action | Contract |
 |--------|------|-------------|
 | `POST /findings` | Create a finding | Body: `FindingIn` (see Pydantic models). Returns `{id, ts}`. |
 | `GET /findings` | List findings | Query params: `since` (float), `min_novelty` (int), `finding_type`, `domain`, `agent_id`, `limit` (default 50, max 500). Returns array. |
@@ -211,7 +254,7 @@ CREATE INDEX idx_coordlog_ts ON coordinator_log(ts);
 
 ### Hypotheses
 
-| Method | Path | Description |
+| Endpoint | Action | Contract |
 |--------|------|-------------|
 | `POST /hypotheses` | Propose a hypothesis | Body: `HypothesisIn`. Returns `{id, ts}`. |
 | `GET /hypotheses` | List hypotheses | Query params: `status`, `unassigned` (bool), `limit`. |
@@ -219,23 +262,40 @@ CREATE INDEX idx_coordlog_ts ON coordinator_log(ts);
 
 ### Tasks
 
-| Method | Path | Description |
+| Endpoint | Action | Contract |
 |--------|------|-------------|
 | `POST /tasks` | Create a task | Body: `TaskIn`. Returns `{id, ts}`. |
 | `GET /tasks` | List tasks | Query params: `status`, `assigned_to`, `unassigned` (bool), `limit`. |
 | `PATCH /tasks/{id}` | Update task status | Body: `TaskUpdate`. |
-| `POST /tasks/{id}/claim?agent_id=X` | Atomically claim a task | Conditional UPDATE — only succeeds if task is still `pending`. Returns 409 if already claimed. |
+| `POST /tasks/{id}/claim?agent_id=X` | Atomically claim a task | Requires satisfied dependencies and remaining attempts; starts a lease. |
+| `POST /tasks/{id}/heartbeat?agent_id=X` | Heartbeat owned task | Extends a still-live lease and marks it `in_progress`. |
+| `POST /tasks/recover` | Recover expired tasks | Requeues attempts or marks exhausted tasks failed. |
+
+### Runs
+
+| Endpoint | Action | Contract |
+|--------|------|-------------|
+| `POST /runs` | Create/deduplicate a run | Idempotency keys reject conflicting payloads. |
+| `GET /runs` | List runs | Filter by dataset path, run type, or status. |
+| `GET /runs/{id}` | Get a run | Returns decoded config/result. |
+| `POST /runs/{id}/start` | Start a run | Sets lifecycle timestamps and heartbeat. |
+| `POST /runs/{id}/submit` | Mark scheduler handoff | Atomically moves pending → submitted. |
+| `POST /runs/{id}/heartbeat` | Heartbeat a run | Updates a running record. |
+| `PATCH /runs/{id}` | Complete or fail a run | Writes result or terminal error. |
+| `GET /runs/{id}/events` | Read event stream | Ordered run/stage lifecycle events. |
+| `GET /runs/{id}/stages` | Inspect stage attempts | Optional `stage_id` filter; decoded snapshots/resources. |
+| `POST /runs/recover` | Recover stale runs | Fails expired running stage attempts and parent runs. |
 
 ### Coordinator Log
 
-| Method | Path | Description |
+| Endpoint | Action | Contract |
 |--------|------|-------------|
 | `POST /coordinator/log` | Write a log entry | Body: `CoordinatorLogIn`. |
 | `GET /coordinator/log` | Read recent log | Query params: `limit`, `since`. |
 
 ### Utility
 
-| Method | Path | Description |
+| Endpoint | Action | Contract |
 |--------|------|-------------|
 | `GET /stream` | SSE event stream | Real-time push notifications for new findings, hypotheses, tasks. Send keepalive every 30s. |
 | `GET /stats` | Dashboard stats | Counts per table, findings by novelty, tasks by status, hypotheses by status. |
@@ -248,8 +308,8 @@ CREATE INDEX idx_coordlog_ts ON coordinator_log(ts);
 ```python
 class FindingIn(BaseModel):
     agent_id: str
-    finding_type: str   # gene|neighborhood|cassette|domain_architecture|phylogenetic|observation
-    domain: str         # omnitrophota|dpann|bathyarchaeia|hinthialibacterota|cross_domain
+    finding_type: str   # caller-defined non-empty category
+    domain: str         # caller-defined dataset/domain slug
     summary: str
     evidence: dict = {}
     confidence: float = 0.5  # 0.0-1.0
@@ -278,11 +338,19 @@ class TaskIn(BaseModel):
     priority: int = 1  # 0-3
     domain_hint: Optional[str] = None
     assigned_to: Optional[str] = None
+    run_id: Optional[str] = None
+    idempotency_key: Optional[str] = None
+    depends_on: list[str] = []
+    max_attempts: int = 3
+    lease_seconds: int = 900
 
 class TaskUpdate(BaseModel):
-    status: str  # pending|claimed|in_progress|complete|failed
-    assigned_to: Optional[str] = None
+    status: str  # pending|claimed|in_progress|retry_wait|complete|failed
+    agent_id: Optional[str] = None
     result_finding_ids: Optional[list[str]] = None
+    error: Optional[str] = None
+    retryable: bool = False
+    retry_delay_seconds: int = 0
 
 class CoordinatorLogIn(BaseModel):
     action_type: str  # synthesis|task_assignment|escalation|hypothesis_generated|checkpoint
@@ -296,10 +364,10 @@ class CoordinatorLogIn(BaseModel):
 
 ## Client Library
 
-`sharur_client.py` provides a `SharurOps` class that wraps all endpoints. Usage:
+`sharur/ops/client.py` provides a `SharurOps` class that wraps all endpoints. Usage:
 
 ```python
-from sharur_client import SharurOps
+from sharur.ops.client import SharurOps
 
 ops = SharurOps("http://localhost:8811", agent_id="dpann_surveyor")
 
@@ -379,8 +447,14 @@ print(ops.stats())
 | `my_tasks(status)` | Get tasks assigned to this agent. |
 | `available_tasks()` | Get unassigned pending tasks. |
 | `claim_task(id)` | Atomically claim a task (409 if already claimed). |
+| `heartbeat_task(id, lease_seconds)` | Extend the current agent's live task lease. |
 | `complete_task(id, result_finding_ids)` | Mark task complete. |
-| `fail_task(id)` | Mark task failed. |
+| `fail_task(id, error, retryable, retry_delay_seconds)` | Fail or schedule retry. |
+| `recover_expired_tasks()` | Requeue expired attempts or fail exhausted tasks. |
+| `create_run(...)`, `start_run(id)`, `submit_run(id)`, `heartbeat_run(id)` | Manage durable runs. |
+| `complete_run(id, result)`, `fail_run(id, error)` | Terminate runs. |
+| `list_runs(...)`, `get_run(id)`, `run_events(id)`, `run_stages(id)` | Inspect run history. |
+| `recover_stale_runs(...)` | Mark abandoned run/stage attempts failed. |
 | `log(...)` | Write a coordinator log entry. |
 | `recent_log(limit, since)` | Read coordinator log. |
 | `stats()` | Get dashboard stats. |
@@ -393,11 +467,16 @@ print(ops.stats())
 
 2. **HTTP, not shared files.** Works identically on laptop (localhost) and cluster (remote node). No shared filesystem, no NFS, no NDJSON append atomicity concerns.
 
-3. **Atomic task claiming.** `POST /tasks/{id}/claim` uses a conditional UPDATE (`WHERE status = 'pending'`). If two agents race, exactly one gets 200, the other gets 409. No distributed locking needed.
+3. **Atomic leased task claiming.** `POST /tasks/{id}/claim` uses a write transaction plus
+   a conditional update. If two agents race, exactly one claims the task. Leases, heartbeats,
+   bounded attempts, dependency gates, delayed retries, and idempotency keys handle worker
+   death and duplicate dispatch.
 
 4. **SSE for real-time events.** The `/stream` endpoint pushes finding/hypothesis/task creation events. The coordinator can subscribe instead of polling. Keepalive every 30s prevents timeouts.
 
-5. **Mixed-granularity findings.** The `finding_type` enum + flexible JSON `evidence` payload handles everything from single genes to cross-phylum observations without schema sprawl.
+5. **Mixed-granularity findings.** An open `finding_type` string plus flexible JSON
+   `evidence` handles everything from single genes to cross-dataset observations without
+   schema sprawl.
 
 6. **Coordinator log as compaction insurance.** The coordinator writes its reasoning to `coordinator_log` before and after synthesis steps. After compaction, it queries `GET /coordinator/log?limit=10` to recover its train of thought.
 
@@ -432,12 +511,29 @@ The intended orchestrator workflow after integration:
 
 ---
 
+## Durability and Recovery Boundary
+
+SQLite is the executor-of-record for Sharur task and ingest lifecycle state on a shared
+filesystem. It provides transactional claims, finite leases, heartbeat recovery, bounded
+retries, dependency gates, idempotent creation, and append-only run events. It does not
+replace a remote scheduler: SLURM remains responsible for allocating/killing cluster jobs,
+and network partitions can delay heartbeats until a lease expires. Workers must treat a lost
+lease as lost authority and must not publish terminal task state afterward.
+
+Ingest subprocesses heartbeat every 30 seconds. On the next ingest invocation, stale running
+stage attempts and their parent runs are marked failed before new work starts. Resume is
+signature- and output-gated; it never infers success solely from a directory's existence.
+Run/stage starts are atomic as well as run creation: a duplicate launcher using the same
+idempotency key cannot start the same run or stage twice. SLURM handoff uses `submitted`
+status so long scheduler queue time is not crash-recovered as active worker failure.
+
 ## File Manifest
 
 ```
-sharur_ops.py      — FastAPI server (~350 lines)
-sharur_client.py   — Agent client library (~180 lines)
-SCHEMA.md          — Schema design document with query patterns
+sharur/ops/server.py  — FastAPI server
+sharur/ops/client.py  — HTTP client
+sharur/ops/store.py   — direct SQLite client with matching semantics
+sharur/ops/schema.py  — migration-safe shared schema
+sharur/ops/ledger.py  — run, event, stage-attempt, reuse, and recovery API
+agent_ops_spec.md     — schema and operating contract
 ```
-
-All three files are provided in the accompanying tarball.
