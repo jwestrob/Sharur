@@ -594,9 +594,10 @@ def get_neighborhood(
                 ) as best_annotation
             FROM proteins p
             WHERE p.contig_id = ?
+              AND p.bin_id = ?
             ORDER BY p.start
             """,
-            [contig_id],
+            [contig_id, bin_id],
         )
 
         if not neighbors:

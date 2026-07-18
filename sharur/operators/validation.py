@@ -277,7 +277,7 @@ def validate_context(
 
         # Get target protein info
         target = store.execute("""
-            SELECT p.contig_id, p.gene_index,
+            SELECT p.contig_id, p.bin_id, p.gene_index,
                    COALESCE(a.name, a.description, 'unannotated') as annotation
             FROM proteins p
             LEFT JOIN annotations a ON p.protein_id = a.protein_id
@@ -291,7 +291,7 @@ def validate_context(
                 rows=0,
             )
 
-        contig_id, gene_index, target_annotation = target[0]
+        contig_id, bin_id, gene_index, target_annotation = target[0]
 
         # Get neighborhood with annotations
         neighbors = store.execute("""
@@ -304,18 +304,31 @@ def validate_context(
             LEFT JOIN annotations a ON p.protein_id = a.protein_id
             LEFT JOIN protein_predicates pp ON p.protein_id = pp.protein_id
             WHERE p.contig_id = ?
+              AND p.bin_id = ?
               AND p.gene_index BETWEEN ? AND ?
               AND p.protein_id != ?
             ORDER BY p.gene_index
-        """, [contig_id, gene_index - window, gene_index + window, protein_id])
+        """, [
+            contig_id,
+            bin_id,
+            gene_index - window,
+            gene_index + window,
+            protein_id,
+        ])
 
         # Check for CRISPR arrays nearby
         arrays_nearby = store.execute("""
-            SELECT locus_id, start, end_coord
-            FROM loci
-            WHERE contig_id = ?
-              AND locus_type = 'crispr'
-        """, [contig_id])
+            SELECT l.locus_id, l.start, l.end_coord
+            FROM loci l
+            WHERE l.contig_id = ?
+              AND l.locus_type = 'crispr'
+              AND EXISTS (
+                  SELECT 1
+                  FROM contigs c
+                  WHERE c.contig_id = l.contig_id
+                    AND c.bin_id = ?
+              )
+        """, [contig_id, bin_id])
 
         # Analyze neighbors
         found_expected = {exp: [] for exp in expected_neighbors}
@@ -457,7 +470,8 @@ def analyze_crispr_systems(store) -> SharurResult:
                 SELECT p.protein_id, a.name, p.start, p.end_coord
                 FROM proteins p
                 JOIN annotations a ON p.protein_id = a.protein_id
-                WHERE p.contig_id = ?
+                WHERE p.bin_id = ?
+                  AND p.contig_id = ?
                   AND (a.name ILIKE '%cas1%' OR a.name ILIKE '%cas2%'
                        OR a.name ILIKE '%cas3%' OR a.name ILIKE '%cas5%'
                        OR a.name ILIKE '%cas6%' OR a.name ILIKE '%cas7%'
@@ -466,7 +480,7 @@ def analyze_crispr_systems(store) -> SharurResult:
                        OR a.name ILIKE '%cas13%' OR a.name ILIKE '%csm%'
                        OR a.name ILIKE '%cmr%' OR a.name ILIKE '%csx%')
                   AND ABS(p.start - ?) < 15000
-            """, [contig_id, start])
+            """, [genome_id, contig_id, start])
 
             # Determine system type based on cas genes
             cas_genes = [ann.lower() for _, ann, _, _ in cas_nearby]

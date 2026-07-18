@@ -38,10 +38,18 @@ python scripts/plot_locus_multisource.py \
 Labels are assigned per-gene using the highest-priority source available:
 
 1. **Foldseek** structural homology (PDB descriptions, cleaned automatically)
-2. **DefenseFinder** system-level calls (loaded from `defensefinder_results/` or `annotations/`)
+2. **Structured caller output** from `defensefinder_system` or
+   `txsscan_system` annotation rows
 3. **PADLOC** defense calls (loaded from `padloc_results/` or `annotations/`)
-4. **PFAM / KEGG / VOGdb** -- best by e-value from the `annotations` table
+4. **PFAM / KEGG / VOGdb / CAZy / HydDB** sequence or domain observations
    - KEGG KO IDs are translated to human-readable descriptions via `data/reference/ko_list`
+5. **Raw DefenseFinder / TXSScan profiles**, only when no higher-priority
+   observation exists
+
+Raw profile labels are prefixed with `profile:` and use a distinct legend
+category. They are observations, not named system calls. Before interpreting a
+named system, inspect the live schema and consult the purpose-built structured
+caller table or system annotation rows.
 
 If no annotation source produces a hit, the gene is labeled `?` and colored gray.
 
@@ -50,7 +58,10 @@ If no annotation source produces a hit, the gene is labeled `?` and colored gray
 | Source | Color | Hex |
 |--------|-------|-----|
 | Foldseek | Red | `#FF6B6B` |
-| DefenseFinder | Teal | `#4ECDC4` |
+| DefenseFinder call | Teal | `#4ECDC4` |
+| TXSScan call | Dark teal | `#16A085` |
+| DefenseFinder profile | Muted teal | `#A3D5D3` |
+| TXSScan profile | Muted blue | `#85C1E9` |
 | PADLOC | Light teal | `#95E1D3` |
 | PFAM | Blue | `#3498DB` |
 | KEGG | Purple | `#9B59B6` |
@@ -235,10 +246,12 @@ pid = b.store.execute("""
     LIMIT 1 OFFSET (SELECT COUNT(*)/2 FROM locus_proteins WHERE locus_id = 'LOCUS_ID')
 """)[0][0]
 
-# By DefenseFinder system type
+# By curated DefenseFinder system type
 pid = b.store.execute("""
-    SELECT protein_id FROM annotations
-    WHERE source = 'defensefinder' AND accession LIKE 'CBASS%'
+    SELECT sp.protein_id
+    FROM defense_systems ds
+    JOIN system_proteins sp USING (system_id)
+    WHERE ds.system_type = 'CBASS'
     LIMIT 1
 """)[0][0]
 ```

@@ -128,7 +128,11 @@ def export_neighborhood_fasta(
     with OperatorContext("export_neighborhood_fasta", params, store=store) as ctx:
         # Get anchor protein info
         anchor = store.execute(
-            "SELECT contig_id, gene_index FROM proteins WHERE protein_id = ?",
+            """
+            SELECT contig_id, bin_id, gene_index
+            FROM proteins
+            WHERE protein_id = ?
+            """,
             [protein_id],
         )
         if not anchor:
@@ -137,7 +141,7 @@ def export_neighborhood_fasta(
                 rows=0,
             )
 
-        contig_id, gene_index = anchor[0]
+        contig_id, bin_id, gene_index = anchor[0]
 
         # Get neighborhood proteins
         query = """
@@ -149,12 +153,13 @@ def export_neighborhood_fasta(
                     LIMIT 1) as annotation
             FROM proteins p
             WHERE p.contig_id = ?
+              AND p.bin_id = ?
               AND p.gene_index BETWEEN ? AND ?
             ORDER BY p.gene_index
         """
         rows = store.execute(
             query,
-            [contig_id, gene_index - window, gene_index + window],
+            [contig_id, bin_id, gene_index - window, gene_index + window],
         )
 
         if not rows:
@@ -188,7 +193,12 @@ def export_neighborhood_fasta(
         return ctx.make_result(
             data=summary,
             rows=len(rows),
-            raw={"fasta": fasta_content, "count": len(rows), "contig_id": contig_id},
+            raw={
+                "fasta": fasta_content,
+                "count": len(rows),
+                "contig_id": contig_id,
+                "bin_id": bin_id,
+            },
         )
 
 

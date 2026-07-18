@@ -129,7 +129,7 @@ def visualize_neighborhood(
 
         # Get anchor protein info including its annotation
         anchor = store.execute(
-            """SELECT p.contig_id, p.gene_index, p.start, p.end_coord,
+            """SELECT p.contig_id, p.bin_id, p.gene_index, p.start, p.end_coord,
                       (SELECT a.name FROM annotations a
                        WHERE a.protein_id = p.protein_id
                        ORDER BY a.evalue NULLS LAST LIMIT 1) as annotation
@@ -142,7 +142,14 @@ def visualize_neighborhood(
                 rows=0,
             )
 
-        contig_id, gene_index, anchor_start, anchor_end, anchor_annotation = anchor[0]
+        (
+            contig_id,
+            bin_id,
+            gene_index,
+            anchor_start,
+            anchor_end,
+            anchor_annotation,
+        ) = anchor[0]
 
         # Get neighborhood proteins
         query = """
@@ -159,12 +166,13 @@ def visualize_neighborhood(
                  LIMIT 1) as annotation
             FROM proteins p
             WHERE p.contig_id = ?
+              AND p.bin_id = ?
               AND p.gene_index BETWEEN ? AND ?
             ORDER BY p.gene_index
         """
         rows = store.execute(
             query,
-            [contig_id, gene_index - window, gene_index + window],
+            [contig_id, bin_id, gene_index - window, gene_index + window],
         )
 
         if not rows:
@@ -186,12 +194,19 @@ def visualize_neighborhood(
                 expanded_min = max(0, min_coord - 1000)
                 expanded_max = max_coord + 1000
                 crispr_arrays = store.execute(
-                    """SELECT locus_id, start, end_coord, metadata
-                       FROM loci
-                       WHERE contig_id = ?
-                         AND locus_type = 'crispr'
-                         AND start <= ? AND end_coord >= ?""",
-                    [contig_id, expanded_max, expanded_min],
+                    """SELECT l.locus_id, l.start, l.end_coord, l.metadata
+                       FROM loci l
+                       WHERE l.contig_id = ?
+                         AND l.locus_type = 'crispr'
+                         AND l.start <= ?
+                         AND l.end_coord >= ?
+                         AND EXISTS (
+                             SELECT 1
+                             FROM contigs c
+                             WHERE c.contig_id = l.contig_id
+                               AND c.bin_id = ?
+                         )""",
+                    [contig_id, expanded_max, expanded_min, bin_id],
                 )
                 # Extend view to include any found arrays
                 for _, arr_start, arr_end, _ in crispr_arrays:

@@ -140,17 +140,49 @@ class DuckDBStore:
             for r in rows
         ]
 
-    def get_proteins_in_window(self, contig_id: str, start: int, end: int) -> list[Protein]:
-        """Get proteins overlapping coordinate window."""
+    def get_proteins_in_window(
+        self,
+        contig_id: str,
+        start: int,
+        end: int,
+        *,
+        bin_id: str | None = None,
+    ) -> list[Protein]:
+        """Get proteins overlapping a coordinate window.
+
+        ``contig_id`` is not guaranteed to be globally unique in legacy
+        datasets. Supply ``bin_id`` when known. If it is omitted and the
+        protein table associates the contig label with multiple bins, fail
+        closed instead of returning a cross-genome mixture.
+        """
+        if bin_id is None:
+            bins = self.conn.execute(
+                """
+                SELECT DISTINCT bin_id
+                FROM proteins
+                WHERE contig_id = ?
+                ORDER BY bin_id
+                """,
+                [contig_id],
+            ).fetchall()
+            if len(bins) > 1:
+                raise ValueError(
+                    f"Contig ID {contig_id!r} occurs in multiple bins; "
+                    "pass bin_id explicitly"
+                )
+            if bins:
+                bin_id = bins[0][0]
+
         rows = self.conn.execute(
             """
             SELECT protein_id, contig_id, bin_id, start, end_coord, strand, sequence
             FROM proteins
             WHERE contig_id = ?
+              AND (? IS NULL OR bin_id = ?)
               AND NOT (end_coord <= ? OR start >= ?)
             ORDER BY start
             """,
-            [contig_id, start, end],
+            [contig_id, bin_id, bin_id, start, end],
         ).fetchall()
 
         return [

@@ -2,7 +2,8 @@
 """
 Generate publication-quality gene neighborhood diagrams with multi-source annotation.
 
-Annotation priority: Foldseek structural > DefenseFinder > PADLOC > PFAM/KEGG/VOGdb
+Annotation priority: Foldseek structural > structured system calls > PADLOC >
+sequence/domain observations > raw system-profile observations
 
 Usage:
     python plot_locus_multisource.py --db data/dataset/sharur.duckdb --protein PROTEIN_ID --window 10 --output figure.png
@@ -24,26 +25,33 @@ import matplotlib.pyplot as plt
 # Color scheme by annotation source
 # Keys are canonical display names; _SOURCE_NORMALIZE maps DB values to these keys
 COLORS = {
-    'Foldseek': '#FF6B6B',       # Red - Foldseek structural homology
-    'DefenseFinder': '#4ECDC4',  # Teal - DefenseFinder defense systems
-    'PADLOC': '#95E1D3',         # Light teal - PADLOC defense systems
-    'PFAM': '#3498DB',           # Blue - PFAM domains
-    'KEGG': '#9B59B6',           # Purple - KEGG orthologs
-    'VOGdb': '#F39C12',          # Orange - VOGdb viral genes
-    'CAZy': '#2ECC71',           # Green - CAZy carbohydrate-active enzymes
-    'HydDB': '#E74C3C',          # Red - HydDB hydrogenase classification
-    'none': '#BDC3C7',           # Light gray - unannotated
+    'Foldseek': '#FF6B6B',              # Red - Foldseek structural homology
+    'DefenseFinder call': '#4ECDC4',     # Teal - purpose-built caller output
+    'TXSScan call': '#16A085',           # Dark teal - purpose-built caller output
+    'DefenseFinder profile': '#A3D5D3',  # Muted teal - raw HMM observation
+    'TXSScan profile': '#85C1E9',        # Muted blue - raw HMM observation
+    'PADLOC': '#95E1D3',                 # Light teal - PADLOC output
+    'PFAM': '#3498DB',                   # Blue - PFAM domains
+    'KEGG': '#9B59B6',                   # Purple - KEGG orthologs
+    'VOGdb': '#F39C12',                  # Orange - VOGdb viral genes
+    'CAZy': '#2ECC71',                   # Green - CAZy carbohydrate-active enzymes
+    'HydDB': '#E74C3C',                  # Red - HydDB hydrogenase classification
+    'none': '#BDC3C7',                   # Light gray - unannotated
 }
 
 # Map database source values (any case) to canonical display names
 _SOURCE_NORMALIZE = {
     'pfam': 'PFAM',
     'kegg': 'KEGG',
+    'kofam': 'KEGG',
     'vogdb': 'VOGdb',
     'cazy': 'CAZy',
     'hyddb': 'HydDB',
     'foldseek': 'Foldseek',
-    'defensefinder': 'DefenseFinder',
+    'defensefinder_system': 'DefenseFinder call',
+    'defensefinder': 'DefenseFinder profile',
+    'txsscan_system': 'TXSScan call',
+    'txsscan': 'TXSScan profile',
     'padloc': 'PADLOC',
 }
 
@@ -129,6 +137,22 @@ def get_color_for_source(source: str) -> str:
     """Assign color based on annotation source."""
     canonical = normalize_source(source)
     return COLORS.get(canonical, COLORS['none'])
+
+
+def format_system_call_label(accession: str, name: str) -> str:
+    """Render a caller-emitted system type without hiding its component."""
+    system_type = (name or "").split("/", 1)[0].strip() or "system call"
+    component = (accession or "").split("__", 1)[-1].strip()
+    if system_type == "pAgo_SPARTA" and component == "pAgo_SPARTA":
+        component = "pAgo"
+    if not component or component == system_type:
+        return system_type
+    return f"{system_type}: {component}"
+
+
+def format_raw_profile_label(name: str) -> str:
+    """Make observational profile provenance survive legend-free crops."""
+    return f"profile: {name}"
 
 
 def load_defensefinder(db_path: Path) -> Dict[str, str]:
@@ -229,7 +253,8 @@ def get_best_annotation(
     """
     Get best annotation for a protein using priority stack.
 
-    Priority: Foldseek > DefenseFinder > PADLOC > PFAM/KEGG/VOGdb
+    Priority: Foldseek > structured system calls > PADLOC >
+    sequence/domain observations > raw system-profile observations
 
     Returns: (label, source)
     """
@@ -249,19 +274,51 @@ def get_best_annotation(
     except duckdb.CatalogException:
         pass  # foldseek_hits table doesn't exist
 
-    # 2. DefenseFinder
-    if protein_id in defensefinder:
-        return (defensefinder[protein_id], 'DefenseFinder')
+    # 2. Purpose-built caller output. These rows support named system labels;
+    # raw DefenseFinder/TXSScan HMM profiles below do not.
+    system_call = db.execute(
+        """SELECT accession, name, source
+           FROM annotations
+           WHERE protein_id = ?
+             AND source IN ('defensefinder_system', 'txsscan_system')
+           ORDER BY score DESC NULLS LAST, source, accession
+           LIMIT 1""",
+        [protein_id],
+    ).fetchone()
+    if system_call:
+        accession, name, source = system_call
+        return (format_system_call_label(accession, name), normalize_source(source))
 
-    # 3. PADLOC
+    # 3. Legacy/external DefenseFinder profile file. Keep the profile
+    # provenance explicit rather than presenting it as a named system call.
+    if protein_id in defensefinder:
+        return (
+            format_raw_profile_label(defensefinder[protein_id]),
+            'DefenseFinder profile',
+        )
+
+    # 4. PADLOC
     if protein_id in padloc:
         return (padloc[protein_id], 'PADLOC')
 
-    # 4. PFAM/KEGG/VOGdb (best by e-value)
+    # 5. Sequence/domain observations. Prefer general annotation sources over
+    # raw system-profile HMMs so a cross-family profile does not silently
+    # become the displayed functional name.
     seq_ann = db.execute(
         """SELECT name, source FROM annotations
            WHERE protein_id = ?
-           ORDER BY evalue NULLS LAST LIMIT 1""",
+             AND source NOT IN ('defensefinder_system', 'txsscan_system')
+           ORDER BY
+             CASE
+               WHEN source IN ('pfam', 'kegg', 'kofam', 'vogdb', 'cazy', 'hyddb')
+                 THEN 0
+               WHEN source IN ('defensefinder', 'txsscan')
+                 THEN 1
+               ELSE 2
+             END,
+             evalue NULLS LAST,
+             score DESC NULLS LAST
+           LIMIT 1""",
         [protein_id]
     ).fetchone()
 
@@ -272,6 +329,9 @@ def get_best_annotation(
         # Translate KEGG KO IDs to descriptions
         if source == 'KEGG' and name in kegg_map:
             name = kegg_map[name]
+
+        if source in {'DefenseFinder profile', 'TXSScan profile'}:
+            name = format_raw_profile_label(name)
 
         return (name, source)
 
@@ -314,7 +374,7 @@ def plot_locus(
 
     # Get anchor protein
     anchor = db.execute(
-        """SELECT contig_id, gene_index, start, end_coord, strand
+        """SELECT contig_id, bin_id, gene_index, start, end_coord, strand
            FROM proteins WHERE protein_id = ?""",
         [protein_id]
     ).fetchone()
@@ -322,15 +382,24 @@ def plot_locus(
     if not anchor:
         raise ValueError(f"Protein {protein_id} not found")
 
-    contig_id, gene_index, anchor_start, anchor_end, anchor_strand = anchor
+    (
+        contig_id,
+        bin_id,
+        gene_index,
+        anchor_start,
+        anchor_end,
+        anchor_strand,
+    ) = anchor
 
     # Get neighborhood
     rows = db.execute(
         """SELECT protein_id, start, end_coord, strand, gene_index
            FROM proteins
-           WHERE contig_id = ? AND gene_index BETWEEN ? AND ?
+           WHERE contig_id = ?
+             AND bin_id = ?
+             AND gene_index BETWEEN ? AND ?
            ORDER BY gene_index""",
-        [contig_id, gene_index - window, gene_index + window]
+        [contig_id, bin_id, gene_index - window, gene_index + window]
     ).fetchall()
 
     if not rows:
@@ -342,10 +411,19 @@ def plot_locus(
 
     # Check for CRISPR arrays in region
     crispr_arrays = db.execute(
-        """SELECT locus_id, start, end_coord FROM loci
-           WHERE contig_id = ? AND locus_type = 'crispr'
-           AND start <= ? AND end_coord >= ?""",
-        [contig_id, max_coord + 1000, min_coord - 1000]
+        """SELECT l.locus_id, l.start, l.end_coord
+           FROM loci l
+           WHERE l.contig_id = ?
+             AND l.locus_type = 'crispr'
+             AND l.start <= ?
+             AND l.end_coord >= ?
+             AND EXISTS (
+                 SELECT 1
+                 FROM contigs c
+                 WHERE c.contig_id = l.contig_id
+                   AND c.bin_id = ?
+             )""",
+        [contig_id, max_coord + 1000, min_coord - 1000, bin_id]
     ).fetchall()
 
     # Extend to include arrays
@@ -449,7 +527,10 @@ def plot_locus(
 
     if subtitle is None:
         # Show full annotation priority order (always show all sources)
-        subtitle = "Labels: Foldseek structural > DefenseFinder > PADLOC > PFAM/KEGG/VOGdb"
+        subtitle = (
+            "Labels: Foldseek > structured calls > PADLOC > "
+            "sequence/domain observations > raw profiles"
+        )
 
     ax.set_title(f"{title}\n{subtitle}", fontsize=11, pad=15)
 
@@ -457,8 +538,20 @@ def plot_locus(
     from matplotlib.patches import Rectangle
 
     # Canonical display order for legend
-    _LEGEND_ORDER = ['Foldseek', 'DefenseFinder', 'PADLOC', 'PFAM', 'KEGG',
-                     'VOGdb', 'CAZy', 'HydDB', 'none']
+    _LEGEND_ORDER = [
+        'Foldseek',
+        'DefenseFinder call',
+        'TXSScan call',
+        'DefenseFinder profile',
+        'TXSScan profile',
+        'PADLOC',
+        'PFAM',
+        'KEGG',
+        'VOGdb',
+        'CAZy',
+        'HydDB',
+        'none',
+    ]
     # Normalize sources_used to canonical names
     sources_canonical = {normalize_source(s) for s in sources_used}
 
