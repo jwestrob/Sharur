@@ -15,7 +15,7 @@ from sharur.predicates.vocabulary import (
     get_hierarchy,
 )
 from sharur.predicates.mappings.pfam_map import get_predicates_for_pfam
-from sharur.predicates.mappings import pfam_map
+from sharur.predicates.mappings import kegg_map, pfam_map
 from sharur.predicates.mappings.kegg_map import get_predicates_for_kegg, get_predicates_for_ec
 from sharur.predicates.mappings.cazy_map import get_predicates_for_cazy
 from sharur.predicates.mappings.vog_map import get_vog_predicates
@@ -229,6 +229,23 @@ class TestPfamMapping:
 
 class TestKeggMapping:
     """Tests for KEGG mapping."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated_ko_definitions(self, monkeypatch, tmp_path):
+        ko_list = tmp_path / "ko_list"
+        ko_list.write_text(
+            "knum\tdefinition\n"
+            "K01424\tglutaminase [EC:3.5.1.2]\n"
+            "K23356\ttranscriptional regulator\n"
+            "K07041\tuncharacterized protein\n"
+            "K04802\tproliferating cell nuclear antigen\n"
+            "K03231\ttranslation elongation factor\n"
+            "K01990\tABC-type transport system ATP-binding protein\n"
+        )
+        monkeypatch.setattr(kegg_map, "_ko_list_path", lambda: ko_list)
+        kegg_map._load_ko_definitions.cache_clear()
+        yield
+        kegg_map._load_ko_definitions.cache_clear()
 
     def test_direct_mapping(self):
         """Should map known KEGG orthologs."""
