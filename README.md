@@ -79,6 +79,17 @@ sharur preflight --db data/my_dataset/sharur.duckdb --format json
 This inspects live sources/caller resources, semantic coverage, persistent similarity
 sidecars, the run ledger, resource profiles, and tool availability without mutating data.
 
+Once dataset writes are complete, record and later verify its canonical state:
+
+```bash
+sharur seal --db data/my_dataset/sharur.duckdb
+sharur verify-seal data/my_dataset/dataset.seal.json
+```
+
+The default seal is disk-light and samples large canonical artifacts. Use `--full` when
+making an archival seal that should stream full SHA-256 over DuckDB, embeddings, and active
+index sidecars.
+
 ### Use the operators
 
 ```python

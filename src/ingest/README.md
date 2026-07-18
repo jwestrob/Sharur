@@ -172,13 +172,25 @@ Stages 01, 02, 05a, and 05b exist as scripts but are not required for a standard
 
 ### Stage 00: Prepare Inputs (`00_prepare_inputs.py`)
 
-**What it does:** Validates FASTA format, checks for duplicate sequence IDs, generates checksums, and creates an organized output directory with symlinks (or copies) of input genomes plus a `processing_manifest.json`.
+**What it does:** Audits the complete FASTA set before exposing any assembly downstream.
+It checks FASTA structure (including terminal headers without sequence), IUPAC nucleotide
+symbols, empty records, duplicate record IDs within and across files, normalized genome-ID
+collisions, readability, and duplicate file content. It computes SHA-256 plus the legacy MD5
+field and, only after the set passes, creates symlinks (or copies) and a
+`processing_manifest.json`.
 
 **Required inputs:** Directory of genome assembly FASTA files (`.fna`, `.fa`, `.fasta`).
 
 **Outputs:**
 - `stage00_prepared/` directory containing symlinked (or copied) genome files
+- `stage00_prepared/input_integrity.json` (always written after an audit, including rejection)
 - `stage00_prepared/processing_manifest.json` (consumed by Stage 03)
+
+If any error is found, Stage 00 exits non-zero and deliberately creates neither assembly
+links nor `processing_manifest.json`. The rejection report remains in
+`input_integrity.json` so the exact file, line, record, error code, and any related file are
+available for repair. The ingest DAG requires both JSON outputs before Stage 00 can be
+reused.
 
 **Minimal invocation:**
 ```bash
@@ -192,12 +204,17 @@ python src/ingest/00_prepare_inputs.py -i /path/to/genomes -o data/DATASET/stage
 | `-i`, `--input-dir` | `data/raw` | Directory containing input genome FASTAs |
 | `-o`, `--output-dir` | `data/stage00_prepared` | Output directory |
 | `--copy` / `--symlink` | `--symlink` | Copy files instead of symlinking (use `--copy` if genomes are on a different filesystem) |
+| `--validate` / `--no-validate` | `--validate` | Keep validation enabled; `--no-validate` is only an explicit legacy-recovery escape hatch and marks the contract `skipped` |
 | `--force` | off | Overwrite existing output directory |
 | `-e`, `--extensions` | `.fasta .fa .fna` | File extensions to search for |
 
 **Common errors:**
 - "Output directory already exists" -- add `--force` or delete the existing directory.
 - Symlink failures -- use `--copy` if input files are on a different mount or filesystem.
+- Duplicate IDs across files -- rename contigs before ingest; global collisions would
+  otherwise produce colliding Prodigal protein IDs and ambiguous database rows.
+- Colliding genome IDs -- filenames that differ only by punctuation can normalize to the
+  same Stage-00 ID; rename one input assembly.
 
 ---
 

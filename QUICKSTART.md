@@ -118,7 +118,10 @@ This is the manual reference sequence behind `sharur-ingest`. `04_astra_scan.py`
 
 ## What Each Stage Does
 
-- `00_prepare_inputs.py`: validates assemblies and creates a processing manifest
+- `00_prepare_inputs.py`: audits the complete assembly set before publishing it. It rejects
+  malformed/empty records, invalid nucleotide symbols, duplicate record IDs (within or
+  across files), and colliding normalized genome IDs; accepted inputs receive SHA-256
+  checksums plus a processing manifest.
 - `03_prodigal.py`: produces per-genome protein FASTAs and the `all_protein_symlinks/` directory used by Stage 04
 - `04_astra_scan.py`: runs PFAM, KOFAM, HydDB, DefenseFinder, and dbCAN with Sharur's expected settings
 - `minced_crispr.py`: finds CRISPR repeat-spacer arrays from nucleotide assemblies
@@ -135,6 +138,11 @@ This is the manual reference sequence behind `sharur-ingest`. `04_astra_scan.py`
 sharur preflight --db data/my_dataset/sharur.duckdb
 # Machine-readable:
 sharur preflight --db data/my_dataset/sharur.duckdb --format json
+
+# Record the completed canonical dataset state:
+sharur seal --db data/my_dataset/sharur.duckdb
+# Later, or after copying/archive restoration:
+sharur verify-seal data/my_dataset/dataset.seal.json
 ```
 
 The typed brief inspects the live dataset without mutating it. It reports
@@ -144,6 +152,22 @@ compatibility coverage,
 embeddings, persistent similarity index, dataset run ledger, execution profiles, and the
 external toolchain. Add `--strict` for a non-zero exit when a required dataset capability is
 not available; add `--skip-tools` when binary/version probes are not needed.
+
+Stage 00 is itself an integrity gate. It writes
+`stage00_prepared/input_integrity.json` for both accepted and rejected input sets. A rejected
+set exits non-zero and does not expose assembly links or a downstream
+`processing_manifest.json`.
+
+`sharur seal` writes `dataset.seal.json` atomically and refuses to overwrite it without
+`--force`. The default structural seal fully hashes small canonical files and reads bounded,
+deterministic samples from large DuckDB/H5/FAISS artifacts; it also records Stage-00 source
+SHA-256 values, the live DuckDB schema and table counts, annotation sources, whatever
+structured caller resources actually exist, canonical findings, and completed ingest
+signatures. Use `--full` for an archival content seal that streams every discovered
+canonical artifact through SHA-256. Tool/reference versions are optional provenance via
+`--include-tools`; volatile operational state does not define the scientific dataset ID.
+The command refuses to seal while any ingest run is active. `sharur verify-seal`
+exits non-zero on canonical drift and supports `--format json`.
 
 For a legacy H5 without sidecars:
 

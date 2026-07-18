@@ -489,6 +489,94 @@ def preflight(
         raise typer.Exit(code=1)
 
 
+@app.command()
+def seal(
+    db: Path = typer.Option(
+        Path(DEFAULT_DB),
+        "--db",
+        "-d",
+        help="Path to the dataset DuckDB.",
+    ),
+    output: Path | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Seal path (default: DATASET/dataset.seal.json).",
+    ),
+    full: bool = typer.Option(
+        False,
+        "--full",
+        help="Fully hash every canonical artifact, including large DuckDB/H5/index files.",
+    ),
+    include_tools: bool = typer.Option(
+        False,
+        "--include-tools",
+        help="Record slower external tool and reference-database probes as provenance.",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Replace an existing seal atomically.",
+    ),
+):
+    """Write a portable integrity seal for a completed dataset."""
+    from sharur.dataset_seal import DatasetSealError, seal_dataset  # noqa: PLC0415
+
+    try:
+        seal_path, payload = seal_dataset(
+            db,
+            output_path=output,
+            hash_large_files=full,
+            include_tools=include_tools,
+            force=force,
+        )
+    except (DatasetSealError, FileExistsError, ValueError) as exc:
+        typer.echo(f"Could not seal dataset: {exc}", err=True)
+        raise typer.Exit(1) from exc
+
+    typer.echo(f"Dataset ID: {payload['dataset_id']}")
+    typer.echo(f"Strength: {payload['seal_strength']}")
+    typer.echo(f"Seal: {seal_path}")
+
+
+@app.command(name="verify-seal")
+def verify_seal(
+    seal_path: Path = typer.Argument(..., help="Path to dataset.seal.json."),
+    db: Path | None = typer.Option(
+        None,
+        "--db",
+        "-d",
+        help="Current DuckDB path (needed if the seal was moved separately).",
+    ),
+    output_format: BriefFormat = typer.Option(
+        BriefFormat.markdown,
+        "--format",
+        "-f",
+        help="Output format: markdown or json.",
+    ),
+):
+    """Recompute a dataset seal and report canonical identity drift."""
+    import json  # noqa: PLC0415
+
+    from sharur.dataset_seal import (  # noqa: PLC0415
+        DatasetSealError,
+        verify_dataset_seal,
+    )
+
+    try:
+        verification = verify_dataset_seal(seal_path, db_path=db)
+    except (DatasetSealError, OSError, ValueError) as exc:
+        typer.echo(f"Could not verify dataset seal: {exc}", err=True)
+        raise typer.Exit(1) from exc
+
+    if output_format == BriefFormat.json:
+        typer.echo(json.dumps(verification.to_dict(), indent=2))
+    else:
+        typer.echo(verification.to_markdown())
+    if not verification.valid:
+        raise typer.Exit(1)
+
+
 @app.command(name="build-vector-index")
 def build_vector_index_command(
     embeddings: Optional[Path] = typer.Option(

@@ -773,6 +773,7 @@ def build_capability_brief(
     db_path: str | Path,
     *,
     include_tools: bool = False,
+    include_execution: bool = True,
 ) -> CapabilityBrief:
     """Build one non-mutating capability/preflight brief."""
     resolved = Path(db_path).expanduser().resolve()
@@ -808,7 +809,8 @@ def build_capability_brief(
             store.close()
     capabilities.extend(_embedding_checks(resolved, sequence_protein_count, invalid_sequence_count))
     capabilities.append(_ledger_check(resolved))
-    capabilities.extend(_execution_checks())
+    if include_execution:
+        capabilities.extend(_execution_checks())
     if include_tools:
         capabilities.append(_toolchain_check())
 

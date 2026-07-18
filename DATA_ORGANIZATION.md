@@ -14,6 +14,7 @@ data/
 ├── {organism}_production/              # Active analysis
 │   ├── sharur.duckdb                   # Main database
 │   ├── sharur_ops.db                  # Run ledger + coordination/task state
+│   ├── dataset.seal.json              # Portable canonical-state integrity seal
 │   ├── manifest.json                  # Analysis state and session continuity
 │   │
 │   ├── source/                        # Input files
@@ -147,10 +148,21 @@ That fallback path does not replace the standard stage pipeline, and it does not
 **Always archive:**
 - `sharur.duckdb` - Main database
 - `sharur_ops.db` - Run/stage history, task leases, and coordination state
+- `dataset.seal.json` - Dataset identity, canonical artifact digests, and provenance
 - `manifest.json` - Analysis state
 - `exploration/` - All findings and state
 - `reports/` - Synthesis documents
 - `figures/` - Key visualizations
+
+Create or refresh the seal only after writes are complete:
+
+```bash
+sharur seal --db data/${NEW_ORGANISM}_production/sharur.duckdb --full --force
+sharur verify-seal data/${NEW_ORGANISM}_production/dataset.seal.json
+```
+
+The default seal is faster and samples large canonical files; `--full` is the archival
+choice. Verification is read-only and exits non-zero if the canonical identity changed.
 
 **Archive if valuable:**
 - `structures/` - ESM3 PDBs (can regenerate but slow)

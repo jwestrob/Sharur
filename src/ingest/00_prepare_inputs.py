@@ -1,344 +1,309 @@
 #!/usr/bin/env python3
-"""
-Stage 0: Input Preparation
-Validate and organize input genome assemblies for processing.
-"""
+"""Stage 00: validate and organize input genome assemblies."""
 
-import logging
+from __future__ import annotations
+
 import hashlib
 import json
-from pathlib import Path
-from typing import List, Optional, Dict, Any
-from datetime import datetime
+import logging
 import shutil
-import re
+from pathlib import Path
+from typing import Any
 
 import typer
 from rich.console import Console
 from rich.table import Table
-from rich.progress import Progress, TaskID
+
+from sharur.ingest.input_integrity import (
+    DEFAULT_FASTA_EXTENSIONS,
+    IntegrityIssue,
+    audit_fasta_file,
+    audit_input_directory,
+    calculate_checksums,
+    write_json_atomic,
+)
+from sharur.ingest.input_integrity import (
+    find_fasta_files as _find_fasta_files,
+)
+from sharur.ingest.input_integrity import (
+    generate_genome_id as _generate_genome_id,
+)
+
 
 console = Console()
 logger = logging.getLogger(__name__)
 
 
-def validate_fasta_format(file_path: Path) -> Dict[str, Any]:
-    """
-    Validate FASTA file format and extract basic statistics.
-    
-    Returns:
-        Dict containing validation results and statistics
-    """
-    stats = {
-        "is_valid": True,
-        "error_message": None,
-        "sequence_count": 0,
-        "total_length": 0,
-        "sequence_ids": [],
-        "duplicate_ids": [],
-        "invalid_characters": []
+def validate_fasta_format(file_path: Path) -> dict[str, Any]:
+    """Compatibility wrapper around the Stage-00 integrity auditor."""
+    audit = audit_fasta_file(file_path)
+    errors = [issue for issue in audit.issues if issue.severity == "error"]
+    return {
+        "is_valid": audit.valid,
+        "error_message": errors[0].message if errors else None,
+        "sequence_count": audit.sequence_count or 0,
+        "total_length": audit.total_length or 0,
+        "sequence_ids": audit.sequence_ids,
+        "duplicate_ids": [
+            issue.record_id
+            for issue in errors
+            if issue.code == "duplicate_record_id" and issue.record_id is not None
+        ],
+        "invalid_characters": [],
+        "issues": [issue.to_dict() for issue in audit.issues],
     }
-    
-    try:
-        with open(file_path, 'r') as f:
-            current_seq_id = None
-            current_seq_length = 0
-            seen_ids = set()
-            line_number = 0
-            
-            for line in f:
-                line_number += 1
-                line = line.strip()
-                
-                if not line:  # Skip empty lines
-                    continue
-                
-                if line.startswith('>'):
-                    # Header line
-                    if current_seq_id is not None:
-                        # Finish previous sequence
-                        stats["total_length"] += current_seq_length
-                    
-                    # Extract sequence ID
-                    seq_id = line[1:].split()[0]  # Take first part after >
-                    
-                    if seq_id in seen_ids:
-                        stats["duplicate_ids"].append(seq_id)
-                        stats["is_valid"] = False
-                    
-                    seen_ids.add(seq_id)
-                    stats["sequence_ids"].append(seq_id)
-                    stats["sequence_count"] += 1
-                    current_seq_id = seq_id
-                    current_seq_length = 0
-                    
-                else:
-                    # Sequence line
-                    if current_seq_id is None:
-                        stats["is_valid"] = False
-                        stats["error_message"] = f"Sequence data before header at line {line_number}"
-                        break
-                    
-                    # Check for invalid characters
-                    valid_chars = set('ATCGNRYSWKMBVDHX-')  # IUPAC nucleotide codes
-                    invalid_chars = set(line.upper()) - valid_chars
-                    if invalid_chars:
-                        stats["invalid_characters"].extend(list(invalid_chars))
-                        stats["is_valid"] = False
-                    
-                    current_seq_length += len(line)
-            
-            # Finish last sequence
-            if current_seq_id is not None:
-                stats["total_length"] += current_seq_length
-            
-            # Check if file has any sequences (only if no previous error)
-            if stats["sequence_count"] == 0 and not stats["error_message"]:
-                stats["is_valid"] = False
-                stats["error_message"] = "No sequences found in file"
-    
-    except Exception as e:
-        stats["is_valid"] = False
-        stats["error_message"] = f"Error reading file: {str(e)}"
-    
-    return stats
 
 
 def calculate_file_checksum(file_path: Path) -> str:
-    """Calculate MD5 checksum of file."""
-    hash_md5 = hashlib.md5()
-    with open(file_path, "rb") as f:
-        for chunk in iter(lambda: f.read(4096), b""):
-            hash_md5.update(chunk)
-    return hash_md5.hexdigest()
+    """Return the legacy MD5 checksum retained in processing manifests."""
+    md5, _sha256 = calculate_checksums(file_path)
+    return md5
 
 
-def find_genome_files(input_dir: Path, extensions: List[str]) -> List[Path]:
-    """Find all genome files with specified extensions."""
-    genome_files = []
-    
-    for ext in extensions:
-        # Handle both .ext and ext formats
-        if not ext.startswith('.'):
-            ext = '.' + ext
-        
-        pattern = f"*{ext}"
-        genome_files.extend(input_dir.glob(pattern))
-    
-    return sorted(genome_files)
+def find_genome_files(input_dir: Path, extensions: list[str]) -> list[Path]:
+    """Compatibility wrapper for callers of the original Stage-00 helper."""
+    return _find_fasta_files(input_dir, extensions)
 
 
 def generate_genome_id(file_path: Path) -> str:
-    """Generate genome ID from filename."""
-    # Remove all common extensions
-    name = file_path.name
-    extensions = ['.fasta', '.fa', '.fna', '.fas', '.faa']
-    
-    for ext in extensions:
-        if name.lower().endswith(ext.lower()):
-            name = name[:-len(ext)]
-            break
-    
-    # Clean up name (remove special characters, replace with underscores)
-    genome_id = re.sub(r'[^a-zA-Z0-9_]', '_', name)
-    genome_id = re.sub(r'_+', '_', genome_id)  # Replace multiple underscores
-    genome_id = genome_id.strip('_')  # Remove leading/trailing underscores
-    
-    return genome_id
+    """Compatibility wrapper for callers of the original Stage-00 helper."""
+    return _generate_genome_id(file_path)
+
+
+def _remove_existing_output(output_dir: Path) -> None:
+    if output_dir.is_dir() and not output_dir.is_symlink():
+        shutil.rmtree(output_dir)
+    else:
+        output_dir.unlink(missing_ok=True)
+
+
+def _source_set_sha256(files: list[dict[str, Any]]) -> str:
+    records = [
+        {
+            "filename": entry["filename"],
+            "genome_id": entry["genome_id"],
+            "file_size": entry["file_size"],
+            "sha256": entry["sha256"],
+        }
+        for entry in files
+    ]
+    encoded = json.dumps(
+        records,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _print_integrity_summary(report_payload: dict[str, Any], report_path: Path) -> None:
+    summary = report_payload["summary"]
+    table = Table(title="Stage 00 input-integrity contract")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", style="magenta")
+    table.add_row("Status", report_payload["status"])
+    table.add_row("Files scanned", str(summary["files_scanned"]))
+    table.add_row("Records scanned", str(summary["records_scanned"]))
+    table.add_row("Total bases", str(summary["total_bases"]))
+    table.add_row("Errors", str(summary["errors"]))
+    table.add_row("Warnings", str(summary["warnings"]))
+    table.add_row("Report", str(report_path))
+    console.print(table)
+
+    for issue in report_payload["issues"]:
+        location = issue["file"]
+        if issue.get("line") is not None:
+            location += f":{issue['line']}"
+        related = (
+            f" (first seen in {issue['related_file']})"
+            if issue.get("related_file")
+            else ""
+        )
+        style = "red" if issue["severity"] == "error" else "yellow"
+        console.print(
+            f"[{style}]{issue['severity'].upper()} "
+            f"{issue['code']} at {location}: {issue['message']}{related}[/{style}]"
+        )
 
 
 def prepare_inputs(
     input_dir: Path = typer.Option(
         Path("data/raw"),
-        "--input-dir", "-i",
-        help="Directory containing input genome assemblies"
+        "--input-dir",
+        "-i",
+        help="Directory containing input genome assemblies",
     ),
     output_dir: Path = typer.Option(
         Path("data/stage00_prepared"),
-        "--output-dir", "-o",
-        help="Output directory for validated assemblies"
+        "--output-dir",
+        "-o",
+        help="Output directory for validated assemblies",
     ),
-    file_extensions: List[str] = typer.Option(
-        [".fasta", ".fa", ".fna"],
-        "--extensions", "-e",
-        help="File extensions to search for"
+    file_extensions: list[str] = typer.Option(
+        list(DEFAULT_FASTA_EXTENSIONS),
+        "--extensions",
+        "-e",
+        help="File extensions to search for",
     ),
     validate_format: bool = typer.Option(
         True,
         "--validate/--no-validate",
-        help="Validate FASTA format"
+        help=(
+            "Validate FASTA structure, residues, empty records, and global IDs. "
+            "Disabling this is only for explicit legacy recovery."
+        ),
     ),
     copy_files: bool = typer.Option(
         False,
         "--copy/--symlink",
-        help="Copy files instead of creating symlinks"
+        help="Copy files instead of creating symlinks",
     ),
     force: bool = typer.Option(
         False,
         "--force",
-        help="Overwrite existing output directory"
-    )
+        help="Overwrite an existing Stage-00 output directory",
+    ),
 ) -> None:
-    """
-    Prepare input genome assemblies for pipeline processing.
-    
-    Validates FASTA file formats, checks for duplicates, generates processing
-    manifest, and creates organized output directory structure.
-    """
-    console.print("[bold blue]Stage 0: Input Preparation[/bold blue]")
-    
-    # Validate input directory
-    if not input_dir.exists():
-        console.print(f"[red]Error: Input directory does not exist: {input_dir}[/red]")
+    """Audit the complete input set before exposing it to downstream stages."""
+    console.print("[bold blue]Stage 00: Input Preparation[/bold blue]")
+    resolved_input = input_dir.expanduser().resolve()
+    resolved_output = output_dir.expanduser().resolve()
+
+    if not resolved_input.exists():
+        console.print(f"[red]Input directory does not exist: {resolved_input}[/red]")
         raise typer.Exit(1)
-    
-    if not input_dir.is_dir():
-        console.print(f"[red]Error: Input path is not a directory: {input_dir}[/red]")
+    if not resolved_input.is_dir():
+        console.print(f"[red]Input path is not a directory: {resolved_input}[/red]")
         raise typer.Exit(1)
-    
-    # Handle output directory
-    if output_dir.exists():
+    if resolved_output == resolved_input or resolved_input.is_relative_to(resolved_output):
+        console.print(
+            "[red]Output directory cannot equal or contain the input directory.[/red]"
+        )
+        raise typer.Exit(1)
+
+    if resolved_output.exists():
         if not force:
-            console.print(f"[red]Error: Output directory already exists: {output_dir}[/red]")
-            console.print("[yellow]Use --force to overwrite[/yellow]")
+            console.print(f"[red]Output already exists: {resolved_output}[/red]")
+            console.print("[yellow]Use --force to replace it.[/yellow]")
             raise typer.Exit(1)
-        else:
-            console.print(f"[yellow]Removing existing output directory: {output_dir}[/yellow]")
-            shutil.rmtree(output_dir)
-    
-    # Create output directory
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Find genome files
-    console.print(f"Searching for genome files in: {input_dir}")
-    genome_files = find_genome_files(input_dir, file_extensions)
-    
-    if not genome_files:
-        console.print(f"[red]Error: No genome files found with extensions: {file_extensions}[/red]")
+        _remove_existing_output(resolved_output)
+    resolved_output.mkdir(parents=True)
+
+    report = audit_input_directory(
+        resolved_input,
+        extensions=file_extensions,
+        validate_sequences=validate_format,
+    )
+    report_path = resolved_output / "input_integrity.json"
+    report_payload = report.to_dict()
+    write_json_atomic(report_payload, report_path)
+    _print_integrity_summary(report_payload, report_path)
+
+    if report.status == "failed":
+        console.print(
+            "[bold red]Stage 00 rejected the input set. "
+            "No downstream processing manifest or assembly links were created.[/bold red]"
+        )
         raise typer.Exit(1)
-    
-    console.print(f"Found {len(genome_files)} genome files")
-    
-    # Initialize manifest
+    if report.status == "skipped":
+        console.print(
+            "[yellow]FASTA content validation was explicitly disabled; "
+            "the integrity contract is marked skipped.[/yellow]"
+        )
+
+    genome_entries: list[dict[str, Any]] = []
+    for audit in report.files:
+        output_file = resolved_output / audit.path.name
+        entry = {
+            "filename": audit.path.name,
+            "genome_id": audit.genome_id,
+            "file_path": str(audit.path),
+            "file_size": audit.file_size,
+            "checksum": audit.md5,
+            "checksum_algorithm": "md5",
+            "sha256": audit.sha256,
+            "format_valid": audit.valid if validate_format else True,
+            "validation_errors": [
+                issue.message
+                for issue in audit.issues
+                if issue.severity == "error"
+            ],
+            "sequence_count": audit.sequence_count,
+            "total_length": audit.total_length,
+            "sequence_ids": audit.sequence_ids,
+        }
+        try:
+            if copy_files:
+                shutil.copy2(audit.path, output_file)
+            else:
+                output_file.symlink_to(audit.path)
+            entry["output_path"] = str(output_file)
+            entry["linked_successfully"] = True
+        except OSError as exc:
+            entry["linked_successfully"] = False
+            entry["link_error"] = f"{type(exc).__name__}: {exc}"
+            report.global_issues.append(
+                IntegrityIssue(
+                    severity="error",
+                    code="assembly_publish_failed",
+                    file=audit.path.name,
+                    message=entry["link_error"],
+                )
+            )
+        genome_entries.append(entry)
+
+    if report.status == "failed":
+        for entry in genome_entries:
+            output_path = entry.get("output_path")
+            if isinstance(output_path, str):
+                Path(output_path).unlink(missing_ok=True)
+        write_json_atomic(report.to_dict(), report_path)
+        console.print(
+            "[bold red]Stage 00 could not publish every validated assembly. "
+            "No processing manifest was created.[/bold red]"
+        )
+        raise typer.Exit(1)
+
+    manifest_files = [
+        {
+            "filename": entry["filename"],
+            "genome_id": entry["genome_id"],
+            "file_size": entry["file_size"],
+            "sha256": entry["sha256"],
+        }
+        for entry in genome_entries
+    ]
     manifest = {
-        "version": "0.1.0",
-        "timestamp": datetime.now().isoformat(),
-        "input_dir": str(input_dir.absolute()),
-        "output_dir": str(output_dir.absolute()),
-        "file_extensions": file_extensions,
+        "version": "0.2.0",
+        "stage": "stage00_prepare_inputs",
+        "timestamp": report.generated_at,
+        "input_dir": str(resolved_input),
+        "output_dir": str(resolved_output),
+        "file_extensions": list(report.extensions),
         "validate_format": validate_format,
         "copy_files": copy_files,
-        "genomes": []
+        "integrity_report": str(report_path),
+        "integrity_status": report.status,
+        "source_set_sha256": _source_set_sha256(manifest_files),
+        "summary": report_payload["summary"],
+        "genomes": genome_entries,
     }
-    
-    # Process each genome file
-    valid_genomes = 0
-    invalid_genomes = 0
-    
-    with Progress() as progress:
-        task = progress.add_task("Processing genomes...", total=len(genome_files))
-        
-        for genome_file in genome_files:
-            progress.update(task, description=f"Processing {genome_file.name}")
-            
-            # Generate genome ID
-            genome_id = generate_genome_id(genome_file)
-            
-            # Initialize genome entry
-            genome_entry = {
-                "filename": genome_file.name,
-                "genome_id": genome_id,
-                "file_path": str(genome_file.absolute()),
-                "file_size": genome_file.stat().st_size,
-                "checksum": calculate_file_checksum(genome_file),
-                "format_valid": True,
-                "validation_errors": []
-            }
-            
-            # Validate FASTA format if requested
-            if validate_format:
-                validation_results = validate_fasta_format(genome_file)
-                genome_entry["format_valid"] = validation_results["is_valid"]
-                genome_entry["sequence_count"] = validation_results["sequence_count"]
-                genome_entry["total_length"] = validation_results["total_length"]
-                genome_entry["sequence_ids"] = validation_results["sequence_ids"]
-                
-                if not validation_results["is_valid"]:
-                    errors = []
-                    if validation_results["error_message"]:
-                        errors.append(validation_results["error_message"])
-                    if validation_results["duplicate_ids"]:
-                        errors.append(f"Duplicate sequence IDs: {validation_results['duplicate_ids']}")
-                    if validation_results["invalid_characters"]:
-                        errors.append(f"Invalid characters: {set(validation_results['invalid_characters'])}")
-                    
-                    genome_entry["validation_errors"] = errors
-                    invalid_genomes += 1
-                else:
-                    valid_genomes += 1
-            
-            # Create output file (symlink or copy)
-            output_file = output_dir / genome_file.name
-            
-            try:
-                if copy_files:
-                    shutil.copy2(genome_file, output_file)
-                else:
-                    output_file.symlink_to(genome_file.absolute())
-                
-                genome_entry["output_path"] = str(output_file.absolute())
-                genome_entry["linked_successfully"] = True
-                
-            except Exception as e:
-                genome_entry["linked_successfully"] = False
-                genome_entry["link_error"] = str(e)
-                console.print(f"[red]Warning: Failed to link {genome_file.name}: {e}[/red]")
-            
-            manifest["genomes"].append(genome_entry)
-            progress.advance(task)
-    
-    # Save manifest
-    manifest_file = output_dir / "processing_manifest.json"
-    with open(manifest_file, 'w') as f:
-        json.dump(manifest, f, indent=2)
-    
-    # Display summary
-    console.print("\n[bold green]Input Preparation Summary[/bold green]")
-    
-    summary_table = Table()
-    summary_table.add_column("Metric", style="cyan")
-    summary_table.add_column("Value", style="magenta")
-    
-    summary_table.add_row("Input directory", str(input_dir))
-    summary_table.add_row("Output directory", str(output_dir))
-    summary_table.add_row("Total files found", str(len(genome_files)))
-    
-    if validate_format:
-        summary_table.add_row("Valid genomes", str(valid_genomes))
-        summary_table.add_row("Invalid genomes", str(invalid_genomes))
-    
-    summary_table.add_row("File operation", "Copy" if copy_files else "Symlink")
-    summary_table.add_row("Manifest file", str(manifest_file))
-    
-    console.print(summary_table)
-    
-    # Show validation errors if any
-    if validate_format and invalid_genomes > 0:
-        console.print("\n[bold red]Validation Errors:[/bold red]")
-        for genome in manifest["genomes"]:
-            if not genome["format_valid"]:
-                console.print(f"[red]• {genome['filename']}:[/red]")
-                for error in genome["validation_errors"]:
-                    console.print(f"  - {error}")
-    
-    console.print(f"\n[bold green]✓ Stage 0 completed successfully![/bold green]")
-    logger.info(f"Stage 0 completed: {valid_genomes} valid, {invalid_genomes} invalid genomes")
+    manifest_path = resolved_output / "processing_manifest.json"
+    write_json_atomic(manifest, manifest_path)
+
+    console.print(
+        f"[bold green]Stage 00 accepted {len(genome_entries)} assemblies.[/bold green]"
+    )
+    console.print(f"Processing manifest: {manifest_path}")
+    logger.info(
+        "Stage 00 completed: %s assemblies, %s warnings",
+        len(genome_entries),
+        report.warning_count,
+    )
 
 
-def main():
-    """Entry point for standalone execution."""
+def main() -> None:
+    """Entry point for standalone and packaged execution."""
     logging.basicConfig(level=logging.INFO)
-    logger.info("Stage 0 stub")
     typer.run(prepare_inputs)
 
 

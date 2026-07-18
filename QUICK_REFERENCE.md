@@ -42,11 +42,18 @@ sharur preflight --db data/my_dataset/sharur.duckdb --format json --skip-tools
 
 # Prepare persistent similarity sidecars for a legacy embedding H5
 sharur build-vector-index --db data/my_dataset/sharur.duckdb
+
+# Seal a stable dataset and verify it later
+sharur seal --db data/my_dataset/sharur.duckdb
+sharur verify-seal data/my_dataset/dataset.seal.json
+# Archival mode: stream full SHA-256 over large canonical artifacts
+sharur seal --db data/my_dataset/sharur.duckdb --full --force
 ```
 
 Capability states are `available`, `unavailable`, `stale`, and `failed`. The brief discovers
 live `annotations`-table sources and structured caller resources separately; it does not
 assume a closed annotation list or treat every annotation source as a system caller.
+Seal verification returns non-zero on canonical drift; use `--format json` in automation.
 
 ## Schema (live as of schema v4)
 

@@ -154,7 +154,10 @@ def _build_tools_dag(
             str(stages.stage00),
             "--force",
         ],
-        outputs=(stages.stage00 / "processing_manifest.json",),
+        outputs=(
+            stages.stage00 / "processing_manifest.json",
+            stages.stage00 / "input_integrity.json",
+        ),
         inputs=(input_dir,),
     )
     if not skip_quast:

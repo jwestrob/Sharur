@@ -64,6 +64,8 @@ jobs:
           with zipfile.ZipFile(wheel) as archive:
               names = set(archive.namelist())
           required = {
+              "sharur/dataset_seal.py",
+              "sharur/ingest/input_integrity.py",
               "sharur/predicates_v2/config/composites.yaml",
               "sharur/ingest/stages/00_prepare_inputs.py",
               "sharur/ingest/stages/07_build_knowledge_base.py",

@@ -191,12 +191,17 @@ if a core requirement is missing.
 For an existing dataset, run `sharur preflight --db data/DATASET/sharur.duckdb` to inspect
 the typed live capability contract. Use `--format json` for agents and automation.
 
+After dataset writes are complete, use `sharur seal --db data/DATASET/sharur.duckdb` to
+record the canonical state and `sharur verify-seal data/DATASET/dataset.seal.json` before
+resuming or archiving it. Use `--full` for a content seal of large canonical artifacts.
+
 ## Standard Directory Structure
 
 ```
 data/{dataset_name}/
 ├── sharur.duckdb                # Core database
 ├── sharur_ops.db                # Unified run ledger + coordination/task state
+├── dataset.seal.json            # Canonical identity + integrity/provenance record
 ├── manifest.json               # Derived continuity/status cache
 ├── source/                     # Input assemblies (.fna/.fa/.fasta)
 ├── stage00_prepared/           # Prepared assembly inputs
