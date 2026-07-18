@@ -58,3 +58,64 @@ def test_genomes_jsonl_output_emits_one_record_per_row(tmp_path):
             "total_length": 1000,
         }
     ]
+
+
+def test_inspect_json_preserves_asymmetric_context(case_database):
+    result = CliRunner().invoke(
+        app,
+        [
+            "inspect",
+            "target_minus",
+            "--type",
+            "system",
+            "--window",
+            "8",
+            "--upstream",
+            "2",
+            "--downstream",
+            "1",
+            "--db",
+            str(case_database),
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["entity"]["source_table"] == "defense_systems"
+    assert payload["context_window"]["default_orfs"] == 8
+    assert payload["context_window"]["upstream_orfs"] == 2
+    assert payload["context_window"]["downstream_orfs"] == 1
+    assert payload["context_window"]["orientation"] == "-"
+
+
+def test_compare_context_json_exposes_denominators_and_recipe(case_database):
+    result = CliRunner().invoke(
+        app,
+        [
+            "compare-context",
+            "target_plus",
+            "--type",
+            "system",
+            "--feature",
+            "pfam:PFTEST",
+            "--window",
+            "2",
+            "--min-components",
+            "2",
+            "--db",
+            str(case_database),
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["composite"]["foreground_positive"] == 2
+    assert payload["composite"]["foreground_total"] == 2
+    assert payload["composite"]["background_positive"] == 1
+    assert payload["composite"]["background_total"] == 2
+    assert payload["recipe"]["upstream_orfs"] == 2
+    assert payload["recipe"]["downstream_orfs"] == 2

@@ -26,6 +26,7 @@ Detailed guides live in `docs/` and `.claude/skills/`. **Read the relevant doc b
 | Querying ELSA synteny results | `.claude/skills/synteny.md` |
 | Coordinating multi-agent runs | `agent_ops_spec.md`, `sharur/ops/` |
 | Writing structured findings | `docs/findings_spec.md` |
+| Inspecting cases, comparing ORF context, or adding assembly evidence | `docs/cases_and_evidence.md` |
 
 **Other key docs:**
 

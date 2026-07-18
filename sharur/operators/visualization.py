@@ -6,12 +6,14 @@ Generates publication-ready gene arrow diagrams using dna_features_viewer.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
-from sharur.operators.base import SharurResult, OperatorContext
+from sharur.operators.base import OperatorContext, SharurResult
 
 if TYPE_CHECKING:
+    from sharur.core.case_models import CaseRecord, ProteinContextRecord
     from sharur.storage.duckdb_store import DuckDBStore
 
 
@@ -30,6 +32,19 @@ ANNOTATION_COLORS = {
     "metal_binding": "#FFC107",      # Amber
     "membrane": "#8BC34A",           # Light green
     "default": "#607D8B",            # Blue gray
+}
+
+CASE_EVIDENCE_COLORS = {
+    "component": "#C0392B",
+    "caller_named": "#16A085",
+    "foldseek": "#FF6B6B",
+    "pfam": "#3498DB",
+    "kegg": "#9B59B6",
+    "cazy": "#2ECC71",
+    "vogdb": "#F39C12",
+    "hyddb": "#E74C3C",
+    "observed": "#607D8B",
+    "unannotated": "#BDC3C7",
 }
 
 
@@ -82,6 +97,206 @@ def _format_label(name: str, max_width: int = 15) -> str:
     if current:
         lines.append(current)
     return "\n".join(lines[:3])  # Max 3 lines
+
+
+def _case_protein_label(
+    protein: ProteinContextRecord,
+) -> tuple[str, str]:
+    """Return a provenance-aware case-plot label and evidence class."""
+    if protein.named_calls:
+        call = protein.named_calls[0]
+        component = (call.profile_name or "").split("__", 1)[-1]
+        if component and component != call.call_type:
+            return f"{call.call_type}: {component}", "caller_named"
+        return call.call_type, "caller_named"
+
+    source_order = {
+        "foldseek": 0,
+        "padloc": 1,
+        "pfam": 2,
+        "kegg": 3,
+        "kofam": 3,
+        "cazy": 4,
+        "vogdb": 5,
+        "hyddb": 6,
+        "defensefinder": 20,
+        "txsscan": 20,
+    }
+    annotations = sorted(
+        protein.annotations,
+        key=lambda annotation: (
+            source_order.get(annotation.source.lower(), 10),
+            annotation.evalue if annotation.evalue is not None else float("inf"),
+            -(annotation.score or 0),
+        ),
+    )
+    if not annotations:
+        return "?", "unannotated"
+    annotation = annotations[0]
+    label = annotation.name or annotation.accession
+    source = annotation.source.lower()
+    return label, source if source in CASE_EVIDENCE_COLORS else "observed"
+
+
+def visualize_case(
+    case: CaseRecord,
+    *,
+    output_path: str | Path | None = None,
+    title: str | None = None,
+    figure_width: float = 16,
+) -> Path:
+    """Render a resolved biological case with provenance-aware labels.
+
+    Unlike :func:`visualize_neighborhood`, this accepts a complete system or
+    locus case, highlights every anchor component, and preserves asymmetric
+    upstream/downstream windows already resolved by ``inspect``.
+    """
+    try:
+        import matplotlib as mpl  # noqa: PLC0415
+        from dna_features_viewer import GraphicFeature, GraphicRecord  # noqa: PLC0415
+
+        mpl.use("Agg")
+        import matplotlib.pyplot as plt  # noqa: PLC0415
+        from matplotlib.patches import Rectangle  # noqa: PLC0415
+    except ImportError as exc:
+        raise RuntimeError(
+            "Case plotting requires Sharur's visualization dependencies; "
+            "install them with `pip install -e '.[visualization]'`."
+        ) from exc
+
+    if not case.proteins:
+        raise ValueError(f"Case {case.entity.entity_id!r} has no resolved protein context")
+    min_coord = min(protein.start for protein in case.proteins)
+    max_coord = max(protein.end for protein in case.proteins)
+    if max_coord <= min_coord:
+        raise ValueError("Case context has invalid genomic coordinates")
+
+    features = []
+    evidence_classes: set[str] = set()
+    relative_positions: list[tuple[int, float]] = []
+    for protein in case.proteins:
+        label, evidence_class = _case_protein_label(protein)
+        if protein.is_component:
+            evidence_class = "component"
+            label = f"★\n{label}"
+        evidence_classes.add(evidence_class)
+        features.append(
+            GraphicFeature(
+                start=protein.start - min_coord,
+                end=protein.end - min_coord,
+                strand=(
+                    1
+                    if protein.strand == "+"
+                    else -1
+                    if protein.strand == "-"
+                    else 0
+                ),
+                color=CASE_EVIDENCE_COLORS[evidence_class],
+                label=_format_label(label, 18),
+            )
+        )
+        if protein.relative_orf is not None:
+            relative_positions.append(
+                (
+                    protein.relative_orf,
+                    (protein.start + protein.end) / 2 - min_coord,
+                )
+            )
+
+    record = GraphicRecord(
+        sequence_length=max_coord - min_coord,
+        features=features,
+    )
+    figure, axis = plt.subplots(1, 1, figsize=(figure_width, 6))
+    record.plot(ax=axis, with_ruler=True, annotate_inline=False)
+    ticks = axis.get_xticks()
+    axis.set_xticklabels([f"{int(tick + min_coord):,}" for tick in ticks])
+
+    y_bottom = axis.get_ylim()[0]
+    for relative_orf, midpoint in relative_positions:
+        relative_label = (
+            "anchor"
+            if relative_orf == 0
+            else f"{relative_orf:+d} ORF"
+        )
+        axis.text(
+            midpoint,
+            y_bottom - 0.55,
+            relative_label,
+            ha="center",
+            va="top",
+            fontsize=7,
+            color="gray",
+        )
+    limits = axis.get_ylim()
+    axis.set_ylim(limits[0] - 1.0, limits[1])
+
+    context = case.context_window
+    window_text = (
+        f"{context.upstream_orfs} upstream / {context.downstream_orfs} downstream ORFs"
+        if context is not None
+        else "no ORF context"
+    )
+    axis.set_title(
+        title
+        or (
+            f"{case.entity.name or case.entity.entity_type.value}: "
+            f"{case.entity.entity_id}\n{window_text}; "
+            "★ caller anchor components"
+        ),
+        fontsize=11,
+        pad=15,
+    )
+
+    legend_order = [
+        ("component", "Anchor component"),
+        ("caller_named", "Other caller-named component"),
+        ("foldseek", "Foldseek observation"),
+        ("pfam", "PFAM observation"),
+        ("kegg", "KEGG observation"),
+        ("cazy", "CAZy observation"),
+        ("vogdb", "VOGdb observation"),
+        ("hyddb", "HydDB observation"),
+        ("observed", "Other observation"),
+        ("unannotated", "Unannotated"),
+    ]
+    legend_entries = [
+        (key, display)
+        for key, display in legend_order
+        if key in evidence_classes
+    ]
+    handles = [
+        Rectangle(
+            (0, 0),
+            1,
+            1,
+            facecolor=CASE_EVIDENCE_COLORS[key],
+            edgecolor="black",
+            linewidth=0.5,
+        )
+        for key, _ in legend_entries
+    ]
+    if handles:
+        axis.legend(
+            handles,
+            [display for _, display in legend_entries],
+            loc="upper right",
+            fontsize=8,
+            framealpha=0.95,
+            title="Evidence provenance",
+            title_fontsize=8,
+        )
+
+    if output_path is None:
+        safe_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", case.entity.entity_id)[:80]
+        output = Path("/tmp") / f"sharur_case_{safe_id}.png"
+    else:
+        output = Path(output_path).expanduser().resolve()
+        output.parent.mkdir(parents=True, exist_ok=True)
+    plt.tight_layout()
+    plt.savefig(output, dpi=150, bbox_inches="tight")
+    plt.close(figure)
+    return output
 
 
 def visualize_neighborhood(
@@ -514,7 +729,8 @@ def get_kegg_pathway_context(
 
 
 __all__ = [
-    "visualize_neighborhood",
-    "visualize_domain_architecture",
     "get_kegg_pathway_context",
+    "visualize_case",
+    "visualize_domain_architecture",
+    "visualize_neighborhood",
 ]

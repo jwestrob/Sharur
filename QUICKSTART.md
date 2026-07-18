@@ -153,6 +153,23 @@ embeddings, persistent similarity index, dataset run ledger, execution profiles,
 external toolchain. Add `--strict` for a non-zero exit when a required dataset capability is
 not available; add `--skip-tools` when binary/version probes are not needed.
 
+Inspect a structured caller result or protein without flattening raw domains
+and caller-emitted names:
+
+```bash
+sharur inspect ENTITY_ID \
+  --type system \
+  --upstream 4 \
+  --downstream 8 \
+  --db data/my_dataset/sharur.duckdb
+```
+
+Run a controlled ORF-context comparison with `sharur compare-context`.
+Assembly/host evidence can optionally be imported into a separate
+`assembly_evidence.duckdb` sidecar. No assembly composition work runs
+automatically; `sharur compute-composition-evidence` is the explicit opt-in
+command. See [`docs/cases_and_evidence.md`](docs/cases_and_evidence.md).
+
 Stage 00 is itself an integrity gate. It writes
 `stage00_prepared/input_integrity.json` for both accepted and rejected input sets. A rejected
 set exits non-zero and does not expose assembly links or a downstream

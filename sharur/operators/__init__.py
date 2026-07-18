@@ -27,13 +27,15 @@ from sharur.operators.navigation import (
     list_genomes,
     list_proteins,
 )
+from sharur.operators.cases import BiologicalCase, inspect_case
 from sharur.operators.search import search_by_predicates, search_proteins
 from sharur.operators.export import export_fasta, export_neighborhood_fasta, get_sequence
 from sharur.operators.similarity import find_similar, find_similar_to_set
 from sharur.operators.visualization import (
-    visualize_neighborhood,
-    visualize_domain_architecture,
     get_kegg_pathway_context,
+    visualize_case,
+    visualize_domain_architecture,
+    visualize_neighborhood,
 )
 from sharur.operators.structure import (
     predict_structure,
@@ -73,6 +75,7 @@ class Sharur:
         db_path: Optional[Path | str] = None,
         *,
         read_only: bool = False,
+        assembly_evidence_path: Path | str | None = None,
     ):
         """
         Initialize Sharur instance.
@@ -81,9 +84,17 @@ class Sharur:
             db_path: Path to DuckDB database file. If None, uses in-memory DB.
             read_only: Open file-backed DuckDB databases without taking a
                 writer lock or running schema initialization/migrations.
+            assembly_evidence_path: Optional contig-evidence sidecar. When
+                omitted, ``assembly_evidence.duckdb`` is discovered beside
+                the core database. Absence is a typed optional capability.
         """
         self._db_path = Path(db_path) if db_path else None
         self._read_only = read_only
+        self._assembly_evidence_path = (
+            Path(assembly_evidence_path)
+            if assembly_evidence_path is not None
+            else None
+        )
         self._session: Optional[ExplorationSession] = None
         self._manifest: Optional[AnalysisManifest] = None
         self._hypothesis_registry = None
@@ -166,6 +177,7 @@ class Sharur:
         return build_capability_brief(
             self._db_path,
             include_tools=include_tools,
+            assembly_evidence_path=self._assembly_evidence_path,
         )
 
     # ------------------------------------------------------------------ #
@@ -276,6 +288,39 @@ class Sharur:
             window=window,
             verbosity=verbosity,
             all_annotations=all_annotations,
+        )
+
+    def inspect(
+        self,
+        entity_id: str,
+        *,
+        entity_type: str | None = None,
+        bin_id: str | None = None,
+        source_table: str | None = None,
+        window: int = 10,
+        upstream_orfs: int | None = None,
+        downstream_orfs: int | None = None,
+        include_sequences: bool = False,
+    ) -> BiologicalCase:
+        """Resolve a protein, caller-emitted system, or locus into one case.
+
+        ``window`` is the default number of ORFs on each side.
+        ``upstream_orfs`` and ``downstream_orfs`` may override it
+        independently. Co-oriented anchors use transcriptional orientation;
+        mixed-strand anchors fall back to coordinate order and report that
+        limitation.
+        """
+        return inspect_case(
+            self.store,
+            entity_id,
+            entity_type=entity_type,
+            bin_id=bin_id,
+            source_table=source_table,
+            window=window,
+            upstream_orfs=upstream_orfs,
+            downstream_orfs=downstream_orfs,
+            include_sequences=include_sequences,
+            assembly_evidence_path=self._assembly_evidence_path,
         )
 
     # ------------------------------------------------------------------ #
@@ -1091,6 +1136,7 @@ __all__ = [
     "ResultMeta",
     "OperatorTrace",
     "OperatorContext",
+    "BiologicalCase",
     # Introspection
     "overview",
     "describe_schema",
@@ -1100,6 +1146,7 @@ __all__ = [
     "get_genome",
     "get_protein",
     "get_neighborhood",
+    "inspect_case",
     # Search
     "search_by_predicates",
     "search_proteins",
@@ -1111,6 +1158,7 @@ __all__ = [
     "find_similar",
     "find_similar_to_set",
     # Visualization
+    "visualize_case",
     "visualize_neighborhood",
     "visualize_domain_architecture",
     "get_kegg_pathway_context",

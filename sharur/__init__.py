@@ -7,6 +7,33 @@ Ask natural language questions and get structured, reproducible answers.
 
 __version__ = "0.1.0"
 
+from sharur.core import (
+    AnomalyReport,
+    AnomalySignal,
+    AnomalyType,
+    AssemblyEvidenceRecord,
+    Bin,
+    CaseEntityType,
+    CaseRecord,
+    ClaimValidationError,
+    ContextComparison,
+    ContextFeature,
+    ContextWindow,
+    Contig,
+    Evidence,
+    EvidenceLevel,
+    ExplorationSession,
+    FindingDraft,
+    FocusEntity,
+    Hypothesis,
+    HypothesisStatus,
+    Protein,
+    ProvenanceEntry,
+    ScientificClaim,
+    Strand,
+    VerificationRecord,
+    WorkingSet,
+)
 from sharur.core.models import (
     Annotation,
     AnnotationSource,
@@ -18,24 +45,10 @@ from sharur.core.models import (
     ProteinHit,
     ProteinSet,
 )
-from sharur.core import (
-    ExplorationSession,
-    Evidence,
-    Hypothesis,
-    HypothesisStatus,
-    WorkingSet,
-    AnomalyReport,
-    AnomalySignal,
-    AnomalyType,
-    Protein,
-    Contig,
-    Bin,
-    FocusEntity,
-    ProvenanceEntry,
-    Strand,
-)
+
 # Backwards compatibility
 from sharur.core.session import ExplorationSession as SessionState
+
 
 __all__ = [
     # Version
@@ -43,8 +56,15 @@ __all__ = [
     # Core models
     "Annotation",
     "AnnotationSource",
+    "AssemblyEvidenceRecord",
     "AnomalyHit",
     "ComparisonResult",
+    "CaseEntityType",
+    "CaseRecord",
+    "ClaimValidationError",
+    "ContextComparison",
+    "ContextFeature",
+    "ContextWindow",
     "GenomicRegion",
     "Hypothesis",
     "LegacyHypothesis",
@@ -55,6 +75,7 @@ __all__ = [
     "ExplorationSession",
     "WorkingSet",
     "Evidence",
+    "EvidenceLevel",
     "HypothesisStatus",
     "AnomalyReport",
     "AnomalySignal",
@@ -63,8 +84,11 @@ __all__ = [
     "Contig",
     "Bin",
     "FocusEntity",
+    "FindingDraft",
     "ProvenanceEntry",
     "Strand",
+    "ScientificClaim",
+    "VerificationRecord",
     # Session
     "SessionState",
 ]

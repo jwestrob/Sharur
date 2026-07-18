@@ -633,6 +633,124 @@ def _ledger_check(db_path: Path) -> Capability:
         )
 
 
+def _assembly_evidence_check(
+    db_path: Path,
+    *,
+    explicit_path: str | Path | None = None,
+) -> Capability:
+    """Inspect the optional scalar assembly/host-evidence sidecar."""
+    from sharur.assembly_evidence import (  # noqa: PLC0415
+        ASSEMBLY_EVIDENCE_SCHEMA_VERSION,
+        AssemblyEvidenceStore,
+        default_assembly_evidence_path,
+        discover_assembly_evidence,
+    )
+
+    expected_path = (
+        Path(explicit_path).expanduser().resolve()
+        if explicit_path is not None
+        else default_assembly_evidence_path(db_path)
+    )
+    sidecar = discover_assembly_evidence(db_path, explicit_path=explicit_path)
+    if sidecar is None:
+        explicitly_missing = explicit_path is not None
+        return Capability(
+            "assembly_evidence",
+            (
+                CapabilityState.failed
+                if explicitly_missing
+                else CapabilityState.unavailable
+            ),
+            (
+                "The explicitly configured assembly-evidence sidecar does not exist."
+                if explicitly_missing
+                else "Optional assembly/host-assignment evidence has not been supplied."
+            ),
+            evidence={
+                "path": str(expected_path),
+                "required": False,
+                "composition_computation": "not_run",
+            },
+            remediation=(
+                "Correct the explicit sidecar path."
+                if explicitly_missing
+                else (
+                    "Import contig evidence only when it is useful; composition "
+                    "scanning is a separate, explicit opt-in operation."
+                )
+            ),
+        )
+
+    try:
+        with AssemblyEvidenceStore(sidecar, read_only=True) as evidence_store:
+            version = evidence_store.schema_version()
+            (
+                rows,
+                coverage_rows,
+                linkage_rows,
+                taxonomy_rows,
+                gc_rows,
+                tetranucleotide_rows,
+            ) = evidence_store.conn.execute(
+                """
+                SELECT
+                    COUNT(*),
+                    COUNT(coverage_mean),
+                    COUNT(proper_pair_fraction),
+                    COUNT(taxonomy),
+                    COUNT(gc_zscore),
+                    COUNT(tetranucleotide_distance)
+                FROM contig_evidence
+                """
+            ).fetchone()
+        state = (
+            CapabilityState.available
+            if version == ASSEMBLY_EVIDENCE_SCHEMA_VERSION and int(rows) > 0
+            else CapabilityState.stale
+        )
+        summary = (
+            f"Optional assembly evidence is available for {int(rows)} contigs."
+            if state == CapabilityState.available
+            else (
+                "Assembly-evidence sidecar is empty or uses an incompatible "
+                f"schema version ({version})."
+            )
+        )
+        return Capability(
+            "assembly_evidence",
+            state,
+            summary,
+            evidence={
+                "path": str(sidecar),
+                "schema_version": version,
+                "code_schema_version": ASSEMBLY_EVIDENCE_SCHEMA_VERSION,
+                "rows": int(rows),
+                "coverage_rows": int(coverage_rows),
+                "read_pair_metric_rows": int(linkage_rows),
+                "taxonomy_rows": int(taxonomy_rows),
+                "gc_rows": int(gc_rows),
+                "tetranucleotide_rows": int(tetranucleotide_rows),
+                "vectors_persisted_by_sharur": False,
+            },
+            remediation=(
+                None
+                if state == CapabilityState.available
+                else "Re-import the optional evidence with the current Sharur version."
+            ),
+        )
+    except Exception as exc:
+        return Capability(
+            "assembly_evidence",
+            CapabilityState.failed,
+            "Optional assembly-evidence sidecar could not be inspected.",
+            evidence={
+                "path": str(sidecar),
+                "error": f"{type(exc).__name__}: {exc}",
+            },
+            remediation="Inspect or recreate the optional sidecar; the core dataset is unaffected.",
+        )
+
+
 def _execution_checks() -> list[Capability]:
     from sharur.ingest.resources import resolve_resource_profile  # noqa: PLC0415
 
@@ -774,6 +892,7 @@ def build_capability_brief(
     *,
     include_tools: bool = False,
     include_execution: bool = True,
+    assembly_evidence_path: str | Path | None = None,
 ) -> CapabilityBrief:
     """Build one non-mutating capability/preflight brief."""
     resolved = Path(db_path).expanduser().resolve()
@@ -809,6 +928,12 @@ def build_capability_brief(
             store.close()
     capabilities.extend(_embedding_checks(resolved, sequence_protein_count, invalid_sequence_count))
     capabilities.append(_ledger_check(resolved))
+    capabilities.append(
+        _assembly_evidence_check(
+            resolved,
+            explicit_path=assembly_evidence_path,
+        )
+    )
     if include_execution:
         capabilities.extend(_execution_checks())
     if include_tools:

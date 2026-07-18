@@ -105,6 +105,19 @@ defense = b.search_by_predicates(has=["crispr_associated"])
 # Genomic neighborhood (with all annotation sources)
 b.get_neighborhood(protein_id, window=10, all_annotations=True)
 
+# First-class, provenance-separated case with asymmetric ORF context
+case = b.inspect(
+    caller_or_protein_id,
+    entity_type="system",
+    upstream_orfs=4,
+    downstream_orfs=8,
+)
+comparison = case.compare_context(
+    features=["pfam:PF00589", "other_called_system"],
+    window=8,
+    deduplicate_by="replicon",
+)
+
 # Embedding similarity
 similar = b.find_similar(protein_id, k=20)
 
@@ -120,6 +133,12 @@ Operator results expose `result.records`, `result.raw`, `result.status`, and
 `result.to_json()` for programmatic use. The CLI commands `overview`, `genomes`,
 `proteins`, `neighborhood`, and `search` accept
 `--format markdown|json|jsonl|tsv`.
+
+`sharur inspect` and `sharur compare-context` expose typed cases and exact
+foreground/background context tests. Optional assembly/host evidence lives in
+a separate sidecar, and composition scanning is available only through the
+explicit `compute-composition-evidence` command. See
+[`docs/cases_and_evidence.md`](docs/cases_and_evidence.md).
 
 ### Use with Claude Code
 

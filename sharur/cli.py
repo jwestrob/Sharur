@@ -17,8 +17,9 @@ Example usage:
     sharur search --has giant,unannotated --db data/sharur.duckdb
 """
 
-from pathlib import Path
+import json
 from enum import Enum
+from pathlib import Path
 from typing import Optional
 
 import typer
@@ -78,8 +79,6 @@ def _emit_result(result, output_format: OutputFormat) -> None:
         typer.echo(result.to_json(indent=2))
         return
     if output_format == OutputFormat.jsonl:
-        import json
-
         for record in result.records:
             typer.echo(json.dumps(record, default=str))
         return
@@ -243,6 +242,419 @@ def neighborhood(
     verbosity = 2 if verbose else 1
     result = b.get_neighborhood(entity_id=protein_id, window=window, verbosity=verbosity)
     _emit_result(result, output_format)
+
+
+# ------------------------------------------------------------------ #
+# First-class case inspection and context comparison
+# ------------------------------------------------------------------ #
+
+
+@app.command(name="inspect")
+def inspect_entity(
+    entity_id: str = typer.Argument(..., help="Protein, system, locus, contig, or bin ID"),
+    entity_type: str | None = typer.Option(
+        None,
+        "--type",
+        help="Disambiguate as protein, system, locus, contig, or bin.",
+    ),
+    bin_id: str | None = typer.Option(
+        None,
+        "--bin",
+        help="Required only when a contig label occurs in multiple bins.",
+    ),
+    source_table: str | None = typer.Option(
+        None,
+        "--source-table",
+        help="Structured caller table when a system/locus ID is ambiguous.",
+    ),
+    window: int = typer.Option(
+        10,
+        "--window",
+        "-w",
+        help="Default ORFs on each side.",
+    ),
+    upstream_orfs: int | None = typer.Option(
+        None,
+        "--upstream",
+        help="Biological upstream ORFs; overrides --window on that side.",
+    ),
+    downstream_orfs: int | None = typer.Option(
+        None,
+        "--downstream",
+        help="Biological downstream ORFs; overrides --window on that side.",
+    ),
+    assembly_evidence: Path | None = typer.Option(
+        None,
+        "--assembly-evidence",
+        help="Optional assembly_evidence.duckdb sidecar.",
+    ),
+    include_sequences: bool = typer.Option(
+        False,
+        "--include-sequences",
+        help="Embed context sequences in JSON output (can make output large).",
+    ),
+    plot: Path | None = typer.Option(
+        None,
+        "--plot",
+        help="Render the resolved locus to this PNG/SVG path.",
+    ),
+    bundle: Path | None = typer.Option(
+        None,
+        "--bundle",
+        help="Write a compact, replayable evidence-bundle directory.",
+    ),
+    bundle_sequences: bool = typer.Option(
+        True,
+        "--bundle-sequences/--no-bundle-sequences",
+        help="Include anchor-component FASTA in --bundle.",
+    ),
+    overwrite: bool = typer.Option(
+        False,
+        "--overwrite",
+        help="Replace an existing --bundle directory.",
+    ),
+    db: str = typer.Option(DEFAULT_DB, "--db", "-d", help="Path to DuckDB database"),
+    output_format: BriefFormat = typer.Option(
+        BriefFormat.markdown,
+        "--format",
+        "-f",
+        help="Output format: markdown or json.",
+    ),
+):
+    """Resolve an entity into a provenance-separated, strand-aware case."""
+    db_path = Path(db)
+    if not db_path.is_file():
+        typer.echo(f"DB not found: {db}", err=True)
+        raise typer.Exit(1)
+
+    try:
+        sharur = Sharur(
+            db_path,
+            read_only=True,
+            assembly_evidence_path=assembly_evidence,
+        )
+        case = sharur.inspect(
+            entity_id,
+            entity_type=entity_type,
+            bin_id=bin_id,
+            source_table=source_table,
+            window=window,
+            upstream_orfs=upstream_orfs,
+            downstream_orfs=downstream_orfs,
+            include_sequences=include_sequences,
+        )
+        if plot is not None:
+            rendered = case.plot(plot)
+            typer.echo(f"Plot: {rendered}", err=True)
+        if bundle is not None:
+            bundle_path = case.export(
+                bundle,
+                include_sequences=bundle_sequences,
+                include_plot=False,
+                overwrite=overwrite,
+            )
+            typer.echo(f"Bundle: {bundle_path}", err=True)
+    except (KeyError, ValueError, RuntimeError, FileExistsError) as exc:
+        typer.echo(f"Could not inspect case: {exc}", err=True)
+        raise typer.Exit(1) from exc
+
+    if output_format == BriefFormat.json:
+        typer.echo(case.to_json())
+    else:
+        typer.echo(case.to_markdown())
+
+
+@app.command(name="compare-context")
+def compare_context_command(
+    entity_id: str = typer.Argument(..., help="System, locus, or protein case ID"),
+    feature: list[str] = typer.Option(
+        [],
+        "--feature",
+        help=(
+            "Repeatable feature: pfam:ACCESSION, name:TEXT, predicate:ID, "
+            "system:TYPE, locus:TYPE, or other_called_system."
+        ),
+    ),
+    entity_type: str | None = typer.Option(None, "--type"),
+    source_table: str | None = typer.Option(None, "--source-table"),
+    bin_id: str | None = typer.Option(None, "--bin"),
+    window: int = typer.Option(10, "--window", "-w", help="Default ORFs on each side."),
+    upstream_orfs: int | None = typer.Option(
+        None,
+        "--upstream",
+        help="Biological upstream ORFs; overrides --window.",
+    ),
+    downstream_orfs: int | None = typer.Option(
+        None,
+        "--downstream",
+        help="Biological downstream ORFs; overrides --window.",
+    ),
+    foreground_id: list[str] = typer.Option(
+        [],
+        "--foreground-id",
+        help="Explicit foreground entity ID; repeat for protein/custom cohorts.",
+    ),
+    background_id: list[str] = typer.Option(
+        [],
+        "--background-id",
+        help="Explicit background entity ID; repeat for protein/custom cohorts.",
+    ),
+    combine: str = typer.Option(
+        "all",
+        "--combine",
+        help="Combine features with all or any.",
+    ),
+    min_components: int = typer.Option(
+        1,
+        "--min-components",
+        help="Exclude caller-emitted systems/loci with fewer components.",
+    ),
+    require_full_context: bool = typer.Option(
+        True,
+        "--require-full-context/--allow-edge-censored",
+        help="Exclude contig-edge-censored neighborhoods.",
+    ),
+    deduplicate_by: str = typer.Option(
+        "replicon",
+        "--deduplicate-by",
+        help="Independent unit: entity, replicon, or bin.",
+    ),
+    exclude_foreground_units: bool = typer.Option(
+        True,
+        "--exclude-foreground-units/--allow-foreground-overlap",
+        help="Keep foreground-bearing units out of the background.",
+    ),
+    taxonomy: str | None = typer.Option(
+        None,
+        "--taxonomy",
+        help="Require this taxonomy substring in both groups.",
+    ),
+    same_taxonomy_rank: str | None = typer.Option(
+        None,
+        "--same-taxonomy-rank",
+        help="Match the case at domain/phylum/class/order/family/genus/species.",
+    ),
+    alternative: str = typer.Option(
+        "greater",
+        "--alternative",
+        help="Fisher alternative: greater, less, or two-sided.",
+    ),
+    bundle: Path | None = typer.Option(
+        None,
+        "--bundle",
+        help="Write the case, comparison matrix, recipe, and verifier.",
+    ),
+    overwrite: bool = typer.Option(False, "--overwrite"),
+    db: str = typer.Option(DEFAULT_DB, "--db", "-d", help="Path to DuckDB database"),
+    output_format: BriefFormat = typer.Option(
+        BriefFormat.markdown,
+        "--format",
+        "-f",
+    ),
+):
+    """Run an exact, reproducible foreground/background ORF-context comparison."""
+    if not feature:
+        typer.echo("At least one --feature is required.", err=True)
+        raise typer.Exit(1)
+    if combine not in {"all", "any"}:
+        raise typer.BadParameter("--combine must be all or any")
+    if deduplicate_by not in {"entity", "replicon", "bin"}:
+        raise typer.BadParameter("--deduplicate-by must be entity, replicon, or bin")
+    if alternative not in {"greater", "less", "two-sided"}:
+        raise typer.BadParameter("--alternative must be greater, less, or two-sided")
+
+    db_path = Path(db)
+    if not db_path.is_file():
+        typer.echo(f"DB not found: {db}", err=True)
+        raise typer.Exit(1)
+    try:
+        sharur = Sharur(db_path, read_only=True)
+        case = sharur.inspect(
+            entity_id,
+            entity_type=entity_type,
+            bin_id=bin_id,
+            source_table=source_table,
+            window=window,
+            upstream_orfs=upstream_orfs,
+            downstream_orfs=downstream_orfs,
+        )
+        comparison = case.compare_context(
+            features=feature,
+            window=window,
+            upstream_orfs=upstream_orfs,
+            downstream_orfs=downstream_orfs,
+            foreground_ids=foreground_id or None,
+            background_ids=background_id or None,
+            combine=combine,
+            min_components=min_components,
+            require_full_context=require_full_context,
+            deduplicate_by=deduplicate_by,
+            exclude_foreground_units=exclude_foreground_units,
+            taxonomy_filter=taxonomy,
+            same_taxonomy_rank=same_taxonomy_rank,
+            alternative=alternative,
+        )
+        if bundle is not None:
+            bundle_path = case.export(
+                bundle,
+                comparison=comparison,
+                overwrite=overwrite,
+            )
+            typer.echo(f"Bundle: {bundle_path}", err=True)
+    except (KeyError, ValueError, RuntimeError, FileExistsError) as exc:
+        typer.echo(f"Could not compare context: {exc}", err=True)
+        raise typer.Exit(1) from exc
+
+    if output_format == BriefFormat.json:
+        typer.echo(comparison.to_json())
+    else:
+        typer.echo(comparison.to_markdown())
+
+
+# ------------------------------------------------------------------ #
+# Optional assembly/host-assignment evidence
+# ------------------------------------------------------------------ #
+
+
+@app.command(name="import-assembly-evidence")
+def import_assembly_evidence_command(
+    input_path: Path = typer.Argument(
+        ...,
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help="TSV, CSV, or JSONL with bin_id and contig_id columns.",
+    ),
+    db: Path = typer.Option(
+        Path(DEFAULT_DB),
+        "--db",
+        "-d",
+        help="Core DuckDB used for validation and sidecar discovery.",
+    ),
+    sidecar: Path | None = typer.Option(
+        None,
+        "--sidecar",
+        help="Output sidecar (default: assembly_evidence.duckdb beside --db).",
+    ),
+    source: str | None = typer.Option(
+        None,
+        "--source",
+        help="Provenance label for these measurements.",
+    ),
+    validate: bool = typer.Option(
+        True,
+        "--validate/--no-validate",
+        help="Require every (bin_id, contig_id) to exist in the core dataset.",
+    ),
+    hash_input: bool = typer.Option(
+        True,
+        "--hash-input/--skip-input-hash",
+        help="SHA-256 the input for provenance (one extra sequential read).",
+    ),
+):
+    """Import optional scalar contig evidence without modifying the core database."""
+    from sharur.assembly_evidence import (  # noqa: PLC0415
+        default_assembly_evidence_path,
+        import_contig_evidence,
+    )
+
+    if not db.is_file():
+        typer.echo(f"DB not found: {db}", err=True)
+        raise typer.Exit(1)
+    target = sidecar or default_assembly_evidence_path(db)
+    if target.expanduser().resolve() == db.expanduser().resolve():
+        raise typer.BadParameter(
+            "--sidecar must not be the core DuckDB",
+            param_hint="--sidecar",
+        )
+    try:
+        result = import_contig_evidence(
+            input_path,
+            target,
+            source=source,
+            validate_db_path=db if validate else None,
+            hash_input=hash_input,
+        )
+    except (OSError, ValueError) as exc:
+        typer.echo(f"Could not import assembly evidence: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(json.dumps(result, indent=2, default=str))
+
+
+@app.command(name="compute-composition-evidence")
+def compute_composition_evidence_command(
+    assembly: list[str] = typer.Option(
+        [],
+        "--assembly",
+        help="Repeatable BIN_ID=/path/to/assembly.fna mapping.",
+    ),
+    db: Path = typer.Option(
+        Path(DEFAULT_DB),
+        "--db",
+        "-d",
+        help="Core DuckDB used for validation and sidecar discovery.",
+    ),
+    sidecar: Path | None = typer.Option(
+        None,
+        "--sidecar",
+        help="Output sidecar (default: assembly_evidence.duckdb beside --db).",
+    ),
+    validate: bool = typer.Option(
+        True,
+        "--validate/--no-validate",
+        help="Require FASTA contigs to exist in the core dataset.",
+    ),
+):
+    """Explicitly scan FASTAs for scalar GC/4-mer evidence.
+
+    This command is never run by ingestion, preflight, or case inspection.
+    It reads every supplied FASTA, keeps 4-mer vectors in memory only, and
+    persists scalar leave-one-contig-out distances.
+    """
+    from sharur.assembly_evidence import (  # noqa: PLC0415
+        compute_composition_evidence,
+        default_assembly_evidence_path,
+    )
+
+    if not assembly:
+        typer.echo("At least one --assembly BIN_ID=FASTA is required.", err=True)
+        raise typer.Exit(1)
+    if not db.is_file():
+        typer.echo(f"DB not found: {db}", err=True)
+        raise typer.Exit(1)
+
+    assemblies: dict[str, Path] = {}
+    for specification in assembly:
+        bin_name, separator, fasta = specification.partition("=")
+        if not separator or not bin_name.strip() or not fasta.strip():
+            raise typer.BadParameter(
+                f"Invalid --assembly {specification!r}; use BIN_ID=/path/to/file.fna"
+            )
+        if bin_name in assemblies:
+            raise typer.BadParameter(f"Duplicate --assembly bin ID: {bin_name}")
+        assemblies[bin_name] = Path(fasta)
+
+    target = sidecar or default_assembly_evidence_path(db)
+    if target.expanduser().resolve() == db.expanduser().resolve():
+        raise typer.BadParameter(
+            "--sidecar must not be the core DuckDB",
+            param_hint="--sidecar",
+        )
+    typer.echo(
+        f"Explicit composition scan: {len(assemblies)} FASTA file(s); "
+        "4-mer vectors will not be persisted.",
+        err=True,
+    )
+    try:
+        result = compute_composition_evidence(
+            assemblies,
+            target,
+            validate_db_path=db if validate else None,
+        )
+    except (OSError, ValueError) as exc:
+        typer.echo(f"Could not compute composition evidence: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(json.dumps(result, indent=2, default=str))
 
 
 # ------------------------------------------------------------------ #
@@ -460,6 +872,11 @@ def predicates(
 @app.command()
 def preflight(
     db: str = typer.Option(DEFAULT_DB, "--db", "-d", help="Path to DuckDB database"),
+    assembly_evidence: Path | None = typer.Option(
+        None,
+        "--assembly-evidence",
+        help="Optional non-default assembly-evidence sidecar.",
+    ),
     output_format: BriefFormat = typer.Option(
         BriefFormat.markdown,
         "--format",
@@ -480,7 +897,11 @@ def preflight(
     """Emit one typed dataset/runtime capability brief without modifying data."""
     from sharur.capabilities import CapabilityState, build_capability_brief
 
-    brief = build_capability_brief(db, include_tools=not skip_tools)
+    brief = build_capability_brief(
+        db,
+        include_tools=not skip_tools,
+        assembly_evidence_path=assembly_evidence,
+    )
     if output_format == BriefFormat.json:
         typer.echo(brief.to_json())
     else:
