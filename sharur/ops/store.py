@@ -117,6 +117,7 @@ class OpsStore:
         min_novelty: int = 0,
         finding_type: str = None,
         domain: str = None,
+        agent_id: str = None,
         limit: int = 50,
     ) -> list[dict]:
         sql = "SELECT * FROM findings WHERE ts > ? AND novelty >= ?"
@@ -127,25 +128,34 @@ class OpsStore:
         if domain:
             sql += " AND domain = ?"
             params.append(domain)
+        if agent_id:
+            sql += " AND agent_id = ?"
+            params.append(agent_id)
         sql += " ORDER BY ts DESC LIMIT ?"
         params.append(limit)
-        rows = self._conn.execute(sql, params).fetchall()
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
         return [_row_to_dict(r) for r in rows]
 
     def get_finding(self, finding_id: str) -> dict:
-        row = self._conn.execute("SELECT * FROM findings WHERE id = ?", (finding_id,)).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM findings WHERE id = ?",
+                (finding_id,),
+            ).fetchone()
         if not row:
             raise KeyError(f"Finding {finding_id} not found")
         return _row_to_dict(row)
 
     def search_findings(self, text: str, limit: int = 20) -> list[dict]:
         pattern = f"%{text}%"
-        rows = self._conn.execute(
-            """SELECT * FROM findings
-               WHERE summary LIKE ? OR reasoning LIKE ? OR evidence LIKE ?
-               ORDER BY ts DESC LIMIT ?""",
-            (pattern, pattern, pattern, limit),
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT * FROM findings
+                   WHERE summary LIKE ? OR reasoning LIKE ? OR evidence LIKE ?
+                   ORDER BY novelty DESC, ts DESC LIMIT ?""",
+                (pattern, pattern, pattern, limit),
+            ).fetchall()
         return [_row_to_dict(r) for r in rows]
 
     # ------------------------------------------------------------------
@@ -177,16 +187,44 @@ class OpsStore:
             self._conn.commit()
         return hid
 
-    def open_hypotheses(self, unassigned: bool = True) -> list[dict]:
+    def list_hypotheses(
+        self,
+        *,
+        status: str = None,
+        unassigned: bool = False,
+        limit: int = 50,
+    ) -> list[dict]:
+        clauses = []
+        params: list = []
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
         if unassigned:
+            clauses.append("assigned_agent_id IS NULL")
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        params.append(limit)
+        with self._lock:
             rows = self._conn.execute(
-                "SELECT * FROM hypotheses WHERE status = 'proposed' AND assigned_agent_id IS NULL"
-            ).fetchall()
-        else:
-            rows = self._conn.execute(
-                "SELECT * FROM hypotheses WHERE status = 'proposed'"
+                f"SELECT * FROM hypotheses{where} ORDER BY ts DESC LIMIT ?",
+                params,
             ).fetchall()
         return [_row_to_dict(r) for r in rows]
+
+    def open_hypotheses(self, unassigned: bool = True) -> list[dict]:
+        return self.list_hypotheses(
+            status="proposed",
+            unassigned=unassigned,
+        )
+
+    def get_hypothesis(self, hypothesis_id: str) -> dict:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM hypotheses WHERE id = ?",
+                (hypothesis_id,),
+            ).fetchone()
+        if row is None:
+            raise KeyError(f"Hypothesis {hypothesis_id} not found")
+        return _row_to_dict(row)
 
     def update_hypothesis(self, hyp_id: str, **kwargs) -> dict:
         allowed = {
@@ -342,12 +380,34 @@ class OpsStore:
         return tid
 
     def my_tasks(self, status: str = None) -> list[dict]:
-        sql = "SELECT * FROM tasks WHERE assigned_to = ?"
-        params: list = [self.agent_id]
+        return self.list_tasks(status=status, assigned_to=self.agent_id)
+
+    def list_tasks(
+        self,
+        *,
+        status: str = None,
+        assigned_to: str = None,
+        unassigned: bool = False,
+        limit: int = 50,
+    ) -> list[dict]:
+        if unassigned:
+            return self.available_tasks()[:limit]
+        clauses = []
+        params: list = []
         if status:
-            sql += " AND status = ?"
+            clauses.append("status = ?")
             params.append(status)
-        return [_row_to_dict(r) for r in self._conn.execute(sql, params).fetchall()]
+        if assigned_to:
+            clauses.append("assigned_to = ?")
+            params.append(assigned_to)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        params.append(limit)
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT * FROM tasks{where} ORDER BY priority DESC, ts ASC LIMIT ?",
+                params,
+            ).fetchall()
+        return [_row_to_dict(row) for row in rows]
 
     def available_tasks(self) -> list[dict]:
         with self._lock:
@@ -636,6 +696,10 @@ class OpsStore:
             raise KeyError(f"Task {task_id} not found")
         return _row_to_dict(row)
 
+    def get_task(self, task_id: str) -> dict:
+        with self._lock:
+            return self._get_task(task_id)
+
     # ------------------------------------------------------------------
     # Runs
     # ------------------------------------------------------------------
@@ -684,6 +748,10 @@ class OpsStore:
 
     def list_run_stages(self, run_id: str, *, stage_id: str = None) -> list[dict]:
         return self.ledger.list_stages(run_id, stage_id=stage_id)
+
+    def run_events(self, run_id: str) -> list[dict]:
+        self.ledger.get_run(run_id)
+        return self.ledger.events(run_id)
 
     def recover_stale_runs(
         self,
@@ -735,6 +803,16 @@ class OpsStore:
             (since, limit),
         ).fetchall()
         return [_row_to_dict(r) for r in rows]
+
+    def get_log_entry(self, entry_id: str) -> dict:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM coordinator_log WHERE id = ?",
+                (entry_id,),
+            ).fetchone()
+        if row is None:
+            raise KeyError(f"Coordinator log entry {entry_id} not found")
+        return _row_to_dict(row)
 
     # ------------------------------------------------------------------
     # Stats
@@ -796,6 +874,12 @@ class OpsStore:
     def close(self):
         self.ledger.close()
         self._conn.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
 
     def __repr__(self):
         return f"OpsStore(db='{self.db_path}', agent_id='{self.agent_id}')"

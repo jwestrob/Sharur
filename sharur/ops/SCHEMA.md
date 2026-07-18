@@ -5,17 +5,26 @@
 Two backends expose the same API and schema:
 
 ```python
+import os
+
 # Direct SQLite (no server needed — use for local/single-machine runs)
 from sharur.ops.store import OpsStore
 ops = OpsStore("data/DATASET/sharur_ops.db", agent_id="my_agent")
 
-# HTTP client (requires uvicorn sharur.ops.server:app running)
+# HTTP client (requires `pip install -e ".[ops]"` and `sharur-ops`)
 from sharur.ops.client import SharurOps
-ops = SharurOps("http://localhost:8811", agent_id="my_agent")
+ops = SharurOps(
+    "http://localhost:8811",
+    agent_id="my_agent",
+    api_token=os.environ.get("SHARUR_OPS_TOKEN"),
+)
 ```
 
 Both support findings/hypotheses, leased tasks, idempotent runs, recovery, coordinator logs,
 and stats. Point the HTTP server and direct clients at the same dataset-local SQLite file.
+The server opens no database at import time, binds to loopback by default, requires bearer
+authentication for remote use, and uses short-lived request connections. HTTP clients have
+bounded timeouts and retry only idempotent reads.
 
 ## Design Principles
 

@@ -97,6 +97,9 @@ data/example/*
 *.duckdb
 *.duckdb.wal
 
+# Dataset-local operational SQLite files
+sharur_ops.db*
+
 # LanceDB databases  
 *.lance/
 

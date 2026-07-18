@@ -1,113 +1,122 @@
-"""
-Sharur Ops Server — Coordination layer for multi-agent metagenomic discovery.
+"""Optional HTTP coordination service for distributed Sharur agents.
 
-Run:  uvicorn sharur.ops.server:app --host 0.0.0.0 --port 8811
-Or:   python -m sharur.ops.server
+The service is a transport around :class:`sharur.ops.store.OpsStore`. It keeps
+coordination state in ``sharur_ops.db``; canonical scientific findings remain
+in the dataset's JSONL records and DuckDB.
 
-Agents POST findings/hypotheses/tasks. Orchestrator queries them.
-All writes serialized through a single SQLite connection in WAL mode.
-
-Important boundary: this server stores coordination records only. Dataset-local
-scientific records remain the canonical source of truth in
-`survey/findings.jsonl`, `exploration/findings.jsonl`, and
-`exploration/hypotheses.json`.
+Use ``sharur-ops`` (or ``python -m sharur.ops.server``) for the guarded server
+launcher. It binds to loopback by default and refuses unauthenticated remote
+clients unless an explicit insecure override is enabled.
 """
 
+from __future__ import annotations
+
+import argparse
 import asyncio
 import contextlib
 import json
 import os
-import sqlite3
+import secrets
 import threading
 import time
-import uuid
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
 from sharur import __version__
-from sharur.ops.ledger import RunLedger
-from sharur.ops.schema import DEFAULT_LEASE_SECONDS, ensure_ops_schema
+from sharur.ops.schema import DEFAULT_LEASE_SECONDS
 from sharur.ops.store import OpsStore
 
 
-# ---------------------------------------------------------------------------
-# Config
-# ---------------------------------------------------------------------------
-
-# DB path is configurable so containers can point it at a persistent volume.
-# A bare relative default resolves against the process CWD, which loses
-# coordination state across container restarts — hence the env override.
-DB_PATH = Path(os.environ.get("SHARUR_OPS_DB_PATH", "sharur_ops.db"))
-app = FastAPI(title="Sharur Ops", version=__version__)
-
-# ---------------------------------------------------------------------------
-# Database setup — single connection, WAL mode, serialized writes via lock
-# ---------------------------------------------------------------------------
-
-_db_lock = threading.Lock()
+DEFAULT_HOST = "127.0.0.1"
+DEFAULT_PORT = 8811
+DEFAULT_SSE_QUEUE_SIZE = 1_000
 
 
-def _get_db() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=5000")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    conn.row_factory = sqlite3.Row
-    return conn
+def _env_flag(name: str, *, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-_conn: sqlite3.Connection = _get_db()
+def _is_loopback(host: str | None) -> bool:
+    if host is None:
+        return False
+    normalized = host.strip().lower()
+    return normalized in {"127.0.0.1", "::1", "localhost", "testclient"}
 
 
-def _init_db():
-    with _db_lock:
-        ensure_ops_schema(_conn)
-
-
-# ---------------------------------------------------------------------------
-# SSE event bus — orchestrator subscribes, agents publish
-# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class _Subscriber:
+    queue: asyncio.Queue[str]
+    loop: asyncio.AbstractEventLoop
 
 
 class EventBus:
-    """Simple in-process pub/sub for SSE streaming."""
+    """Bounded, thread-safe in-process pub/sub for the SSE endpoint."""
 
-    def __init__(self):
-        self._subscribers: list[asyncio.Queue] = []
+    def __init__(self, *, queue_size: int = DEFAULT_SSE_QUEUE_SIZE):
+        if queue_size < 1:
+            raise ValueError("SSE queue size must be positive")
+        self._queue_size = queue_size
+        self._subscribers: list[_Subscriber] = []
         self._lock = threading.Lock()
 
-    def subscribe(self) -> asyncio.Queue:
-        q: asyncio.Queue = asyncio.Queue()
+    def subscribe(self) -> _Subscriber:
+        subscriber = _Subscriber(
+            queue=asyncio.Queue(maxsize=self._queue_size),
+            loop=asyncio.get_running_loop(),
+        )
         with self._lock:
-            self._subscribers.append(q)
-        return q
+            self._subscribers.append(subscriber)
+        return subscriber
 
-    def unsubscribe(self, q: asyncio.Queue):
+    def unsubscribe(self, subscriber: _Subscriber) -> None:
         with self._lock:
-            self._subscribers = [s for s in self._subscribers if s is not q]
+            self._subscribers = [
+                current for current in self._subscribers if current is not subscriber
+            ]
 
-    def publish(self, event_type: str, data: dict):
-        payload = json.dumps({"type": event_type, **data})
+    @staticmethod
+    def _offer(queue: asyncio.Queue[str], payload: str) -> None:
+        if queue.full():
+            with contextlib.suppress(asyncio.QueueEmpty):
+                queue.get_nowait()
+        with contextlib.suppress(asyncio.QueueFull):
+            queue.put_nowait(payload)
+
+    def publish(self, event_type: str, data: dict) -> None:
+        payload = json.dumps({"type": event_type, **data}, separators=(",", ":"))
         with self._lock:
-            for q in self._subscribers:
-                with contextlib.suppress(asyncio.QueueFull):
-                    q.put_nowait(payload)
+            subscribers = list(self._subscribers)
+        for subscriber in subscribers:
+            with contextlib.suppress(RuntimeError):
+                subscriber.loop.call_soon_threadsafe(
+                    self._offer,
+                    subscriber.queue,
+                    payload,
+                )
 
 
-_bus = EventBus()
+@dataclass(frozen=True)
+class OpsRuntime:
+    """Application-scoped configuration with no open database connection."""
 
-# ---------------------------------------------------------------------------
-# Pydantic models for coordination records only
-# ---------------------------------------------------------------------------
+    db_path: Path
+    api_token: str | None
+    allow_insecure_remote: bool
+    event_bus: EventBus
 
 
 class FindingIn(BaseModel):
-    agent_id: str
+    agent_id: str = Field(min_length=1)
     finding_type: str = Field(min_length=1)
     domain: str = Field(min_length=1)
     summary: str
@@ -119,9 +128,9 @@ class FindingIn(BaseModel):
 
 
 class HypothesisIn(BaseModel):
-    source_agent_id: str
+    source_agent_id: str = Field(min_length=1)
     source_finding_ids: list[str] = Field(default_factory=list)
-    hypothesis: str
+    hypothesis: str = Field(min_length=1)
     domains_relevant: list[str] = Field(default_factory=list)
 
 
@@ -137,8 +146,8 @@ class HypothesisUpdate(BaseModel):
 
 class TaskIn(BaseModel):
     created_by: str = "coordinator"
-    task_type: str  # investigate, validate_hypothesis, cross_domain_search, follow_up, survey
-    description: str
+    task_type: str = Field(min_length=1)
+    description: str = Field(min_length=1)
     params: dict = Field(default_factory=dict)
     priority: int = Field(default=1, ge=0, le=3)
     domain_hint: str | None = None
@@ -184,622 +193,562 @@ class RunUpdate(BaseModel):
 
 
 class CoordinatorLogIn(BaseModel):
-    action_type: str  # synthesis, task_assignment, escalation, hypothesis_generated, checkpoint
+    action_type: str = Field(min_length=1)
     reasoning: str
     referenced_finding_ids: list[str] = Field(default_factory=list)
     referenced_hypothesis_ids: list[str] = Field(default_factory=list)
     decisions_made: dict = Field(default_factory=dict)
 
 
-# ---------------------------------------------------------------------------
-# Helper
-# ---------------------------------------------------------------------------
+def _runtime(request: Request) -> OpsRuntime:
+    return request.app.state.ops_runtime
 
 
-def _row_to_dict(row: sqlite3.Row) -> dict:
-    d = dict(row)
-    # Parse JSON fields back to objects for the response
-    for key in (
-        "evidence",
-        "source_finding_ids",
-        "domains_relevant",
-        "evidence_for",
-        "evidence_against",
-        "params",
-        "result_finding_ids",
-        "dependency_ids",
-        "referenced_finding_ids",
-        "referenced_hypothesis_ids",
-        "decisions_made",
-        "config",
-        "result",
-        "payload",
-    ):
-        if key in d and isinstance(d[key], str):
-            with contextlib.suppress(json.JSONDecodeError, TypeError):
-                d[key] = json.loads(d[key])
-    return d
+def _store(request: Request, *, agent_id: str = "server") -> OpsStore:
+    return OpsStore(_runtime(request).db_path, agent_id=agent_id)
 
 
-def _rows_to_list(cursor) -> list[dict]:
-    return [_row_to_dict(r) for r in cursor.fetchall()]
+_bearer = HTTPBearer(auto_error=False)
 
 
-# ---------------------------------------------------------------------------
-# FINDINGS endpoints
-# ---------------------------------------------------------------------------
+def _authorize(
+    request: Request,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+) -> None:
+    runtime = _runtime(request)
+    if runtime.api_token is not None:
+        valid = (
+            credentials is not None
+            and credentials.scheme.lower() == "bearer"
+            and secrets.compare_digest(credentials.credentials, runtime.api_token)
+        )
+        if not valid:
+            raise HTTPException(
+                status_code=401,
+                detail="Missing or invalid Sharur Ops bearer token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return
 
-
-@app.post("/findings", status_code=201)
-def create_finding(f: FindingIn):
-    fid = str(uuid.uuid4())
-    now = time.time()
-    with _db_lock:
-        _conn.execute(
-            """INSERT INTO findings (id, agent_id, ts, finding_type, domain, summary,
-               evidence, confidence, novelty, parent_finding_id, reasoning)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                fid,
-                f.agent_id,
-                now,
-                f.finding_type,
-                f.domain,
-                f.summary,
-                json.dumps(f.evidence),
-                f.confidence,
-                f.novelty,
-                f.parent_finding_id,
-                f.reasoning,
+    client_host = request.client.host if request.client is not None else None
+    if not runtime.allow_insecure_remote and not _is_loopback(client_host):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Unauthenticated Sharur Ops access is restricted to loopback; "
+                "set SHARUR_OPS_TOKEN for remote access"
             ),
         )
-        _conn.commit()
-    _bus.publish(
-        "finding", {"id": fid, "agent_id": f.agent_id, "novelty": f.novelty, "summary": f.summary}
+
+
+router = APIRouter(dependencies=[Depends(_authorize)])
+
+
+@router.post("/findings", status_code=201)
+def create_finding(finding: FindingIn, request: Request):
+    with _store(request, agent_id=finding.agent_id) as store:
+        finding_id = store.finding(
+            finding.finding_type,
+            finding.domain,
+            finding.summary,
+            evidence=finding.evidence,
+            confidence=finding.confidence,
+            novelty=finding.novelty,
+            parent_finding_id=finding.parent_finding_id,
+            reasoning=finding.reasoning,
+        )
+        created = store.get_finding(finding_id)
+    _runtime(request).event_bus.publish(
+        "finding",
+        {
+            "id": finding_id,
+            "agent_id": finding.agent_id,
+            "novelty": finding.novelty,
+            "summary": finding.summary,
+        },
     )
-    return {"id": fid, "ts": now}
+    return {"id": finding_id, "ts": created["ts"]}
 
 
-@app.get("/findings")
+@router.get("/findings")
 def list_findings(
+    request: Request,
     since: float = 0,
     min_novelty: int = 0,
     finding_type: str | None = None,
     domain: str | None = None,
     agent_id: str | None = None,
-    limit: int = Query(default=50, le=500),
+    limit: int = Query(default=50, ge=1, le=500),
 ):
-    clauses = ["ts > ?"]
-    params: list = [since]
-    if min_novelty > 0:
-        clauses.append("novelty >= ?")
-        params.append(min_novelty)
-    if finding_type:
-        clauses.append("finding_type = ?")
-        params.append(finding_type)
-    if domain:
-        clauses.append("domain = ?")
-        params.append(domain)
-    if agent_id:
-        clauses.append("agent_id = ?")
-        params.append(agent_id)
-    where = " AND ".join(clauses)
-    params.append(limit)
-    rows = _conn.execute(f"SELECT * FROM findings WHERE {where} ORDER BY ts DESC LIMIT ?", params)
-    return _rows_to_list(rows)
-
-
-@app.get("/findings/{finding_id}")
-def get_finding(finding_id: str):
-    row = _conn.execute("SELECT * FROM findings WHERE id = ?", (finding_id,)).fetchone()
-    if not row:
-        raise HTTPException(404, "Finding not found")
-    return _row_to_dict(row)
-
-
-@app.get("/findings/search/{text}")
-def search_findings(text: str, limit: int = Query(default=20, le=100)):
-    """Full-text search across summary, reasoning, and evidence."""
-    pattern = f"%{text}%"
-    rows = _conn.execute(
-        """SELECT * FROM findings
-           WHERE summary LIKE ? OR reasoning LIKE ? OR evidence LIKE ?
-           ORDER BY novelty DESC, ts DESC LIMIT ?""",
-        (pattern, pattern, pattern, limit),
-    )
-    return _rows_to_list(rows)
-
-
-# ---------------------------------------------------------------------------
-# HYPOTHESES endpoints
-# ---------------------------------------------------------------------------
-
-
-@app.post("/hypotheses", status_code=201)
-def create_hypothesis(h: HypothesisIn):
-    hid = str(uuid.uuid4())
-    now = time.time()
-    with _db_lock:
-        _conn.execute(
-            """INSERT INTO hypotheses (id, source_agent_id, source_finding_ids, ts,
-               hypothesis, status, domains_relevant)
-               VALUES (?, ?, ?, ?, ?, 'proposed', ?)""",
-            (
-                hid,
-                h.source_agent_id,
-                json.dumps(h.source_finding_ids),
-                now,
-                h.hypothesis,
-                json.dumps(h.domains_relevant),
-            ),
+    with _store(request) as store:
+        return store.recent_findings(
+            since=since,
+            min_novelty=min_novelty,
+            finding_type=finding_type,
+            domain=domain,
+            agent_id=agent_id,
+            limit=limit,
         )
-        _conn.commit()
-    _bus.publish("hypothesis", {"id": hid, "hypothesis": h.hypothesis})
-    return {"id": hid, "ts": now}
 
 
-@app.get("/hypotheses")
+@router.get("/findings/search/{text}")
+def search_findings(
+    text: str,
+    request: Request,
+    limit: int = Query(default=20, ge=1, le=100),
+):
+    with _store(request) as store:
+        return store.search_findings(text, limit=limit)
+
+
+@router.get("/findings/{finding_id}")
+def get_finding(finding_id: str, request: Request):
+    with _store(request) as store:
+        try:
+            return store.get_finding(finding_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/hypotheses", status_code=201)
+def create_hypothesis(hypothesis: HypothesisIn, request: Request):
+    with _store(request, agent_id=hypothesis.source_agent_id) as store:
+        hypothesis_id = store.hypothesis(
+            hypothesis.hypothesis,
+            source_finding_ids=hypothesis.source_finding_ids,
+            domains_relevant=hypothesis.domains_relevant,
+        )
+        created = store.get_hypothesis(hypothesis_id)
+    _runtime(request).event_bus.publish(
+        "hypothesis",
+        {"id": hypothesis_id, "hypothesis": hypothesis.hypothesis},
+    )
+    return {"id": hypothesis_id, "ts": created["ts"]}
+
+
+@router.get("/hypotheses")
 def list_hypotheses(
+    request: Request,
     status: str | None = None,
     unassigned: bool = False,
-    limit: int = Query(default=50, le=200),
+    limit: int = Query(default=50, ge=1, le=200),
 ):
-    clauses = []
-    params: list = []
-    if status:
-        clauses.append("status = ?")
-        params.append(status)
-    if unassigned:
-        clauses.append("assigned_agent_id IS NULL")
-    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-    params.append(limit)
-    rows = _conn.execute(f"SELECT * FROM hypotheses{where} ORDER BY ts DESC LIMIT ?", params)
-    return _rows_to_list(rows)
-
-
-@app.patch("/hypotheses/{hyp_id}")
-def update_hypothesis(hyp_id: str, u: HypothesisUpdate):
-    with _db_lock:
-        existing_row = _conn.execute(
-            "SELECT * FROM hypotheses WHERE id = ?",
-            (hyp_id,),
-        ).fetchone()
-        if existing_row is None:
-            raise HTTPException(404, "Hypothesis not found")
-        existing = _row_to_dict(existing_row)
-
-        sets = []
-        params: list = []
-        if u.status is not None:
-            sets.append("status = ?")
-            params.append(u.status)
-        if u.assigned_agent_id is not None:
-            sets.append("assigned_agent_id = ?")
-            params.append(u.assigned_agent_id)
-        if u.evidence_for is not None:
-            evidence_for = list(
-                dict.fromkeys([*(existing.get("evidence_for") or []), *u.evidence_for])
-            )
-            sets.append("evidence_for = ?")
-            params.append(json.dumps(evidence_for))
-        if u.evidence_against is not None:
-            evidence_against = list(
-                dict.fromkeys([*(existing.get("evidence_against") or []), *u.evidence_against])
-            )
-            sets.append("evidence_against = ?")
-            params.append(json.dumps(evidence_against))
-        if u.resolution_summary is not None:
-            sets.append("resolution_summary = ?")
-            params.append(u.resolution_summary)
-        if not sets:
-            raise HTTPException(400, "No hypothesis updates supplied")
-
-        params.append(hyp_id)
-        cur = _conn.execute(f"UPDATE hypotheses SET {', '.join(sets)} WHERE id = ?", params)
-        _conn.commit()
-    if cur.rowcount == 0:
-        raise HTTPException(404, "Hypothesis not found")
-    return {"updated": hyp_id}
-
-
-# ---------------------------------------------------------------------------
-# TASKS endpoints
-# ---------------------------------------------------------------------------
-
-
-@app.post("/tasks", status_code=201)
-def create_task(t: TaskIn):
-    store = OpsStore(DB_PATH, agent_id=t.created_by)
-    try:
-        tid = store.create_task(
-            t.task_type,
-            t.description,
-            params=t.params,
-            priority=t.priority,
-            domain_hint=t.domain_hint,
-            assigned_to=t.assigned_to,
-            run_id=t.run_id,
-            idempotency_key=t.idempotency_key,
-            depends_on=t.depends_on,
-            max_attempts=t.max_attempts,
-            lease_seconds=t.lease_seconds,
+    with _store(request) as store:
+        return store.list_hypotheses(
+            status=status,
+            unassigned=unassigned,
+            limit=limit,
         )
-        task = store._get_task(tid)
-    except ValueError as exc:
-        raise HTTPException(409, str(exc)) from exc
-    finally:
-        store.close()
-    _bus.publish("task", {"id": tid, "description": t.description, "priority": t.priority})
-    return {"id": tid, "ts": task["ts"], "task": task}
 
 
-@app.get("/tasks")
+@router.patch("/hypotheses/{hypothesis_id}")
+def update_hypothesis(
+    hypothesis_id: str,
+    update: HypothesisUpdate,
+    request: Request,
+):
+    values = update.model_dump(exclude_none=True)
+    if not values:
+        raise HTTPException(400, "No hypothesis updates supplied")
+    with _store(request) as store:
+        try:
+            return store.update_hypothesis(hypothesis_id, **values)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/tasks", status_code=201)
+def create_task(task: TaskIn, request: Request):
+    with _store(request, agent_id=task.created_by) as store:
+        try:
+            task_id = store.create_task(
+                task.task_type,
+                task.description,
+                params=task.params,
+                priority=task.priority,
+                domain_hint=task.domain_hint,
+                assigned_to=task.assigned_to,
+                run_id=task.run_id,
+                idempotency_key=task.idempotency_key,
+                depends_on=task.depends_on,
+                max_attempts=task.max_attempts,
+                lease_seconds=task.lease_seconds,
+            )
+            created = store.get_task(task_id)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+    _runtime(request).event_bus.publish(
+        "task",
+        {"id": task_id, "description": task.description, "priority": task.priority},
+    )
+    return {"id": task_id, "ts": created["ts"], "task": created}
+
+
+@router.get("/tasks")
 def list_tasks(
+    request: Request,
     status: str | None = None,
     assigned_to: str | None = None,
     unassigned: bool = False,
-    limit: int = Query(default=50, le=200),
+    limit: int = Query(default=50, ge=1, le=200),
 ):
-    if unassigned:
-        store = OpsStore(DB_PATH, agent_id="server")
-        try:
-            return store.available_tasks()[:limit]
-        finally:
-            store.close()
-
-    clauses = []
-    params: list = []
-    if status:
-        clauses.append("status = ?")
-        params.append(status)
-    if assigned_to:
-        clauses.append("assigned_to = ?")
-        params.append(assigned_to)
-    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-    params.append(limit)
-    rows = _conn.execute(
-        f"SELECT * FROM tasks{where} ORDER BY priority DESC, ts ASC LIMIT ?", params
-    )
-    return _rows_to_list(rows)
-
-
-@app.patch("/tasks/{task_id}")
-def update_task(task_id: str, u: TaskUpdate):
-    if not u.agent_id:
-        raise HTTPException(400, "agent_id is required for task updates")
-    store = OpsStore(DB_PATH, agent_id=u.agent_id)
-    try:
-        if u.status == "complete":
-            return store.complete_task(task_id, u.result_finding_ids)
-        if u.status == "failed":
-            return store.fail_task(
-                task_id,
-                error=u.error,
-                retryable=u.retryable,
-                retry_delay_seconds=u.retry_delay_seconds,
-            )
-        if u.status == "in_progress":
-            return store.heartbeat_task(
-                task_id,
-                lease_seconds=u.lease_seconds,
-                in_progress=True,
-            )
-        raise HTTPException(
-            400,
-            "Use the claim endpoint for ownership; only in_progress, complete, "
-            "and failed are valid worker updates.",
+    with _store(request) as store:
+        return store.list_tasks(
+            status=status,
+            assigned_to=assigned_to,
+            unassigned=unassigned,
+            limit=limit,
         )
-    except (KeyError, ValueError) as exc:
-        raise HTTPException(409, str(exc)) from exc
-    finally:
-        store.close()
 
 
-@app.post("/tasks/{task_id}/claim")
+@router.post("/tasks/recover")
+def recover_tasks(request: Request, now: float | None = None):
+    with _store(request, agent_id="coordinator") as store:
+        return store.recover_expired_tasks(now=now)
+
+
+@router.patch("/tasks/{task_id}")
+def update_task(task_id: str, update: TaskUpdate, request: Request):
+    if not update.agent_id:
+        raise HTTPException(400, "agent_id is required for task updates")
+    with _store(request, agent_id=update.agent_id) as store:
+        try:
+            if update.status == "complete":
+                return store.complete_task(task_id, update.result_finding_ids)
+            if update.status == "failed":
+                return store.fail_task(
+                    task_id,
+                    error=update.error,
+                    retryable=update.retryable,
+                    retry_delay_seconds=update.retry_delay_seconds,
+                )
+            if update.status == "in_progress":
+                return store.heartbeat_task(
+                    task_id,
+                    lease_seconds=update.lease_seconds,
+                    in_progress=True,
+                )
+            raise HTTPException(
+                400,
+                "Use the claim endpoint for ownership; only in_progress, complete, "
+                "and failed are valid worker updates.",
+            )
+        except (KeyError, ValueError) as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/tasks/{task_id}/claim")
 def claim_task(
     task_id: str,
+    request: Request,
     agent_id: str,
     lease_seconds: int | None = Query(default=None, ge=1),
 ):
-    """Atomically claim a ready task and start a finite worker lease."""
-    store = OpsStore(DB_PATH, agent_id=agent_id)
-    try:
-        return store.claim_task(task_id, lease_seconds=lease_seconds)
-    except ValueError as exc:
-        raise HTTPException(409, str(exc)) from exc
-    finally:
-        store.close()
+    with _store(request, agent_id=agent_id) as store:
+        try:
+            return store.claim_task(task_id, lease_seconds=lease_seconds)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
 
 
-@app.post("/tasks/{task_id}/heartbeat")
+@router.post("/tasks/{task_id}/heartbeat")
 def heartbeat_task(
     task_id: str,
+    request: Request,
     agent_id: str,
     lease_seconds: int | None = Query(default=None, ge=1),
 ):
-    """Extend an owned task lease and mark the task in progress."""
-    store = OpsStore(DB_PATH, agent_id=agent_id)
-    try:
-        return store.heartbeat_task(task_id, lease_seconds=lease_seconds)
-    except ValueError as exc:
-        raise HTTPException(409, str(exc)) from exc
-    finally:
-        store.close()
+    with _store(request, agent_id=agent_id) as store:
+        try:
+            return store.heartbeat_task(task_id, lease_seconds=lease_seconds)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
 
 
-@app.post("/tasks/recover")
-def recover_tasks(now: float | None = None):
-    """Recover expired worker leases; primarily for the coordinator."""
-    store = OpsStore(DB_PATH, agent_id="coordinator")
-    try:
-        return store.recover_expired_tasks(now=now)
-    finally:
-        store.close()
+@router.post("/runs", status_code=201)
+def create_run(run: RunIn, request: Request):
+    with _store(request, agent_id=run.created_by) as store:
+        try:
+            run_id = store.create_run(
+                run.run_type,
+                run.dataset_path,
+                config=run.config,
+                idempotency_key=run.idempotency_key,
+                parent_run_id=run.parent_run_id,
+            )
+            return store.get_run(run_id)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
 
 
-# ---------------------------------------------------------------------------
-# RUN LEDGER endpoints
-# ---------------------------------------------------------------------------
-
-
-@app.post("/runs", status_code=201)
-def create_run(run: RunIn):
-    ledger = RunLedger(DB_PATH)
-    try:
-        run_id = ledger.create_run(
-            run.run_type,
-            run.dataset_path,
-            created_by=run.created_by,
-            config=run.config,
-            idempotency_key=run.idempotency_key,
-            parent_run_id=run.parent_run_id,
-        )
-        return ledger.get_run(run_id)
-    except ValueError as exc:
-        raise HTTPException(409, str(exc)) from exc
-    finally:
-        ledger.close()
-
-
-@app.get("/runs")
+@router.get("/runs")
 def list_runs(
+    request: Request,
     dataset_path: str | None = None,
     run_type: str | None = None,
     status: str | None = None,
-    limit: int = Query(default=50, le=200),
+    limit: int = Query(default=50, ge=1, le=200),
 ):
-    ledger = RunLedger(DB_PATH)
-    try:
-        return ledger.list_runs(
+    with _store(request) as store:
+        return store.list_runs(
             dataset_path=dataset_path,
             run_type=run_type,
             status=status,
             limit=limit,
         )
-    finally:
-        ledger.close()
 
 
-@app.get("/runs/{run_id}")
-def get_run(run_id: str):
-    ledger = RunLedger(DB_PATH)
-    try:
-        return ledger.get_run(run_id)
-    except KeyError as exc:
-        raise HTTPException(404, str(exc)) from exc
-    finally:
-        ledger.close()
-
-
-@app.post("/runs/{run_id}/start")
-def start_run(run_id: str):
-    ledger = RunLedger(DB_PATH)
-    try:
-        return ledger.start_run(run_id)
-    except ValueError as exc:
-        raise HTTPException(409, str(exc)) from exc
-    finally:
-        ledger.close()
-
-
-@app.post("/runs/{run_id}/submit")
-def submit_run(run_id: str):
-    ledger = RunLedger(DB_PATH)
-    try:
-        return ledger.submit_run(run_id)
-    except ValueError as exc:
-        raise HTTPException(409, str(exc)) from exc
-    finally:
-        ledger.close()
-
-
-@app.post("/runs/{run_id}/heartbeat")
-def heartbeat_run(run_id: str):
-    ledger = RunLedger(DB_PATH)
-    try:
-        return ledger.heartbeat_run(run_id)
-    except ValueError as exc:
-        raise HTTPException(409, str(exc)) from exc
-    finally:
-        ledger.close()
-
-
-@app.patch("/runs/{run_id}")
-def update_run(run_id: str, update: RunUpdate):
-    ledger = RunLedger(DB_PATH)
-    try:
-        if update.status == "complete":
-            return ledger.complete_run(run_id, result=update.result)
-        if not update.error:
-            raise HTTPException(400, "error is required when failing a run")
-        return ledger.fail_run(run_id, update.error)
-    except ValueError as exc:
-        raise HTTPException(409, str(exc)) from exc
-    finally:
-        ledger.close()
-
-
-@app.get("/runs/{run_id}/events")
-def get_run_events(run_id: str):
-    ledger = RunLedger(DB_PATH)
-    try:
-        ledger.get_run(run_id)
-        return ledger.events(run_id)
-    except KeyError as exc:
-        raise HTTPException(404, str(exc)) from exc
-    finally:
-        ledger.close()
-
-
-@app.get("/runs/{run_id}/stages")
-def get_run_stages(run_id: str, stage_id: str | None = None):
-    ledger = RunLedger(DB_PATH)
-    try:
-        ledger.get_run(run_id)
-        return ledger.list_stages(run_id, stage_id=stage_id)
-    except KeyError as exc:
-        raise HTTPException(404, str(exc)) from exc
-    finally:
-        ledger.close()
-
-
-@app.post("/runs/recover")
+@router.post("/runs/recover")
 def recover_runs(
+    request: Request,
     stale_after_seconds: int = Query(default=300, ge=1),
     now: float | None = None,
 ):
-    ledger = RunLedger(DB_PATH)
-    try:
-        return ledger.recover_stale_runs(
+    with _store(request) as store:
+        return store.recover_stale_runs(
             stale_after_seconds=stale_after_seconds,
             now=now,
         )
-    finally:
-        ledger.close()
 
 
-# ---------------------------------------------------------------------------
-# COORDINATOR LOG endpoints
-# ---------------------------------------------------------------------------
+@router.get("/runs/{run_id}")
+def get_run(run_id: str, request: Request):
+    with _store(request) as store:
+        try:
+            return store.get_run(run_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
 
 
-@app.post("/coordinator/log", status_code=201)
-def create_log_entry(entry: CoordinatorLogIn):
-    eid = str(uuid.uuid4())
-    now = time.time()
-    with _db_lock:
-        _conn.execute(
-            """INSERT INTO coordinator_log (id, ts, action_type, reasoning,
-               referenced_finding_ids, referenced_hypothesis_ids, decisions_made)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (
-                eid,
-                now,
-                entry.action_type,
-                entry.reasoning,
-                json.dumps(entry.referenced_finding_ids),
-                json.dumps(entry.referenced_hypothesis_ids),
-                json.dumps(entry.decisions_made),
-            ),
+@router.post("/runs/{run_id}/start")
+def start_run(run_id: str, request: Request):
+    with _store(request) as store:
+        try:
+            return store.start_run(run_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/runs/{run_id}/submit")
+def submit_run(run_id: str, request: Request):
+    with _store(request) as store:
+        try:
+            return store.submit_run(run_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/runs/{run_id}/heartbeat")
+def heartbeat_run(run_id: str, request: Request):
+    with _store(request) as store:
+        try:
+            return store.heartbeat_run(run_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+
+@router.patch("/runs/{run_id}")
+def update_run(run_id: str, update: RunUpdate, request: Request):
+    with _store(request) as store:
+        try:
+            if update.status == "complete":
+                return store.complete_run(run_id, result=update.result)
+            if not update.error:
+                raise HTTPException(400, "error is required when failing a run")
+            return store.fail_run(run_id, update.error)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+
+@router.get("/runs/{run_id}/events")
+def get_run_events(run_id: str, request: Request):
+    with _store(request) as store:
+        try:
+            return store.run_events(run_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+
+@router.get("/runs/{run_id}/stages")
+def get_run_stages(
+    run_id: str,
+    request: Request,
+    stage_id: str | None = None,
+):
+    with _store(request) as store:
+        try:
+            store.get_run(run_id)
+            return store.list_run_stages(run_id, stage_id=stage_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/coordinator/log", status_code=201)
+def create_log_entry(entry: CoordinatorLogIn, request: Request):
+    with _store(request, agent_id="coordinator") as store:
+        entry_id = store.log(
+            entry.action_type,
+            entry.reasoning,
+            referenced_finding_ids=entry.referenced_finding_ids,
+            referenced_hypothesis_ids=entry.referenced_hypothesis_ids,
+            decisions_made=entry.decisions_made,
         )
-        _conn.commit()
-    return {"id": eid, "ts": now}
+        created = store.get_log_entry(entry_id)
+    return {"id": entry_id, "ts": created["ts"]}
 
 
-@app.get("/coordinator/log")
-def get_log(limit: int = Query(default=20, le=100), since: float = 0):
-    rows = _conn.execute(
-        "SELECT * FROM coordinator_log WHERE ts > ? ORDER BY ts DESC LIMIT ?",
-        (since, limit),
-    )
-    return _rows_to_list(rows)
+@router.get("/coordinator/log")
+def get_log(
+    request: Request,
+    limit: int = Query(default=20, ge=1, le=100),
+    since: float = 0,
+):
+    with _store(request) as store:
+        return store.recent_log(limit=limit, since=since)
 
 
-# ---------------------------------------------------------------------------
-# SSE stream — orchestrator subscribes to real-time events
-# ---------------------------------------------------------------------------
-
-
-@app.get("/stream")
-async def event_stream():
-    """SSE endpoint. Orchestrator connects here to get push notifications
-    for new findings, hypotheses, and tasks."""
-    q = _bus.subscribe()
+@router.get("/stream")
+async def event_stream(request: Request):
+    """Stream bounded in-process notifications for new coordination records."""
+    bus = _runtime(request).event_bus
+    subscriber = bus.subscribe()
 
     async def generate():
         try:
             while True:
                 try:
-                    data = await asyncio.wait_for(q.get(), timeout=30)
+                    data = await asyncio.wait_for(subscriber.queue.get(), timeout=30)
                     yield f"data: {data}\n\n"
                 except asyncio.TimeoutError:
-                    yield ": keepalive\n\n"  # Prevents connection timeout
+                    yield ": keepalive\n\n"
         except asyncio.CancelledError:
-            pass
+            return
         finally:
-            _bus.unsubscribe(q)
+            bus.unsubscribe(subscriber)
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 
-# ---------------------------------------------------------------------------
-# Stats / health
-# ---------------------------------------------------------------------------
+@router.get("/stats")
+def stats(request: Request):
+    with _store(request) as store:
+        return store.stats()
 
 
-@app.get("/stats")
-def stats():
-    """Quick overview for the orchestrator or for you."""
-    counts = {}
-    for table in (
-        "findings",
-        "hypotheses",
-        "tasks",
-        "coordinator_log",
-        "runs",
-        "run_events",
-        "run_stages",
-    ):
-        row = _conn.execute(f"SELECT COUNT(*) as n FROM {table}").fetchone()
-        counts[table] = row["n"]
-
-    # Breakdown
-    novelty_dist = _conn.execute(
-        "SELECT novelty, COUNT(*) as n FROM findings GROUP BY novelty ORDER BY novelty"
-    ).fetchall()
-    task_status = _conn.execute(
-        "SELECT status, COUNT(*) as n FROM tasks GROUP BY status"
-    ).fetchall()
-    hyp_status = _conn.execute(
-        "SELECT status, COUNT(*) as n FROM hypotheses GROUP BY status"
-    ).fetchall()
-    run_status = _conn.execute("SELECT status, COUNT(*) as n FROM runs GROUP BY status").fetchall()
-    stage_status = _conn.execute(
-        "SELECT status, COUNT(*) as n FROM run_stages GROUP BY status"
-    ).fetchall()
-
+@router.get("/health")
+def health(request: Request):
+    runtime = _runtime(request)
+    with _store(request):
+        pass
     return {
-        "counts": counts,
-        "findings_by_novelty": {r["novelty"]: r["n"] for r in novelty_dist},
-        "tasks_by_status": {r["status"]: r["n"] for r in task_status},
-        "hypotheses_by_status": {r["status"]: r["n"] for r in hyp_status},
-        "runs_by_status": {r["status"]: r["n"] for r in run_status},
-        "stages_by_status": {r["status"]: r["n"] for r in stage_status},
+        "status": "ok",
+        "db": str(runtime.db_path),
+        "auth_required": runtime.api_token is not None,
+        "ts": time.time(),
     }
 
 
-@app.get("/health")
-def health():
-    return {"status": "ok", "db": str(DB_PATH), "ts": time.time()}
+def create_app(
+    *,
+    db_path: str | Path | None = None,
+    api_token: str | None = None,
+    allow_insecure_remote: bool | None = None,
+    sse_queue_size: int = DEFAULT_SSE_QUEUE_SIZE,
+) -> FastAPI:
+    """Build an isolated app without opening SQLite until application startup."""
+    configured_path = (
+        Path(db_path)
+        if db_path is not None
+        else Path(os.environ.get("SHARUR_OPS_DB_PATH", "sharur_ops.db"))
+    )
+    configured_token = api_token if api_token is not None else os.environ.get("SHARUR_OPS_TOKEN")
+    normalized_token = configured_token.strip() if configured_token else None
+    insecure_remote = (
+        _env_flag("SHARUR_OPS_ALLOW_INSECURE_REMOTE")
+        if allow_insecure_remote is None
+        else allow_insecure_remote
+    )
+    runtime = OpsRuntime(
+        db_path=configured_path.expanduser().resolve(),
+        api_token=normalized_token,
+        allow_insecure_remote=insecure_remote,
+        event_bus=EventBus(queue_size=sse_queue_size),
+    )
+
+    @asynccontextmanager
+    async def lifespan(application: FastAPI):
+        application.state.ops_runtime = runtime
+        with OpsStore(runtime.db_path, agent_id="server-bootstrap"):
+            pass
+        yield
+
+    application = FastAPI(
+        title="Sharur Ops",
+        version=__version__,
+        lifespan=lifespan,
+    )
+    application.state.ops_runtime = runtime
+    application.include_router(router)
+    return application
 
 
-# ---------------------------------------------------------------------------
-# Run directly
-# ---------------------------------------------------------------------------
+app = create_app()
 
-_init_db()
+
+def main() -> None:
+    """Run the single-worker coordination server with safe network defaults."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--host",
+        default=os.environ.get("SHARUR_OPS_HOST", DEFAULT_HOST),
+        help="Bind host (default: 127.0.0.1)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int(os.environ.get("SHARUR_OPS_PORT", DEFAULT_PORT)),
+    )
+    parser.add_argument(
+        "--db",
+        type=Path,
+        default=Path(os.environ.get("SHARUR_OPS_DB_PATH", "sharur_ops.db")),
+    )
+    parser.add_argument(
+        "--allow-insecure-remote",
+        action="store_true",
+        default=_env_flag("SHARUR_OPS_ALLOW_INSECURE_REMOTE"),
+        help="Allow remote clients without SHARUR_OPS_TOKEN (unsafe)",
+    )
+    args = parser.parse_args()
+    token = os.environ.get("SHARUR_OPS_TOKEN")
+    if not _is_loopback(args.host) and not token and not args.allow_insecure_remote:
+        parser.error(
+            "remote binding requires SHARUR_OPS_TOKEN; "
+            "use --allow-insecure-remote only on a trusted network"
+        )
+
+    import uvicorn  # noqa: PLC0415 - optional HTTP dependency
+
+    server_app = create_app(
+        db_path=args.db,
+        api_token=token,
+        allow_insecure_remote=args.allow_insecure_remote,
+    )
+    uvicorn.run(server_app, host=args.host, port=args.port, workers=1)
+
+
+__all__ = ["EventBus", "OpsRuntime", "app", "create_app", "main"]
+
 
 if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run(app, host="0.0.0.0", port=8811)
+    main()

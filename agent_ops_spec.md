@@ -39,23 +39,26 @@ records remain the dataset findings and hypothesis files.
 
 ## Dependencies
 
-```
-pip install -e .
+```bash
+pip install -e ".[ops]"
 ```
 
-No other dependencies. Python 3.10+.
+Python 3.10+.
 
 ## Running
 
 ```bash
-# Start the server (creates sharur_ops.db on first run)
-uvicorn sharur.ops.server:app --host 0.0.0.0 --port 8811
+# Loopback-only by default (creates sharur_ops.db on application startup)
+sharur-ops
 
-# Or directly
+# Equivalent module entrypoint
 python -m sharur.ops.server
 ```
 
-Works identically on laptop (localhost:8811) and cluster (node:8811). Agents just change the base URL.
+The guarded launcher defaults to `127.0.0.1:8811`. Remote binding fails closed unless
+`SHARUR_OPS_TOKEN` is set; clients send that value as a bearer token. Automatic client
+retries apply only to idempotent reads, while every request has bounded connect/read
+timeouts.
 
 The server defaults to `sharur_ops.db` in the process working directory. Pin it to the
 dataset-local ledger created by `sharur-ingest` so coordination tasks and execution history
@@ -63,14 +66,21 @@ share one operational record:
 
 ```bash
 export SHARUR_OPS_DB_PATH=/absolute/path/data/DATASET/sharur_ops.db
-uvicorn sharur.ops.server:app --host 0.0.0.0 --port 8811
+export SHARUR_OPS_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+sharur-ops --host 0.0.0.0
 ```
+
+Give the same token to clients with `api_token=...`. `--allow-insecure-remote` exists only
+for explicitly trusted networks and should not be the default. SSE notifications are
+bounded and in-process, so run one HTTP worker; SQLite remains the durable source of truth.
 
 ## Database
 
-SQLite runs in WAL mode with a busy timeout. The HTTP server serializes writes through
-an in-process lock; direct `OpsStore` instances use SQLite transactions plus a per-instance
-lock. Task claim and completion paths use conditional ownership and live-lease checks.
+SQLite runs in WAL mode with a busy timeout. Application startup initializes/migrates the
+schema, then each request uses a short-lived `OpsStore`/ledger connection rather than a
+module-global cross-thread connection. Direct `OpsStore` instances use SQLite transactions
+plus a per-instance lock. Task claim and completion paths use conditional ownership and
+live-lease checks.
 Expired work is recovered transactionally, and run/stage heartbeats make abandoned ingest
 attempts visible on the next run.
 
