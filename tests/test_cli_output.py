@@ -35,7 +35,7 @@ def test_overview_json_output_is_structured(tmp_path):
     payload = json.loads(result.output)
     assert payload["status"] == "ok"
     assert payload["raw"]["genome_count"] == 1
-    assert payload["trace"]["schema_version"] == "4"
+    assert payload["trace"]["schema_version"] == "5"
 
 
 def test_genomes_jsonl_output_emits_one_record_per_row(tmp_path):

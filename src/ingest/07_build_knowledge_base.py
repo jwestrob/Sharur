@@ -26,6 +26,7 @@ import pandas as pd
 import typer
 from rich.console import Console
 
+from sharur.storage.migrations import run_migrations
 from sharur.storage.schema import SCHEMA
 
 console = Console()
@@ -307,6 +308,7 @@ class KnowledgeBaseBuilder:
 
         self.conn = duckdb.connect(str(self.db_path))
         self.conn.execute(SCHEMA)
+        run_migrations(self.conn)
         console.print(f"[blue]Created DuckDB at {self.db_path}[/blue]")
 
     # --- bins ----------------------------------------------------------- #
@@ -1056,9 +1058,9 @@ class KnowledgeBaseBuilder:
         self._release_db()
         try:
             from sharur.colocation import (
-                validate_systems,
                 integrate_defense_results,
                 integrate_secretion_results,
+                validate_systems,
             )
 
             systems_df, genes_df = validate_systems(
@@ -1067,12 +1069,14 @@ class KnowledgeBaseBuilder:
                 verbose=True,
             )
 
-            if not systems_df.empty or not genes_df.empty:
-                if source == "defensefinder":
-                    integrate_defense_results(self.db_path, systems_df, genes_df)
-                elif source == "txsscan":
-                    integrate_secretion_results(self.db_path, systems_df, genes_df)
+            # Integration is replacement-based and must also run for an empty
+            # result so stale structured calls are removed.
+            if source == "defensefinder":
+                integrate_defense_results(self.db_path, systems_df, genes_df)
+            elif source == "txsscan":
+                integrate_secretion_results(self.db_path, systems_df, genes_df)
 
+            if not systems_df.empty or not genes_df.empty:
                 n_systems = len(systems_df)
                 n_genes = len(genes_df)
                 console.print(f"  Validated {n_systems} {system_type} systems ({n_genes} genes)")

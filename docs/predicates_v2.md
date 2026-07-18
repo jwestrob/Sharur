@@ -558,9 +558,16 @@ To promote or demote a specific accession:
 
 ## DuckDB Tables
 
-Current V2 tables are part of schema version 4. The core V2 tables can also be
+Current V2 tables are part of schema version 5. The core V2 tables can also be
 created explicitly via
 `create_v2_tables(store)`:
+
+Schema version 5 adds contig provenance to validated system calls. Because the
+pre-v5 caller did not enforce replicon-local MacSyFinder semantics, migration
+quarantines those legacy named calls and removes semantic state/search-cache
+rows for their former members. Raw DefenseFinder/TXSScan observations remain.
+Rerun the current caller and refresh V2 for the affected proteins before using
+named system evidence from a migrated legacy dataset.
 
 ### `semantic_atoms`
 

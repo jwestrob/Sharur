@@ -35,17 +35,21 @@ The stage 04 script handles all of this automatically.
 - For single files: `mkdir source/ && cp proteins.faa source/`
 
 ### Secretion System Identification (TXSScan)
-**Validation:** Use the co-location engine (see section above), NOT `scripts/validate_secretion_systems.py`.
+**Validation:** Use the authoritative co-location engine below. Do not reconstruct systems
+from raw profile rows.
 **Requires:** TXSScan HMMs via Astra (`-d TXSScan` in stage 04), TXSScan models in `~/.macsyfinder/models/`
-**Output:** `secretion_systems` table + `txsscan_system` annotations in DuckDB.
-**Systems detected:** T1SS–T9SS, T4P, Tad, Flagellum, MSH, ComM (280 HMM profiles).
+**Output:** replicon-provenanced `secretion_systems`, normalized `system_proteins`, and
+`txsscan_system` annotations in DuckDB. Inspect the live caller table for the exact systems
+emitted by the currently installed model definitions.
 
 ## Defense System Validation (Co-location Engine)
 
 **Module:** `sharur/colocation.py`
-**Purpose:** Validates raw HMM hits (DefenseFinder/TXSScan) into genuine multi-gene systems using MacSyFinder's XML model definitions, but runs in-process with DuckDB — **~1-2 seconds** vs 20-30 minutes for the MacSyFinder subprocess.
+**Purpose:** Calls systems from raw DefenseFinder/TXSScan profile hits using the installed
+MacSyFinder XML definitions and ordered-replicon semantics, in process against DuckDB.
 
-**ALWAYS use this instead of `scripts/validate_defense_systems.py`** (which calls MacSyFinder single-threaded). The old script was written for the susan_genomes dataset before this engine existed.
+`scripts/validate_defense_systems.py` remains only as a compatibility CLI and delegates to
+this module; it no longer runs an independent concatenated-FASTA workflow.
 
 ### Usage
 
@@ -56,33 +60,53 @@ logging.basicConfig(level=logging.INFO, format='%(message)s')
 from sharur.colocation import validate_systems, integrate_defense_results, integrate_secretion_results
 
 db_path = "data/DATASET/sharur.duckdb"
+affected = set()
 
 # DefenseFinder
 systems_df, genes_df = validate_systems(db_path, source="defensefinder")
-integrate_defense_results(db_path, systems_df, genes_df)
+affected |= integrate_defense_results(db_path, systems_df, genes_df)
 
 # TXSScan (if loaded)
 systems_df, genes_df = validate_systems(db_path, source="txsscan")
-integrate_secretion_results(db_path, systems_df, genes_df)
+affected |= integrate_secretion_results(db_path, systems_df, genes_df)
+
+# Integration deliberately invalidates derived semantics for old/new members.
+from sharur.operators import Sharur
+b = Sharur(db_path)
+b.generate_v2(
+    protein_ids=sorted(affected),
+    update_legacy_predicates=True,
+    predict_topology=False,
+)
 ```
 
 ### What it does
-1. Parses 556 DefenseFinder XML model definitions from `~/.macsyfinder/models/`
-2. Loads all HMM hits from DuckDB `annotations` table (single indexed query)
-3. Clusters hits on contigs within each model's `inter_gene_max_space`
-4. Validates clusters against quorum rules (mandatory/accessory/forbidden genes)
-5. Resolves conflicts (greedy score-ranked non-overlapping selection)
-6. Writes validated systems to `defense_systems` table + `defensefinder_system` annotations
+1. Parses the currently installed model definitions and profile-name metadata.
+2. Quarantines ambiguous internal HMM names that cannot be mapped to one model component.
+3. Selects one deterministic global best profile per `(bin, contig, gene_index)`.
+4. Clusters and evaluates each composite `(bin_id, contig_id)` replicon independently using
+   model- and gene-specific gaps, quorum, forbidden, multi-locus, loner, and multi-system
+   rules.
+5. Uses an exact deterministic conflict solver with MacSyFinder-compatible scoring and
+   sharing rules.
+6. Transactionally replaces the structured table, normalized membership, and validated
+   annotation surface, including when the new result is empty.
 
-### Key numbers (omni_production benchmark)
-- 312,144 HMM hits → 18,430 systems (42,954 genes) in 1.3 seconds
-- 110,210 raw proteins → 22,158 system-validated proteins (79.9% FP reduction)
-- Typical FP rates: 80-85% of raw HMM hits are not part of genuine multi-gene systems
+### Caller validation
+
+On the full DPANN translated TXSScan hit set, MacSyFinder 2.1.4 / TXSScan 1.1.3 produced
+904 candidates and selected 687 systems across all 19 installed models. Sharur selected
+exactly the same 687 instances (zero disagreements), with identical output under three
+Python hash seeds.
 
 ### Requirements
 - MacSyFinder model XMLs at `~/.macsyfinder/models/defense-finder-models/` (installed by defense-finder)
 - Raw HMM hits loaded in DuckDB `annotations` table with `source='defensefinder'`
 - Astra `--write_macsyfinder` is NOT needed (engine reads from DuckDB, not hmmsearch files)
+
+Schema-v5 migration quarantines pre-v5 named DefenseFinder/TXSScan calls and invalidates
+their affected semantic cache rows. Rerun Stage 07 (or the caller plus a V2 subset refresh)
+before treating a migrated legacy database's system surface as available.
 
 ## Hydrogenase Classification
 **Script:** `scripts/classify_hydrogenases.py`

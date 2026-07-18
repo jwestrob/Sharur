@@ -409,8 +409,8 @@ python src/ingest/07_build_knowledge_base.py -d data/DATASET -o data/DATASET/sha
 6. Computes length z-scores per bin
 7. Runs HydDB subgroup classification (if HydDB annotations exist)
 8. Optionally runs dbCAN three-tool consensus CAZyme classification when `--enable-cazymes` is set
-9. Validates DefenseFinder hits via co-location rules → `defense_systems` table + `defensefinder_system` annotations
-10. Validates TXSScan hits via co-location rules → `secretion_systems` table + `txsscan_system` annotations
+9. Calls DefenseFinder systems with replicon-local model semantics → `defense_systems`, normalized membership, and `defensefinder_system` annotations
+10. Calls TXSScan systems with replicon-local model semantics → `secretion_systems`, normalized membership, and `txsscan_system` annotations
 11. Generates V2 semantic atoms/states for all proteins
 12. Materializes `protein_predicates` from V2 for legacy query compatibility
 13. Emits CRISPR-overlap quality flags in V2 and the compatibility table
@@ -498,8 +498,8 @@ After a successful pipeline run, `sharur.duckdb` contains:
 | `semantic_atoms` | `protein_id`, `atom_id`, `facet`, `relation`, `source_db`, `source_accession` | V2 evidence-backed semantic claims |
 | `semantic_state` | `protein_id`, `activities`, `roles`, `architecture`, `localization`, `quality_flags`, `composite_predicates` | V2 resolved per-protein state |
 | `protein_predicates` | `protein_id`, `predicates` (list) | V2-derived legacy compatibility predicate tags |
-| `defense_systems` | `system_id`, `genome_id`, `system_type`, `protein_ids` | MacSyFinder-validated defense systems (if DefenseFinder ran) |
-| `secretion_systems` | `system_id`, `genome_id`, `system_type`, `protein_ids` | MacSyFinder-validated secretion systems (if TXSScan ran) |
+| `defense_systems` | `system_id`, `genome_id`, `contig_id`, `system_type`, `protein_ids` | Replicon-local defense-system caller output (if DefenseFinder ran) |
+| `secretion_systems` | `system_id`, `genome_id`, `contig_id`, `system_type`, `protein_ids` | Replicon-local secretion-system caller output (if TXSScan ran) |
 | `feature_store` | `protein_id`, `metric_name`, `metric_value` | Computed metrics (length z-score) |
 
 **Query conventions (for downstream agents):**

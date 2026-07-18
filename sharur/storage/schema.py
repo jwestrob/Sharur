@@ -1,6 +1,6 @@
 """DuckDB schema for Sharur."""
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS bins (
@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS contigs (
     gc_content FLOAT,
     is_circular BOOLEAN DEFAULT FALSE,
     taxonomy VARCHAR,
-    
+
     FOREIGN KEY (bin_id) REFERENCES bins(bin_id)
 );
 
@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS proteins (
     sequence TEXT,
     sequence_length INTEGER,
     gc_content FLOAT,
-    
+
     -- Indexes
     FOREIGN KEY (contig_id) REFERENCES contigs(contig_id)
 );
@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS annotations (
     score FLOAT,
     start_aa INTEGER,
     end_aa INTEGER,
-    
+
     FOREIGN KEY (protein_id) REFERENCES proteins(protein_id)
 );
 CREATE INDEX IF NOT EXISTS idx_annotations_protein ON annotations(protein_id);
@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS loci (
     end_coord INTEGER NOT NULL,
     confidence FLOAT,
     metadata JSON,
-    
+
     FOREIGN KEY (contig_id) REFERENCES contigs(contig_id)
 );
 
@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS locus_proteins (
     locus_id VARCHAR NOT NULL,
     protein_id VARCHAR NOT NULL,
     position INTEGER NOT NULL,  -- Order within locus
-    
+
     PRIMARY KEY (locus_id, protein_id),
     FOREIGN KEY (locus_id) REFERENCES loci(locus_id),
     FOREIGN KEY (protein_id) REFERENCES proteins(protein_id)
@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS feature_store (
     metric_value FLOAT NOT NULL,
     computed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     version VARCHAR DEFAULT '1.0',
-    
+
     PRIMARY KEY (protein_id, metric_name)
 );
 CREATE INDEX IF NOT EXISTS idx_features_metric ON feature_store(metric_name);
@@ -189,6 +189,7 @@ CREATE INDEX IF NOT EXISTS idx_semantic_terms_kind ON semantic_terms(term_kind);
 CREATE TABLE IF NOT EXISTS defense_systems (
     system_id VARCHAR PRIMARY KEY,
     genome_id VARCHAR,
+    contig_id VARCHAR,
     system_type VARCHAR,
     system_subtype VARCHAR,
     activity VARCHAR,
@@ -202,12 +203,15 @@ CREATE TABLE IF NOT EXISTS defense_systems (
     FOREIGN KEY (genome_id) REFERENCES bins(bin_id)
 );
 CREATE INDEX IF NOT EXISTS idx_defense_systems_genome ON defense_systems(genome_id);
+CREATE INDEX IF NOT EXISTS idx_defense_systems_replicon
+    ON defense_systems(genome_id, contig_id);
 CREATE INDEX IF NOT EXISTS idx_defense_systems_type ON defense_systems(system_type);
 
 -- Secretion system validation (MacSyFinder/TXSScan co-localization)
 CREATE TABLE IF NOT EXISTS secretion_systems (
     system_id VARCHAR PRIMARY KEY,
     genome_id VARCHAR,
+    contig_id VARCHAR,
     system_type VARCHAR,
     system_subtype VARCHAR,
     genes_count INTEGER,
@@ -220,6 +224,8 @@ CREATE TABLE IF NOT EXISTS secretion_systems (
     FOREIGN KEY (genome_id) REFERENCES bins(bin_id)
 );
 CREATE INDEX IF NOT EXISTS idx_secretion_systems_genome ON secretion_systems(genome_id);
+CREATE INDEX IF NOT EXISTS idx_secretion_systems_replicon
+    ON secretion_systems(genome_id, contig_id);
 CREATE INDEX IF NOT EXISTS idx_secretion_systems_type ON secretion_systems(system_type);
 
 -- Normalized validated-system membership. The summary tables above retain

@@ -126,7 +126,149 @@ MIGRATIONS: list[tuple[int, str, str]] = [
             VALUES (4, 'Validated system membership join table');
         """,
     ),
+    (
+        5,
+        "Replicon provenance for validated systems",
+        """
+        ALTER TABLE IF EXISTS defense_systems
+            ADD COLUMN IF NOT EXISTS contig_id VARCHAR;
+        ALTER TABLE IF EXISTS secretion_systems
+            ADD COLUMN IF NOT EXISTS contig_id VARCHAR;
+
+        INSERT INTO schema_version (version, description)
+            VALUES (5, 'Replicon provenance for validated systems');
+        """,
+    ),
 ]
+
+
+def _column_names(conn: duckdb.DuckDBPyConnection, table_name: str) -> set[str]:
+    """Return columns for an existing table."""
+    return {
+        str(row[1])
+        for row in conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()
+    }
+
+
+def _quarantine_pre_v5_system_calls(conn: duckdb.DuckDBPyConnection) -> None:
+    """Remove caller output that predates replicon-local validation.
+
+    The old caller cannot be repaired by deriving a contig from its serialized
+    members: global profile competition and quorum evaluation must be rerun.
+    Preserve raw HMM observations, but remove named calls and invalidate V2
+    rows for proteins that inherited those calls. This makes a migrated
+    database fail closed until Stage 07 reruns the current caller and refreshes
+    the affected semantic subset.
+    """
+    tables = {str(row[0]) for row in conn.execute("SHOW TABLES").fetchall()}
+    sources = ("defensefinder_system", "txsscan_system")
+
+    conn.execute("""
+        CREATE TEMP TABLE sharur_stale_system_members (
+            protein_id VARCHAR
+        )
+    """)
+
+    if "system_proteins" in tables:
+        columns = _column_names(conn, "system_proteins")
+        if {"protein_id", "system_source"} <= columns:
+            conn.execute(
+                """
+                INSERT INTO sharur_stale_system_members
+                SELECT DISTINCT protein_id
+                FROM system_proteins
+                WHERE system_source IN (?, ?)
+                """,
+                list(sources),
+            )
+
+    if "annotations" in tables:
+        columns = _column_names(conn, "annotations")
+        if {"protein_id", "source"} <= columns:
+            conn.execute(
+                """
+                INSERT INTO sharur_stale_system_members
+                SELECT DISTINCT protein_id
+                FROM annotations
+                WHERE source IN (?, ?)
+                """,
+                list(sources),
+            )
+
+    if "semantic_atoms" in tables:
+        columns = _column_names(conn, "semantic_atoms")
+        if {"protein_id", "source_db"} <= columns:
+            conn.execute(
+                """
+                INSERT INTO sharur_stale_system_members
+                SELECT DISTINCT protein_id
+                FROM semantic_atoms
+                WHERE source_db IN (?, ?)
+                """,
+                list(sources),
+            )
+
+    if "semantic_terms" in tables:
+        columns = _column_names(conn, "semantic_terms")
+        if {"protein_id", "source_db"} <= columns:
+            conn.execute(
+                """
+                INSERT INTO sharur_stale_system_members
+                SELECT DISTINCT protein_id
+                FROM semantic_terms
+                WHERE source_db IN (?, ?)
+                """,
+                list(sources),
+            )
+
+    if "semantic_atoms" in tables:
+        conn.execute(
+            "DELETE FROM semantic_atoms WHERE source_db IN (?, ?)",
+            list(sources),
+        )
+    if "semantic_state" in tables:
+        conn.execute(
+            """
+            DELETE FROM semantic_state
+            WHERE protein_id IN (
+                SELECT protein_id FROM sharur_stale_system_members
+            )
+            """
+        )
+    if "semantic_terms" in tables:
+        conn.execute(
+            """
+            DELETE FROM semantic_terms
+            WHERE protein_id IN (
+                SELECT protein_id FROM sharur_stale_system_members
+            )
+            """
+        )
+    if "protein_predicates" in tables:
+        conn.execute(
+            """
+            DELETE FROM protein_predicates
+            WHERE protein_id IN (
+                SELECT protein_id FROM sharur_stale_system_members
+            )
+            """
+        )
+    if "annotations" in tables:
+        conn.execute(
+            "DELETE FROM annotations WHERE source IN (?, ?)",
+            list(sources),
+        )
+    if "system_proteins" in tables:
+        conn.execute(
+            "DELETE FROM system_proteins WHERE system_source IN (?, ?)",
+            list(sources),
+        )
+    if "defense_systems" in tables:
+        conn.execute("DELETE FROM defense_systems")
+    if "secretion_systems" in tables:
+        conn.execute("DELETE FROM secretion_systems")
+
+    conn.execute("DROP TABLE sharur_stale_system_members")
 
 
 def get_current_version(conn: duckdb.DuckDBPyConnection) -> int:
@@ -159,7 +301,17 @@ def run_migrations(
         if version > target_version:
             break
 
-        conn.execute(sql)
+        if version == 5:
+            conn.execute("BEGIN TRANSACTION")
+            try:
+                _quarantine_pre_v5_system_calls(conn)
+                conn.execute(sql)
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+        else:
+            conn.execute(sql)
         applied += 1
 
     return applied

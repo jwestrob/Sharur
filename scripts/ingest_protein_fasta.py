@@ -12,9 +12,8 @@ Example header:
 from __future__ import annotations
 
 import gzip
-import re
 from pathlib import Path
-from typing import Iterator, Tuple
+from typing import Iterator
 
 import duckdb
 import typer
@@ -116,6 +115,7 @@ def ingest_proteins(
 
     Returns stats dict.
     """
+    from sharur.storage.migrations import run_migrations
     from sharur.storage.schema import SCHEMA
 
     if db_path.exists() and not force:
@@ -128,6 +128,7 @@ def ingest_proteins(
 
     conn = duckdb.connect(str(db_path))
     conn.execute(SCHEMA)
+    run_migrations(conn)
 
     # Collect all proteins first
     proteins = list(parse_protein_fasta(fasta_path))
