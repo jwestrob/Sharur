@@ -37,7 +37,7 @@ def export_fasta(
         "include_annotations": include_annotations,
     }
 
-    with OperatorContext("export_fasta", params) as ctx:
+    with OperatorContext("export_fasta", params, store=store) as ctx:
         if not protein_ids:
             return ctx.make_result(
                 data="No protein IDs provided",
@@ -125,7 +125,7 @@ def export_neighborhood_fasta(
         "output_path": output_path,
     }
 
-    with OperatorContext("export_neighborhood_fasta", params) as ctx:
+    with OperatorContext("export_neighborhood_fasta", params, store=store) as ctx:
         # Get anchor protein info
         anchor = store.execute(
             "SELECT contig_id, gene_index FROM proteins WHERE protein_id = ?",
@@ -206,7 +206,11 @@ def get_sequence(
     Returns:
         SharurResult with sequence
     """
-    with OperatorContext("get_sequence", {"protein_id": protein_id}) as ctx:
+    with OperatorContext(
+        "get_sequence",
+        {"protein_id": protein_id},
+        store=store,
+    ) as ctx:
         rows = store.execute(
             "SELECT sequence, sequence_length FROM proteins WHERE protein_id = ?",
             [protein_id],

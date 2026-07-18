@@ -98,6 +98,46 @@ class TestSearchByPredicates:
         """)[0][0]
         assert stale == 0
 
+    def test_read_only_search_does_not_repair_complete_stale_cache(self, store):
+        """A read query must not mutate a complete compatibility snapshot."""
+        generate_and_persist_v2(
+            store,
+            chunk_size=5,
+            update_legacy_predicates=True,
+            return_states=False,
+        )
+        store.execute("""
+            UPDATE protein_predicates
+            SET updated_at = updated_at - INTERVAL 1 HOUR
+            WHERE protein_id = 'prot_001'
+        """)
+        store.read_only = True
+
+        result = search_by_predicates(store, has=["giant"])
+
+        assert result.meta.total_rows == 2
+        stale = store.execute("""
+            SELECT COUNT(*)
+            FROM semantic_state ss
+            JOIN protein_predicates pp ON pp.protein_id = ss.protein_id
+            WHERE pp.updated_at < ss.updated_at
+        """)[0][0]
+        assert stale == 1
+
+    def test_read_only_partial_cache_fails_without_attempting_repair(self, store):
+        """An incomplete read-only snapshot gets an actionable failure."""
+        generate_and_persist_v2(
+            store,
+            chunk_size=5,
+            update_legacy_predicates=True,
+            return_states=False,
+        )
+        store.execute("DELETE FROM protein_predicates WHERE protein_id = 'prot_001'")
+        store.read_only = True
+
+        with pytest.raises(RuntimeError, match="cannot be repaired in a read-only session"):
+            search_by_predicates(store, has=["giant"])
+
     def test_partial_legacy_cache_without_complete_v2_state_fails(self, store):
         """Partial precomputed predicates should not silently truncate search."""
         store.execute("""

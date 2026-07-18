@@ -1,12 +1,13 @@
 """Integration test for ingest pipeline using dummy_dataset genomes."""
 
 import json
+from collections.abc import Iterable
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
-from typing import Iterable, Tuple
 
 import duckdb
 import pytest
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 KB_PATH = REPO_ROOT / "src" / "ingest" / "07_build_knowledge_base.py"
@@ -15,13 +16,13 @@ KnowledgeBaseBuilder = kb_module.KnowledgeBaseBuilder
 PipelineOutputs = kb_module.PipelineOutputs
 
 
-def _parse_contigs(fasta_path: Path) -> Iterable[Tuple[str, str]]:
+def _parse_contigs(fasta_path: Path) -> Iterable[tuple[str, str]]:
     """Yield (contig_id, sequence) pairs from a FASTA file."""
     header = None
     seq_parts = []
     with open(fasta_path) as fh:
-        for line in fh:
-            line = line.strip()
+        for raw_line in fh:
+            line = raw_line.strip()
             if not line:
                 continue
             if line.startswith(">"):
@@ -38,6 +39,26 @@ def _parse_contigs(fasta_path: Path) -> Iterable[Tuple[str, str]]:
 def _write(path: Path, text: str):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
+
+
+def test_knowledge_builder_rejects_empty_protein_records(tmp_path):
+    faa_path = tmp_path / "truncated.faa"
+    faa_path.write_text(">valid # 1 # 6 # 1\nMA\n>empty # 7 # 12 # 1\n")
+    outputs = PipelineOutputs(
+        stage00_dir=tmp_path / "stage00",
+        stage01_dir=tmp_path / "stage01",
+        stage02_dir=tmp_path / "stage02",
+        stage03_dir=tmp_path / "stage03",
+        stage04_dir=tmp_path / "stage04",
+        stage05a_dir=tmp_path / "stage05a",
+        stage05b_dir=tmp_path / "stage05b",
+        stage05c_dir=tmp_path / "stage05c",
+        stage06_dir=tmp_path / "embeddings",
+    )
+    builder = KnowledgeBaseBuilder(outputs, tmp_path / "sharur.duckdb")
+
+    with pytest.raises(ValueError, match="Empty protein sequence for empty"):
+        builder._parse_prodigal_faa(faa_path, "bin1", {})
 
 
 def test_ingest_pipeline_with_dummy_dataset(tmp_path):
@@ -82,9 +103,11 @@ def test_ingest_pipeline_with_dummy_dataset(tmp_path):
         faa_path = bin_dir / f"{bin_id}.faa"
 
         with open(faa_path, "w") as faa:
-            for idx, (contig_id, seq) in enumerate(contigs):
+            for idx, (_contig_id, seq) in enumerate(contigs):
                 protein_id = f"{bin_id}_ctg{idx:05d}_00001"
-                faa.write(f">{protein_id} # 1 # {min(len(seq), 300)} # 1 # ID={protein_id};partial=00\n")
+                faa.write(
+                    f">{protein_id} # 1 # {min(len(seq), 300)} # 1 # ID={protein_id};partial=00\n"
+                )
                 faa.write("M" * 30 + "\n")
                 total_proteins += 1
 

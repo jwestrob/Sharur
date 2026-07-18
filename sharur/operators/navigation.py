@@ -10,7 +10,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Optional
 
 from sharur.operators.base import SharurResult, OperatorContext
-from sharur.predicates.evaluator import compute_predicates_for_protein
+from sharur.operators.semantics import (
+    get_active_predicates,
+    get_active_predicates_for_protein,
+)
 
 if TYPE_CHECKING:
     from sharur.storage.duckdb_store import DuckDBStore
@@ -46,7 +49,7 @@ def list_genomes(
         "offset": offset,
     }
 
-    with OperatorContext("list_genomes", params) as ctx:
+    with OperatorContext("list_genomes", params, store=store) as ctx:
         # Build query
         clauses = []
         query_params = []
@@ -158,7 +161,7 @@ def list_proteins(
         "offset": offset,
     }
 
-    with OperatorContext("list_proteins", params) as ctx:
+    with OperatorContext("list_proteins", params, store=store) as ctx:
         # Build query
         clauses = []
         query_params = []
@@ -277,7 +280,7 @@ def get_genome(store: "DuckDBStore", genome_id: str, verbosity: int = 1) -> Shar
     """
     params = {"genome_id": genome_id, "verbosity": verbosity}
 
-    with OperatorContext("get_genome", params) as ctx:
+    with OperatorContext("get_genome", params, store=store) as ctx:
         # Get genome info
         row = store.execute(
             """
@@ -372,7 +375,7 @@ def get_protein(store: "DuckDBStore", protein_id: str, verbosity: int = 1) -> Sh
     """
     params = {"protein_id": protein_id, "verbosity": verbosity}
 
-    with OperatorContext("get_protein", params) as ctx:
+    with OperatorContext("get_protein", params, store=store) as ctx:
         # Get protein info
         row = store.execute(
             """
@@ -405,8 +408,18 @@ def get_protein(store: "DuckDBStore", protein_id: str, verbosity: int = 1) -> Sh
             [protein_id],
         )
 
-        # Compute predicates
-        predicates = compute_predicates_for_protein(protein_id, store)
+        # Read the same persisted V2-compatible predicate view used by search.
+        predicates = get_active_predicates_for_protein(store, protein_id)
+
+        try:
+            from sharur.operators.predicates_v2 import explain
+
+            semantic_explanation = explain(store, protein_id)
+        except Exception as exc:
+            semantic_explanation = {
+                "status": "unavailable",
+                "error": f"{type(exc).__name__}: {exc}",
+            }
 
         lines = [
             f"# Protein: {pid}",
@@ -425,8 +438,36 @@ def get_protein(store: "DuckDBStore", protein_id: str, verbosity: int = 1) -> Sh
 
         if predicates:
             lines.extend([
-                "## Predicates",
+                "## Active Semantic Predicates",
                 ", ".join(predicates),
+                "",
+            ])
+
+        validated_systems = semantic_explanation.get("validated_systems", [])
+        if validated_systems:
+            lines.append("## Validated System Membership")
+            for system in validated_systems:
+                details = [
+                    str(value)
+                    for value in (
+                        system.get("profile_name"),
+                        f"position {system.get('position')}"
+                        if system.get("position") is not None
+                        else None,
+                    )
+                    if value
+                ]
+                suffix = f" ({', '.join(details)})" if details else ""
+                lines.append(
+                    f"- {system.get('system_source')}: "
+                    f"{system.get('system_id')}{suffix}"
+                )
+            lines.append("")
+
+        if semantic_explanation.get("status") == "unavailable":
+            lines.extend([
+                "## Semantic Status",
+                f"Unavailable: {semantic_explanation['error']}",
                 "",
             ])
 
@@ -452,7 +493,7 @@ def get_protein(store: "DuckDBStore", protein_id: str, verbosity: int = 1) -> Sh
         if verbosity >= 2 and seq:
             lines.extend([
                 "## Sequence",
-                f"```",
+                "```",
                 _format_sequence(seq),
                 "```",
                 "",
@@ -474,6 +515,7 @@ def get_protein(store: "DuckDBStore", protein_id: str, verbosity: int = 1) -> Sh
                 "length_aa": length_aa,
                 "gc_content": gc,
                 "predicates": predicates,
+                "semantic": semantic_explanation,
                 "annotations": [
                     {"source": a[0], "accession": a[1], "name": a[2], "description": a[3], "evalue": a[4], "score": a[5]}
                     for a in annotations
@@ -513,7 +555,7 @@ def get_neighborhood(
         "all_annotations": all_annotations,
     }
 
-    with OperatorContext("get_neighborhood", params) as ctx:
+    with OperatorContext("get_neighborhood", params, store=store) as ctx:
         # Get anchor protein
         anchor = store.execute(
             """
@@ -581,6 +623,11 @@ def get_neighborhood(
         start_idx = max(0, anchor_list_idx - window)
         end_idx = min(len(neighbors), anchor_list_idx + window + 1)
         window_proteins = neighbors[start_idx:end_idx]
+        predicates_by_protein = (
+            get_active_predicates(store, [row[0] for row in window_proteins])
+            if verbosity >= 1
+            else {}
+        )
 
         # Calculate region bounds
         region_start = window_proteins[0][1]
@@ -642,8 +689,8 @@ def get_neighborhood(
                 window_proteins,
                 entity_id,
                 start_idx,
-                store,
                 verbosity,
+                predicates_by_protein,
             ))
 
         data = "\n".join(lines)
@@ -659,6 +706,7 @@ def get_neighborhood(
                 "length_aa": p[4],
                 "gene_index": p[5],
                 "annotation": p[6],
+                "predicates": predicates_by_protein.get(p[0], []),
                 "is_anchor": p[0] == entity_id,
             }
             if all_annotations:
@@ -778,8 +826,8 @@ def _format_neighborhood_table(
     proteins: list,
     anchor_id: str,
     start_offset: int,
-    store: "DuckDBStore",
     verbosity: int,
+    predicates_by_protein: dict[str, list[str]],
 ) -> list[str]:
     """Format neighborhood as ASCII table."""
     lines = [
@@ -792,13 +840,9 @@ def _format_neighborhood_table(
         protein_id, start, end, strand, length_aa, gene_idx, annotation = row
         is_anchor = protein_id == anchor_id
 
-        # Get predicates if verbose
         if verbosity >= 1:
-            try:
-                predicates = compute_predicates_for_protein(protein_id, store)
-                pred_str = ", ".join(predicates[:2]) if predicates else ""
-            except Exception:
-                pred_str = ""
+            predicates = predicates_by_protein.get(protein_id, [])
+            pred_str = ", ".join(predicates[:2]) if predicates else ""
         else:
             pred_str = ""
 

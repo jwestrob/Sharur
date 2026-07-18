@@ -17,6 +17,9 @@ The manifest tracks:
 from __future__ import annotations
 
 import json
+import uuid
+import warnings
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, TYPE_CHECKING
@@ -62,19 +65,111 @@ class AnalysisManifest:
         self.db_path = Path(db_path) if db_path else None
         self.path = self.db_path.parent / "manifest.json" if self.db_path else None
         self._store = store
+        self.warnings: list[str] = []
         self.data = self._load_or_create()
 
     def _load_or_create(self) -> dict:
         """Load existing manifest or create new one."""
         if self.path and self.path.exists():
             try:
-                return json.loads(self.path.read_text())
-            except (json.JSONDecodeError, IOError):
-                # Corrupted manifest - create fresh
-                pass
+                loaded = json.loads(self.path.read_text())
+                return self._normalize_loaded_manifest(loaded)
+            except (json.JSONDecodeError, OSError) as exc:
+                message = (
+                    f"Could not load manifest {self.path}: "
+                    f"{type(exc).__name__}: {exc}. Using an in-memory empty cache; "
+                    "the existing file has not been modified."
+                )
+                self.warnings.append(message)
+                warnings.warn(message, RuntimeWarning, stacklevel=2)
 
         # Create new manifest with minimal structure
         return self._create_empty_manifest()
+
+    def _normalize_loaded_manifest(self, loaded: Any) -> dict:
+        """Normalize modern and legacy manifests to the current cache shape."""
+        defaults = self._create_empty_manifest()
+        if not isinstance(loaded, dict):
+            self.warnings.append(
+                "Manifest root must be an object; using an empty in-memory cache."
+            )
+            return defaults
+
+        # Early dataset manifests used a top-level dataset string plus stats and
+        # sessions. Preserve that metadata while upgrading the operational shape.
+        if isinstance(loaded.get("dataset"), str):
+            legacy = dict(loaded)
+            dataset_name = str(legacy.pop("dataset"))
+            sessions = legacy.pop("sessions", [])
+            created = legacy.pop("created", None)
+
+            defaults["dataset"]["name"] = dataset_name
+            if created:
+                defaults["dataset"]["created"] = created
+            defaults["dataset"]["legacy_metadata"] = legacy
+
+            if isinstance(sessions, list):
+                for entry in sessions:
+                    if not isinstance(entry, dict):
+                        continue
+                    defaults["session_log"].append(
+                        {
+                            "timestamp": entry.get("timestamp") or _now_iso(),
+                            "action": entry.get("action")
+                            or entry.get("phase")
+                            or "legacy",
+                            "summary": entry.get("summary")
+                            or entry.get("note")
+                            or "",
+                        }
+                    )
+
+            self.warnings.append(
+                "Loaded a legacy manifest shape and normalized it in memory. "
+                "Call save_manifest() to persist the upgraded cache."
+            )
+            return defaults
+
+        return self._merge_manifest_values(defaults, loaded)
+
+    def _merge_manifest_values(
+        self,
+        default: Any,
+        loaded: Any,
+        path: str = "manifest",
+    ) -> Any:
+        """Merge unknown fields while enforcing the current container types."""
+        if isinstance(default, dict):
+            if not isinstance(loaded, dict):
+                self.warnings.append(
+                    f"{path} should be an object; using the default value."
+                )
+                return deepcopy(default)
+
+            merged = deepcopy(default)
+            for key, value in loaded.items():
+                child_path = f"{path}.{key}"
+                if key in default:
+                    merged[key] = self._merge_manifest_values(
+                        default[key],
+                        value,
+                        child_path,
+                    )
+                else:
+                    merged[key] = value
+            return merged
+
+        if isinstance(default, list):
+            if loaded is None:
+                return deepcopy(default)
+            if not isinstance(loaded, list):
+                self.warnings.append(
+                    f"{path} should be a list; using the default value."
+                )
+                return deepcopy(default)
+            return loaded
+
+        return default if loaded is None else loaded
 
     def _create_empty_manifest(self) -> dict:
         """Create a new empty manifest with required fields."""
@@ -404,6 +499,24 @@ class AnalysisManifest:
         except Exception as e:
             self.log_session("error", f"Failed to update findings: {e}")
 
+    def refresh(self) -> None:
+        """Refresh the derived cache from live database and canonical findings."""
+        self.update_annotations()
+        self.update_findings()
+
+        exploration = self.data.setdefault("exploration", {})
+        status = exploration.get("status", "not_started")
+        activity_count = (
+            int(self.data.get("findings", {}).get("count", 0) or 0)
+            + int(self.data.get("structures", {}).get("predicted", 0) or 0)
+            + len(self.data.get("figures", []) or [])
+            + len(self.data.get("reports", []) or [])
+            + len(exploration.get("phases_completed", []) or [])
+            + len(self.data.get("session_log", []) or [])
+        )
+        if status == "not_started" and activity_count > 0:
+            exploration["status"] = "in_progress"
+
     # ------------------------------------------------------------------ #
     # Exploration status
     # ------------------------------------------------------------------ #
@@ -538,6 +651,12 @@ class AnalysisManifest:
             "",
         ]
 
+        if self.warnings:
+            lines.append("**Manifest warnings:**")
+            for warning in self.warnings:
+                lines.append(f"- {warning}")
+            lines.append("")
+
         # Status overview
         status = d.get("exploration", {}).get("status", "unknown")
         lines.append(f"**Status:** {status}")
@@ -559,6 +678,9 @@ class AnalysisManifest:
             if findings.get("by_category"):
                 cats = [f"{k}: {v}" for k, v in sorted(findings["by_category"].items())]
                 lines.append(f"  Categories: {', '.join(cats[:5])}")
+            issue_count = len(findings.get("validation_issues", []) or [])
+            if issue_count:
+                lines.append(f"  Validation issues: {issue_count}")
 
         # Structures
         structures = d.get("structures", {})
@@ -640,8 +762,12 @@ class AnalysisManifest:
         # Ensure directory exists
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Write with indent for readability
-        self.path.write_text(json.dumps(self.data, indent=2, default=str))
+        # Atomic replacement prevents a killed writer from truncating the cache.
+        temporary_path = self.path.with_name(
+            f".{self.path.name}.{uuid.uuid4().hex}.tmp"
+        )
+        temporary_path.write_text(json.dumps(self.data, indent=2, default=str))
+        temporary_path.replace(self.path)
 
     def __enter__(self) -> "AnalysisManifest":
         """Context manager entry."""

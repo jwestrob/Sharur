@@ -1,6 +1,5 @@
 """Tests for navigation operators (list_*, get_*)."""
 
-import pytest
 
 from sharur.operators.navigation import (
     list_genomes,
@@ -150,6 +149,41 @@ class TestGetProtein:
         result = get_protein(store, "prot_001")
         assert "PF00142" in result.data or "NiFe-hydrogenase" in result.data
 
+    def test_uses_persisted_v2_compatibility_predicates(self, store):
+        """Protein views must use the same persisted predicate surface as search."""
+        store.execute(
+            """
+            INSERT INTO protein_predicates (protein_id, predicates)
+            VALUES ('prot_001', ['v2_only_predicate'])
+            """
+        )
+
+        result = get_protein(store, "prot_001")
+
+        assert result._raw["predicates"] == ["v2_only_predicate"]
+        assert "v2_only_predicate" in result.data
+
+    def test_derives_predicates_from_v2_state_when_cache_row_is_missing(self, store):
+        """A missing compatibility row must not force the legacy evaluator."""
+        store.execute(
+            """
+            INSERT INTO semantic_state (
+                protein_id, activities, roles, architecture, localization,
+                topology, size_class, quality_flags, composite_predicates,
+                unresolved_count
+            )
+            VALUES (
+                'prot_001', [], ['v2_state_role'], [], [], '{}', 'standard',
+                [], ['v2_composite'], 0
+            )
+            """
+        )
+
+        result = get_protein(store, "prot_001")
+
+        assert "v2_state_role" in result._raw["predicates"]
+        assert "v2_composite" in result._raw["predicates"]
+
 
 class TestGetNeighborhood:
     """Tests for get_neighborhood() operator."""
@@ -184,3 +218,18 @@ class TestGetNeighborhood:
         assert result._raw is not None
         assert "proteins" in result._raw
         assert any(p["is_anchor"] for p in result._raw["proteins"])
+
+    def test_neighborhood_uses_persisted_predicates(self, store):
+        """Neighborhood rows must agree with the persisted V2 search view."""
+        store.execute(
+            """
+            INSERT INTO protein_predicates (protein_id, predicates)
+            VALUES ('prot_003', ['v2_neighborhood_predicate'])
+            """
+        )
+
+        result = get_neighborhood(store, "prot_003", window=1)
+        anchor = next(p for p in result._raw["proteins"] if p["is_anchor"])
+
+        assert anchor["predicates"] == ["v2_neighborhood_predicate"]
+        assert "v2_neighborhood" in result.data

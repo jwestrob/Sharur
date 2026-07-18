@@ -1,3 +1,4 @@
+# ruff: noqa: RUF013
 """
 Sharur Ops Client — drop this into any agent's environment.
 
@@ -34,8 +35,6 @@ Usage:
 """
 
 import requests
-import json
-from typing import Optional
 
 
 class SharurOps:
@@ -62,17 +61,20 @@ class SharurOps:
         reasoning: str = "",
     ) -> str:
         """Post a finding. Returns the finding ID."""
-        r = requests.post(f"{self.base}/findings", json={
-            "agent_id": self.agent_id,
-            "finding_type": finding_type,
-            "domain": domain,
-            "summary": summary,
-            "evidence": evidence or {},
-            "confidence": confidence,
-            "novelty": novelty,
-            "parent_finding_id": parent_finding_id,
-            "reasoning": reasoning,
-        })
+        r = requests.post(
+            f"{self.base}/findings",
+            json={
+                "agent_id": self.agent_id,
+                "finding_type": finding_type,
+                "domain": domain,
+                "summary": summary,
+                "evidence": evidence or {},
+                "confidence": confidence,
+                "novelty": novelty,
+                "parent_finding_id": parent_finding_id,
+                "reasoning": reasoning,
+            },
+        )
         r.raise_for_status()
         return r.json()["id"]
 
@@ -116,19 +118,23 @@ class SharurOps:
         domains_relevant: list[str] = None,
     ) -> str:
         """Propose a hypothesis. Returns the hypothesis ID."""
-        r = requests.post(f"{self.base}/hypotheses", json={
-            "source_agent_id": self.agent_id,
-            "source_finding_ids": source_finding_ids or [],
-            "hypothesis": hypothesis,
-            "domains_relevant": domains_relevant or [],
-        })
+        r = requests.post(
+            f"{self.base}/hypotheses",
+            json={
+                "source_agent_id": self.agent_id,
+                "source_finding_ids": source_finding_ids or [],
+                "hypothesis": hypothesis,
+                "domains_relevant": domains_relevant or [],
+            },
+        )
         r.raise_for_status()
         return r.json()["id"]
 
     def open_hypotheses(self, unassigned: bool = True) -> list[dict]:
         """Get hypotheses needing investigation."""
-        r = requests.get(f"{self.base}/hypotheses",
-                         params={"status": "proposed", "unassigned": unassigned})
+        r = requests.get(
+            f"{self.base}/hypotheses", params={"status": "proposed", "unassigned": unassigned}
+        )
         r.raise_for_status()
         return r.json()
 
@@ -150,17 +156,31 @@ class SharurOps:
         priority: int = 1,
         domain_hint: str = None,
         assigned_to: str = None,
+        *,
+        run_id: str = None,
+        idempotency_key: str = None,
+        depends_on: list[str] = None,
+        max_attempts: int = 3,
+        lease_seconds: int = 900,
     ) -> str:
         """Create a task (usually called by orchestrator). Returns task ID."""
-        r = requests.post(f"{self.base}/tasks", json={
-            "created_by": self.agent_id,
-            "task_type": task_type,
-            "description": description,
-            "params": params or {},
-            "priority": priority,
-            "domain_hint": domain_hint,
-            "assigned_to": assigned_to,
-        })
+        r = requests.post(
+            f"{self.base}/tasks",
+            json={
+                "created_by": self.agent_id,
+                "task_type": task_type,
+                "description": description,
+                "params": params or {},
+                "priority": priority,
+                "domain_hint": domain_hint,
+                "assigned_to": assigned_to,
+                "run_id": run_id,
+                "idempotency_key": idempotency_key,
+                "depends_on": depends_on or [],
+                "max_attempts": max_attempts,
+                "lease_seconds": lease_seconds,
+            },
+        )
         r.raise_for_status()
         return r.json()["id"]
 
@@ -179,24 +199,158 @@ class SharurOps:
         r.raise_for_status()
         return r.json()
 
-    def claim_task(self, task_id: str) -> dict:
+    def claim_task(self, task_id: str, lease_seconds: int = None) -> dict:
         """Atomically claim a pending task."""
-        r = requests.post(f"{self.base}/tasks/{task_id}/claim",
-                          params={"agent_id": self.agent_id})
+        params = {"agent_id": self.agent_id}
+        if lease_seconds is not None:
+            params["lease_seconds"] = lease_seconds
+        r = requests.post(f"{self.base}/tasks/{task_id}/claim", params=params)
+        r.raise_for_status()
+        return r.json()
+
+    def heartbeat_task(self, task_id: str, lease_seconds: int = None) -> dict:
+        """Extend this agent's task lease and mark the task in progress."""
+        params = {"agent_id": self.agent_id}
+        if lease_seconds is not None:
+            params["lease_seconds"] = lease_seconds
+        r = requests.post(
+            f"{self.base}/tasks/{task_id}/heartbeat",
+            params=params,
+        )
         r.raise_for_status()
         return r.json()
 
     def complete_task(self, task_id: str, result_finding_ids: list[str] = None) -> dict:
         """Mark a task as complete with optional result findings."""
-        r = requests.patch(f"{self.base}/tasks/{task_id}", json={
-            "status": "complete",
-            "result_finding_ids": result_finding_ids or [],
-        })
+        r = requests.patch(
+            f"{self.base}/tasks/{task_id}",
+            json={
+                "status": "complete",
+                "agent_id": self.agent_id,
+                "result_finding_ids": result_finding_ids or [],
+            },
+        )
         r.raise_for_status()
         return r.json()
 
-    def fail_task(self, task_id: str) -> dict:
-        r = requests.patch(f"{self.base}/tasks/{task_id}", json={"status": "failed"})
+    def fail_task(
+        self,
+        task_id: str,
+        *,
+        error: str = None,
+        retryable: bool = False,
+        retry_delay_seconds: int = 0,
+    ) -> dict:
+        r = requests.patch(
+            f"{self.base}/tasks/{task_id}",
+            json={
+                "status": "failed",
+                "agent_id": self.agent_id,
+                "error": error,
+                "retryable": retryable,
+                "retry_delay_seconds": retry_delay_seconds,
+            },
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def recover_expired_tasks(self, now: float = None) -> dict:
+        params = {}
+        if now is not None:
+            params["now"] = now
+        r = requests.post(f"{self.base}/tasks/recover", params=params)
+        r.raise_for_status()
+        return r.json()
+
+    # ------------------------------------------------------------------
+    # Runs
+    # ------------------------------------------------------------------
+
+    def create_run(
+        self,
+        run_type: str,
+        dataset_path: str,
+        *,
+        config: dict = None,
+        idempotency_key: str = None,
+        parent_run_id: str = None,
+    ) -> str:
+        r = requests.post(
+            f"{self.base}/runs",
+            json={
+                "created_by": self.agent_id,
+                "run_type": run_type,
+                "dataset_path": dataset_path,
+                "config": config or {},
+                "idempotency_key": idempotency_key,
+                "parent_run_id": parent_run_id,
+            },
+        )
+        r.raise_for_status()
+        return r.json()["id"]
+
+    def start_run(self, run_id: str) -> dict:
+        r = requests.post(f"{self.base}/runs/{run_id}/start")
+        r.raise_for_status()
+        return r.json()
+
+    def submit_run(self, run_id: str) -> dict:
+        r = requests.post(f"{self.base}/runs/{run_id}/submit")
+        r.raise_for_status()
+        return r.json()
+
+    def heartbeat_run(self, run_id: str) -> dict:
+        r = requests.post(f"{self.base}/runs/{run_id}/heartbeat")
+        r.raise_for_status()
+        return r.json()
+
+    def complete_run(self, run_id: str, result: dict = None) -> dict:
+        r = requests.patch(
+            f"{self.base}/runs/{run_id}",
+            json={"status": "complete", "result": result or {}},
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def fail_run(self, run_id: str, error: str) -> dict:
+        r = requests.patch(
+            f"{self.base}/runs/{run_id}",
+            json={"status": "failed", "error": error},
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def get_run(self, run_id: str) -> dict:
+        r = requests.get(f"{self.base}/runs/{run_id}")
+        r.raise_for_status()
+        return r.json()
+
+    def list_runs(self, **filters) -> list[dict]:
+        r = requests.get(f"{self.base}/runs", params=filters)
+        r.raise_for_status()
+        return r.json()
+
+    def run_events(self, run_id: str) -> list[dict]:
+        r = requests.get(f"{self.base}/runs/{run_id}/events")
+        r.raise_for_status()
+        return r.json()
+
+    def run_stages(self, run_id: str, stage_id: str = None) -> list[dict]:
+        params = {"stage_id": stage_id} if stage_id is not None else None
+        r = requests.get(f"{self.base}/runs/{run_id}/stages", params=params)
+        r.raise_for_status()
+        return r.json()
+
+    def recover_stale_runs(
+        self,
+        *,
+        stale_after_seconds: int = 300,
+        now: float = None,
+    ) -> dict:
+        params = {"stale_after_seconds": stale_after_seconds}
+        if now is not None:
+            params["now"] = now
+        r = requests.post(f"{self.base}/runs/recover", params=params)
         r.raise_for_status()
         return r.json()
 
@@ -213,19 +367,21 @@ class SharurOps:
         decisions_made: dict = None,
     ) -> str:
         """Write a coordinator log entry (primarily for orchestrator use)."""
-        r = requests.post(f"{self.base}/coordinator/log", json={
-            "action_type": action_type,
-            "reasoning": reasoning,
-            "referenced_finding_ids": referenced_finding_ids or [],
-            "referenced_hypothesis_ids": referenced_hypothesis_ids or [],
-            "decisions_made": decisions_made or {},
-        })
+        r = requests.post(
+            f"{self.base}/coordinator/log",
+            json={
+                "action_type": action_type,
+                "reasoning": reasoning,
+                "referenced_finding_ids": referenced_finding_ids or [],
+                "referenced_hypothesis_ids": referenced_hypothesis_ids or [],
+                "decisions_made": decisions_made or {},
+            },
+        )
         r.raise_for_status()
         return r.json()["id"]
 
     def recent_log(self, limit: int = 20, since: float = 0) -> list[dict]:
-        r = requests.get(f"{self.base}/coordinator/log",
-                         params={"limit": limit, "since": since})
+        r = requests.get(f"{self.base}/coordinator/log", params={"limit": limit, "since": since})
         r.raise_for_status()
         return r.json()
 

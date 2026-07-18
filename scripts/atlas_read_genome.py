@@ -3,6 +3,7 @@
 import json
 import os
 import sys
+from pathlib import Path
 
 from sharur.core.analysis_record_io import write_findings_records
 
@@ -26,9 +27,9 @@ SUPERFAMILY_DEFENSE = {
 
 def read_genome(genome, short_name, db_path="data/susan_genomes/sharur.duckdb"):
     from sharur.operators import Sharur
-    b = Sharur(db_path)
+    b = Sharur(db_path, read_only=True)
 
-    out_dir = "data/susan_genomes/atlas"
+    out_dir = str(Path(db_path).expanduser().resolve().parent / "atlas")
     os.makedirs(out_dir, exist_ok=True)
 
     # 1. Basic stats
@@ -147,32 +148,22 @@ def read_genome(genome, short_name, db_path="data/susan_genomes/sharur.duckdb"):
     if giant_unannotated:
         flags.append(f"{len(giant_unannotated)} giant proteins (>1000 aa) with zero annotations")
 
-    # 7. Defense systems (actual, after superfamily filtering)
-    defense_raw = b.store.execute(f"""
-        SELECT a.accession, a.name, COUNT(DISTINCT a.protein_id) as n
-        FROM annotations a
-        JOIN proteins p ON a.protein_id = p.protein_id
-        WHERE p.bin_id = '{genome}' AND a.source = 'defensefinder'
-        GROUP BY a.accession, a.name
+    # 7. Defense systems (curated caller output only; raw HMM profiles are observations)
+    defense_rows = b.store.execute(f"""
+        SELECT system_type, system_subtype, COUNT(DISTINCT system_id) AS n
+        FROM defense_systems
+        WHERE genome_id = '{genome}'
+        GROUP BY system_type, system_subtype
         ORDER BY n DESC
     """)
-    defense_filtered = []
-    for d in defense_raw:
-        if d[0] not in SUPERFAMILY_DEFENSE:
-            defense_filtered.append({"accession": d[0], "name": d[1], "count": d[2]})
-        else:
-            # Check kinase co-annotation
-            kinase_check = b.store.execute(f"""
-                SELECT COUNT(DISTINCT a1.protein_id)
-                FROM annotations a1
-                JOIN annotations a2 ON a1.protein_id = a2.protein_id
-                JOIN proteins p ON a1.protein_id = p.protein_id
-                WHERE p.bin_id = '{genome}'
-                  AND a1.accession = '{d[0]}'
-                  AND a2.accession IN ('PF00069', 'PF07714')
-            """)[0][0]
-            if kinase_check < d[2] * 0.5:  # Less than half are kinases
-                defense_filtered.append({"accession": d[0], "name": d[1], "count": d[2], "note": "partially validated"})
+    validated_defense = [
+        {
+            "system_type": row[0],
+            "system_subtype": row[1],
+            "count": row[2],
+        }
+        for row in defense_rows
+    ]
 
     # 8. HydDB hits
     hyddb_hits = b.store.execute(f"""
@@ -210,13 +201,13 @@ def read_genome(genome, short_name, db_path="data/susan_genomes/sharur.duckdb"):
         """)[0][0]
         nbr_targets.append(("hyddb_hit", hyddb_pid, None))
 
-    # DefenseFinder hit (non-superfamily)
-    if defense_filtered:
+    # Representative protein from a validated defense-system call.
+    if validated_defense:
         def_pid = b.store.execute(f"""
-            SELECT a.protein_id FROM annotations a
-            JOIN proteins p ON a.protein_id = p.protein_id
-            WHERE p.bin_id = '{genome}' AND a.source = 'defensefinder'
-              AND a.accession NOT IN ('Mokosh_type_I__MkoA_B', 'BREX__pglW')
+            SELECT sp.protein_id
+            FROM defense_systems ds
+            JOIN system_proteins sp ON ds.system_id = sp.system_id
+            WHERE ds.genome_id = '{genome}'
             LIMIT 1
         """)
         if def_pid:
@@ -307,7 +298,7 @@ def read_genome(genome, short_name, db_path="data/susan_genomes/sharur.duckdb"):
         f"{phylum} MAG with {total_proteins} proteins across {n_contigs} contigs; "
         f"{unanno_pct}% unannotated; {len(giants)} giant proteins (>1000 aa), "
         f"{len(giant_unannotated)} unannotated giants; "
-        f"{len(defense_filtered)} defense system types detected (after superfamily filtering); "
+        f"{len(validated_defense)} curated defense system types detected; "
         f"{len(hyddb_hits)} HydDB classifications."
     )
 
@@ -334,7 +325,7 @@ def read_genome(genome, short_name, db_path="data/susan_genomes/sharur.duckdb"):
         "predicates_top15": [
             {"predicate": pr[0], "count": pr[1]} for pr in predicates[:15]
         ],
-        "defense_systems": defense_filtered,
+        "defense_systems": validated_defense,
         "hyddb_hits": [{"accession": h[0], "name": h[1], "count": h[2]} for h in hyddb_hits],
         "neighborhoods_sampled": neighborhoods_sampled,
         "neighborhood_notes": neighborhood_notes,
@@ -385,27 +376,26 @@ def read_genome(genome, short_name, db_path="data/susan_genomes/sharur.duckdb"):
         })
 
     # Unusual defense content
-    real_defense_count = sum(d["count"] for d in defense_filtered)
+    real_defense_count = sum(d["count"] for d in validated_defense)
     if real_defense_count > 20:
         findings.append({
             "id": f"atlas-{short_name}-002",
-            "title": f"Dense defense system repertoire in {phylum} MAG {short_name} ({real_defense_count} proteins)",
+            "title": f"Dense defense system repertoire in {phylum} MAG {short_name} ({real_defense_count} system calls)",
             "category": "defense_systems",
             "description": (
-                f"After filtering superfamily false positives (Mokosh/BREX kinases), "
-                f"genome {genome} retains {real_defense_count} defense-associated proteins "
-                f"across {len(defense_filtered)} system types: "
-                f"{', '.join(d['accession'] + ' (' + str(d['count']) + ')' for d in defense_filtered[:5])}."
+                f"The curated system caller emitted {real_defense_count} system calls "
+                f"across {len(validated_defense)} system types for genome {genome}: "
+                f"{', '.join(d['system_type'] + ' (' + str(d['count']) + ')' for d in validated_defense[:5])}."
             ),
             "evidence": {
                 "genome": genome,
-                "defense_systems": defense_filtered,
+                "defense_systems": validated_defense,
             },
             "n_genomes": 1,
             "provenance": {
-                "query": "DefenseFinder annotations with kinase superfamily filtering",
-                "raw_result": f"{real_defense_count} proteins in {len(defense_filtered)} systems",
-                "interpretation": "Dense defense repertoire after superfamily correction",
+                "query": "SELECT system_type, COUNT(DISTINCT system_id) FROM defense_systems WHERE genome_id = ? GROUP BY system_type",
+                "raw_result": f"{real_defense_count} system calls in {len(validated_defense)} types",
+                "interpretation": "Dense repertoire in curated caller output",
             },
             "figures": [],
             "related_findings": [],
@@ -468,7 +458,14 @@ def read_genome(genome, short_name, db_path="data/susan_genomes/sharur.duckdb"):
 
     if findings:
         findings_path = os.path.join(out_dir, f"findings_{short_name}.jsonl")
-        results = write_findings_records(findings_path, findings, phase="atlas")
+        # These are per-genome draft spools. Their coordinator merge into a
+        # canonical findings archive must run in strict mode.
+        results = write_findings_records(
+            findings_path,
+            findings,
+            phase="atlas",
+            strict=False,
+        )
         print(f"Wrote {len(findings)} findings to {findings_path}")
         issues = [r for r in results if r.issues]
         if issues:
@@ -482,4 +479,5 @@ def read_genome(genome, short_name, db_path="data/susan_genomes/sharur.duckdb"):
 if __name__ == "__main__":
     genome = sys.argv[1]
     short_name = sys.argv[2]
-    read_genome(genome, short_name)
+    db_path = sys.argv[3] if len(sys.argv) > 3 else "data/susan_genomes/sharur.duckdb"
+    read_genome(genome, short_name, db_path=db_path)

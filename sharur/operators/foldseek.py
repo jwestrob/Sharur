@@ -378,7 +378,11 @@ def search_foldseek_for_protein(
     """
     params = {"protein_id": protein_id, "databases": databases}
 
-    with OperatorContext("search_foldseek_for_protein", params) as ctx:
+    with OperatorContext(
+        "search_foldseek_for_protein",
+        params,
+        store=store,
+    ) as ctx:
         # If no PDB provided, check for existing or predict
         if pdb_path is None:
             # Check common locations using protein_id

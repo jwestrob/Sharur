@@ -55,6 +55,7 @@ from sharur.operators.validation import (
 from sharur.operators.manifest import AnalysisManifest
 
 if TYPE_CHECKING:
+    from sharur.capabilities import CapabilityBrief
     from sharur.core.types import Hypothesis, ProvenanceEntry
     from sharur.predicates_v2.model import SemanticState
 
@@ -111,14 +112,18 @@ class Sharur:
 
     def resume(self) -> str:
         """
-        Generate a summary of current analysis state for resuming a session.
+        Generate a live-refreshed summary of current analysis state.
 
         Call this at the start of a new session to understand what has been
-        done and what remains to explore.
+        done and what remains to explore. The manifest is a derived cache:
+        canonical findings and database counts are reconciled in memory before
+        rendering. Call save_manifest() explicitly to persist the refreshed
+        cache.
 
         Returns:
             Formatted markdown summary of analysis state
         """
+        self.manifest.refresh()
         return self.manifest.get_status_summary()
 
     def save_manifest(self) -> None:
@@ -145,6 +150,23 @@ class Sharur:
         Useful for understanding what data and operations are available.
         """
         return describe_schema(self.store)
+
+    def capabilities(self, *, include_tools: bool = False) -> "CapabilityBrief":
+        """Return the typed, non-mutating capability/preflight brief.
+
+        This inspects live tables, caller outputs, predicate coverage, embedding
+        artifacts, persistent similarity sidecars, and the dataset-local run
+        ledger. External binary/version probes are opt-in for API calls because
+        they are slower; the CLI preflight includes them by default.
+        """
+        from sharur.capabilities import build_capability_brief
+
+        if self._db_path is None:
+            raise ValueError("Capability preflight requires a file-backed database")
+        return build_capability_brief(
+            self._db_path,
+            include_tools=include_tools,
+        )
 
     # ------------------------------------------------------------------ #
     # Navigation operators

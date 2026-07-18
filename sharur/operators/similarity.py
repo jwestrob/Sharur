@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Optional
 from sharur.operators.base import SharurResult, OperatorContext
 
 if TYPE_CHECKING:
-    from sharur.core.session import ExplorationSession
     from sharur.storage.duckdb_store import DuckDBStore
 
 
@@ -48,11 +47,12 @@ def find_similar(
         "include_self_genome": include_self_genome,
     }
 
-    with OperatorContext("find_similar", params) as ctx:
+    with OperatorContext("find_similar", params, store=store) as ctx:
         if vector_store is None:
             return ctx.make_result(
                 data="Vector store not available. Embeddings may not be computed for this database.",
                 rows=0,
+                status="unavailable",
             )
 
         # Get query protein's genome for filtering
@@ -78,6 +78,7 @@ def find_similar(
             return ctx.make_result(
                 data=f"Error querying vector store: {e}",
                 rows=0,
+                status="failed",
             )
 
         if not results:
@@ -88,7 +89,6 @@ def find_similar(
 
         # Get protein IDs from results
         similar_ids = [r[0] if isinstance(r, tuple) else r for r in results]
-        scores = {r[0]: r[1] for r in results} if results and isinstance(results[0], tuple) else {}
 
         # Get metadata for similar proteins
         placeholders = ",".join(["?"] * len(similar_ids))
@@ -115,7 +115,7 @@ def find_similar(
 
         lines = [
             f"# Similar Proteins to {protein_id[:40]}...",
-            f"**Method:** ESM2 embedding similarity (cosine)",
+            "**Method:** ESM2 embedding similarity (cosine)",
             f"**Found:** {len(results)} similar proteins",
             "",
             "| Rank | Similarity | Length | Genome | Annotation |",
@@ -198,16 +198,18 @@ def find_similar_to_set(
         "threshold": threshold,
     }
 
-    with OperatorContext("find_similar_to_set", params) as ctx:
+    with OperatorContext("find_similar_to_set", params, store=store) as ctx:
         if vector_store is None:
             return ctx.make_result(
                 data="Vector store not available.",
                 rows=0,
+                status="unavailable",
             )
 
         # Collect all similar proteins
         all_similar: dict[str, float] = {}  # pid -> max similarity
         query_set = set(protein_ids)
+        query_errors: list[str] = []
 
         for pid in protein_ids:
             try:
@@ -223,13 +225,22 @@ def find_similar_to_set(
                             all_similar.get(similar_id, 0),
                             score,
                         )
-            except Exception:
+            except Exception as exc:
+                query_errors.append(f"{pid}: {type(exc).__name__}: {exc}")
                 continue
 
         if not all_similar:
+            if query_errors and len(query_errors) == len(protein_ids):
+                return ctx.make_result(
+                    data="All vector-store queries failed.",
+                    rows=0,
+                    status="failed",
+                    warnings=query_errors,
+                )
             return ctx.make_result(
                 data="No similar proteins found outside the query set",
                 rows=0,
+                warnings=query_errors,
             )
 
         # Sort by score and take top k
@@ -279,6 +290,7 @@ def find_similar_to_set(
             data="\n".join(lines),
             rows=len(sorted_similar),
             raw=[{"protein_id": pid, "similarity": score} for pid, score in sorted_similar],
+            warnings=query_errors,
         )
 
 

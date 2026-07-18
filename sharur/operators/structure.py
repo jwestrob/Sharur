@@ -49,7 +49,7 @@ def predict_structure(
     """
     params = {"protein_id": protein_id, "output_path": output_path}
 
-    with OperatorContext("predict_structure", params) as ctx:
+    with OperatorContext("predict_structure", params, store=store) as ctx:
         # Get client
         client, error = _get_esm_client()
         if error:
@@ -234,7 +234,7 @@ def batch_predict_structures(
     """
     params = {"protein_ids": protein_ids, "max_length": max_length}
 
-    with OperatorContext("batch_predict_structures", params) as ctx:
+    with OperatorContext("batch_predict_structures", params, store=store) as ctx:
         client, error = _get_esm_client()
         if error:
             return ctx.make_result(data=error, rows=0)

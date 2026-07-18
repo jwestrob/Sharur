@@ -13,7 +13,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from pydantic import BaseModel, Field
 
 from sharur.core.types import (
     Evidence,
@@ -59,10 +58,14 @@ class ExplorationSession:
         self._provenance: list[ProvenanceEntry] = []
 
         # Database connection
+        self._db_path = Path(db_path) if db_path else None
         self._db = DuckDBStore(db_path, read_only=read_only) if db_path else None
         self._vector_store = None
+        self._vector_store_path: Optional[Path] = None
+        self._vector_store_initialized = False
+        self._vector_store_error: Optional[str] = None
         if db_path:
-            self._attach_vector_store(db_path)
+            self._discover_vector_store(Path(db_path))
 
         # Turn counter for focus expiry
         self._turn_counter = 0
@@ -78,11 +81,31 @@ class ExplorationSession:
 
     @property
     def vector_store(self):
+        """Load the embedding index on first similarity operation only."""
+        if not self._vector_store_initialized:
+            self._load_vector_store()
         return self._vector_store
 
     @vector_store.setter
     def vector_store(self, store) -> None:
         self._vector_store = store
+        self._vector_store_initialized = True
+        self._vector_store_error = None
+
+    @property
+    def vector_store_available(self) -> bool:
+        """Return whether an embeddings file was discovered without loading it."""
+        return self._vector_store_path is not None
+
+    @property
+    def vector_store_path(self) -> Optional[Path]:
+        """Return the discovered H5 path without constructing a FAISS index."""
+        return self._vector_store_path
+
+    @property
+    def vector_store_error(self) -> Optional[str]:
+        """Return the most recent vector-store initialization error, if any."""
+        return self._vector_store_error
 
     # ------------------------------------------------------------------ #
     # Working sets
@@ -183,26 +206,30 @@ class ExplorationSession:
     # ------------------------------------------------------------------ #
     # Vector store discovery
     # ------------------------------------------------------------------ #
-    def _attach_vector_store(self, db_path: Path) -> None:
+    def _discover_vector_store(self, db_path: Path) -> None:
         """
-        Auto-load FAISS vector store from H5 embeddings if present
-        alongside the DuckDB.
+        Discover H5 embeddings alongside the DuckDB without loading them.
 
         Checks both new standard path (embeddings/) and legacy path (stage06_embeddings/).
         """
-        try:
-            # Check new standard path first, then legacy path
-            embeddings_dir = db_path.parent / "embeddings"
-            if not embeddings_dir.exists():
-                embeddings_dir = db_path.parent / "stage06_embeddings"
-
+        for directory_name in ("embeddings", "stage06_embeddings"):
+            embeddings_dir = db_path.parent / directory_name
             h5_path = embeddings_dir / "protein_embeddings.h5"
-            if not h5_path.exists():
+            if h5_path.is_file():
+                self._vector_store_path = h5_path
                 return
-            self._vector_store = FAISSStore(str(h5_path))
-        except Exception:
-            # Fallback to None; find_similar will warn gracefully
+
+    def _load_vector_store(self) -> None:
+        """Construct the FAISS store once, when similarity is first requested."""
+        self._vector_store_initialized = True
+        if self._vector_store_path is None:
+            return
+
+        try:
+            self._vector_store = FAISSStore(str(self._vector_store_path))
+        except Exception as exc:
             self._vector_store = None
+            self._vector_store_error = f"{type(exc).__name__}: {exc}"
 
     # ------------------------------------------------------------------ #
     # Hypotheses
@@ -299,22 +326,46 @@ class ExplorationSession:
         state = {
             "session_id": str(self.session_id),
             "created_at": self.created_at.isoformat(),
+            "db_path": str(self._db_path) if self._db_path else None,
+            "read_only": self.read_only,
+            "turn_counter": self._turn_counter,
             "working_sets": [ws.model_dump() for ws in self._working_sets.values()],
             "focus_stack": [fe.model_dump() for fe in self._focus_stack],
             "hypotheses": [h.model_dump() for h in self._hypotheses.values()],
             "provenance": [p.model_dump() for p in self._provenance],
         }
-        path.write_text(json.dumps(state, default=str, indent=2))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        temporary_path.write_text(json.dumps(state, default=str, indent=2))
+        temporary_path.replace(path)
 
     @classmethod
-    def load(cls, path: Path) -> "ExplorationSession":
+    def load(
+        cls,
+        path: Path,
+        *,
+        db_path: Optional[Path] = None,
+        read_only: Optional[bool] = None,
+    ) -> "ExplorationSession":
         data = json.loads(path.read_text())
-        session = cls(session_id=uuid.UUID(data["session_id"]))
+        saved_db_path = data.get("db_path")
+        resolved_db_path = db_path or (Path(saved_db_path) if saved_db_path else None)
+        resolved_read_only = (
+            bool(data.get("read_only", False))
+            if read_only is None
+            else read_only
+        )
+        session = cls(
+            session_id=uuid.UUID(data["session_id"]),
+            db_path=resolved_db_path,
+            read_only=resolved_read_only,
+        )
         session.created_at = datetime.fromisoformat(data["created_at"])
         session._working_sets = {ws["name"].lower(): WorkingSet(**ws) for ws in data["working_sets"]}
         session._focus_stack = [FocusEntity(**fe) for fe in data["focus_stack"]]
         session._hypotheses = {uuid.UUID(h["hypothesis_id"]): Hypothesis(**h) for h in data["hypotheses"]}
         session._provenance = [ProvenanceEntry(**p) for p in data["provenance"]]
+        session._turn_counter = int(data.get("turn_counter", len(session._provenance)))
         return session
 
     def to_notebook(self) -> str:

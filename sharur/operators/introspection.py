@@ -11,6 +11,10 @@ from typing import TYPE_CHECKING, Any
 
 from sharur.operators.base import SharurResult, OperatorContext
 from sharur.predicates.registry import get_registry
+from sharur.predicates.vocabulary import (
+    PREDICATE_BY_ID,
+    PREDICATES_BY_CATEGORY,
+)
 
 if TYPE_CHECKING:
     from sharur.storage.duckdb_store import DuckDBStore
@@ -26,7 +30,7 @@ def overview(store: "DuckDBStore") -> SharurResult:
     - Taxonomy distribution (top phyla)
     - Predicate summary
     """
-    with OperatorContext("overview", {}) as ctx:
+    with OperatorContext("overview", {}, store=store) as ctx:
         stats = _gather_stats(store)
         taxonomy = _gather_taxonomy(store)
         annotation_summary = _gather_annotation_summary(store)
@@ -100,7 +104,7 @@ def describe_schema(store: "DuckDBStore") -> SharurResult:
 
     Useful for understanding what data is available.
     """
-    with OperatorContext("describe_schema", {}) as ctx:
+    with OperatorContext("describe_schema", {}, store=store) as ctx:
         # Get table info
         tables = store.execute(
             """
@@ -120,37 +124,64 @@ def describe_schema(store: "DuckDBStore") -> SharurResult:
             "",
         ]
 
+        table_summaries = []
         for table_name, col_count in tables:
             # Get row count
             try:
                 count = store.execute(f"SELECT COUNT(*) FROM {table_name}")[0][0]
-            except Exception:
-                count = 0
+                count_status = "ok"
+                count_error = None
+            except Exception as exc:
+                count = None
+                count_status = "unavailable"
+                count_error = f"{type(exc).__name__}: {exc}"
 
             lines.append(f"## {table_name}")
             lines.append(f"- Columns: {col_count}")
-            lines.append(f"- Rows: {count:,}")
+            if count is None:
+                lines.append(f"- Rows: unavailable ({count_error})")
+            else:
+                lines.append(f"- Rows: {count:,}")
             lines.append("")
-
-        # List available predicates
-        registry = get_registry()
-        predicates = registry.list_predicates()
+            table_summaries.append(
+                {
+                    "table_name": table_name,
+                    "column_count": col_count,
+                    "row_count": count,
+                    "status": count_status,
+                    "error": count_error,
+                }
+            )
 
         lines.extend([
-            "# Available Predicates",
+            "# Available Predicate Vocabulary",
+            "",
+            f"- {len(PREDICATE_BY_ID):,} declared V2-compatible predicates",
+            "- Runtime direct-access terms such as `pfam:*`, `kegg:*`, and "
+            "`cazy:*` are discovered from the live data and are not a closed list.",
             "",
         ])
-        for pred in predicates:
-            lines.append(f"- **{pred.predicate_id}** ({pred.category}): {pred.description}")
+        predicate_categories: dict[str, list[str]] = {}
+        for category, entries in sorted(PREDICATES_BY_CATEGORY.items()):
+            predicate_ids = [entry.predicate_id for entry in entries]
+            predicate_categories[category] = predicate_ids
+            preview = ", ".join(predicate_ids[:12])
+            if len(predicate_ids) > 12:
+                preview += ", …"
+            lines.append(f"- **{category} ({len(predicate_ids)}):** {preview}")
 
         lines.append("")
         data = "\n".join(lines)
 
         return ctx.make_result(
             data=data,
-            rows=len(tables) + len(predicates),
-            total_rows=len(tables) + len(predicates),
-            raw={"tables": tables, "predicates": [p.predicate_id for p in predicates]},
+            rows=len(tables) + len(PREDICATE_BY_ID),
+            total_rows=len(tables) + len(PREDICATE_BY_ID),
+            raw={
+                "tables": table_summaries,
+                "predicates": sorted(PREDICATE_BY_ID),
+                "predicate_categories": predicate_categories,
+            },
         )
 
 
@@ -257,30 +288,50 @@ def _gather_annotation_summary(store: "DuckDBStore") -> list[tuple[str, int]]:
 
 
 def _gather_predicate_summary(store: "DuckDBStore") -> dict[str, list[tuple[str, int]]]:
-    """Gather predicate counts, grouped by category."""
-    registry = get_registry()
+    """Gather a compact summary from the active persisted predicate surface."""
     summary: dict[str, list[tuple[str, int]]] = {}
 
-    for pred in registry.list_predicates():
-        try:
-            # Quick count via eval_query
-            if pred.eval_query:
-                count = store.execute(
-                    f"SELECT COUNT(*) FROM ({pred.eval_query.strip()}) sub"
-                )[0][0]
-            else:
-                count = 0
+    summary_predicates = [
+        "giant",
+        "massive",
+        "unannotated",
+        "well_annotated",
+        "multi_domain",
+        "defense_system_validated",
+        "secretion_system_validated",
+    ]
 
-            if pred.category not in summary:
-                summary[pred.category] = []
-            summary[pred.category].append((pred.predicate_id, count))
-        except Exception:
-            # Skip predicates that fail (e.g., missing tables)
-            pass
+    try:
+        expressions = ", ".join(
+            f"SUM(CASE WHEN list_contains(predicates, '{predicate}') "
+            f"THEN 1 ELSE 0 END) AS {predicate}"
+            for predicate in summary_predicates
+        )
+        row = store.execute(f"SELECT {expressions} FROM protein_predicates")[0]
+        for predicate_id, count in zip(summary_predicates, row):
+            definition = PREDICATE_BY_ID.get(predicate_id)
+            category = definition.category if definition else "runtime"
+            summary.setdefault(category, []).append(
+                (predicate_id, int(count or 0))
+            )
+    except Exception:
+        registry = get_registry()
+        for pred in registry.list_predicates():
+            try:
+                if pred.eval_query:
+                    count = store.execute(
+                        f"SELECT COUNT(*) FROM ({pred.eval_query.strip()}) sub"
+                    )[0][0]
+                else:
+                    count = 0
+                summary.setdefault(pred.category, []).append(
+                    (pred.predicate_id, count)
+                )
+            except Exception:
+                continue
 
-    # Sort each category by count descending
-    for cat in summary:
-        summary[cat].sort(key=lambda x: -x[1])
+    for category in summary:
+        summary[category].sort(key=lambda item: -item[1])
 
     return summary
 

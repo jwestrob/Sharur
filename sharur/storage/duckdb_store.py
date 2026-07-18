@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING
 
 import duckdb
-import pandas as pd
 
 from sharur.core.types import Annotation, Protein
 from sharur.storage.migrations import run_migrations
@@ -14,12 +13,16 @@ from sharur.storage.migrations import run_migrations
 from .schema import SCHEMA
 
 
+if TYPE_CHECKING:
+    import pandas as pd
+
+
 class DuckDBStore:
     """DuckDB storage backend."""
 
     def __init__(
         self,
-        db_path: Optional[Path] = None,
+        db_path: Path | None = None,
         *,
         read_only: bool = False,
     ):
@@ -30,7 +33,7 @@ class DuckDBStore:
         """
         self.db_path = Path(db_path) if db_path else None
         self.read_only = read_only
-        self._conn: Optional[duckdb.DuckDBPyConnection] = None
+        self._conn: duckdb.DuckDBPyConnection | None = None
 
     # ------------------------------------------------------------------ #
     # Connection management
@@ -56,16 +59,28 @@ class DuckDBStore:
         self._conn.execute(SCHEMA)
         run_migrations(self._conn)
 
+    def close(self) -> None:
+        """Close the lazy connection without opening one solely to close it."""
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
+
+    def __enter__(self) -> DuckDBStore:
+        return self
+
+    def __exit__(self, *_exc_info: object) -> None:
+        self.close()
+
     # ------------------------------------------------------------------ #
     # Generic execution helpers
     # ------------------------------------------------------------------ #
-    def execute(self, query: str, params: Optional[dict | list | tuple] = None) -> list[tuple]:
+    def execute(self, query: str, params: dict | list | tuple | None = None) -> list[tuple]:
         """Execute query and return results."""
         if params:
             return self.conn.execute(query, params).fetchall()
         return self.conn.execute(query).fetchall()
 
-    def execute_df(self, query: str, params: Optional[dict | list | tuple] = None) -> pd.DataFrame:
+    def execute_df(self, query: str, params: dict | list | tuple | None = None) -> pd.DataFrame:
         """Execute query and return DataFrame."""
         if params:
             return self.conn.execute(query, params).df()
@@ -74,7 +89,7 @@ class DuckDBStore:
     # ------------------------------------------------------------------ #
     # Convenience methods
     # ------------------------------------------------------------------ #
-    def get_protein(self, protein_id: str) -> Optional[Protein]:
+    def get_protein(self, protein_id: str) -> Protein | None:
         """Get single protein by ID."""
         row = self.conn.execute(
             """
@@ -181,9 +196,9 @@ class DuckDBStore:
 
     def search_annotations(
         self,
-        source: Optional[str] = None,
-        accession: Optional[str] = None,
-        name_pattern: Optional[str] = None,
+        source: str | None = None,
+        accession: str | None = None,
+        name_pattern: str | None = None,
     ) -> list[tuple[str, Annotation]]:
         """Search annotations, returns (protein_id, annotation) pairs."""
         clauses: list[str] = []

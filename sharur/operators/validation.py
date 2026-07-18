@@ -80,11 +80,15 @@ def validate_annotation(
     Returns:
         SharurResult with validation summary
     """
-    with OperatorContext("validate_annotation", {
-        "n_proteins": len(protein_ids),
-        "expected_function": expected_function,
-        "domain_name": domain_name,
-    }) as ctx:
+    with OperatorContext(
+        "validate_annotation",
+        {
+            "n_proteins": len(protein_ids),
+            "expected_function": expected_function,
+            "domain_name": domain_name,
+        },
+        store=store,
+    ) as ctx:
 
         if not protein_ids:
             return ctx.make_result(
@@ -261,11 +265,15 @@ def validate_context(
     Returns:
         SharurResult with context validation
     """
-    with OperatorContext("validate_context", {
-        "protein_id": protein_id,
-        "expected_neighbors": expected_neighbors,
-        "window": window,
-    }) as ctx:
+    with OperatorContext(
+        "validate_context",
+        {
+            "protein_id": protein_id,
+            "expected_neighbors": expected_neighbors,
+            "window": window,
+        },
+        store=store,
+    ) as ctx:
 
         # Get target protein info
         target = store.execute("""
@@ -415,7 +423,7 @@ def analyze_crispr_systems(store) -> SharurResult:
     Returns:
         SharurResult with CRISPR system analysis
     """
-    with OperatorContext("analyze_crispr_systems", {}) as ctx:
+    with OperatorContext("analyze_crispr_systems", {}, store=store) as ctx:
 
         # Get all CRISPR arrays
         arrays = store.execute("""
@@ -581,7 +589,11 @@ def detect_annotation_errors(store, limit: int = 50) -> SharurResult:
     Returns:
         SharurResult with potential annotation errors
     """
-    with OperatorContext("detect_annotation_errors", {"limit": limit}) as ctx:
+    with OperatorContext(
+        "detect_annotation_errors",
+        {"limit": limit},
+        store=store,
+    ) as ctx:
 
         errors = {
             "problem_domain_hits": [],

@@ -2,11 +2,18 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import multiprocessing
 import sys
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
+import pytest
+
 from sharur.core.analysis_record_compat import normalize_finding
-from sharur.core.analysis_record_io import append_finding_record
+from sharur.core.analysis_record_io import (
+    FindingValidationError,
+    append_finding_record,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -31,6 +38,28 @@ REPORT_MODULE = _load_module(
     "scripts/compile_comprehensive_report.py",
     "test_compile_comprehensive_report_module",
 )
+
+
+def _append_concurrent_finding(args: tuple[str, int]) -> str:
+    path, worker_id = args
+    result = append_finding_record(
+        path,
+        {
+            "title": f"Concurrent finding {worker_id}",
+            "category": "general",
+            "description": "Lock allocation test.",
+            "evidence": {},
+            "verification": [
+                {
+                    "claim": f"worker {worker_id}",
+                    "query": f"SELECT {worker_id}",
+                    "expected": worker_id,
+                }
+            ],
+        },
+        phase="exploration",
+    )
+    return str(result.finding["id"])
 
 
 def _write_jsonl(path: Path, records: list[dict]) -> None:
@@ -219,3 +248,109 @@ def test_append_finding_record_emits_canonical_defaults(tmp_path: Path) -> None:
         "SELECT protein_id FROM proteins LIMIT 1"
     )
     assert findings_path.read_text().strip()
+
+
+def test_append_rejects_validation_issues_by_default(tmp_path: Path) -> None:
+    findings_path = tmp_path / "survey" / "findings.jsonl"
+
+    with pytest.raises(FindingValidationError, match="missing verification"):
+        append_finding_record(
+            findings_path,
+            {
+                "title": "Invalid new finding",
+                "description": "No verification supplied.",
+                "evidence": {},
+            },
+        )
+
+    assert not findings_path.exists() or not findings_path.read_text()
+
+
+def test_append_enforces_lean_canonical_fields(tmp_path: Path) -> None:
+    findings_path = tmp_path / "survey" / "findings.jsonl"
+
+    with pytest.raises(FindingValidationError, match="missing category"):
+        append_finding_record(
+            findings_path,
+            {
+                "title": "Incomplete finding",
+                "description": "Category is required.",
+                "evidence": {},
+                "verification": [
+                    {"claim": "one", "query": "SELECT 1", "expected": 1}
+                ],
+            },
+        )
+
+
+def test_append_requires_falsification_for_novel_finding(tmp_path: Path) -> None:
+    findings_path = tmp_path / "exploration" / "findings.jsonl"
+
+    with pytest.raises(FindingValidationError, match="missing falsification"):
+        append_finding_record(
+            findings_path,
+            {
+                "title": "Novel finding",
+                "category": "general",
+                "description": "Novel claims need a falsification condition.",
+                "evidence": {},
+                "verification": [
+                    {"claim": "one", "query": "SELECT 1", "expected": 1}
+                ],
+                "novelty": 2,
+            },
+        )
+
+
+def test_append_can_write_explicit_draft_spool(tmp_path: Path) -> None:
+    findings_path = tmp_path / "drafts" / "findings.jsonl"
+
+    result = append_finding_record(
+        findings_path,
+        {
+            "title": "Draft finding",
+            "description": "Drafts may retain validation issues before merge.",
+            "evidence": {},
+        },
+        phase="exploration",
+        strict=False,
+    )
+
+    assert "missing verification" in result.issues
+    assert findings_path.read_text().strip()
+
+
+def test_append_rejects_duplicate_explicit_id(tmp_path: Path) -> None:
+    findings_path = tmp_path / "survey" / "findings.jsonl"
+    finding = {
+        "id": "survey-001",
+        "title": "Finding",
+        "category": "general",
+        "description": "Duplicate ID test.",
+        "evidence": {},
+        "verification": [{"claim": "one", "query": "SELECT 1", "expected": 1}],
+    }
+    append_finding_record(findings_path, finding)
+
+    with pytest.raises(FindingValidationError, match="already exists"):
+        append_finding_record(findings_path, finding)
+
+
+def test_parallel_appends_allocate_unique_ids(tmp_path: Path) -> None:
+    findings_path = tmp_path / "exploration" / "findings.jsonl"
+    work = [(str(findings_path), worker_id) for worker_id in range(12)]
+
+    with ProcessPoolExecutor(
+        max_workers=4,
+        mp_context=multiprocessing.get_context("spawn"),
+    ) as executor:
+        finding_ids = list(executor.map(_append_concurrent_finding, work))
+
+    records = [
+        json.loads(line)
+        for line in findings_path.read_text().splitlines()
+        if line.strip()
+    ]
+    assert len(records) == 12
+    assert len(set(finding_ids)) == 12
+    assert {record["id"] for record in records} == set(finding_ids)

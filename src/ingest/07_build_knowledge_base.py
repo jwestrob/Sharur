@@ -469,6 +469,10 @@ class KnowledgeBaseBuilder:
                     # flush previous
                     if current_id is not None:
                         seq = "".join(seq_parts)
+                        if not seq.rstrip("*"):
+                            raise ValueError(
+                                f"Empty protein sequence for {current_id} in {path}"
+                            )
                         row = self._row_from_header(current_id, header_meta, seq, bin_id)
                         contig_gene_idx[row["contig_id"]] = contig_gene_idx.get(row["contig_id"], 0)
                         row["gene_index"] = contig_gene_idx[row["contig_id"]]
@@ -483,6 +487,8 @@ class KnowledgeBaseBuilder:
                     seq_parts.append(line.strip())
             if current_id is not None:
                 seq = "".join(seq_parts)
+                if not seq.rstrip("*"):
+                    raise ValueError(f"Empty protein sequence for {current_id} in {path}")
                 row = self._row_from_header(current_id, header_meta, seq, bin_id)
                 contig_gene_idx[row["contig_id"]] = contig_gene_idx.get(row["contig_id"], 0)
                 row["gene_index"] = contig_gene_idx[row["contig_id"]]
@@ -1149,6 +1155,13 @@ def main(
     enable_cazymes: bool = typer.Option(False, "--enable-cazymes", help="Run dbCAN CAZyme classification (slow, off by default)"),
 ) -> None:
     logging.basicConfig(level=logging.INFO)
+    canonical_embeddings_dir = data_dir / "embeddings"
+    legacy_embeddings_dir = data_dir / "stage06_embeddings"
+    embeddings_dir = (
+        canonical_embeddings_dir
+        if canonical_embeddings_dir.exists() or not legacy_embeddings_dir.exists()
+        else legacy_embeddings_dir
+    )
     outputs = PipelineOutputs(
         stage00_dir=data_dir / "stage00_prepared",
         stage01_dir=data_dir / "stage01_quast",
@@ -1158,7 +1171,7 @@ def main(
         stage05a_dir=data_dir / "stage05a_gecco",
         stage05b_dir=data_dir / "stage05b_dbcan",
         stage05c_dir=data_dir / "stage05c_crispr",
-        stage06_dir=data_dir / "stage06_embeddings",
+        stage06_dir=embeddings_dir,
     )
     console.print(f"Detected stage outputs: {outputs.validate()}")
     builder = KnowledgeBaseBuilder(outputs, output, force=force, enable_cazymes=enable_cazymes)

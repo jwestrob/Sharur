@@ -10,17 +10,19 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
-from pathlib import Path
-from typing import List, Dict, Any
+from datetime import datetime, timezone
+from pathlib import Path  # noqa: TC003 - Typer resolves runtime annotations
+from typing import Any
 
 import typer
 from rich.console import Console
 from rich.progress import Progress
 
+
 console = Console()
 
 
-def run_minced(fasta: Path, out_dir: Path) -> Dict[str, Any]:
+def run_minced(fasta: Path, out_dir: Path) -> dict[str, Any]:
     """Run minced on a single fasta and return parsed arrays."""
     exe = shutil.which("minced")
     if exe is None:
@@ -32,7 +34,7 @@ def run_minced(fasta: Path, out_dir: Path) -> Dict[str, Any]:
 
     # MinCED usage: minced input.fa output.txt output.gff
     cmd = [exe, str(fasta), str(txt_out), str(gff_out)]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, check=False, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(f"minced failed: {result.stderr}")
 
@@ -40,7 +42,7 @@ def run_minced(fasta: Path, out_dir: Path) -> Dict[str, Any]:
     return {"genome": fasta.stem, "arrays": arrays}
 
 
-def parse_minced_gff(gff_path: Path) -> List[Dict[str, Any]]:
+def parse_minced_gff(gff_path: Path) -> list[dict[str, Any]]:
     """Parse minced GFF; arrays are marked as 'repeat_region' features with rpt_family=CRISPR."""
     arrays = []
     if not gff_path.exists():
@@ -52,7 +54,7 @@ def parse_minced_gff(gff_path: Path) -> List[Dict[str, Any]]:
             parts = line.strip().split("\t")
             if len(parts) < 9:
                 continue
-            seqid, _, ftype, start, end, score, strand, phase, attrs = parts
+            seqid, _, ftype, start, end, _score, strand, _phase, attrs = parts
             # MinCED outputs 'repeat_region' as feature type with rpt_family=CRISPR in attributes
             if ftype != "repeat_region":
                 continue
@@ -93,6 +95,7 @@ def run(
         raise typer.Exit(1)
 
     combined = []
+    failures = []
     with Progress() as progress:
         task = progress.add_task("Running minced...", total=len(fasta_files))
         for fasta in fasta_files:
@@ -102,6 +105,7 @@ def run(
                 progress.advance(task)
             except Exception as exc:
                 console.print(f"[yellow]minced failed on {fasta.name}: {exc}[/yellow]")
+                failures.append({"input": str(fasta), "error": str(exc)})
                 progress.advance(task)
 
     # Write per-genome JSONs
@@ -109,7 +113,21 @@ def run(
         path = output_dir / f"{entry['genome']}_crispr_arrays.json"
         path.write_text(json.dumps({"arrays": entry["arrays"]}, indent=2))
 
-    console.print(f"[green]CRISPR detection complete[/green]: wrote {len(combined)} JSONs to {output_dir}")
+    manifest = {
+        "version": "0.2.0",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "input_dir": str(input_dir.resolve()),
+        "output_dir": str(output_dir.resolve()),
+        "inputs": len(fasta_files),
+        "completed": len(combined),
+        "failed": failures,
+        "arrays": sum(len(entry["arrays"]) for entry in combined),
+    }
+    (output_dir / "processing_manifest.json").write_text(json.dumps(manifest, indent=2))
+
+    console.print(
+        f"[green]CRISPR detection complete[/green]: wrote {len(combined)} JSONs to {output_dir}"
+    )
 
 
 if __name__ == "__main__":

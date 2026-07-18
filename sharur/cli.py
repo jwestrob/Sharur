@@ -18,6 +18,7 @@ Example usage:
 """
 
 from pathlib import Path
+from enum import Enum
 from typing import Optional
 
 import typer
@@ -27,6 +28,18 @@ from sharur.operators import Sharur
 
 # Default DB path
 DEFAULT_DB = "data/sharur.duckdb"
+
+
+class OutputFormat(str, Enum):
+    markdown = "markdown"
+    json = "json"
+    jsonl = "jsonl"
+    tsv = "tsv"
+
+
+class BriefFormat(str, Enum):
+    markdown = "markdown"
+    json = "json"
 
 # Main app with subcommands
 app = typer.Typer(
@@ -56,6 +69,24 @@ def _main(
     """Sharur - Metagenomic dataset exploration CLI."""
 
 
+def _emit_result(result, output_format: OutputFormat) -> None:
+    """Render one operator result in a human- or machine-readable format."""
+    if output_format == OutputFormat.markdown:
+        typer.echo(result.data)
+        return
+    if output_format == OutputFormat.json:
+        typer.echo(result.to_json(indent=2))
+        return
+    if output_format == OutputFormat.jsonl:
+        import json
+
+        for record in result.records:
+            typer.echo(json.dumps(record, default=str))
+        return
+
+    typer.echo(result.to_dataframe().to_csv(sep="\t", index=False), nl=False)
+
+
 # ------------------------------------------------------------------ #
 # Overview command
 # ------------------------------------------------------------------ #
@@ -64,6 +95,12 @@ def _main(
 @app.command()
 def overview(
     db: str = typer.Option(DEFAULT_DB, "--db", "-d", help="Path to DuckDB database"),
+    output_format: OutputFormat = typer.Option(
+        OutputFormat.markdown,
+        "--format",
+        "-f",
+        help="Output format: markdown, json, jsonl, or tsv",
+    ),
 ):
     """
     Show dataset overview with summary statistics.
@@ -76,9 +113,9 @@ def overview(
         typer.echo(f"DB not found: {db}", err=True)
         raise typer.Exit(1)
 
-    b = Sharur(db_path)
+    b = Sharur(db_path, read_only=True)
     result = b.overview()
-    typer.echo(result.data)
+    _emit_result(result, output_format)
 
 
 # ------------------------------------------------------------------ #
@@ -93,6 +130,11 @@ def genomes(
     max_contamination: Optional[float] = typer.Option(None, "--max-contam", help="Maximum contamination %"),
     limit: int = typer.Option(20, "--limit", "-n", help="Maximum results"),
     db: str = typer.Option(DEFAULT_DB, "--db", "-d", help="Path to DuckDB database"),
+    output_format: OutputFormat = typer.Option(
+        OutputFormat.markdown,
+        "--format",
+        "-f",
+    ),
 ):
     """
     List genomes (MAGs) with optional filtering.
@@ -106,14 +148,14 @@ def genomes(
         typer.echo(f"DB not found: {db}", err=True)
         raise typer.Exit(1)
 
-    b = Sharur(db_path)
+    b = Sharur(db_path, read_only=True)
     result = b.list_genomes(
         taxonomy_filter=taxonomy,
         min_completeness=min_completeness,
         max_contamination=max_contamination,
         limit=limit,
     )
-    typer.echo(result.data)
+    _emit_result(result, output_format)
 
     if result.meta.truncated:
         typer.echo(f"\n[Showing {result.meta.rows} of {result.meta.total_rows} results]", err=True)
@@ -133,6 +175,11 @@ def proteins(
     annotated: Optional[bool] = typer.Option(None, "--annotated/--unannotated", help="Filter by annotation status"),
     limit: int = typer.Option(50, "--limit", "-n", help="Maximum results"),
     db: str = typer.Option(DEFAULT_DB, "--db", "-d", help="Path to DuckDB database"),
+    output_format: OutputFormat = typer.Option(
+        OutputFormat.markdown,
+        "--format",
+        "-f",
+    ),
 ):
     """
     List proteins with optional filtering.
@@ -146,7 +193,7 @@ def proteins(
         typer.echo(f"DB not found: {db}", err=True)
         raise typer.Exit(1)
 
-    b = Sharur(db_path)
+    b = Sharur(db_path, read_only=True)
     result = b.list_proteins(
         genome_id=genome,
         contig_id=contig,
@@ -155,7 +202,7 @@ def proteins(
         has_annotation=annotated,
         limit=limit,
     )
-    typer.echo(result.data)
+    _emit_result(result, output_format)
 
     if result.meta.truncated:
         typer.echo(f"\n[Showing {result.meta.rows} of {result.meta.total_rows} results]", err=True)
@@ -172,6 +219,11 @@ def neighborhood(
     window: int = typer.Option(10, "--window", "-w", help="Genes on each side"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show predicate details"),
     db: str = typer.Option(DEFAULT_DB, "--db", "-d", help="Path to DuckDB database"),
+    output_format: OutputFormat = typer.Option(
+        OutputFormat.markdown,
+        "--format",
+        "-f",
+    ),
 ):
     """
     Show genomic neighborhood around a protein.
@@ -187,10 +239,10 @@ def neighborhood(
         typer.echo(f"DB not found: {db}", err=True)
         raise typer.Exit(1)
 
-    b = Sharur(db_path)
+    b = Sharur(db_path, read_only=True)
     verbosity = 2 if verbose else 1
     result = b.get_neighborhood(entity_id=protein_id, window=window, verbosity=verbosity)
-    typer.echo(result.data)
+    _emit_result(result, output_format)
 
 
 # ------------------------------------------------------------------ #
@@ -207,6 +259,11 @@ def search(
     taxonomy: Optional[str] = typer.Option(None, "--taxonomy", "-t", help="Taxonomy filter"),
     limit: int = typer.Option(50, "--limit", "-n", help="Maximum results"),
     db: str = typer.Option(DEFAULT_DB, "--db", "-d", help="Path to DuckDB database"),
+    output_format: OutputFormat = typer.Option(
+        OutputFormat.markdown,
+        "--format",
+        "-f",
+    ),
 ):
     """
     Search proteins by predicates or annotations.
@@ -226,7 +283,7 @@ def search(
         typer.echo(f"DB not found: {db}", err=True)
         raise typer.Exit(1)
 
-    b = Sharur(db_path)
+    b = Sharur(db_path, read_only=True)
 
     # Parse comma-separated predicates
     has_list = [p.strip() for p in has.split(",")] if has else None
@@ -246,7 +303,7 @@ def search(
         typer.echo("Please specify search criteria: --has, --lacks, --annotation, --accession, or --taxonomy", err=True)
         raise typer.Exit(1)
 
-    typer.echo(result.data)
+    _emit_result(result, output_format)
 
     if result.meta.truncated:
         typer.echo(f"\n[Showing {result.meta.rows} of {result.meta.total_rows} results]", err=True)
@@ -393,6 +450,99 @@ def predicates(
             typer.echo(f"**{pred.predicate_id}**: {pred.description}")
 
     typer.echo(f"\nTotal: {len(preds)} predicates")
+
+
+# ------------------------------------------------------------------ #
+# Capability preflight and vector-index preparation
+# ------------------------------------------------------------------ #
+
+
+@app.command()
+def preflight(
+    db: str = typer.Option(DEFAULT_DB, "--db", "-d", help="Path to DuckDB database"),
+    output_format: BriefFormat = typer.Option(
+        BriefFormat.markdown,
+        "--format",
+        "-f",
+        help="Output format: markdown or json",
+    ),
+    skip_tools: bool = typer.Option(
+        False,
+        "--skip-tools",
+        help="Skip slower external binary/version probes.",
+    ),
+    strict: bool = typer.Option(
+        False,
+        "--strict",
+        help="Exit non-zero unless every required dataset capability is available.",
+    ),
+):
+    """Emit one typed dataset/runtime capability brief without modifying data."""
+    from sharur.capabilities import CapabilityState, build_capability_brief
+
+    brief = build_capability_brief(db, include_tools=not skip_tools)
+    if output_format == BriefFormat.json:
+        typer.echo(brief.to_json())
+    else:
+        typer.echo(brief.to_markdown())
+    if strict and brief.overall_state != CapabilityState.available:
+        raise typer.Exit(code=1)
+
+
+@app.command(name="build-vector-index")
+def build_vector_index_command(
+    embeddings: Optional[Path] = typer.Option(
+        None,
+        "--embeddings",
+        "-e",
+        help="Canonical protein_embeddings.h5 path.",
+    ),
+    db: Optional[Path] = typer.Option(
+        None,
+        "--db",
+        "-d",
+        help="DuckDB path; discovers embeddings beside the dataset.",
+    ),
+    force: bool = typer.Option(False, "--force", help="Rebuild an already-valid index."),
+    chunk_size: int = typer.Option(
+        50_000,
+        "--chunk-size",
+        help="Number of vectors streamed per FAISS add batch.",
+    ),
+    nprobe: int = typer.Option(32, "--nprobe", help="IVF partitions probed per query."),
+    threads: Optional[int] = typer.Option(
+        None,
+        "--threads",
+        "-t",
+        help="FAISS CPU build threads (default: FAISS runtime default).",
+    ),
+):
+    """Build mmap-ready FAISS sidecars and a stable disk-backed protein-ID map."""
+    import json
+
+    from sharur.storage.vector_store import build_vector_index
+
+    h5_path = embeddings
+    if h5_path is None and db is not None:
+        for directory in ("embeddings", "stage06_embeddings"):
+            candidate = db.expanduser().resolve().parent / directory / "protein_embeddings.h5"
+            if candidate.is_file():
+                h5_path = candidate
+                break
+    if h5_path is None:
+        raise typer.BadParameter("Provide --embeddings or a --db with discovered embeddings.")
+    if not h5_path.expanduser().is_file():
+        typer.echo(f"Embeddings not found: {h5_path}", err=True)
+        raise typer.Exit(1)
+
+    inspection = build_vector_index(
+        h5_path,
+        force=force,
+        chunk_size=chunk_size,
+        nprobe=nprobe,
+        threads=threads,
+    )
+    typer.echo(json.dumps(inspection.to_dict(), indent=2))
 
 
 # ------------------------------------------------------------------ #

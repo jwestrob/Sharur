@@ -115,7 +115,7 @@ def visualize_neighborhood(
         "figure_width": figure_width,
     }
 
-    with OperatorContext("visualize_neighborhood", params) as ctx:
+    with OperatorContext("visualize_neighborhood", params, store=store) as ctx:
         try:
             from dna_features_viewer import GraphicFeature, GraphicRecord
             import matplotlib
@@ -303,7 +303,11 @@ def visualize_domain_architecture(
     """
     params = {"protein_id": protein_id, "output_path": output_path}
 
-    with OperatorContext("visualize_domain_architecture", params) as ctx:
+    with OperatorContext(
+        "visualize_domain_architecture",
+        params,
+        store=store,
+    ) as ctx:
         try:
             from dna_features_viewer import GraphicFeature, GraphicRecord
             import matplotlib
@@ -425,7 +429,7 @@ def get_kegg_pathway_context(
     """
     params = {"protein_id": protein_id}
 
-    with OperatorContext("get_kegg_pathway_context", params) as ctx:
+    with OperatorContext("get_kegg_pathway_context", params, store=store) as ctx:
         # Get KEGG annotations for protein
         kegg_anns = store.execute(
             """

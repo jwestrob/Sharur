@@ -46,7 +46,7 @@ def search_by_predicates(
 
     params = {"has": has, "lacks": lacks, "limit": limit, "offset": offset}
 
-    with OperatorContext("search_by_predicates", params) as ctx:
+    with OperatorContext("search_by_predicates", params, store=store) as ctx:
         registry = get_registry()
 
         # Validate predicates - accept vocabulary, direct-access, or legacy registry
@@ -101,8 +101,12 @@ def _ensure_compatible_predicate_cache(store: "DuckDBStore") -> bool:
         return False
 
     legacy_complete = legacy_count == protein_count and legacy_join_count == protein_count
-    if legacy_complete and not _legacy_cache_is_older_than_v2(store):
-        return True
+    if legacy_complete:
+        # Read-only analytical sessions must never turn a query into a repair
+        # write. A complete compatibility snapshot is safe to query even when
+        # V2 has a newer timestamp; writable sessions reconcile it below.
+        if store.read_only or not _legacy_cache_is_older_than_v2(store):
+            return True
 
     semantic_complete = False
     try:
@@ -123,6 +127,14 @@ def _ensure_compatible_predicate_cache(store: "DuckDBStore") -> bool:
         semantic_join_count = 0
 
     if semantic_complete:
+        if store.read_only:
+            raise RuntimeError(
+                "protein_predicates compatibility cache is incomplete and cannot "
+                "be repaired in a read-only session. Reopen once with "
+                "read_only=False and run "
+                "b.generate_v2(update_legacy_predicates=True), then return to "
+                "read-only analysis."
+            )
         from sharur.predicates_v2.persistence import (
             materialize_legacy_predicates_from_v2,
         )
@@ -393,7 +405,7 @@ def search_proteins(
         "offset": offset,
     }
 
-    with OperatorContext("search_proteins", params) as ctx:
+    with OperatorContext("search_proteins", params, store=store) as ctx:
         clauses = []
         query_params = []
 
