@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from typing import TYPE_CHECKING
 
 
@@ -130,11 +131,6 @@ MIGRATIONS: list[tuple[int, str, str]] = [
         5,
         "Replicon provenance for validated systems",
         """
-        ALTER TABLE IF EXISTS defense_systems
-            ADD COLUMN IF NOT EXISTS contig_id VARCHAR;
-        ALTER TABLE IF EXISTS secretion_systems
-            ADD COLUMN IF NOT EXISTS contig_id VARCHAR;
-
         INSERT INTO schema_version (version, description)
             VALUES (5, 'Replicon provenance for validated systems');
         """,
@@ -271,6 +267,23 @@ def _quarantine_pre_v5_system_calls(conn: duckdb.DuckDBPyConnection) -> None:
     conn.execute("DROP TABLE sharur_stale_system_members")
 
 
+def _add_v5_replicon_columns(conn: duckdb.DuckDBPyConnection) -> None:
+    """Idempotently add caller provenance columns before data migration.
+
+    Current DuckDB releases reject altering and deleting from the same table
+    in one transaction. Adding a nullable column is safe as a pre-step: if the
+    later quarantine transaction fails, the database remains at schema version
+    4 and the whole migration can be retried.
+    """
+    tables = {str(row[0]) for row in conn.execute("SHOW TABLES").fetchall()}
+    for table_name in ("defense_systems", "secretion_systems"):
+        if (
+            table_name in tables
+            and "contig_id" not in _column_names(conn, table_name)
+        ):
+            conn.execute(f"ALTER TABLE {table_name} ADD COLUMN contig_id VARCHAR")
+
+
 def get_current_version(conn: duckdb.DuckDBPyConnection) -> int:
     """Return current schema version, or 0 if no version table exists."""
     try:
@@ -302,13 +315,17 @@ def run_migrations(
             break
 
         if version == 5:
+            _add_v5_replicon_columns(conn)
             conn.execute("BEGIN TRANSACTION")
             try:
                 _quarantine_pre_v5_system_calls(conn)
                 conn.execute(sql)
                 conn.commit()
             except Exception:
-                conn.rollback()
+                # DuckDB can close an aborted transaction automatically.
+                # Preserve the migration error rather than masking it.
+                with suppress(Exception):
+                    conn.rollback()
                 raise
         else:
             conn.execute(sql)
