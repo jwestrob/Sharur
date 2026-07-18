@@ -85,6 +85,25 @@ append_finding_record(
 )
 ```
 
+To correct an existing canonical record, do not rewrite the JSONL manually.
+Load the complete target record, modify it, and replace it by ID:
+
+```python
+from sharur.core.analysis_record_io import replace_finding_record
+
+replace_finding_record(
+    "data/DATASET/exploration/findings.jsonl",
+    "exploration-139",
+    corrected_complete_record,
+    phase="exploration",
+)
+```
+
+The replacement is locked, validated, and atomic. Its line position is
+preserved, and unrelated records—including legacy records—remain
+byte-for-byte unchanged. This is a full-record replacement, not a partial
+patch.
+
 `strict=False` is permitted only for an explicitly non-canonical draft spool. A coordinator
 must read, resolve duplicate IDs or conflicting claims, and append every accepted record to
 the canonical archive with `strict=True`. Never concatenate draft files into a canonical

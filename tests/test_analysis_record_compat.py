@@ -13,6 +13,7 @@ from sharur.core.analysis_record_compat import normalize_finding
 from sharur.core.analysis_record_io import (
     FindingValidationError,
     append_finding_record,
+    replace_finding_record,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -334,6 +335,68 @@ def test_append_rejects_duplicate_explicit_id(tmp_path: Path) -> None:
 
     with pytest.raises(FindingValidationError, match="already exists"):
         append_finding_record(findings_path, finding)
+
+
+def test_replace_finding_record_preserves_other_lines(tmp_path: Path) -> None:
+    findings_path = tmp_path / "exploration" / "findings.jsonl"
+    first = {
+        "id": "legacy-A001",
+        "title": "Legacy record",
+        "category": "general",
+        "description": "Must remain byte-for-byte stable.",
+        "evidence": {},
+        "verification": [
+            {"claim": "one", "query": "SELECT 1", "expected": 1}
+        ],
+    }
+    second = {
+        "id": "exploration-002",
+        "title": "Replaceable record",
+        "category": "general",
+        "description": "Before.",
+        "evidence": {},
+        "verification": [
+            {"claim": "one", "query": "SELECT 1", "expected": 1}
+        ],
+    }
+    append_finding_record(findings_path, first)
+    append_finding_record(findings_path, second)
+    original_first_line = findings_path.read_text().splitlines(keepends=True)[0]
+
+    second["description"] = "After."
+    result = replace_finding_record(
+        findings_path,
+        "exploration-002",
+        second,
+    )
+    lines = findings_path.read_text().splitlines(keepends=True)
+
+    assert result.finding["description"] == "After."
+    assert result.finding["id"] == "exploration-002"
+    assert len(lines) == 2
+    assert lines[0] == original_first_line
+
+
+def test_replace_finding_record_rejects_missing_id(tmp_path: Path) -> None:
+    findings_path = tmp_path / "exploration" / "findings.jsonl"
+    finding = {
+        "id": "exploration-001",
+        "title": "Existing record",
+        "category": "general",
+        "description": "Existing.",
+        "evidence": {},
+        "verification": [
+            {"claim": "one", "query": "SELECT 1", "expected": 1}
+        ],
+    }
+    append_finding_record(findings_path, finding)
+
+    with pytest.raises(FindingValidationError, match="does not exist"):
+        replace_finding_record(
+            findings_path,
+            "exploration-999",
+            finding,
+        )
 
 
 def test_parallel_appends_allocate_unique_ids(tmp_path: Path) -> None:

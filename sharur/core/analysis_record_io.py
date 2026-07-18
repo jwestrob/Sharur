@@ -187,6 +187,86 @@ def append_finding_record(
     return result
 
 
+def replace_finding_record(
+    path: str | Path,
+    finding_id: str,
+    finding: dict[str, Any],
+    *,
+    phase: str | None = None,
+    strict: bool = True,
+) -> FindingNormalizationResult:
+    """Atomically replace one canonical finding while preserving line order.
+
+    This is the safe correction path for an existing JSONL archive. Unrelated
+    records, including legacy records, are retained byte-for-byte.
+    """
+    path = Path(path)
+    target_id = str(finding_id)
+    with _exclusive_findings_lock(path):
+        if not path.exists():
+            raise FindingValidationError(f"Findings archive does not exist: {path}")
+
+        lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+        record_ordinal = 0
+        target_line_indexes: list[tuple[int, int]] = []
+        for line_index, line in enumerate(lines):
+            if not line.strip():
+                continue
+            record_ordinal += 1
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise FindingValidationError(
+                    f"Cannot replace record in malformed JSONL at "
+                    f"line {line_index + 1}: {exc}"
+                ) from exc
+            record_id = record.get("id") if isinstance(record, dict) else None
+            if record_id is not None and str(record_id) == target_id:
+                target_line_indexes.append((line_index, record_ordinal))
+
+        if not target_line_indexes:
+            raise FindingValidationError(
+                f"Finding ID {target_id!r} does not exist in {path}"
+            )
+        if len(target_line_indexes) > 1:
+            raise FindingValidationError(
+                f"Finding ID {target_id!r} occurs multiple times in {path}"
+            )
+
+        raw = dict(finding)
+        supplied_id = raw.get("id")
+        if supplied_id is not None and str(supplied_id) != target_id:
+            raise FindingValidationError(
+                f"Replacement ID {supplied_id!r} does not match target "
+                f"{target_id!r}"
+            )
+        raw["id"] = target_id
+
+        line_index, ordinal = target_line_indexes[0]
+        result = _prepare_with_ordinal(
+            raw,
+            path,
+            phase=phase,
+            ordinal=ordinal,
+        )
+        if strict:
+            _raise_for_issues(result)
+
+        newline = "\n" if lines[line_index].endswith("\n") else ""
+        lines[line_index] = (
+            json.dumps(result.finding, default=str) + newline
+        )
+
+        temporary_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        with temporary_path.open("w", encoding="utf-8") as handle:
+            handle.writelines(lines)
+            handle.flush()
+            os.fsync(handle.fileno())
+        temporary_path.replace(path)
+
+    return result
+
+
 def write_findings_records(
     path: str | Path,
     findings: Iterable[dict[str, Any]],
@@ -232,5 +312,6 @@ __all__ = [
     "append_finding_record",
     "FindingValidationError",
     "prepare_finding_for_write",
+    "replace_finding_record",
     "write_findings_records",
 ]
