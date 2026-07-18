@@ -16,10 +16,6 @@ from typing import Optional, Dict, List, Tuple
 
 import duckdb
 import pandas as pd
-from dna_features_viewer import GraphicFeature, GraphicRecord
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 
 
 # Color scheme by annotation source
@@ -357,6 +353,17 @@ def plot_locus(
         title: Custom title (default: auto-generated)
         subtitle: Custom subtitle (default: shows annotation sources)
     """
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        from dna_features_viewer import GraphicFeature, GraphicRecord
+    except ImportError as exc:
+        raise RuntimeError(
+            "Locus plotting requires Sharur's visualization dependencies; "
+            "install them with `pip install -e '.[visualization]'`."
+        ) from exc
+
     db = duckdb.connect(str(db_path), read_only=True)
 
     # Load external annotation sources
