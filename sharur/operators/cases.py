@@ -25,8 +25,14 @@ from sharur.core.case_models import (
     EntityReference,
     NamedCallEvidence,
     ProteinContextRecord,
+    SyntenyMembershipEvidence,
 )
 from sharur.operators.semantics import get_active_predicates
+from sharur.synteny import (
+    SyntenyDatasetMismatchError,
+    SyntenyStore,
+    discover_synteny_sidecar,
+)
 
 
 if TYPE_CHECKING:
@@ -695,6 +701,8 @@ def inspect_case(
     downstream_orfs: int | None = None,
     include_sequences: bool = False,
     assembly_evidence_path: str | Path | None = None,
+    synteny_path: str | Path | None = None,
+    allow_stale_synteny: bool = False,
 ) -> BiologicalCase:
     """Resolve an entity into a typed, provenance-separated biological case."""
     default_window, upstream, downstream = _resolve_windows(
@@ -970,6 +978,79 @@ def inspect_case(
             "Optional assembly/host-assignment evidence is not available for this dataset."
         )
 
+    synteny_memberships: list[SyntenyMembershipEvidence] = []
+    synteny_state: Literal["available", "unavailable", "stale", "failed"] = (
+        "unavailable"
+    )
+    discovered_synteny = None
+    if db_path is not None:
+        discovered_synteny = discover_synteny_sidecar(
+            db_path,
+            explicit_path=synteny_path,
+        )
+        if discovered_synteny is not None:
+            try:
+                if component_ids:
+                    with SyntenyStore(
+                        discovered_synteny,
+                        core_db_path=db_path,
+                        allow_stale=allow_stale_synteny,
+                    ) as synteny_store:
+                        membership_rows, membership_total, _run_id = (
+                            synteny_store.protein_memberships(
+                                component_ids,
+                                limit=25,
+                            )
+                        )
+                    synteny_memberships = [
+                        SyntenyMembershipEvidence(
+                            run_id=str(row["run_id"]),
+                            protein_id=str(row["protein_id"]),
+                            member_role=str(row["member_role"]),
+                            cluster_key=str(row["cluster_key"]),
+                            source_cluster_id=(
+                                int(row["source_cluster_id"])
+                                if row.get("source_cluster_id") is not None
+                                else None
+                            ),
+                            cluster_kind=str(row["cluster_kind"]),
+                            block_count=int(row["block_count"]),
+                            genome_support=int(row["genome_support"]),
+                            locus_key=str(row["locus_key"]),
+                            locus_genome_id=str(row["genome_id"]),
+                            locus_contig_id=str(row["contig_id"]),
+                            locus_start_position_index=int(
+                                row["start_position_index"]
+                            ),
+                            locus_end_position_index=int(
+                                row["end_position_index"]
+                            ),
+                        )
+                        for row in membership_rows
+                    ]
+                    if membership_total > len(membership_rows):
+                        limitations.append(
+                            "ELSA membership summary is paginated: "
+                            f"returned {len(membership_rows)} of {membership_total}; "
+                            "use synteny_for_proteins() for the full result."
+                        )
+                synteny_state = "available"
+            except SyntenyDatasetMismatchError as exc:
+                synteny_state = "stale"
+                limitations.append(str(exc))
+            except Exception as exc:
+                synteny_state = "failed"
+                limitations.append(
+                    "ELSA sidecar could not be read: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+        elif synteny_path is not None:
+            synteny_state = "failed"
+            limitations.append(
+                "Explicit ELSA sidecar does not exist: "
+                f"{Path(synteny_path).expanduser().resolve()}"
+            )
+
     trace: dict[str, Any] = {
         "operator": "inspect",
         "parameters": {
@@ -981,10 +1062,14 @@ def inspect_case(
             "upstream_orfs": upstream,
             "downstream_orfs": downstream,
             "include_sequences": include_sequences,
+            "allow_stale_synteny": allow_stale_synteny,
         },
         "database": str(db_path) if db_path is not None else "memory",
         "assembly_evidence_sidecar": (
             str(discovered_sidecar) if discovered_sidecar is not None else None
+        ),
+        "synteny_sidecar": (
+            str(discovered_synteny) if discovered_synteny is not None else None
         ),
     }
     try:
@@ -1008,6 +1093,8 @@ def inspect_case(
         named_calls=named_calls,
         assembly_evidence=assembly_record,
         assembly_evidence_state=assembly_state,
+        synteny_memberships=synteny_memberships,
+        synteny_state=synteny_state,
         limitations=list(dict.fromkeys(limitations)),
         trace=trace,
     )
@@ -1947,6 +2034,34 @@ class BiologicalCase:
             lines.append(f"- Populated fields: {', '.join(fields) if fields else 'none'}")
             for field_name in fields:
                 lines.append(f"- `{field_name}`: {escape(payload[field_name])}")
+        lines.extend(
+            [
+                "",
+                "## ELSA synteny",
+                "",
+                f"- State: `{self.record.synteny_state}`",
+            ]
+        )
+        if self.record.synteny_memberships:
+            lines.extend(
+                [
+                    "",
+                    "| Protein | Role | Run | Cluster | Blocks | Genomes |",
+                    "|---|---|---|---|---:|---:|",
+                ]
+            )
+            for membership in self.record.synteny_memberships:
+                source = (
+                    f" / source {membership.source_cluster_id}"
+                    if membership.source_cluster_id is not None
+                    else ""
+                )
+                lines.append(
+                    f"| `{escape(membership.protein_id)}` | "
+                    f"{membership.member_role} | `{membership.run_id}` | "
+                    f"`{membership.cluster_key}{source}` | "
+                    f"{membership.block_count} | {membership.genome_support} |"
+                )
         if self.record.limitations:
             lines.extend(["", "## Limitations", ""])
             lines.extend(f"- {limitation}" for limitation in self.record.limitations)

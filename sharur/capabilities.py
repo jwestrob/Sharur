@@ -751,6 +751,111 @@ def _assembly_evidence_check(
         )
 
 
+def _synteny_check(
+    db_path: Path,
+    *,
+    explicit_path: str | Path | None = None,
+) -> Capability:
+    """Inspect the optional normalized, run-scoped ELSA result sidecar."""
+    from sharur.synteny import (  # noqa: PLC0415
+        DEFAULT_SIDECAR_NAME,
+        EXPECTED_SCHEMA_VERSION,
+        discover_synteny_sidecar,
+        inspect_synteny_dataset_identity,
+        inspect_synteny_sidecar,
+    )
+
+    expected_path = (
+        Path(explicit_path).expanduser().resolve()
+        if explicit_path is not None
+        else db_path.parent / DEFAULT_SIDECAR_NAME
+    )
+    sidecar = discover_synteny_sidecar(
+        db_path,
+        explicit_path=explicit_path,
+    )
+    if sidecar is None:
+        explicitly_missing = explicit_path is not None
+        return Capability(
+            "elsa_synteny",
+            (
+                CapabilityState.failed
+                if explicitly_missing
+                else CapabilityState.unavailable
+            ),
+            (
+                "The explicitly configured ELSA sidecar does not exist."
+                if explicitly_missing
+                else "A normalized ELSA result sidecar is not available."
+            ),
+            evidence={
+                "path": str(expected_path),
+                "required": False,
+                "contract": "normalized-run-scoped-v1",
+            },
+            remediation=(
+                "Correct the explicit sidecar path."
+                if explicitly_missing
+                else (
+                    "Materialize DATASET/synteny.duckdb from an ELSA block "
+                    "checkpoint and gene store."
+                )
+            ),
+        )
+
+    inspection = inspect_synteny_sidecar(sidecar)
+    state = CapabilityState(inspection.state)
+    identity = inspect_synteny_dataset_identity(db_path, inspection)
+    if not identity.compatible:
+        state = CapabilityState.stale
+
+    if state == CapabilityState.available:
+        summary = (
+            f"Normalized ELSA run {inspection.active_run_id} is queryable "
+            f"across {inspection.cluster_count} complete clusters."
+        )
+        remediation = None
+    elif state == CapabilityState.stale:
+        summary = (
+            "The ELSA sidecar is readable, but its schema, active run, or "
+            "dataset identity requires refresh."
+        )
+        remediation = (
+            "Rematerialize the sidecar from the current dataset and ELSA artifacts."
+        )
+    else:
+        summary = "The ELSA sidecar could not satisfy the normalized result contract."
+        remediation = "Inspect or recreate the ELSA sidecar."
+
+    return Capability(
+        "elsa_synteny",
+        state,
+        summary,
+        evidence={
+            "path": str(sidecar),
+            "schema_version": inspection.schema_version,
+            "code_schema_version": EXPECTED_SCHEMA_VERSION,
+            "active_run_id": inspection.active_run_id,
+            "run_status": inspection.status,
+            "dataset_id": inspection.dataset_id,
+            "dataset_seal_path": str(identity.seal_path),
+            "dataset_seal_id": identity.seal_dataset_id,
+            "dataset_identity_check": identity.state,
+            "dataset_identity_error": identity.error,
+            "gene_count": inspection.gene_count,
+            "block_count": inspection.block_count,
+            "cluster_count": inspection.cluster_count,
+            "singleton_count": inspection.singleton_count,
+            "anchor_pair_count": inspection.anchor_pair_count,
+            "locus_count": inspection.locus_count,
+            "member_count": inspection.member_count,
+            "error": inspection.error,
+            "claim_level": "inferred",
+        },
+        remediation=remediation,
+    )
+
+
 def _execution_checks() -> list[Capability]:
     from sharur.ingest.resources import resolve_resource_profile  # noqa: PLC0415
 
@@ -893,6 +998,7 @@ def build_capability_brief(
     include_tools: bool = False,
     include_execution: bool = True,
     assembly_evidence_path: str | Path | None = None,
+    synteny_path: str | Path | None = None,
 ) -> CapabilityBrief:
     """Build one non-mutating capability/preflight brief."""
     resolved = Path(db_path).expanduser().resolve()
@@ -932,6 +1038,12 @@ def build_capability_brief(
         _assembly_evidence_check(
             resolved,
             explicit_path=assembly_evidence_path,
+        )
+    )
+    capabilities.append(
+        _synteny_check(
+            resolved,
+            explicit_path=synteny_path,
         )
     )
     if include_execution:

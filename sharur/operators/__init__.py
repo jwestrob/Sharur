@@ -18,8 +18,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 from sharur.core.session import ExplorationSession
-from sharur.operators.base import SharurResult, OperatorContext, OperatorTrace, ResultMeta
+from sharur.operators.base import OperatorContext, OperatorTrace, ResultMeta, SharurResult
+from sharur.operators.cases import BiologicalCase, inspect_case
+from sharur.operators.export import export_fasta, export_neighborhood_fasta, get_sequence
+from sharur.operators.foldseek import (
+    list_foldseek_databases,
+    search_foldseek,
+    search_foldseek_for_protein,
+)
 from sharur.operators.introspection import describe_schema, overview
+from sharur.operators.manifest import AnalysisManifest
 from sharur.operators.navigation import (
     get_genome,
     get_neighborhood,
@@ -27,34 +35,33 @@ from sharur.operators.navigation import (
     list_genomes,
     list_proteins,
 )
-from sharur.operators.cases import BiologicalCase, inspect_case
 from sharur.operators.search import search_by_predicates, search_proteins
-from sharur.operators.export import export_fasta, export_neighborhood_fasta, get_sequence
 from sharur.operators.similarity import find_similar, find_similar_to_set
+from sharur.operators.structure import (
+    batch_predict_structures,
+    predict_structure,
+    predict_structure_from_sequence,
+)
+from sharur.operators.synteny import (
+    get_synteny_cluster,
+    synteny_anchor_blocks,
+    synteny_for_proteins,
+)
+from sharur.operators.validation import (
+    PROBLEM_DOMAINS,
+    analyze_crispr_systems,
+    detect_annotation_errors,
+    validate_annotation,
+    validate_context,
+)
 from sharur.operators.visualization import (
     get_kegg_pathway_context,
     visualize_case,
     visualize_domain_architecture,
     visualize_neighborhood,
 )
-from sharur.operators.structure import (
-    predict_structure,
-    predict_structure_from_sequence,
-    batch_predict_structures,
-)
-from sharur.operators.foldseek import (
-    search_foldseek,
-    search_foldseek_for_protein,
-    list_foldseek_databases,
-)
-from sharur.operators.validation import (
-    PROBLEM_DOMAINS,
-    validate_annotation,
-    validate_context,
-    analyze_crispr_systems,
-    detect_annotation_errors,
-)
-from sharur.operators.manifest import AnalysisManifest
+from sharur.synteny import discover_synteny_sidecar
+
 
 if TYPE_CHECKING:
     from sharur.capabilities import CapabilityBrief
@@ -76,6 +83,8 @@ class Sharur:
         *,
         read_only: bool = False,
         assembly_evidence_path: Path | str | None = None,
+        synteny_path: Path | str | None = None,
+        allow_stale_synteny: bool = False,
     ):
         """
         Initialize Sharur instance.
@@ -87,6 +96,11 @@ class Sharur:
             assembly_evidence_path: Optional contig-evidence sidecar. When
                 omitted, ``assembly_evidence.duckdb`` is discovered beside
                 the core database. Absence is a typed optional capability.
+            synteny_path: Optional normalized ELSA result sidecar. When
+                omitted, ``synteny.duckdb`` is discovered beside the core
+                database.
+            allow_stale_synteny: Explicitly permit querying an ELSA run whose
+                dataset identity differs from the live Sharur seal.
         """
         self._db_path = Path(db_path) if db_path else None
         self._read_only = read_only
@@ -95,6 +109,10 @@ class Sharur:
             if assembly_evidence_path is not None
             else None
         )
+        self._synteny_path = (
+            Path(synteny_path) if synteny_path is not None else None
+        )
+        self._allow_stale_synteny = allow_stale_synteny
         self._session: Optional[ExplorationSession] = None
         self._manifest: Optional[AnalysisManifest] = None
         self._hypothesis_registry = None
@@ -178,6 +196,7 @@ class Sharur:
             self._db_path,
             include_tools=include_tools,
             assembly_evidence_path=self._assembly_evidence_path,
+            synteny_path=self._synteny_path,
         )
 
     # ------------------------------------------------------------------ #
@@ -321,6 +340,101 @@ class Sharur:
             downstream_orfs=downstream_orfs,
             include_sequences=include_sequences,
             assembly_evidence_path=self._assembly_evidence_path,
+            synteny_path=self._synteny_path,
+            allow_stale_synteny=self._allow_stale_synteny,
+        )
+
+    # ------------------------------------------------------------------ #
+    # Exact ELSA synteny operators
+    # ------------------------------------------------------------------ #
+
+    def _require_synteny_path(self) -> Path:
+        """Resolve the normalized ELSA sidecar or fail actionably."""
+        if self._db_path is None:
+            raise ValueError("ELSA synteny queries require a file-backed dataset")
+        path = discover_synteny_sidecar(
+            self._db_path,
+            explicit_path=self._synteny_path,
+        )
+        if path is None:
+            raise FileNotFoundError(
+                "Normalized ELSA sidecar is unavailable; materialize "
+                "DATASET/synteny.duckdb with `elsa materialize-results`"
+            )
+        return path
+
+    def synteny_for_protein(
+        self,
+        protein_id: str,
+        *,
+        run_id: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> SharurResult:
+        """Return exact cluster-locus memberships for one protein."""
+        return synteny_for_proteins(
+            self.store,
+            self._require_synteny_path(),
+            [protein_id],
+            run_id=run_id,
+            limit=limit,
+            allow_stale=self._allow_stale_synteny,
+            offset=offset,
+        )
+
+    def synteny_for_proteins(
+        self,
+        protein_ids: list[str],
+        *,
+        run_id: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> SharurResult:
+        """Return exact, many-to-many memberships for a protein cohort."""
+        return synteny_for_proteins(
+            self.store,
+            self._require_synteny_path(),
+            protein_ids,
+            run_id=run_id,
+            limit=limit,
+            offset=offset,
+            allow_stale=self._allow_stale_synteny,
+        )
+
+    def synteny_anchor_blocks(
+        self,
+        protein_id: str,
+        *,
+        run_id: str | None = None,
+        limit: int = 50,
+    ) -> SharurResult:
+        """Return exact orientation-resolved anchor partners and blocks."""
+        return synteny_anchor_blocks(
+            self.store,
+            self._require_synteny_path(),
+            protein_id,
+            run_id=run_id,
+            limit=limit,
+            allow_stale=self._allow_stale_synteny,
+        )
+
+    def get_synteny_cluster(
+        self,
+        cluster: str | int,
+        *,
+        run_id: str | None = None,
+        member_limit: int = 100,
+        member_offset: int = 0,
+    ) -> SharurResult:
+        """Return a run-scoped cluster with bounded exact members."""
+        return get_synteny_cluster(
+            self.store,
+            self._require_synteny_path(),
+            cluster,
+            run_id=run_id,
+            member_limit=member_limit,
+            member_offset=member_offset,
+            allow_stale=self._allow_stale_synteny,
         )
 
     # ------------------------------------------------------------------ #
@@ -1157,6 +1271,10 @@ __all__ = [
     # Similarity
     "find_similar",
     "find_similar_to_set",
+    # ELSA synteny
+    "get_synteny_cluster",
+    "synteny_anchor_blocks",
+    "synteny_for_proteins",
     # Visualization
     "visualize_case",
     "visualize_neighborhood",

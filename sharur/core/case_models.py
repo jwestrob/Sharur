@@ -176,6 +176,27 @@ class AssemblyEvidenceRecord(BaseModel):
         ]
 
 
+class SyntenyMembershipEvidence(BaseModel):
+    """Exact ELSA protein↔cluster-locus membership from one identified run."""
+
+    model_config = ConfigDict(frozen=True)
+
+    run_id: str
+    protein_id: str
+    member_role: Literal["anchor", "context"]
+    cluster_key: str
+    source_cluster_id: int | None = None
+    cluster_kind: Literal["cluster", "singleton"]
+    block_count: int = Field(ge=1)
+    genome_support: int = Field(ge=1)
+    locus_key: str
+    locus_genome_id: str
+    locus_contig_id: str
+    locus_start_position_index: int = Field(ge=0)
+    locus_end_position_index: int = Field(ge=0)
+    evidence_level: EvidenceLevel = EvidenceLevel.inferred
+
+
 class CaseRecord(BaseModel):
     """Serializable, self-contained biological evidence case."""
 
@@ -189,6 +210,8 @@ class CaseRecord(BaseModel):
     named_calls: list[NamedCallEvidence] = Field(default_factory=list)
     assembly_evidence: AssemblyEvidenceRecord | None = None
     assembly_evidence_state: Literal["available", "unavailable", "failed"] = "unavailable"
+    synteny_memberships: list[SyntenyMembershipEvidence] = Field(default_factory=list)
+    synteny_state: Literal["available", "unavailable", "stale", "failed"] = "unavailable"
     limitations: list[str] = Field(default_factory=list)
     trace: dict[str, Any] = Field(default_factory=dict)
 

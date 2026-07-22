@@ -877,6 +877,11 @@ def preflight(
         "--assembly-evidence",
         help="Optional non-default assembly-evidence sidecar.",
     ),
+    synteny: Path | None = typer.Option(
+        None,
+        "--synteny",
+        help="Optional non-default normalized ELSA sidecar.",
+    ),
     output_format: BriefFormat = typer.Option(
         BriefFormat.markdown,
         "--format",
@@ -901,6 +906,7 @@ def preflight(
         db,
         include_tools=not skip_tools,
         assembly_evidence_path=assembly_evidence,
+        synteny_path=synteny,
     )
     if output_format == BriefFormat.json:
         typer.echo(brief.to_json())

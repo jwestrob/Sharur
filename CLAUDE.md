@@ -73,6 +73,14 @@ rerunning a specific stage, or intentionally customizing the stage sequence. If
 
 ## Core Rules (always apply)
 
+### Model-visible sequence handling
+
+Never include raw nucleotide or amino-acid sequences in model-visible chat, reports,
+logs, or generated summaries. Refer to stable protein/contig identifiers and local
+FASTA paths instead. Sequence extraction and computation may occur in local or remote
+tools, but their outputs should expose identifiers, lengths, statistics, or result
+paths rather than sequence strings.
+
 ### Data Integrity
 
 **Never write structured data from memory.** When producing JSON, JSONL, TSV, or any output that references findings, annotations, or database entries, ALWAYS read the source data first. Write a script to process actual files — do not reconstruct from conversation history.
@@ -100,9 +108,9 @@ Findings must include a `verification` field — a list of claim/query/expected 
       "expected": 3
     },
     {
-      "claim": "ELSA cluster 170014 has genome_support=3",
-      "query": "awk -F, '$1==170014 {print $3}' data/dpann/synteny/results/micro_chain_clusters.csv",
-      "expected": "3"
+      "claim": "The exact protein belongs to the cited run-scoped ELSA cluster",
+      "query": "Sharur('data/DATASET/sharur.duckdb', read_only=True).synteny_for_protein('EXACT_PROTEIN_ID').to_json()",
+      "expected": {"run_id": "elsa-RUN_ID", "cluster_key": "cluster:SOURCE_ID"}
     }
   ]
 }
@@ -212,7 +220,8 @@ data/{dataset_name}/
 ├── annotations/                # Annotation results
 ├── embeddings/                 # ESM2 embeddings (H5 + FAISS)
 ├── structures/                 # ESM3 PDBs + Foldseek results
-├── synteny/                    # ELSA synteny results + FAISS store
+├── synteny.duckdb             # Normalized, run-scoped ELSA result sidecar
+├── synteny/                    # ELSA checkpoints + persistent index
 ├── exploration/                # Exploration outputs
 ├── survey/                     # Survey outputs
 ├── reports/                    # Generated reports

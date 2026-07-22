@@ -1,261 +1,291 @@
-# /synteny — ELSA Synteny Discovery
+# /synteny — Exact ELSA Synteny Access
 
-Run ELSA embedding-based synteny detection on a Sharur dataset. Finds conserved gene neighborhoods across genomes by chaining cosine-similar protein pairs into collinear blocks.
+Run ELSA embedding-based synteny discovery and query its normalized,
+run-scoped result sidecar from Sharur. ELSA evidence describes inferred
+conservation of gene neighborhoods. Functional system and pathway names still
+require an exact call from a live, purpose-built annotation resource.
 
-## Prerequisites
+## Canonical contract
 
-1. **Embeddings must exist.** Stage 06 (`protein_embeddings.h5`) is required. If missing, run:
-   ```bash
-   python src/ingest/06_esm2_embeddings.py data/DATASET/stage03_prodigal data/DATASET/embeddings/
-   ```
+Each Sharur dataset may contain:
 
-2. **ELSA must be installed** in the active Python environment:
-   ```bash
-   pip install -e /path/to/ELSA
-   pip install faiss-cpu h5py
-   ```
+```text
+data/DATASET/
+├── sharur.duckdb                 # Core proteins and annotations
+├── dataset.seal.json             # Stable dataset identity
+├── synteny.duckdb                # Canonical ELSA result sidecar
+└── synteny/
+    ├── store/
+    │   ├── index.faiss
+    │   ├── metadata.parquet
+    │   ├── embeddings.npy
+    │   └── config.json
+    └── results/
+        ├── micro_chain_blocks.csv
+        └── micro_chain_clusters.csv
+```
 
-3. **macOS OMP fix** — set before running:
-   ```bash
-   export KMP_DUPLICATE_LIB_OK=TRUE
-   ```
+`synteny.duckdb` is the agent query surface. It carries:
 
-## Workflow
+- a deterministic `run_id`, dataset identity, parameters, input hashes, ELSA
+  version, commit, mapping version, validation results, and active-run state;
+- exact protein IDs and coordinate-sorted ELSA position indices;
+- orientation-resolved anchor pairs;
+- every block and every cluster, including singleton clusters;
+- explicit cluster loci and many-to-many protein membership with `anchor` or
+  `context` roles.
 
-### Step 1: Run ELSA synteny
+Source cluster integers are local labels. Cite them together with `run_id` and
+the canonical `cluster_key`.
+
+## Preflight
+
+Inspect the live capability before using ELSA evidence:
+
+```python
+from sharur.operators import Sharur
+
+b = Sharur("data/DATASET/sharur.duckdb", read_only=True)
+capability = b.capabilities().get("elsa_synteny")
+print(capability.state.value)
+print(capability.evidence)
+```
+
+Proceed when `elsa_synteny` is `available`. A `stale` state identifies schema,
+active-run, or dataset-seal drift. An `unavailable` state identifies a dataset
+that still needs materialization.
+
+Query methods enforce the dataset-seal comparison. A stale sidecar raises
+`SyntenyDatasetMismatchError`, and `inspect()` records `synteny_state="stale"`
+with zero attached memberships.
+
+Historical analysis requires an explicit, documented opt-in:
+
+```python
+b = Sharur(
+    "data/DATASET/sharur.duckdb",
+    read_only=True,
+    allow_stale_synteny=True,
+)
+```
+
+Use this only after inspecting the recorded drift and cite the run as
+historical. A current biological claim requires a refreshed embedding and
+chaining run when the changed records intersect the claim.
+
+## Run ELSA
+
+Prerequisites:
+
+1. Stage 06 `protein_embeddings.h5` exists.
+2. ELSA is installed in the active environment.
+3. macOS runs export `KMP_DUPLICATE_LIB_OK=TRUE`.
+4. One MPS or other heavy ELSA compute process runs at a time.
 
 ```bash
 elsa synteny \
     --db data/DATASET/sharur.duckdb \
     --embeddings data/DATASET/embeddings/protein_embeddings.h5 \
+    --annotations-db data/DATASET/sharur.duckdb \
     --store data/DATASET/synteny/store \
-    -o data/DATASET/synteny/
+    --result-db data/DATASET/synteny.duckdb \
+    --run-label DATASET-production \
+    --jobs "$(sysctl -n hw.logicalcpu)" \
+    -o data/DATASET/synteny/results/
 ```
 
-Use `--store` to persist the FAISS index. Subsequent runs can reload with just `--store` (no `--db`/`--embeddings`).
+The CLI writes the legacy CSV interchange files and materializes the normalized
+sidecar. `--store` preserves the exact gene ordering and embedding index used
+by the run.
 
-### Step 2: Interpret results
+### Materialize an existing checkpoint
 
-Two output files in the output directory:
+Use the original result directory and its exact store:
 
-**`micro_chain_blocks.csv`** (~1.6M rows for DPANN) — one row per syntenic block (collinear gene run between two contigs):
-- `block_id`, `cluster_id` — identifiers
-- `query_genome`, `target_genome` — the two genomes
-- `n_anchors` — number of anchor gene pairs (2 = gene pair, 20+ = large operon)
-- `chain_score` — sum of cosine similarities
-- `orientation` — `"same"` or `"inverted"`
-- `query_anchor_genes`, `target_anchor_genes` — JSON arrays of **Sharur protein_ids** (e.g., `["DATDYP010000003.1_26", "DATDYP010000003.1_29"]`)
-
-**`micro_chain_clusters.csv`** (~68k rows for DPANN, 107 MB) — clusters of overlapping blocks:
-- `cluster_id`, `size` — cluster identifier and block count
-- `genome_support` — number of genomes sharing this syntenic region
-- `genes_json` — JSON dict: `{genome_id: [gene_id, ...]}` where gene_ids use **`contig_id:gene_index`** format (e.g., `"DATDYP010000003.1:25"`)
-
-#### CRITICAL: Gene ID formats differ between files
-
-| File | Gene ID format | Example | How to map to Sharur |
-|------|---------------|---------|---------------------|
-| `micro_chain_blocks.csv` | Sharur `protein_id` | `DATDYP010000003.1_26` | Direct lookup in `proteins` table |
-| `micro_chain_clusters.csv` | `contig_id:gene_index` | `DATDYP010000003.1:25` | `WHERE contig_id = 'DATDYP010000003.1' AND gene_index = 25` |
-
-These are the SAME protein (gene_index=25 → protein_id ending in _26 for Prodigal-named proteins; for accession-style IDs like `HZX44842.1`, use the contig+gene_index lookup). Always verify mappings against the `proteins` table.
-
-### Step 3: Querying ELSA results
-
-#### Forward query: Find the most conserved syntenic regions
-
-```python
-import pandas as pd, json
-from sharur.operators import Sharur
-
-b = Sharur("data/DATASET/sharur.duckdb", read_only=True)
-clusters = pd.read_csv("data/DATASET/synteny/results/micro_chain_clusters.csv")
-top = clusters.nlargest(10, "genome_support")
-
-for _, row in top.iterrows():
-    genes_by_genome = json.loads(row["genes_json"])
-    print(f"cluster {row.cluster_id}: {row.size} blocks, {row.genome_support} genomes")
+```bash
+elsa materialize-results data/DATASET/synteny/results/ \
+    --store data/DATASET/synteny/store \
+    --result-db data/DATASET/synteny.duckdb \
+    --dataset-seal data/DATASET/dataset.seal.json \
+    --parameters-file data/DATASET/synteny/run_parameters.json \
+    --run-label DATASET-production \
+    --threads "$(sysctl -n hw.logicalcpu)"
 ```
 
-#### Reverse query: Find which ELSA cluster(s) contain a specific protein
+The materializer validates unique protein and block IDs, coordinate-ordered
+store rows, valid block intervals, anchor-array shape, orientation, exact
+anchor resolution onto the declared block side, locus endpoints, and
+block-to-cluster coverage before marking a run `ready`.
 
-**This is the most common agent query. You MUST run this — never invent cluster IDs.**
+## Agent query API
+
+### Exact reverse membership
 
 ```python
-import duckdb, json, csv
-
-db = duckdb.connect("data/DATASET/sharur.duckdb", read_only=True)
-
-# 1. Convert protein_id → ELSA cluster gene_id format (contig:gene_index)
-protein_id = "YOUR_PROTEIN_ID"
-r = db.execute(f"""
-    SELECT contig_id, gene_index, bin_id,
-           contig_id || ':' || gene_index AS elsa_gene_id
-    FROM proteins WHERE protein_id = '{protein_id}'
-""").fetchone()
-elsa_gene_id = r[3]  # e.g. "DATDYP010000003.1:25"
-
-# 2. Search the clusters CSV for this gene_id
-#    genes_json is a JSON dict, so the gene_id appears as a quoted string
-matches = []
-with open("data/DATASET/synteny/results/micro_chain_clusters.csv") as f:
-    reader = csv.DictReader(f)
-    for row in reader:
-        if elsa_gene_id in row["genes_json"]:
-            matches.append({
-                "cluster_id": int(row["cluster_id"]),
-                "size": int(row["size"]),
-                "genome_support": int(row["genome_support"]),
-            })
-print(f"Protein {protein_id} found in {len(matches)} ELSA clusters:")
-for m in matches:
-    print(f"  cluster {m['cluster_id']}: {m['size']} blocks, {m['genome_support']} genomes")
+result = b.synteny_for_protein("PROTEIN_ID")
+print(result)
+memberships = result.raw
 ```
 
-#### Batch reverse query: Find clusters for a set of proteins (e.g., all LANC_like)
+Each row includes `run_id`, exact `protein_id`, `member_role`, `cluster_key`,
+source cluster ID, cluster size, genome support, and a resolved locus.
+Membership is many-to-many: retain every returned cluster.
+
+### Batch reverse membership
 
 ```python
-import duckdb, json, csv
-
-db = duckdb.connect("data/DATASET/sharur.duckdb", read_only=True)
-
-# 1. Get all protein_ids with the domain of interest + their ELSA gene_ids
-targets = db.execute("""
-    SELECT p.protein_id, p.contig_id || ':' || p.gene_index AS elsa_gene_id, p.bin_id
-    FROM annotations a
-    JOIN proteins p ON a.protein_id = p.protein_id
-    WHERE a.source = 'pfam' AND a.name = 'LANC_like'
-""").fetchdf()
-target_ids = set(targets.elsa_gene_id)
-
-# 2. Scan clusters for any of these gene_ids
-hits = []
-with open("data/DATASET/synteny/results/micro_chain_clusters.csv") as f:
-    reader = csv.DictReader(f)
-    for row in reader:
-        genes_json = row["genes_json"]
-        found = [gid for gid in target_ids if gid in genes_json]
-        if found:
-            genes_by_genome = json.loads(genes_json)
-            hits.append({
-                "cluster_id": int(row["cluster_id"]),
-                "size": int(row["size"]),
-                "genome_support": int(row["genome_support"]),
-                "matched_gene_ids": found,
-                "genomes": list(genes_by_genome.keys()),
-            })
-
-for h in hits:
-    print(f"cluster {h['cluster_id']}: {h['genome_support']} genomes, "
-          f"matched {len(h['matched_gene_ids'])} target genes")
-    print(f"  genomes: {h['genomes'][:5]}")
-```
-
-#### Searching blocks for pairwise synteny between specific genomes
-
-```python
-import pandas as pd, json
-
-blocks = pd.read_csv("data/DATASET/synteny/results/micro_chain_blocks.csv")
-
-# Find all syntenic blocks between two genomes
-pair = blocks[
-    (blocks.query_genome == "GCA_021801225.1") &
-    (blocks.target_genome == "GCA_027330505.1")
+protein_ids = [
+    row[0]
+    for row in b.store.execute(
+        """
+        SELECT DISTINCT protein_id
+        FROM annotations
+        WHERE source = ? AND accession = ?
+        ORDER BY protein_id
+        """,
+        ["SOURCE", "ACCESSION"],
+    )
 ]
-# Or blocks containing a specific protein_id (blocks use protein_id directly)
-protein_id = "YOUR_PROTEIN_ID"
-mask = blocks.query_anchor_genes.str.contains(protein_id, na=False) | \
-       blocks.target_anchor_genes.str.contains(protein_id, na=False)
-protein_blocks = blocks[mask]
+
+page = b.synteny_for_proteins(protein_ids, limit=500, offset=0)
+print(page.meta.total_rows, page.meta.truncated)
+memberships = page.raw
 ```
 
-### Step 4: Citing ELSA results
+Paginate until `meta.truncated` is false.
 
-**NEVER cite a cluster_id you didn't obtain from an actual query.** ELSA cluster IDs are arbitrary integers — they look plausible at any value, which makes fabrication undetectable without verification.
+### Exact anchor evidence
 
-When reporting ELSA synteny evidence in findings:
+```python
+anchors = b.synteny_anchor_blocks("PROTEIN_ID", limit=100)
+```
 
-```jsonl
+This surface returns exact block partners after ELSA orientation has been
+resolved.
+
+### Run-scoped cluster expansion
+
+```python
+membership = b.synteny_for_protein("PROTEIN_ID").raw[0]
+cluster = b.get_synteny_cluster(
+    membership["cluster_key"],
+    run_id=membership["run_id"],
+    member_limit=500,
+)
+print(cluster)
+```
+
+Numeric source IDs are accepted only inside an explicit run:
+
+```python
+cluster = b.get_synteny_cluster(
+    SOURCE_CLUSTER_ID,
+    run_id="elsa-RUN_ID",
+)
+```
+
+### Case enrichment
+
+```python
+case = b.inspect("PROTEIN_ID", entity_type="protein")
+print(case.record.synteny_state)
+print(case.record.synteny_memberships)
+```
+
+`inspect()` attaches bounded, typed ELSA memberships as `inferred` evidence
+while keeping observed domains and caller-emitted names in their own evidence
+classes.
+
+### Conserved-cluster inventory
+
+```python
+import duckdb
+
+sidecar = duckdb.connect(
+    "data/DATASET/synteny.duckdb",
+    read_only=True,
+)
+top = sidecar.execute(
+    """
+    SELECT run_id, cluster_key, source_cluster_id, size, genome_support,
+           locus_count, member_count
+    FROM current_elsa_clusters
+    ORDER BY genome_support DESC, size DESC, cluster_key
+    LIMIT 25
+    """
+).fetchdf()
+```
+
+## Citation contract
+
+An ELSA evidence record includes:
+
+```json
 {
-  "id": "E202",
-  "title": "Lanthipeptide BGCs in Micrarchaeota",
-  "elsa_evidence": {
-    "cluster_id": 170014,
-    "genome_support": 3,
-    "size": 3,
-    "genomes": ["GCA_021801225.1", "GCA_027330505.1", "GCA_027354795.1"],
-    "query": "batch reverse query for LANC_like proteins"
-  }
+  "evidence_level": "inferred",
+  "run_id": "elsa-RUN_ID",
+  "cluster_key": "cluster:SOURCE_ID",
+  "source_cluster_id": 123,
+  "protein_id": "EXACT_PROTEIN_ID",
+  "member_role": "anchor",
+  "block_count": 12,
+  "genome_support": 8,
+  "locus_key": "cluster:SOURCE_ID:locus:0",
+  "query": "Sharur.synteny_for_protein exact membership"
 }
 ```
 
-**Required fields when citing ELSA:**
-- `cluster_id` — the actual cluster_id from the CSV
-- `genome_support` — from the CSV, not estimated
-- `genomes` — list of genomes in the cluster (parsed from genes_json)
-- `query` — brief description of how you found this cluster
+Required identity fields are `run_id`, `cluster_key`, and the exact queried
+protein or locus. Support counts come from the same run-scoped row. Cluster
+expansion supplies the explicit genomes, loci, and members when the claim
+depends on them.
 
-**If you cannot run the query** (CSV not available, too large, etc.), say so explicitly:
-"ELSA synteny validation not performed" — do NOT invent cluster IDs.
+If the capability is unavailable, record: “ELSA synteny validation pending.”
 
-## Key Parameters
+## Legacy CSV quarantine
 
-| Parameter | Default | When to change |
-|-----------|---------|----------------|
-| `--similarity-threshold` | 0.85 | Lower to 0.7 for divergent species (different phyla) |
-| `--max-gap` | 2 | Increase for fragmented assemblies or loci with many hypotheticals |
-| `--min-chain-size` | 2 | Increase to 3+ to filter noise, reduce for sparse datasets |
-| `--min-genome-support` | 2 | Increase to require broader conservation |
+The CSV files serve checkpoint recovery, interchange, and manual audit. They
+are unsuitable as the primary agent lookup surface because they serialize
+large JSON values and omit a run namespace.
 
-## Python API
+Legacy handling rules:
 
-For programmatic access within agents:
+- `genes_json` coordinates refer to ELSA’s coordinate-sorted store order.
+  Sharur `proteins.gene_index` belongs to a separate ingest contract. Resolve
+  legacy coordinates through the exact store `metadata.parquet`, then verify
+  the protein ID.
+- Substring, regex, `LIKE`, and `str.contains` membership scans can match
+  neighboring identifiers. Exact relational membership is the accepted
+  lookup.
+- Scalar `protein_id -> cluster_id` maps discard valid memberships. Use a
+  one-to-many collection.
+- Raw query and target anchor arrays are independently sorted by genomic
+  coordinate. For inverted blocks, query position `i` pairs with target
+  position `n - 1 - i`.
+
+For a raw-block audit, use the validated parser:
 
 ```python
-from pathlib import Path
-from elsa.adapter import load_proteins_from_duckdb, load_embeddings_h5, build_genes_dataframe
-from elsa.store import SyntenyStore
-from elsa.analyze.pipeline import run_chain_pipeline, ChainConfig
+from sharur.elsa_blocks import elsa_anchor_pairs_from_block
 
-proteins = load_proteins_from_duckdb("data/DATASET/sharur.duckdb")
-embeddings = load_embeddings_h5("data/DATASET/embeddings/protein_embeddings.h5")
-genes_df = build_genes_dataframe(proteins, embeddings, normalize=True)
-
-store = SyntenyStore.create(Path("data/DATASET/synteny/store"), genes_df)
-# Or reload: store = SyntenyStore.load(Path("data/DATASET/synteny/store"))
-
-summary = run_chain_pipeline(
-    output_dir=Path("data/DATASET/synteny/"),
-    config=ChainConfig(),
-    genes_df=store.get_genes_df(),
-    prebuilt_index=store.get_index_tuple(),
-)
-print(f"blocks={summary.num_blocks}, clusters={summary.num_clusters}")
+pairs = elsa_anchor_pairs_from_block(block_row)
 ```
 
-## Adding new genomes to an existing store
+It accepts both CSV and parquet anchor-column names and rejects malformed
+array lengths or orientations.
+
+## Adding genomes
 
 ```bash
 elsa synteny \
     --store data/DATASET/synteny/store \
     --add-db data/NEW_GENOMES/sharur.duckdb \
     --add-embeddings data/NEW_GENOMES/embeddings/protein_embeddings.h5 \
+    --result-db data/DATASET/synteny.duckdb \
+    --run-label DATASET-plus-new-genomes \
+    --jobs "$(sysctl -n hw.logicalcpu)" \
     -o data/DATASET/synteny/results_combined/
 ```
 
-Deduplicates by `protein_id` — already-indexed proteins are skipped. The FAISS index is rebuilt on add (~2s for 100k vectors).
-
-## Output Directory Convention
-
-```
-data/DATASET/
-├── synteny/
-│   ├── store/                  # Persistent FAISS store
-│   │   ├── index.faiss
-│   │   ├── metadata.parquet
-│   │   ├── embeddings.npy
-│   │   └── config.json
-│   ├── micro_chain_blocks.csv  # Syntenic blocks
-│   └── micro_chain_clusters.csv # Block clusters
-```
+The resulting run receives a new deterministic namespace and becomes the
+active run after validation.

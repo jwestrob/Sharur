@@ -21,7 +21,9 @@ Given a set of metagenome-assembled genomes (MAGs), Sharur:
 1. **Ingests** proteins, annotations (PFAM, KEGG, HydDB, VOGdb, CAZy, DefenseFinder), CRISPR arrays, biosynthetic gene clusters, and ESM2 embeddings into a unified database
 2. **Computes predicates** -- functional tags derived from annotation combinations (e.g., `nife_group3`, `crispr_associated`, `giant_unannotated`) that make semantic search possible. The current backend is **Predicate V2**, a typed semantic-atom system (see below)
 3. **Exposes operators** that agents call to explore the data: search by predicate, navigate genomic neighborhoods, find similar proteins by embedding, detect loci, export results
-4. **Maps synteny** with ELSA -- embedding-based conserved gene-block discovery over a per-dataset FAISS synteny store, loaded back into DuckDB as synteny blocks/clusters
+4. **Maps synteny** with ELSA -- embedding-based conserved gene-block
+   discovery over a per-dataset index, exposed through a normalized,
+   run-scoped `synteny.duckdb` sidecar and exact Sharur operators
 
 Agents bring the reasoning; Sharur brings the data access.
 
@@ -188,7 +190,7 @@ Sharur ships with skill specs in `.claude/skills/` that give Claude Code structu
 ┌────────────────────────┴────────────────────────────────┐
 │                     Data Layer                           │
 │  DuckDB (proteins, annotations, loci, semantic atoms)   │
-│  FAISS (ESM2 embeddings + ELSA synteny store)           │
+│  FAISS (ESM2/ELSA index) • DuckDB (ELSA result sidecar) │
 └─────────────────────────────────────────────────────────┘
 ```
 

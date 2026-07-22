@@ -155,10 +155,15 @@ signature prevents reuse after the H5 changes.
 **Purpose:** Embedding-based synteny detection across genomes.
 **Requires:** `faiss-cpu`, `h5py`, `duckdb`. Set `KMP_DUPLICATE_LIB_OK=TRUE` on macOS.
 
-**Data contract — ELSA reads Sharur outputs directly:**
+**Input contract — ELSA reads Sharur outputs directly:**
 1. `sharur.duckdb` — reads `proteins` table
 2. `embeddings/protein_embeddings.h5` — standard embedding format
 3. `sharur.duckdb` `annotations` table (via `--annotations-db`)
+
+**Canonical output contract:** `DATASET/synteny.duckdb` is a normalized,
+schema-versioned sidecar containing run provenance, exact anchor pairs,
+complete cluster/locus rows, and many-to-many protein membership. Sharur
+discovers it beside the core database.
 
 **Basic CLI:**
 ```bash
@@ -167,10 +172,57 @@ elsa synteny \
     --embeddings data/DATASET/embeddings/protein_embeddings.h5 \
     --annotations-db data/DATASET/sharur.duckdb \
     --store data/DATASET/synteny/store \
-    -o data/DATASET/synteny/
+    --result-db data/DATASET/synteny.duckdb \
+    --run-label DATASET-production \
+    --jobs "$(sysctl -n hw.logicalcpu)" \
+    -o data/DATASET/synteny/results/
 ```
 
-**For complete query patterns, gene ID formats, and citing rules, see `.claude/skills/synteny.md`.**
+Materialize a completed checkpoint:
+
+```bash
+elsa materialize-results data/DATASET/synteny/results/ \
+    --store data/DATASET/synteny/store \
+    --result-db data/DATASET/synteny.duckdb \
+    --dataset-seal data/DATASET/dataset.seal.json \
+    --parameters-file data/DATASET/synteny/run_parameters.json \
+    --run-label DATASET-production
+```
+
+Agent access uses the exact Sharur operators:
+
+```python
+b = Sharur("data/DATASET/sharur.duckdb", read_only=True)
+b.capabilities().get("elsa_synteny")
+b.synteny_for_protein("PROTEIN_ID")
+b.synteny_for_proteins(protein_ids, limit=500)
+b.synteny_anchor_blocks("PROTEIN_ID")
+b.get_synteny_cluster("cluster:SOURCE_ID", run_id="elsa-RUN_ID")
+```
+
+ELSA evidence is inferred. Functional names follow caller-emitted resources.
+Cluster citations include both `run_id` and `cluster_key`.
+Dataset-seal drift fails closed in the query API and appears as
+`synteny_state="stale"` in `inspect()`. Reviewed historical access is explicit:
+
+```python
+b = Sharur(
+    "data/DATASET/sharur.duckdb",
+    read_only=True,
+    allow_stale_synteny=True,
+)
+```
+
+**Anchor-pair contract:** ELSA sorts query and target anchor arrays
+independently by genomic coordinate. Raw inverted blocks use the validated
+`sharur.elsa_blocks.elsa_anchor_pairs_from_block` parser, which reverses the
+target array and validates the block shape.
+
+Legacy CSVs serve interchange and recovery. Exact agent lookups use the
+sidecar because ELSA store ranks and Sharur `gene_index` values are distinct
+coordinate contracts, while string membership scans admit partial matches.
+
+**For complete query, migration, and citing rules, see `.claude/skills/synteny.md`.**
 
 ## Embedding Visualization
 **Script:** `scripts/visualize_embeddings.py`

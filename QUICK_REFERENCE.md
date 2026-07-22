@@ -91,9 +91,25 @@ Seal verification returns non-zero on canonical drift; use `--format json` in au
 - `defense_systems` — MacSyFinder-validated: `system_id, genome_id, system_type, system_subtype, activity, genes_count, protein_ids, profile_names, sys_beg, sys_end, created_at`. **Only this table holds genuine defense system calls** — never report raw `defensefinder` HMM hits as systems (80%+ FP).
 - `secretion_systems` — TXSScan-validated, same columns minus `activity`.
 
-### Synteny (present once ELSA has run; e.g. omni_production)
-- `synteny_blocks` — `block_id, query_genome, target_genome, query_contig, target_contig, query_start, query_end, target_start, target_end, n_anchors, chain_score, orientation, cluster_id, n_genes, ...`
-- `synteny_clusters` — `cluster_id, size, mean_chain_length, genome_support, genes_json`
+### ELSA synteny sidecar
+
+`DATASET/synteny.duckdb` is the normalized agent query surface. Its
+`elsa_runs`, `elsa_blocks`, `elsa_anchor_pairs`, `elsa_clusters`,
+`elsa_cluster_loci`, and `elsa_cluster_members` tables are keyed by `run_id`.
+Singleton clusters and anchor/context membership are explicit.
+
+```python
+b = Sharur("data/DATASET/sharur.duckdb", read_only=True)
+b.capabilities().get("elsa_synteny")
+b.synteny_for_protein("PROTEIN_ID")
+b.synteny_anchor_blocks("PROTEIN_ID")
+b.get_synteny_cluster("cluster:SOURCE_ID", run_id="elsa-RUN_ID")
+```
+
+ELSA store position indices and Sharur `proteins.gene_index` values are
+separate coordinate contracts. Exact relational membership replaces legacy
+CSV string scans. Dataset-seal mismatch fails closed; use
+`allow_stale_synteny=True` only for a reviewed, explicitly historical run.
 
 ## SQL patterns
 
