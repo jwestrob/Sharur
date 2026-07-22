@@ -17,6 +17,7 @@ import os
 import re
 import shutil
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -371,13 +372,36 @@ class KnowledgeBaseBuilder:
             faa for faa in genomes_dir.glob("**/*.faa")
             if faa.parent.name != "all_protein_symlinks"
         ]
-        console.print(f"  Parsing {len(faa_files):,} FAA files...")
+        console.print(
+            f"  Parsing {len(faa_files):,} FAA files with {self.threads} threads..."
+        )
         t0 = time.time()
-        for i, faa in enumerate(faa_files):
+
+        def parse_faa(faa: Path):
+            local_contig_lengths: Dict[tuple, int] = {}
             bin_id = faa.parent.name
-            protein_rows.extend(self._parse_prodigal_faa(faa, bin_id, contig_lengths))
-            if (i + 1) % 500 == 0:
-                console.print(f"    {i+1:,}/{len(faa_files):,} files, {len(protein_rows):,} proteins so far")
+            rows = self._parse_prodigal_faa(faa, bin_id, local_contig_lengths)
+            return rows, local_contig_lengths
+
+        # Bound outstanding results to one full worker wave. This keeps file
+        # order deterministic and prevents completed parse results from
+        # accumulating behind a slower early file.
+        with ThreadPoolExecutor(max_workers=self.threads) as executor:
+            for batch_start in range(0, len(faa_files), self.threads):
+                batch = faa_files[batch_start : batch_start + self.threads]
+                futures = [executor.submit(parse_faa, faa) for faa in batch]
+                for future in futures:
+                    rows, local_contig_lengths = future.result()
+                    protein_rows.extend(rows)
+                    for key, length in local_contig_lengths.items():
+                        contig_lengths[key] = max(contig_lengths.get(key, 0), length)
+
+                processed = batch_start + len(batch)
+                if processed % 500 == 0 or processed == len(faa_files):
+                    console.print(
+                        f"    {processed:,}/{len(faa_files):,} files, "
+                        f"{len(protein_rows):,} proteins so far"
+                    )
         console.print(f"  Parsed {len(protein_rows):,} proteins from {len(faa_files):,} files ({time.time()-t0:.1f}s)")
 
         # Ensure bins exist even if stage02 was skipped
@@ -694,8 +718,9 @@ class KnowledgeBaseBuilder:
                 self.stats["annotations"] += len(df)
                 console.print(f"    {source}: {len(df):,} annotations from {tsv.name} ({time.time()-t_ann:.1f}s)")
             except Exception as exc:
-                logger.warning(f"Failed to load annotations from {tsv}: {exc}")
+                logger.exception(f"Failed to load annotations from {tsv}")
                 console.print(f"    [red]FAILED: {tsv.name}: {exc}[/red]")
+                raise
 
         # dbCAN JSON — backward compatibility for datasets that ran dbcan_cazyme.py.
         # For new ingestions, _classify_cazymes() runs DIAMOND directly and takes precedence.

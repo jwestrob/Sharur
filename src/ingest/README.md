@@ -398,13 +398,14 @@ python src/ingest/07_build_knowledge_base.py -d data/DATASET -o data/DATASET/sha
 |------|---------|-------------|
 | `-d`, `--data-dir` | `data` | Parent directory containing `stage*` subdirectories |
 | `-o`, `--output` | `data/sharur.duckdb` | Output DuckDB path |
-| `-t`, `--threads` | Slurm allocation or host CPU count | Worker threads for DuckDB and downstream classifiers |
+| `-t`, `--threads` | Slurm allocation or host CPU count | Worker threads for FAA parsing, DuckDB, and downstream classifiers |
 | `--force` | off | Overwrite existing database |
 | `--enable-cazymes` | off | Run the slower dbCAN three-tool consensus classifier |
 
 When `--threads` is omitted inside Slurm, Stage 07 uses
-`SLURM_CPUS_ON_NODE`. Curated defense/secretion calling is fail-closed: an
-exception terminates the build before predicates and final indexes are written.
+`SLURM_CPUS_ON_NODE`. Annotation chunks and curated defense/secretion calls are
+fail-closed: an exception terminates the build before predicates and final
+indexes are written.
 
 **What Stage 07 does automatically (no user intervention needed):**
 1. Loads bins from Stage 02 manifest (or infers bins from Stage 03 FAA files)
@@ -437,6 +438,7 @@ exception terminates the build before predicates and final indexes are written.
 
 **Common errors:**
 - "FileExistsError: sharur.duckdb exists" -- add `--force` to overwrite.
+- Annotation TSV load failure -- repair or regenerate the named chunk before rebuilding; Stage 07 stops at the first failed chunk.
 - Missing `classify_hydrogenases` or `classify_cazymes` -- these are non-fatal; classification steps are skipped with a warning.
 - Defense/secretion caller failure -- inspect the traceback and repair the caller or model inputs before rebuilding.
 - Missing reference files (`data/reference/pfam_id_desc.tsv`, `data/reference/ko_list`) -- annotations will lack human-readable names but pipeline still works.

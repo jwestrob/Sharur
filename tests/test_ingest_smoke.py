@@ -4,6 +4,7 @@ from pathlib import Path
 
 import duckdb
 import pytest
+from pandas.errors import EmptyDataError
 
 import sharur.colocation
 
@@ -204,3 +205,18 @@ def test_stage07_colocation_failure_aborts_build(tmp_path, monkeypatch):
 
     with pytest.raises(RuntimeError, match="synthetic caller failure"):
         builder._run_colocation("defensefinder", "defense")
+
+
+def test_stage07_annotation_chunk_failure_aborts_build(tmp_path):
+    builder_cls, outputs_cls = _load_kb_module()
+    outputs = _pipeline_outputs(outputs_cls, tmp_path)
+    outputs.stage04_dir.mkdir(parents=True)
+    _write(outputs.stage04_dir / "PFAM_broken_hits_df.tsv", "")
+    builder = builder_cls(outputs, tmp_path / "sharur.duckdb", threads=1)
+    builder._init_db()
+
+    try:
+        with pytest.raises(EmptyDataError):
+            builder._load_annotations()
+    finally:
+        builder._release_db()
