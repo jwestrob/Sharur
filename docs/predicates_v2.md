@@ -106,7 +106,60 @@ b.generate_v2(output_review_queue="review_queue.tsv")
 # Optional for ad hoc/manual runs: materialize V2-derived flat predicates into
 # the legacy compatibility table.
 b.generate_v2(update_legacy_predicates=True)
+
+# Process-parallel full refresh. The parent process owns DuckDB; workers run
+# only the CPU transform.
+b.generate_v2(
+    workers=64,
+    chunk_size=100_000,
+    update_legacy_predicates=True,
+)
 ```
+
+### Parallel generation and resume
+
+Full-dataset generation splits each database chunk into bounded worker
+microbatches. The default microbatch target is about two tasks per worker,
+capped at 5,000 proteins. Worker results return in input order and one parent
+process commits atoms, states, search terms, compatibility predicates, and the
+checkpoint through a single DuckDB connection.
+
+This design holds bulk data memory near one database chunk plus its worker
+shards. Each worker also carries one Python interpreter and one copy of the
+predicate rule state, so that smaller component scales with worker count.
+Stage 07 passes its resolved `--threads` value directly to V2; under Slurm this
+resolves from `SLURM_CPUS_ON_NODE`.
+
+Each full-refresh chunk updates `v2_generation_checkpoint` in the same
+transaction as its semantic rows. Resume validates the semantic code/config
+fingerprint, source-table signature, persisted state count, and ordered protein
+boundary before continuing:
+
+```bash
+# Standard parallel Stage 07 build
+python src/ingest/07_build_knowledge_base.py \
+  --data-dir data/my_dataset \
+  --output data/my_dataset/sharur.duckdb \
+  --threads 64 \
+  --force
+
+# Continue an interrupted V2 phase from its latest committed chunk
+python src/ingest/07_build_knowledge_base.py \
+  --data-dir data/my_dataset \
+  --output data/my_dataset/sharur.duckdb \
+  --threads 64 \
+  --resume-v2
+```
+
+The facade exposes the same recovery path with
+`b.generate_v2(workers=64, resume=True, return_states=False)`. Resume applies
+to full-dataset refreshes. Subset refreshes retain their targeted replacement
+behavior.
+
+Review queue generation performs a set-oriented aggregation over persisted
+`semantic_atoms` after the final chunk. Its Python memory footprint therefore
+stays independent of the number of unresolved atoms, and the same aggregation
+can be regenerated after a recovered run.
 
 Validated defense and secretion systems are folded in automatically during
 generation. V2 reads `defense_systems` and `secretion_systems` directly and
@@ -272,13 +325,21 @@ b.generate_v2(update_legacy_predicates=True)
 b.search_by_predicates(has=["giant", "unannotated"])
 ```
 
-For shell refreshes, use the V2-backed regeneration script:
+For shell refreshes, use the V2-backed CLI:
 
 ```bash
-python scripts/regenerate_predicates.py \
+sharur compute-predicates \
   --db data/my_dataset/sharur.duckdb \
-  --review-queue data/my_dataset/reports/predicates_v2_review_queue.tsv \
-  --chunk-size 100000
+  --chunk-size 100000 \
+  --workers 64 \
+  --review-queue data/my_dataset/reports/predicates_v2_review_queue.tsv
+
+# Recovery after an interrupted full refresh
+sharur compute-predicates \
+  --db data/my_dataset/sharur.duckdb \
+  --chunk-size 100000 \
+  --workers 64 \
+  --resume
 ```
 
 ## Library API (Advanced)
@@ -615,6 +676,14 @@ Materialized search view. It stores:
 `search_by_atoms()` uses this table when populated and falls back to
 `semantic_atoms`/`semantic_state` only for older databases that have not been
 backfilled.
+
+### `v2_generation_checkpoint`
+
+Operational state for a full semantic refresh. The row stores the semantic
+code/config fingerprint, source-table signature, status, ordered
+`last_protein_id`, processed count, and total count. Chunk products and the
+ordered boundary commit atomically. A completed refresh retains the row as
+durable provenance for the generation boundary.
 
 ### `system_proteins`
 

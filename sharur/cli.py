@@ -18,6 +18,7 @@ Example usage:
 """
 
 import json
+import os
 from enum import Enum
 from pathlib import Path
 from typing import Optional
@@ -731,6 +732,23 @@ def compute_predicates(
     db: str = typer.Option(DEFAULT_DB, "--db", "-d", help="Path to DuckDB database"),
     protein_id: Optional[str] = typer.Option(None, "--protein", "-p", help="Compute for specific protein only"),
     chunk_size: int = typer.Option(100_000, "--chunk-size", help="V2 generation batch size"),
+    workers: Optional[int] = typer.Option(
+        None,
+        "--workers",
+        "-t",
+        help="Transform processes (defaults to Slurm CPUs, then host CPUs)",
+    ),
+    worker_batch_size: Optional[int] = typer.Option(
+        None,
+        "--worker-batch-size",
+        help="Optional proteins per transform task",
+    ),
+    resume: bool = typer.Option(False, "--resume", help="Continue the latest full V2 checkpoint"),
+    review_queue: Optional[Path] = typer.Option(
+        None,
+        "--review-queue",
+        help="Write unresolved-accession review TSV",
+    ),
 ):
     """
     Compute and store V2 predicates for proteins.
@@ -754,13 +772,29 @@ def compute_predicates(
         raise typer.Exit(1)
 
     store = DuckDBStore(db_path=db_path)
+    if workers is None:
+        slurm_workers = os.environ.get("SLURM_CPUS_ON_NODE")
+        try:
+            workers = int(slurm_workers) if slurm_workers else (os.cpu_count() or 1)
+        except ValueError as exc:
+            raise typer.BadParameter(
+                "SLURM_CPUS_ON_NODE must be a positive integer"
+            ) from exc
+    if workers <= 0:
+        raise typer.BadParameter("--workers must be a positive integer")
 
     if protein_id:
+        if resume:
+            typer.echo("--resume applies to full-dataset generation", err=True)
+            raise typer.Exit(2)
         typer.echo(f"Computing V2 predicates for {protein_id}...", err=True)
         states = generate_and_persist_v2(
             store,
             protein_ids=[protein_id],
+            output_review_queue=str(review_queue) if review_queue else None,
             chunk_size=chunk_size,
+            workers=workers,
+            worker_batch_size=worker_batch_size,
             update_legacy_predicates=True,
             return_states=True,
             predict_topology=False,
@@ -782,7 +816,11 @@ def compute_predicates(
         typer.echo("Computing V2 predicates for all proteins...", err=True)
         generate_and_persist_v2(
             store,
+            output_review_queue=str(review_queue) if review_queue else None,
             chunk_size=chunk_size,
+            workers=workers,
+            worker_batch_size=worker_batch_size,
+            resume=resume,
             update_legacy_predicates=True,
             return_states=False,
             predict_topology=False,

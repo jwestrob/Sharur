@@ -1,5 +1,8 @@
 """Tests for V2 predicate persistence."""
 
+import pytest
+
+import sharur.predicates_v2.persistence as persistence
 from sharur.predicates_v2.persistence import (
     generate_and_persist_v2,
     materialize_semantic_terms_from_v2,
@@ -374,3 +377,206 @@ def test_materialize_system_proteins_parses_multiple_members():
         WHERE system_id = 'sys_def_2'
         ORDER BY position
     """).fetchall() == [("p1", 1, "HsdR"), ("p2", 2, "HsdM")]
+
+
+def _semantic_snapshot(store: DuckDBStore) -> dict[str, list[tuple]]:
+    """Return stable semantic outputs while excluding timestamps."""
+    return {
+        "atoms": store.conn.execute("""
+            SELECT protein_id, atom_id, facet, relation, source_accession,
+                   source_db, evidence_evalue, evidence_score
+            FROM semantic_atoms
+            ORDER BY ALL
+        """).fetchall(),
+        "states": store.conn.execute("""
+            SELECT protein_id, activities, roles, architecture, localization,
+                   topology, size_class, quality_flags, composite_predicates,
+                   unresolved_count
+            FROM semantic_state
+            ORDER BY protein_id
+        """).fetchall(),
+        "terms": store.conn.execute("""
+            SELECT protein_id, term_id, term_kind, facet, relation,
+                   source_db, source_accession
+            FROM semantic_terms
+            ORDER BY ALL
+        """).fetchall(),
+        "legacy": store.conn.execute("""
+            SELECT protein_id, predicates
+            FROM protein_predicates
+            ORDER BY protein_id
+        """).fetchall(),
+    }
+
+
+def _add_parallel_test_proteins(store: DuckDBStore, count: int = 32) -> None:
+    """Add deterministic, annotation-free records for multi-chunk coverage."""
+    rows = []
+    for index in range(3, count + 3):
+        start = index * 300
+        rows.append((
+            f"z{index:03d}",
+            "contig1",
+            "bin1",
+            start,
+            start + 299,
+            "+",
+            index,
+            100,
+            0.5,
+        ))
+    store.conn.executemany(
+        """
+        INSERT INTO proteins (
+            protein_id, contig_id, bin_id, start, end_coord, strand,
+            gene_index, sequence_length, gc_content
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        rows,
+    )
+
+
+def test_process_parallel_generation_matches_serial_output():
+    """Spawned workers should produce byte-equivalent semantic content."""
+    serial_store = _seed_store()
+    parallel_store = _seed_store()
+    _add_parallel_test_proteins(serial_store)
+    _add_parallel_test_proteins(parallel_store)
+
+    generate_and_persist_v2(
+        serial_store,
+        chunk_size=7,
+        workers=1,
+        update_legacy_predicates=True,
+        return_states=False,
+    )
+    generate_and_persist_v2(
+        parallel_store,
+        chunk_size=7,
+        workers=4,
+        worker_batch_size=2,
+        update_legacy_predicates=True,
+        return_states=False,
+    )
+
+    assert _semantic_snapshot(parallel_store) == _semantic_snapshot(serial_store)
+    assert parallel_store.conn.execute("""
+        SELECT status, last_protein_id, processed_count, total_count
+        FROM v2_generation_checkpoint
+        WHERE generation_key = 'full_v2'
+    """).fetchone() == ("complete", "z034", 34, 34)
+
+
+def test_full_generation_resumes_at_last_atomic_chunk(monkeypatch):
+    """A failed run should retain and resume from its committed protein prefix."""
+    store = _seed_store()
+    original_persist_chunk = persistence._persist_chunk
+    calls = 0
+
+    def fail_before_second_commit(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("injected generation failure")
+        return original_persist_chunk(*args, **kwargs)
+
+    monkeypatch.setattr(persistence, "_persist_chunk", fail_before_second_commit)
+    with pytest.raises(RuntimeError, match="injected generation failure"):
+        generate_and_persist_v2(
+            store,
+            chunk_size=1,
+            workers=1,
+            return_states=False,
+        )
+
+    assert store.conn.execute("""
+        SELECT status, last_protein_id, processed_count, total_count
+        FROM v2_generation_checkpoint
+        WHERE generation_key = 'full_v2'
+    """).fetchone() == ("failed", "p1", 1, 2)
+    assert store.conn.execute(
+        "SELECT protein_id FROM semantic_state ORDER BY protein_id"
+    ).fetchall() == [("p1",)]
+
+    monkeypatch.setattr(persistence, "_persist_chunk", original_persist_chunk)
+    generate_and_persist_v2(
+        store,
+        chunk_size=1,
+        workers=1,
+        resume=True,
+        return_states=False,
+    )
+
+    assert store.conn.execute(
+        "SELECT protein_id FROM semantic_state ORDER BY protein_id"
+    ).fetchall() == [("p1",), ("p2",)]
+    assert store.conn.execute("""
+        SELECT status, last_protein_id, processed_count, total_count
+        FROM v2_generation_checkpoint
+        WHERE generation_key = 'full_v2'
+    """).fetchone() == ("complete", "p2", 2, 2)
+
+
+def test_resume_rejects_source_table_drift(monkeypatch):
+    """Resume should fail closed when upstream inputs changed after a checkpoint."""
+    store = _seed_store()
+    original_persist_chunk = persistence._persist_chunk
+    calls = 0
+
+    def fail_before_second_commit(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("injected generation failure")
+        return original_persist_chunk(*args, **kwargs)
+
+    monkeypatch.setattr(persistence, "_persist_chunk", fail_before_second_commit)
+    with pytest.raises(RuntimeError):
+        generate_and_persist_v2(
+            store,
+            chunk_size=1,
+            workers=1,
+            return_states=False,
+        )
+
+    store.conn.execute("""
+        UPDATE proteins SET sequence_length = sequence_length + 1
+        WHERE protein_id = 'p2'
+    """)
+    monkeypatch.setattr(persistence, "_persist_chunk", original_persist_chunk)
+
+    with pytest.raises(ValueError, match="source tables changed"):
+        generate_and_persist_v2(
+            store,
+            chunk_size=1,
+            workers=1,
+            resume=True,
+            return_states=False,
+        )
+
+
+def test_review_queue_is_aggregated_from_persisted_atoms(tmp_path):
+    """Review output should retain exact protein and genome aggregation."""
+    store = _seed_store()
+    store.conn.execute("""
+        INSERT INTO annotations (
+            annotation_id, protein_id, source, accession, name, description,
+            evalue, score
+        ) VALUES
+            (2, 'p1', 'pfam', 'UNMAPPED_X', 'unmapped', 'unmapped', 1e-5, 20),
+            (3, 'p2', 'pfam', 'UNMAPPED_X', 'unmapped', 'unmapped', 1e-5, 20)
+    """)
+    queue_path = tmp_path / "review.tsv"
+
+    generate_and_persist_v2(
+        store,
+        output_review_queue=str(queue_path),
+        chunk_size=1,
+        workers=1,
+        return_states=False,
+    )
+
+    lines = queue_path.read_text().splitlines()
+    row = next(line for line in lines if "UNMAPPED_X" in line).split("\t")
+    assert row[:4] == ["UNMAPPED_X", "pfam", "2", "1"]
+    assert row[5] == "p1;p2"

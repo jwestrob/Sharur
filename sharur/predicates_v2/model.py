@@ -191,6 +191,21 @@ CREATE INDEX IF NOT EXISTS idx_semantic_terms_protein ON semantic_terms(protein_
 CREATE INDEX IF NOT EXISTS idx_semantic_terms_facet_term ON semantic_terms(facet, term_id);
 CREATE INDEX IF NOT EXISTS idx_semantic_terms_source ON semantic_terms(source_db, source_accession);
 CREATE INDEX IF NOT EXISTS idx_semantic_terms_kind ON semantic_terms(term_kind);
+
+-- Atomic full-refresh resume boundary. One row records the latest committed
+-- protein prefix for the active semantic generation contract.
+CREATE TABLE IF NOT EXISTS v2_generation_checkpoint (
+    generation_key VARCHAR PRIMARY KEY,
+    semantic_fingerprint VARCHAR NOT NULL,
+    input_signature VARCHAR NOT NULL,
+    status VARCHAR NOT NULL,
+    last_protein_id VARCHAR,
+    processed_count BIGINT NOT NULL DEFAULT 0,
+    total_count BIGINT NOT NULL,
+    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP
+);
 """
 
 

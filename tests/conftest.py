@@ -2,9 +2,24 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from sharur.storage.duckdb_store import DuckDBStore
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _align_subprocess_coverage_mode():
+    """Keep subprocess coverage compatible with project branch coverage."""
+    previous = os.environ.get("COV_CORE_BRANCH")
+    if os.environ.get("COV_CORE_DATAFILE"):
+        os.environ["COV_CORE_BRANCH"] = "enabled"
+    yield
+    if previous is None:
+        os.environ.pop("COV_CORE_BRANCH", None)
+    else:
+        os.environ["COV_CORE_BRANCH"] = previous
 
 
 def build_case_database(path):

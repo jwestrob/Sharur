@@ -112,7 +112,9 @@ def test_ingest_smoke(tmp_path):
     )
 
     db_path = data_dir / "sharur.duckdb"
-    builder = builder_cls(outputs, db_path, force=True)
+    # Keep this broad smoke test serial. Dedicated persistence coverage below
+    # exercises spawned V2 workers and deterministic parallel equivalence.
+    builder = builder_cls(outputs, db_path, force=True, threads=1)
     stats = builder.build()
 
     assert stats["proteins"] == 1

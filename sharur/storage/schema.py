@@ -185,6 +185,21 @@ CREATE INDEX IF NOT EXISTS idx_semantic_terms_facet_term ON semantic_terms(facet
 CREATE INDEX IF NOT EXISTS idx_semantic_terms_source ON semantic_terms(source_db, source_accession);
 CREATE INDEX IF NOT EXISTS idx_semantic_terms_kind ON semantic_terms(term_kind);
 
+-- Predicate V2 full-refresh checkpoint. Chunk data and this boundary commit
+-- in one transaction so interrupted generations can resume safely.
+CREATE TABLE IF NOT EXISTS v2_generation_checkpoint (
+    generation_key VARCHAR PRIMARY KEY,
+    semantic_fingerprint VARCHAR NOT NULL,
+    input_signature VARCHAR NOT NULL,
+    status VARCHAR NOT NULL,
+    last_protein_id VARCHAR,
+    processed_count BIGINT NOT NULL DEFAULT 0,
+    total_count BIGINT NOT NULL,
+    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP
+);
+
 -- Defense system validation (MacSyFinder co-localization)
 CREATE TABLE IF NOT EXISTS defense_systems (
     system_id VARCHAR PRIMARY KEY,

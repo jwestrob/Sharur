@@ -304,6 +304,27 @@ class KnowledgeBaseBuilder:
         console.print(f"Stats: {self.stats}")
         return self.stats
 
+    def resume_v2(self) -> Dict[str, int]:
+        """Continue an interrupted V2 generation against an existing DB."""
+        if not self.db_path.exists():
+            raise FileNotFoundError(f"{self.db_path} is required for --resume-v2")
+        self._reacquire_db()
+        resume_start = time.time()
+        self._run_step(
+            "Resume predicates",
+            lambda: self._generate_predicates(resume=True),
+            1,
+            2,
+        )
+        self._run_step("Finalize indexes", self._finalize, 2, 2)
+        elapsed = time.time() - resume_start
+        console.print(
+            f"\n[bold green]V2 resume complete in {elapsed:.0f}s "
+            f"({elapsed / 60:.1f}m)[/bold green]"
+        )
+        console.print(f"Stats: {self.stats}")
+        return self.stats
+
     def _finalize(self) -> None:
         self._create_indexes()
         self._update_stats()
@@ -896,7 +917,7 @@ class KnowledgeBaseBuilder:
         )
 
     # --- predicates ----------------------------------------------------- #
-    def _generate_predicates(self) -> None:
+    def _generate_predicates(self, *, resume: bool = False) -> None:
         """Generate semantic atoms and V2-derived legacy predicates.
 
         Stage 07 treats V2 as the normal predicate product. The compatibility
@@ -917,12 +938,15 @@ class KnowledgeBaseBuilder:
 
         console.print(
             f"  Generating V2 atoms/states for {protein_count:,} proteins "
-            f"(chunk_size={chunk_size:,})"
+            f"(chunk_size={chunk_size:,}, workers={self.threads}, "
+            f"resume={resume})"
         )
         generate_and_persist_v2(
             _StoreAdapter(self.conn),
             output_review_queue=str(review_queue_path),
             chunk_size=chunk_size,
+            workers=self.threads,
+            resume=resume,
             update_legacy_predicates=True,
             return_states=False,
             predict_topology=False,
@@ -1206,6 +1230,11 @@ def main(
     data_dir: Path = typer.Option(Path("data"), "--data-dir", "-d"),
     output: Path = typer.Option(Path("data/sharur.duckdb"), "--output", "-o"),
     force: bool = typer.Option(False, "--force"),
+    resume_v2: bool = typer.Option(
+        False,
+        "--resume-v2",
+        help="Continue V2 generation from the latest committed database chunk",
+    ),
     enable_cazymes: bool = typer.Option(False, "--enable-cazymes", help="Run dbCAN CAZyme classification (slow, off by default)"),
     threads: Optional[int] = typer.Option(
         None,
@@ -1215,6 +1244,8 @@ def main(
     ),
 ) -> None:
     logging.basicConfig(level=logging.INFO)
+    if resume_v2 and force:
+        raise typer.BadParameter("--resume-v2 and --force select different build modes")
     canonical_embeddings_dir = data_dir / "embeddings"
     legacy_embeddings_dir = data_dir / "stage06_embeddings"
     embeddings_dir = (
@@ -1241,7 +1272,7 @@ def main(
         enable_cazymes=enable_cazymes,
         threads=threads,
     )
-    stats = builder.build()
+    stats = builder.resume_v2() if resume_v2 else builder.build()
     console.print(f"[green]Build complete[/green]: {stats}")
 
 

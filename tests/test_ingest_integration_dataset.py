@@ -185,7 +185,9 @@ def test_ingest_pipeline_with_dummy_dataset(tmp_path):
     )
 
     db_path = data_dir / "sharur.duckdb"
-    builder = KnowledgeBaseBuilder(outputs, db_path, force=True)
+    # Process-parallel V2 behavior has dedicated equivalence coverage; keep
+    # this end-to-end ingest fixture serial and focused on data integration.
+    builder = KnowledgeBaseBuilder(outputs, db_path, force=True, threads=1)
     stats = builder.build()
 
     assert stats["bins"] == len(genomes_manifest["genomes"])
