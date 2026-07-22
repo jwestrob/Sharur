@@ -49,6 +49,26 @@ DEFAULT_EVALUE_THRESHOLDS: Dict[str, float] = {
     "txsscan": 1e-10,        # No GA thresholds; secretion system HMMs
 }
 
+
+def _resolve_thread_count(requested: Optional[int] = None) -> int:
+    """Resolve the worker count, honoring a Slurm allocation when present."""
+    if requested is not None:
+        threads = requested
+        source = "--threads"
+    elif os.environ.get("SLURM_CPUS_ON_NODE"):
+        source = "SLURM_CPUS_ON_NODE"
+        try:
+            threads = int(os.environ[source])
+        except ValueError as exc:
+            raise ValueError(f"{source} must be a positive integer") from exc
+    else:
+        threads = os.cpu_count() or 1
+        source = "os.cpu_count()"
+
+    if threads < 1:
+        raise ValueError(f"Thread count from {source} must be positive (got {threads})")
+    return threads
+
 # Regex for DefenseFinder accessions with numbered FAM variants.
 # Matches trailing _FAM_N or _FAMN (where N is one or more digits) at the
 # end of an accession string.  Example matches:
@@ -192,11 +212,12 @@ class PipelineOutputs:
 # --------------------------------------------------------------------------- #
 class KnowledgeBaseBuilder:
     def __init__(self, outputs: PipelineOutputs, db_path: Path, force: bool = False,
-                 enable_cazymes: bool = False):
+                 enable_cazymes: bool = False, threads: Optional[int] = None):
         self.outputs = outputs
         self.db_path = db_path
         self.force = force
         self.enable_cazymes = enable_cazymes
+        self.threads = _resolve_thread_count(threads)
         self.conn: Optional[duckdb.DuckDBPyConnection] = None
         self.embeddings_path: Optional[str] = None
         self.stats: Dict[str, int] = {
@@ -297,6 +318,7 @@ class KnowledgeBaseBuilder:
     def _reacquire_db(self) -> None:
         """Re-open the DB connection after external scripts finish."""
         self.conn = duckdb.connect(str(self.db_path))
+        self.conn.execute(f"SET threads = {self.threads}")
 
     # --- init ----------------------------------------------------------- #
     def _init_db(self) -> None:
@@ -307,6 +329,7 @@ class KnowledgeBaseBuilder:
                 raise FileExistsError(f"{self.db_path} exists (use --force to overwrite)")
 
         self.conn = duckdb.connect(str(self.db_path))
+        self.conn.execute(f"SET threads = {self.threads}")
         self.conn.execute(SCHEMA)
         run_migrations(self.conn)
         console.print(f"[blue]Created DuckDB at {self.db_path}[/blue]")
@@ -925,10 +948,9 @@ class KnowledgeBaseBuilder:
 
             from classify_hydrogenases import classify_hydrogenases as run_classification
 
-            n_threads = min(os.cpu_count() or 4, 12)
             results = run_classification(
                 db_path=str(self.db_path),
-                threads=n_threads,
+                threads=self.threads,
                 update_predicates=True,
                 verbose=False,
             )
@@ -986,10 +1008,9 @@ class KnowledgeBaseBuilder:
 
             from classify_cazymes import classify_cazymes as run_classification
 
-            n_threads = min(os.cpu_count() or 4, 12)
             results = run_classification(
                 db_path=str(self.db_path),
-                threads=n_threads,
+                threads=self.threads,
                 update_predicates=True,
                 verbose=False,
             )
@@ -1084,8 +1105,12 @@ class KnowledgeBaseBuilder:
                 console.print(f"  No {system_type} systems validated")
 
         except Exception as e:
-            logger.warning(f"{system_type.title()} system validation failed: {e}")
-            console.print(f"  [yellow]{system_type.title()} system validation failed: {e}[/yellow]")
+            logger.exception(f"{system_type.title()} system validation failed")
+            console.print(
+                f"  [red]{system_type.title()} system validation failed; "
+                f"aborting build: {e}[/red]"
+            )
+            raise
         finally:
             self._reacquire_db()
 
@@ -1157,6 +1182,12 @@ def main(
     output: Path = typer.Option(Path("data/sharur.duckdb"), "--output", "-o"),
     force: bool = typer.Option(False, "--force"),
     enable_cazymes: bool = typer.Option(False, "--enable-cazymes", help="Run dbCAN CAZyme classification (slow, off by default)"),
+    threads: Optional[int] = typer.Option(
+        None,
+        "--threads",
+        "-t",
+        help="Worker threads (defaults to SLURM_CPUS_ON_NODE, then host CPU count)",
+    ),
 ) -> None:
     logging.basicConfig(level=logging.INFO)
     canonical_embeddings_dir = data_dir / "embeddings"
@@ -1178,7 +1209,13 @@ def main(
         stage06_dir=embeddings_dir,
     )
     console.print(f"Detected stage outputs: {outputs.validate()}")
-    builder = KnowledgeBaseBuilder(outputs, output, force=force, enable_cazymes=enable_cazymes)
+    builder = KnowledgeBaseBuilder(
+        outputs,
+        output,
+        force=force,
+        enable_cazymes=enable_cazymes,
+        threads=threads,
+    )
     stats = builder.build()
     console.print(f"[green]Build complete[/green]: {stats}")
 

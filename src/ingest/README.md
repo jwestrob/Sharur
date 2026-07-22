@@ -287,7 +287,8 @@ That is all you need. The five default databases cover all standard annotation:
 | VOGdb | Viral ortholog groups | No GA; requires e-value 1e-15 filter |
 | CANT-HYD | Hydrocarbon degradation markers | No GA; e-value 1e-10 filter |
 
-DefenseFinder and TXSScan automatically produce `--write_macsyfinder` output for downstream MacSyFinder co-localization validation in Stage 07.
+Stage 07 loads DefenseFinder and TXSScan HMM observations, then applies the
+replicon-local co-location caller to materialize named systems.
 
 **Important options:**
 
@@ -397,8 +398,13 @@ python src/ingest/07_build_knowledge_base.py -d data/DATASET -o data/DATASET/sha
 |------|---------|-------------|
 | `-d`, `--data-dir` | `data` | Parent directory containing `stage*` subdirectories |
 | `-o`, `--output` | `data/sharur.duckdb` | Output DuckDB path |
+| `-t`, `--threads` | Slurm allocation or host CPU count | Worker threads for DuckDB and downstream classifiers |
 | `--force` | off | Overwrite existing database |
 | `--enable-cazymes` | off | Run the slower dbCAN three-tool consensus classifier |
+
+When `--threads` is omitted inside Slurm, Stage 07 uses
+`SLURM_CPUS_ON_NODE`. Curated defense/secretion calling is fail-closed: an
+exception terminates the build before predicates and final indexes are written.
 
 **What Stage 07 does automatically (no user intervention needed):**
 1. Loads bins from Stage 02 manifest (or infers bins from Stage 03 FAA files)
@@ -432,6 +438,7 @@ python src/ingest/07_build_knowledge_base.py -d data/DATASET -o data/DATASET/sha
 **Common errors:**
 - "FileExistsError: sharur.duckdb exists" -- add `--force` to overwrite.
 - Missing `classify_hydrogenases` or `classify_cazymes` -- these are non-fatal; classification steps are skipped with a warning.
+- Defense/secretion caller failure -- inspect the traceback and repair the caller or model inputs before rebuilding.
 - Missing reference files (`data/reference/pfam_id_desc.tsv`, `data/reference/ko_list`) -- annotations will lack human-readable names but pipeline still works.
 
 ---
