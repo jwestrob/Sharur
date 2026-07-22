@@ -116,8 +116,10 @@ hits = b.search_foldseek(
     databases=["afdb50", "pdb100", "afdb-swissprot"],
     top_k=10
 )
-# Returns SharurResult; hits.data is a list of dicts
-# Each dict: {database, target, evalue, score, seq_identity, description, taxon, qstart, qend, tstart, tend}
+# Returns SharurResult:
+#   hits.data is formatted Markdown
+#   hits.raw / hits.records contain hit dictionaries
+# Local hits also include qcov and tcov.
 ```
 
 ### Convenience: search for a database protein
@@ -132,12 +134,15 @@ hits = b.search_foldseek_for_protein("protein_id")
 
 ```python
 from sharur.operators.foldseek import format_foldseek_hits
-print(format_foldseek_hits(hits.data, query_name="my_protein"))
+print(hits.data)
+# Or reformat the structured payload with a different query label:
+print(format_foldseek_hits(hits.raw, query_name="my_protein"))
 ```
 
 ### Local vs web search
 
-- Local binary auto-detected (`which foldseek`); databases at `~/.foldseek/{db}/{db}`
+- Local binary auto-detected and execution-tested; `FOLDSEEK_BINARY` overrides discovery
+- Local databases may use nested prefixes or resolved symlink prefixes under `~/.foldseek/`
 - Local is faster and has no rate limits
 - Falls back to web API for databases not installed locally
 - `b.list_foldseek_databases()` shows available web databases

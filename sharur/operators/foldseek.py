@@ -9,18 +9,22 @@ from __future__ import annotations
 
 import csv
 import io
+import os
 import shutil
 import subprocess
 import tempfile
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import requests
 
-from sharur.operators.base import SharurResult, OperatorContext
+from sharur.operators.base import OperatorContext, SharurResult
+
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from sharur.storage.duckdb_store import DuckDBStore
 
 
@@ -35,34 +39,171 @@ DEFAULT_DATABASES = ["afdb50", "afdb-swissprot", "pdb100"]
 # Local Foldseek database search path
 LOCAL_DB_DIR = Path.home() / ".foldseek"
 
+# Binary discovery settings
+_FOLDSEEK_BINARY_ENV_VARS = ("FOLDSEEK_BINARY", "FOLDSEEK_BIN")
+_FOLDSEEK_PROBE_TIMEOUT_SECONDS = 5
+
 # Output format for local foldseek easy-search
-LOCAL_OUTPUT_COLUMNS = (
-    "query,target,evalue,bits,prob,qstart,qend,tstart,tend,taxname,theader"
+LOCAL_OUTPUT_FIELDS = (
+    "query",
+    "target",
+    "evalue",
+    "bits",
+    "fident",
+    "qcov",
+    "tcov",
+    "qstart",
+    "qend",
+    "tstart",
+    "tend",
+    "taxname",
+    "theader",
 )
+LOCAL_OUTPUT_COLUMNS = ",".join(LOCAL_OUTPUT_FIELDS)
 
 
-def _find_foldseek_binary() -> Optional[str]:
-    """Find the local foldseek binary. Returns path or None."""
-    return shutil.which("foldseek")
+def _foldseek_binary_candidates() -> Iterator[str | Path]:
+    """Yield bounded Foldseek executable candidates in priority order."""
+    home = Path.home()
+    for variable in _FOLDSEEK_BINARY_ENV_VARS:
+        if value := os.environ.get(variable):
+            yield value
+
+    if path_binary := shutil.which("foldseek"):
+        yield path_binary
+
+    yield from (
+        home / ".local" / "bin" / "foldseek",
+        home / "bin" / "foldseek",
+        Path("/opt/homebrew/bin/foldseek"),
+        Path("/usr/local/bin/foldseek"),
+        Path("/opt/local/bin/foldseek"),
+        Path("/home/linuxbrew/.linuxbrew/bin/foldseek"),
+    )
+
+    if conda_prefix := os.environ.get("CONDA_PREFIX"):
+        yield Path(conda_prefix) / "bin" / "foldseek"
+
+    pyenv_root = Path(os.environ.get("PYENV_ROOT", home / ".pyenv")).expanduser()
+    for pattern in (
+        "versions/*/bin/foldseek",
+        "versions/*/envs/*/bin/foldseek",
+    ):
+        yield from sorted(pyenv_root.glob(pattern))
+
+    conda_roots = [
+        home / ".conda",
+        home / "miniconda3",
+        home / "anaconda3",
+        home / "miniforge3",
+        home / "mambaforge",
+    ]
+    if mamba_root := os.environ.get("MAMBA_ROOT_PREFIX"):
+        conda_roots.insert(0, Path(mamba_root).expanduser())
+    for root in conda_roots:
+        yield root / "bin" / "foldseek"
+        yield from sorted(root.glob("envs/*/bin/foldseek"))
 
 
-def _find_local_database(db_name: str) -> Optional[Path]:
-    """Check if a local Foldseek database exists. Returns path or None."""
-    db_path = LOCAL_DB_DIR / db_name / db_name
-    if db_path.exists():
-        return db_path
-    # Also check without the nested directory
-    alt_path = LOCAL_DB_DIR / db_name
-    if alt_path.exists() and not alt_path.is_dir():
-        return alt_path
+def _resolve_executable(candidate: str | Path) -> Path | None:
+    """Resolve an executable candidate without accepting a dangling shim."""
+    candidate_path = Path(candidate).expanduser()
+    if len(candidate_path.parts) == 1:
+        resolved_from_path = shutil.which(str(candidate_path))
+        if resolved_from_path is None:
+            return None
+        candidate_path = Path(resolved_from_path)
+
+    try:
+        resolved = candidate_path.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return None
+    if not resolved.is_file() or not os.access(resolved, os.X_OK):
+        return None
+    return resolved
+
+
+def _is_usable_foldseek_binary(binary: Path) -> bool:
+    """Return whether ``binary`` successfully executes Foldseek's version probe."""
+    try:
+        probe = subprocess.run(
+            [str(binary), "version"],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=_FOLDSEEK_PROBE_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return probe.returncode == 0
+
+
+def _find_foldseek_binary() -> str | None:
+    """Find and validate a real local Foldseek executable."""
+    seen: set[Path] = set()
+    for candidate in _foldseek_binary_candidates():
+        binary = _resolve_executable(candidate)
+        if binary is None or binary in seen:
+            continue
+        seen.add(binary)
+        if _is_usable_foldseek_binary(binary):
+            return str(binary)
     return None
+
+
+def _validated_database_prefix(candidate: Path) -> Path | None:
+    """Resolve a Foldseek database prefix and require its companion dbtype."""
+    try:
+        resolved = candidate.expanduser().resolve(strict=True)
+    except (OSError, RuntimeError):
+        return None
+    if not resolved.is_file():
+        return None
+    if not Path(f"{resolved}.dbtype").is_file():
+        return None
+    return resolved
+
+
+def _find_local_database(db_name: str) -> Path | None:
+    """Return a validated, resolved local Foldseek database prefix."""
+    for candidate in (
+        LOCAL_DB_DIR / db_name / db_name,
+        LOCAL_DB_DIR / db_name,
+    ):
+        if db_path := _validated_database_prefix(candidate):
+            return db_path
+    return None
+
+
+def _parse_optional_float(value: str) -> float | None:
+    """Parse an optional numeric Foldseek field."""
+    try:
+        return float(value) if value else None
+    except ValueError:
+        return None
+
+
+def _parse_optional_int(value: str) -> int | None:
+    """Parse an optional integer Foldseek field."""
+    try:
+        return int(value) if value else None
+    except ValueError:
+        return None
+
+
+def _parse_fraction(value: str) -> float | None:
+    """Normalize Foldseek fraction fields that occasionally use percentages."""
+    parsed = _parse_optional_float(value)
+    if parsed is not None and parsed > 1:
+        return parsed / 100
+    return parsed
 
 
 def search_foldseek_local(
     pdb_path: str,
     database: str = "pdb100",
     top_k: int = 10,
-) -> Optional[list[dict]]:
+) -> list[dict] | None:
     """Run local foldseek easy-search.
 
     Returns list of hit dicts, or None if local foldseek is not available
@@ -96,6 +237,7 @@ def search_foldseek_local(
             proc = subprocess.run(
                 cmd,
                 capture_output=True,
+                check=False,
                 text=True,
             )
         except FileNotFoundError:
@@ -114,34 +256,28 @@ def search_foldseek_local(
         hits = []
         reader = csv.reader(io.StringIO(content), delimiter="\t")
         for row in reader:
-            if len(row) < 11:
+            if len(row) < len(LOCAL_OUTPUT_FIELDS):
                 continue
-            try:
-                evalue = float(row[2]) if row[2] else None
-            except ValueError:
-                evalue = None
-            try:
-                score = float(row[3]) if row[3] else None
-            except ValueError:
-                score = None
+            values = dict(zip(LOCAL_OUTPUT_FIELDS, row, strict=False))
+            hits.append(
+                {
+                    "database": database,
+                    "target": values["target"],
+                    "evalue": _parse_optional_float(values["evalue"]),
+                    "score": _parse_optional_float(values["bits"]),
+                    "seq_identity": _parse_fraction(values["fident"]),
+                    "qcov": _parse_fraction(values["qcov"]),
+                    "tcov": _parse_fraction(values["tcov"]),
+                    "description": values["theader"],
+                    "taxon": values["taxname"],
+                    "qstart": _parse_optional_int(values["qstart"]),
+                    "qend": _parse_optional_int(values["qend"]),
+                    "tstart": _parse_optional_int(values["tstart"]),
+                    "tend": _parse_optional_int(values["tend"]),
+                }
+            )
 
-            hits.append({
-                "database": database,
-                "target": row[1],
-                "evalue": evalue,
-                "score": score,
-                "seq_identity": None,  # Not in this output format
-                "description": row[10] if len(row) > 10 else "",
-                "taxon": row[9] if len(row) > 9 else "",
-                "qstart": int(row[5]) if row[5].isdigit() else None,
-                "qend": int(row[6]) if row[6].isdigit() else None,
-                "tstart": int(row[7]) if row[7].isdigit() else None,
-                "tend": int(row[8]) if row[8].isdigit() else None,
-            })
-
-        hits.sort(
-            key=lambda x: x["evalue"] if x["evalue"] is not None else float("inf")
-        )
+        hits.sort(key=lambda x: x["evalue"] if x["evalue"] is not None else float("inf"))
         return hits[:top_k]
 
 
@@ -188,7 +324,7 @@ def _poll_foldseek_job(ticket_id: str, max_wait: int = 300) -> dict:
             # Get results
             results_response = requests.get(result_url, timeout=30)
             return results_response.json()
-        elif status == "ERROR":
+        if status == "ERROR":
             raise Exception("Foldseek server error")
 
         time.sleep(3)  # Poll every 3 seconds
@@ -211,19 +347,21 @@ def _parse_foldseek_results(data: dict, top_k: int = 10) -> list[dict]:
                 if seq_id is not None and seq_id > 1:
                     seq_id = seq_id / 100  # Convert if it's a percentage
 
-                hits.append({
-                    "database": db_name,
-                    "target": hit.get("target", ""),
-                    "evalue": hit.get("eval"),
-                    "score": hit.get("score"),
-                    "seq_identity": seq_id,
-                    "description": hit.get("tDescription", ""),
-                    "taxon": hit.get("taxName", ""),
-                    "qstart": hit.get("qStartPos"),
-                    "qend": hit.get("qEndPos"),
-                    "tstart": hit.get("tStartPos"),
-                    "tend": hit.get("tEndPos"),
-                })
+                hits.append(
+                    {
+                        "database": db_name,
+                        "target": hit.get("target", ""),
+                        "evalue": hit.get("eval"),
+                        "score": hit.get("score"),
+                        "seq_identity": seq_id,
+                        "description": hit.get("tDescription", ""),
+                        "taxon": hit.get("taxName", ""),
+                        "qstart": hit.get("qStartPos"),
+                        "qend": hit.get("qEndPos"),
+                        "tstart": hit.get("tStartPos"),
+                        "tend": hit.get("tEndPos"),
+                    }
+                )
 
     # Sort by e-value
     hits.sort(key=lambda x: x["evalue"] if x["evalue"] is not None else float("inf"))
@@ -232,7 +370,7 @@ def _parse_foldseek_results(data: dict, top_k: int = 10) -> list[dict]:
 
 def search_foldseek(
     pdb_path: str,
-    databases: Optional[list[str]] = None,
+    databases: list[str] | None = None,
     top_k: int = 10,
     prefer_local: bool = True,
 ) -> SharurResult:
@@ -254,13 +392,19 @@ def search_foldseek(
     if databases is None:
         databases = DEFAULT_DATABASES
 
-    params = {"pdb_path": pdb_path, "databases": databases, "top_k": top_k}
+    params = {
+        "pdb_path": pdb_path,
+        "databases": databases,
+        "top_k": top_k,
+        "prefer_local": prefer_local,
+    }
 
     with OperatorContext("search_foldseek", params) as ctx:
         if not Path(pdb_path).exists():
             return ctx.make_result(
                 data=f"PDB file not found: {pdb_path}",
                 rows=0,
+                raw=[],
             )
 
         all_hits: list[dict] = []
@@ -289,24 +433,25 @@ def search_foldseek(
                     return ctx.make_result(
                         data=f"Foldseek search failed: {e}",
                         rows=0,
+                        raw=[],
                     )
                 # If we have local hits, continue with those
 
         if not all_hits:
             return ctx.make_result(
-                data=[],
+                data=format_foldseek_hits([], query_name=Path(pdb_path).stem),
                 rows=0,
+                raw=[],
             )
 
         # Sort combined results by e-value
-        all_hits.sort(
-            key=lambda x: x["evalue"] if x["evalue"] is not None else float("inf")
-        )
+        all_hits.sort(key=lambda x: x["evalue"] if x["evalue"] is not None else float("inf"))
         all_hits = all_hits[:top_k]
 
         return ctx.make_result(
-            data=all_hits,
+            data=format_foldseek_hits(all_hits, query_name=Path(pdb_path).stem),
             rows=len(all_hits),
+            raw=all_hits,
         )
 
 
@@ -325,42 +470,58 @@ def format_foldseek_hits(hits: list[dict], query_name: str = "query") -> str:
         return "No structural homologs found."
 
     lines = [
-        f"# Foldseek Structure Search",
+        "# Foldseek Structure Search",
         f"**Query:** {query_name}",
         f"**Hits found:** {len(hits)}",
         "",
-        "| Rank | Database | E-value | Identity | Region | Target |",
-        "|------|----------|---------|----------|--------|--------|",
+        "| Rank | Database | E-value | Identity | Q cov | T cov | Region | Target |",
+        "|------|----------|---------|----------|-------|-------|--------|--------|",
     ]
 
     for i, hit in enumerate(hits, 1):
         db = hit.get("database", "?")[:12]
-        evalue = f"{hit['evalue']:.1e}" if hit.get("evalue") else "N/A"
-        identity = f"{hit['seq_identity']:.1%}" if hit.get("seq_identity") else "N/A"
+        evalue_value = hit.get("evalue")
+        evalue = f"{evalue_value:.1e}" if evalue_value is not None else "N/A"
+        identity_value = hit.get("seq_identity")
+        identity = f"{identity_value:.1%}" if identity_value is not None else "N/A"
+        qcov_value = hit.get("qcov")
+        qcov = f"{qcov_value:.1%}" if qcov_value is not None else "N/A"
+        tcov_value = hit.get("tcov")
+        tcov = f"{tcov_value:.1%}" if tcov_value is not None else "N/A"
         region = f"{hit.get('qstart', '?')}-{hit.get('qend', '?')}"
         target = (hit.get("target") or "")[:45]
-        lines.append(f"| {i} | {db} | {evalue} | {identity} | {region} | {target} |")
+        lines.append(
+            f"| {i} | {db} | {evalue} | {identity} | {qcov} | {tcov} | {region} | {target} |"
+        )
 
     # Add top hit details
     top = hits[0]
-    lines.extend([
-        "",
-        "## Top Hit",
-        f"- **Target:** {top.get('target', 'N/A')}",
-        f"- **E-value:** {top.get('evalue', 'N/A')}",
-        f"- **Identity:** {top.get('seq_identity', 0):.1%}" if top.get('seq_identity') else "",
-        f"- **Query region:** {top.get('qstart', '?')}-{top.get('qend', '?')}",
-        f"- **Taxon:** {top.get('taxon', 'N/A')}" if top.get('taxon') else "",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Top Hit",
+            f"- **Target:** {top.get('target', 'N/A')}",
+            f"- **E-value:** {top.get('evalue', 'N/A')}",
+        ]
+    )
+    if top.get("seq_identity") is not None:
+        lines.append(f"- **Identity:** {top['seq_identity']:.1%}")
+    if top.get("qcov") is not None:
+        lines.append(f"- **Query coverage:** {top['qcov']:.1%}")
+    if top.get("tcov") is not None:
+        lines.append(f"- **Target coverage:** {top['tcov']:.1%}")
+    lines.append(f"- **Query region:** {top.get('qstart', '?')}-{top.get('qend', '?')}")
+    if top.get("taxon"):
+        lines.append(f"- **Taxon:** {top['taxon']}")
 
-    return "\n".join(line for line in lines if line)  # Filter empty lines
+    return "\n".join(lines)
 
 
 def search_foldseek_for_protein(
-    store: "DuckDBStore",
+    store: DuckDBStore,
     protein_id: str,
-    pdb_path: Optional[str] = None,
-    databases: Optional[list[str]] = None,
+    pdb_path: str | None = None,
+    databases: list[str] | None = None,
     top_k: int = 10,
 ) -> SharurResult:
     """
@@ -374,7 +535,7 @@ def search_foldseek_for_protein(
         top_k: Number of hits to return
 
     Returns:
-        SharurResult with structural homologs (data is list of hit dicts)
+        SharurResult with formatted text in data and hit dictionaries in raw
     """
     params = {"protein_id": protein_id, "databases": databases}
 
@@ -398,16 +559,17 @@ def search_foldseek_for_protein(
 
         if pdb_path is None or not Path(pdb_path).exists():
             return ctx.make_result(
-                data=[],
+                data=format_foldseek_hits([], query_name=protein_id),
                 rows=0,
+                raw=[],
             )
 
         # Run Foldseek search - returns structured data
         result = search_foldseek(pdb_path, databases, top_k)
 
         # Add protein_id to each hit for traceability
-        if result.data and isinstance(result.data, list):
-            for hit in result.data:
+        if isinstance(result.raw, list):
+            for hit in result.raw:
                 hit["query_protein_id"] = protein_id
 
         return result
@@ -419,24 +581,29 @@ def list_foldseek_databases() -> SharurResult:
         try:
             response = requests.get(FOLDSEEK_DATABASES, timeout=10)
             databases = response.json()
-
-            # Return structured data
+            lines = ["# Available Foldseek Databases", ""]
+            for database in databases:
+                name = database.get("name", "unknown")
+                description = database.get("description", "")
+                lines.append(f"- **{name}**: {description}" if description else f"- **{name}**")
             return ctx.make_result(
-                data=databases,  # List of {"name": ..., "description": ...}
+                data="\n".join(lines),
                 rows=len(databases),
+                raw=databases,
             )
 
-        except Exception as e:
+        except Exception:
             return ctx.make_result(
-                data=[],
+                data="Foldseek database list unavailable.",
                 rows=0,
+                raw=[],
             )
 
 
 __all__ = [
-    "search_foldseek",
-    "search_foldseek_local",
-    "search_foldseek_for_protein",
-    "list_foldseek_databases",
     "format_foldseek_hits",
+    "list_foldseek_databases",
+    "search_foldseek",
+    "search_foldseek_for_protein",
+    "search_foldseek_local",
 ]
