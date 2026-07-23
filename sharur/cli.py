@@ -1012,6 +1012,52 @@ def seal(
     typer.echo(f"Seal: {seal_path}")
 
 
+@app.command()
+def migrate(
+    db: Path = typer.Option(
+        Path(DEFAULT_DB),
+        "--db",
+        "-d",
+        help="Path to a writable Sharur DuckDB.",
+    ),
+):
+    """Apply pending additive schema/index migrations in a maintenance window."""
+    import duckdb  # noqa: PLC0415
+
+    from sharur.storage.migrations import (  # noqa: PLC0415
+        get_current_version,
+        run_migrations,
+    )
+    from sharur.storage.schema import SCHEMA_VERSION  # noqa: PLC0415
+
+    database = db.expanduser().resolve()
+    if not database.is_file():
+        typer.echo(f"DuckDB file does not exist: {database}", err=True)
+        raise typer.Exit(1)
+    connection = duckdb.connect(str(database))
+    try:
+        before = get_current_version(connection)
+        applied = run_migrations(connection)
+        after = get_current_version(connection)
+    finally:
+        connection.close()
+    typer.echo(
+        f"Schema: {before} -> {after} "
+        f"({applied} migration{'s' if applied != 1 else ''} applied)"
+    )
+    if after != SCHEMA_VERSION:
+        typer.echo(
+            f"Current software expects schema {SCHEMA_VERSION}; migration stopped at {after}.",
+            err=True,
+        )
+        raise typer.Exit(1)
+    if applied:
+        typer.echo(
+            "Canonical database state changed. Rebuild dataset.seal.json "
+            "with `sharur seal --force` before serving it."
+        )
+
+
 @app.command(name="verify-seal")
 def verify_seal(
     seal_path: Path = typer.Argument(..., help="Path to dataset.seal.json."),

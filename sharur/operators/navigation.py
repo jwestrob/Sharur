@@ -7,23 +7,89 @@ filtering, and contextual views.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
-from sharur.operators.base import SharurResult, OperatorContext
+from sharur.operators.base import OperatorContext, SharurResult
+from sharur.operators.cases import structured_projection_sources
+from sharur.operators.predicates_v2 import explain
 from sharur.operators.semantics import (
     get_active_predicates,
     get_active_predicates_for_protein,
 )
 
+
 if TYPE_CHECKING:
     from sharur.storage.duckdb_store import DuckDBStore
 
 
+def _load_annotation_rows(
+    store: DuckDBStore,
+    protein_ids: list[str],
+    *,
+    excluded_sources: list[str] | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    """Batch observed annotation rows for a bounded protein cohort."""
+    if not protein_ids:
+        return {}
+    placeholders = ", ".join(["?"] * len(protein_ids))
+    excluded = excluded_sources or []
+    exclusion_sql = ""
+    params: list[Any] = [*protein_ids]
+    if excluded:
+        source_placeholders = ", ".join(["?"] * len(excluded))
+        exclusion_sql = f"AND a.source NOT IN ({source_placeholders})"
+        params.extend(excluded)
+    rows = store.execute(
+        f"""
+        SELECT
+            a.protein_id,
+            a.source,
+            a.accession,
+            a.name,
+            a.description,
+            a.evalue,
+            a.score
+        FROM annotations AS a
+        WHERE a.protein_id IN ({placeholders})
+          {exclusion_sql}
+        ORDER BY
+            a.protein_id,
+            a.evalue NULLS LAST,
+            a.score DESC NULLS LAST,
+            a.annotation_id
+        """,
+        params,
+    )
+    by_protein: dict[str, list[dict[str, Any]]] = {}
+    for protein_id, source, accession, name, description, evalue, score in rows:
+        by_protein.setdefault(str(protein_id), []).append(
+            {
+                "source": source,
+                "accession": accession,
+                "name": name,
+                "description": description,
+                "evalue": evalue,
+                "score": score,
+            }
+        )
+    return by_protein
+
+
+def _annotation_label(annotation: dict[str, Any] | None) -> str | None:
+    if annotation is None:
+        return None
+    name = annotation.get("name") or annotation.get("description")
+    accession = annotation.get("accession")
+    if name and accession:
+        return f"{name} ({accession})"
+    return str(name or accession) if name or accession else None
+
+
 def list_genomes(
-    store: "DuckDBStore",
-    taxonomy_filter: Optional[str] = None,
-    min_completeness: Optional[float] = None,
-    max_contamination: Optional[float] = None,
+    store: DuckDBStore,
+    taxonomy_filter: str | None = None,
+    min_completeness: float | None = None,
+    max_contamination: float | None = None,
     limit: int = 20,
     offset: int = 0,
 ) -> SharurResult:
@@ -77,7 +143,7 @@ def list_genomes(
             SELECT bin_id, completeness, contamination, taxonomy, n_contigs, total_length
             FROM bins
             {where}
-            ORDER BY completeness DESC NULLS LAST
+            ORDER BY completeness DESC NULLS LAST, bin_id
             LIMIT ? OFFSET ?
         """
         query_params.extend([limit, offset])
@@ -126,12 +192,12 @@ def list_genomes(
 
 
 def list_proteins(
-    store: "DuckDBStore",
-    genome_id: Optional[str] = None,
-    contig_id: Optional[str] = None,
-    min_length: Optional[int] = None,
-    max_length: Optional[int] = None,
-    has_annotation: Optional[bool] = None,
+    store: DuckDBStore,
+    genome_id: str | None = None,
+    contig_id: str | None = None,
+    min_length: int | None = None,
+    max_length: int | None = None,
+    has_annotation: bool | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> SharurResult:
@@ -162,45 +228,59 @@ def list_proteins(
     }
 
     with OperatorContext("list_proteins", params, store=store) as ctx:
-        # Build query
-        clauses = []
-        query_params = []
+        clauses: list[str] = []
+        filter_params: list[Any] = []
 
         if genome_id:
             clauses.append("p.bin_id = ?")
-            query_params.append(genome_id)
+            filter_params.append(genome_id)
 
         if contig_id:
             clauses.append("p.contig_id = ?")
-            query_params.append(contig_id)
+            filter_params.append(contig_id)
 
         if min_length is not None:
             clauses.append("(p.sequence_length >= ? OR (p.end_coord - p.start) / 3 >= ?)")
-            query_params.extend([min_length, min_length])
+            filter_params.extend([min_length, min_length])
 
         if max_length is not None:
             clauses.append("(p.sequence_length <= ? OR (p.end_coord - p.start) / 3 <= ?)")
-            query_params.extend([max_length, max_length])
+            filter_params.extend([max_length, max_length])
 
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-
-        # Handle annotation filter with subquery
+        excluded_sources = structured_projection_sources(store)
+        annotation_relation = "SELECT DISTINCT protein_id FROM annotations"
+        annotation_params: list[Any] = []
+        if excluded_sources:
+            placeholders = ", ".join(["?"] * len(excluded_sources))
+            annotation_relation += f" WHERE source NOT IN ({placeholders})"
+            annotation_params.extend(excluded_sources)
+        annotation_join = ""
         if has_annotation is True:
-            if where:
-                where += " AND p.protein_id IN (SELECT DISTINCT protein_id FROM annotations)"
-            else:
-                where = "WHERE p.protein_id IN (SELECT DISTINCT protein_id FROM annotations)"
+            annotation_join = (
+                f"SEMI JOIN ({annotation_relation}) AS annotated "
+                "ON annotated.protein_id = p.protein_id"
+            )
         elif has_annotation is False:
-            if where:
-                where += " AND p.protein_id NOT IN (SELECT DISTINCT protein_id FROM annotations)"
-            else:
-                where = "WHERE p.protein_id NOT IN (SELECT DISTINCT protein_id FROM annotations)"
+            annotation_join = (
+                f"ANTI JOIN ({annotation_relation}) AS annotated "
+                "ON annotated.protein_id = p.protein_id"
+            )
 
-        # Get total count
-        count_query = f"SELECT COUNT(*) FROM proteins p {where}"
-        total_count = store.execute(count_query, query_params or None)[0][0]
+        query_params = [
+            *(annotation_params if annotation_join else []),
+            *filter_params,
+        ]
+        total_count = store.execute(
+            f"""
+            SELECT COUNT(*)
+            FROM proteins AS p
+            {annotation_join}
+            {where}
+            """,
+            query_params or None,
+        )[0][0]
 
-        # Get results with best annotation
         query = f"""
             SELECT
                 p.protein_id,
@@ -209,23 +289,23 @@ def list_proteins(
                 p.start,
                 p.end_coord,
                 p.strand,
-                COALESCE(p.sequence_length, (p.end_coord - p.start) / 3) as length_aa,
-                (
-                    SELECT a.name || ' (' || a.accession || ')'
-                    FROM annotations a
-                    WHERE a.protein_id = p.protein_id
-                    ORDER BY a.evalue NULLS LAST
-                    LIMIT 1
-                ) as best_annotation
-            FROM proteins p
+                CAST(
+                    COALESCE(p.sequence_length, (p.end_coord - p.start) / 3)
+                    AS BIGINT
+                ) AS length_aa
+            FROM proteins AS p
+            {annotation_join}
             {where}
-            ORDER BY p.contig_id, p.start
+            ORDER BY p.contig_id, p.start, p.protein_id
             LIMIT ? OFFSET ?
         """
-        query_params.extend([limit, offset])
-        rows = store.execute(query, query_params)
+        rows = store.execute(query, [*query_params, limit, offset])
+        annotations = _load_annotation_rows(
+            store,
+            [str(row[0]) for row in rows],
+            excluded_sources=excluded_sources,
+        )
 
-        # Format output
         lines = [
             "# Proteins",
             f"Showing {len(rows)} of {total_count:,} proteins",
@@ -236,7 +316,11 @@ def list_proteins(
 
         proteins = []
         for row in rows:
-            protein_id, contig_id, bin_id, start, end, strand, length_aa, annotation = row
+            protein_id, contig_id, bin_id, start, end, strand, length_aa = row
+            protein_annotations = annotations.get(str(protein_id), [])
+            annotation = _annotation_label(
+                protein_annotations[0] if protein_annotations else None
+            )
             ann_str = (annotation or "NO HITS")[:40]
             id_short = protein_id[:25] if len(protein_id) > 25 else protein_id
 
@@ -266,7 +350,7 @@ def list_proteins(
         )
 
 
-def get_genome(store: "DuckDBStore", genome_id: str, verbosity: int = 1) -> SharurResult:
+def get_genome(store: DuckDBStore, genome_id: str, verbosity: int = 1) -> SharurResult:
     """
     Get detailed information about a specific genome.
 
@@ -306,16 +390,27 @@ def get_genome(store: "DuckDBStore", genome_id: str, verbosity: int = 1) -> Shar
             [genome_id],
         )[0][0]
 
-        # Get annotation stats
+        excluded_sources = structured_projection_sources(store)
+        exclusion_sql = ""
+        annotation_params: list[Any] = [genome_id]
+        if excluded_sources:
+            placeholders = ", ".join(["?"] * len(excluded_sources))
+            exclusion_sql = f"AND a.source NOT IN ({placeholders})"
+            annotation_params.extend(excluded_sources)
         annotation_stats = store.execute(
-            """
-            SELECT source, COUNT(*) as count
-            FROM annotations
-            WHERE protein_id IN (SELECT protein_id FROM proteins WHERE bin_id = ?)
-            GROUP BY source
-            ORDER BY count DESC
+            f"""
+            SELECT
+                a.source,
+                COUNT(*) AS domain_hits,
+                COUNT(DISTINCT a.protein_id) AS proteins
+            FROM proteins AS p
+            JOIN annotations AS a ON a.protein_id = p.protein_id
+            WHERE p.bin_id = ?
+              {exclusion_sql}
+            GROUP BY a.source
+            ORDER BY proteins DESC, domain_hits DESC, a.source
             """,
-            [genome_id],
+            annotation_params,
         )
 
         lines = [
@@ -338,9 +433,13 @@ def get_genome(store: "DuckDBStore", genome_id: str, verbosity: int = 1) -> Shar
         if verbosity >= 1 and annotation_stats:
             lines.extend([
                 "## Annotations by Source",
+                "| Source | Proteins | Domain hits |",
+                "|--------|---------:|------------:|",
             ])
-            for source, count in annotation_stats:
-                lines.append(f"- {source}: {count:,}")
+            for source, domain_hits, annotated_proteins in annotation_stats:
+                lines.append(
+                    f"| {source} | {annotated_proteins:,} | {domain_hits:,} |"
+                )
             lines.append("")
 
         data = "\n".join(lines)
@@ -357,11 +456,19 @@ def get_genome(store: "DuckDBStore", genome_id: str, verbosity: int = 1) -> Shar
                 "n_contigs": n_contigs,
                 "total_length": total_len,
                 "protein_count": protein_count,
+                "annotation_stats": [
+                    {
+                        "source": source,
+                        "domain_hits": domain_hits,
+                        "proteins": annotated_proteins,
+                    }
+                    for source, domain_hits, annotated_proteins in annotation_stats
+                ],
             },
         )
 
 
-def get_protein(store: "DuckDBStore", protein_id: str, verbosity: int = 1) -> SharurResult:
+def get_protein(store: DuckDBStore, protein_id: str, verbosity: int = 1) -> SharurResult:
     """
     Get detailed information about a specific protein.
 
@@ -380,7 +487,7 @@ def get_protein(store: "DuckDBStore", protein_id: str, verbosity: int = 1) -> Sh
         row = store.execute(
             """
             SELECT protein_id, contig_id, bin_id, start, end_coord, strand,
-                   sequence, sequence_length, gc_content
+                   sequence_length, gc_content
             FROM proteins
             WHERE protein_id = ?
             """,
@@ -394,26 +501,19 @@ def get_protein(store: "DuckDBStore", protein_id: str, verbosity: int = 1) -> Sh
                 total_rows=0,
             )
 
-        pid, contig_id, bin_id, start, end, strand, seq, seq_len, gc = row[0]
+        pid, contig_id, bin_id, start, end, strand, seq_len, gc = row[0]
         length_aa = seq_len or ((end - start) // 3)
 
-        # Get annotations
-        annotations = store.execute(
-            """
-            SELECT source, accession, name, description, evalue, score
-            FROM annotations
-            WHERE protein_id = ?
-            ORDER BY evalue NULLS LAST
-            """,
+        annotations = _load_annotation_rows(
+            store,
             [protein_id],
-        )
+            excluded_sources=structured_projection_sources(store),
+        ).get(protein_id, [])
 
         # Read the same persisted V2-compatible predicate view used by search.
         predicates = get_active_predicates_for_protein(store, protein_id)
 
         try:
-            from sharur.operators.predicates_v2 import explain
-
             semantic_explanation = explain(store, protein_id)
         except Exception as exc:
             semantic_explanation = {
@@ -478,7 +578,11 @@ def get_protein(store: "DuckDBStore", protein_id: str, verbosity: int = 1) -> Sh
                 "|--------|-----------|------|---------|",
             ])
             for ann in annotations:
-                source, acc, name, desc, evalue, score = ann
+                source = ann["source"]
+                acc = ann["accession"]
+                name = ann["name"]
+                desc = ann["description"]
+                evalue = ann["evalue"]
                 ev_str = f"{evalue:.1e}" if evalue is not None else "-"
                 name_str = (name or desc or "-")[:30]
                 lines.append(f"| {source} | {acc} | {name_str} | {ev_str} |")
@@ -490,12 +594,11 @@ def get_protein(store: "DuckDBStore", protein_id: str, verbosity: int = 1) -> Sh
                 "",
             ])
 
-        if verbosity >= 2 and seq:
+        if verbosity >= 2:
             lines.extend([
-                "## Sequence",
-                "```",
-                _format_sequence(seq),
-                "```",
+                "## Sequence Access",
+                "Raw sequence is compute-only. Use `get_sequence()` or an export "
+                "operator with a local output path.",
                 "",
             ])
 
@@ -516,16 +619,18 @@ def get_protein(store: "DuckDBStore", protein_id: str, verbosity: int = 1) -> Sh
                 "gc_content": gc,
                 "predicates": predicates,
                 "semantic": semantic_explanation,
-                "annotations": [
-                    {"source": a[0], "accession": a[1], "name": a[2], "description": a[3], "evalue": a[4], "score": a[5]}
-                    for a in annotations
-                ],
+                "annotations": annotations,
             },
+            warnings=(
+                ["Raw sequence is intentionally omitted from model-visible output."]
+                if verbosity >= 2
+                else None
+            ),
         )
 
 
 def get_neighborhood(
-    store: "DuckDBStore",
+    store: DuckDBStore,
     entity_id: str,
     window: int = 10,
     verbosity: int = 1,
@@ -539,11 +644,9 @@ def get_neighborhood(
         entity_id: Protein ID as anchor
         window: Number of genes on each side
         verbosity: 0=minimal, 1=standard, 2=detailed
-        all_annotations: If True, return all annotation sources per gene
-            (PFAM, KEGG, VOGdb, DefenseFinder, HydDB, CAZy) instead of
-            just the best hit. Essential for context-based functional
-            interpretation — the domain tells you the fold, the full
-            annotation context tells you the function.
+        all_annotations: If True, return all live observed annotation sources
+            per gene instead of only the best hit. Structured caller output is
+            kept separate from these per-domain observations.
 
     Returns:
         SharurResult with neighborhood as ASCII table
@@ -556,7 +659,8 @@ def get_neighborhood(
     }
 
     with OperatorContext("get_neighborhood", params, store=store) as ctx:
-        # Get anchor protein
+        if window < 0:
+            raise ValueError("window must be non-negative")
         anchor = store.execute(
             """
             SELECT protein_id, contig_id, bin_id, start, end_coord, strand, gene_index
@@ -573,57 +677,77 @@ def get_neighborhood(
                 total_rows=0,
             )
 
-        anchor_pid, contig_id, bin_id, anchor_start, anchor_end, anchor_strand, anchor_idx = anchor[0]
-
-        # Get neighboring proteins by position
-        neighbors = store.execute(
+        _anchor_pid, contig_id, bin_id, *_anchor_fields = anchor[0]
+        neighbor_rows = store.execute(
             """
+            WITH ranked AS (
+                SELECT
+                    p.protein_id,
+                    p.start,
+                    p.end_coord,
+                    p.strand,
+                    CAST(
+                        COALESCE(
+                            p.sequence_length,
+                            (p.end_coord - p.start) / 3
+                        )
+                        AS BIGINT
+                    ) AS length_aa,
+                    p.gene_index,
+                    ROW_NUMBER() OVER (
+                        ORDER BY p.start, p.protein_id
+                    ) AS row_number,
+                    COUNT(*) OVER () AS total_rows
+                FROM proteins AS p
+                WHERE p.contig_id = ?
+                  AND p.bin_id IS NOT DISTINCT FROM ?
+            ),
+            anchor_position AS (
+                SELECT row_number
+                FROM ranked
+                WHERE protein_id = ?
+            )
             SELECT
-                p.protein_id,
-                p.start,
-                p.end_coord,
-                p.strand,
-                COALESCE(p.sequence_length, (p.end_coord - p.start) / 3) as length_aa,
-                p.gene_index,
-                (
-                    SELECT a.name || COALESCE(' (' || a.accession || ')', '')
-                    FROM annotations a
-                    WHERE a.protein_id = p.protein_id
-                    ORDER BY a.evalue NULLS LAST
-                    LIMIT 1
-                ) as best_annotation
-            FROM proteins p
-            WHERE p.contig_id = ?
-              AND p.bin_id = ?
-            ORDER BY p.start
+                ranked.protein_id,
+                ranked.start,
+                ranked.end_coord,
+                ranked.strand,
+                ranked.length_aa,
+                ranked.gene_index,
+                ranked.row_number,
+                ranked.total_rows
+            FROM ranked
+            CROSS JOIN anchor_position
+            WHERE ranked.row_number BETWEEN
+                  anchor_position.row_number - ?
+              AND anchor_position.row_number + ?
+            ORDER BY ranked.row_number
             """,
-            [contig_id, bin_id],
+            [contig_id, bin_id, entity_id, window, window],
         )
 
-        if not neighbors:
+        if not neighbor_rows:
             return ctx.make_result(
                 data="No proteins found on contig",
                 rows=0,
                 total_rows=0,
             )
 
-        # Find anchor index and slice window
-        anchor_list_idx = None
-        for i, row in enumerate(neighbors):
-            if row[0] == entity_id:
-                anchor_list_idx = i
-                break
-
-        if anchor_list_idx is None:
-            return ctx.make_result(
-                data="Anchor protein not found in contig",
-                rows=0,
-                total_rows=0,
+        excluded_sources = structured_projection_sources(store)
+        annotations_by_protein = _load_annotation_rows(
+            store,
+            [str(row[0]) for row in neighbor_rows],
+            excluded_sources=excluded_sources,
+        )
+        window_proteins = []
+        for row in neighbor_rows:
+            protein_annotations = annotations_by_protein.get(str(row[0]), [])
+            best_annotation = _annotation_label(
+                protein_annotations[0] if protein_annotations else None
             )
-
-        start_idx = max(0, anchor_list_idx - window)
-        end_idx = min(len(neighbors), anchor_list_idx + window + 1)
-        window_proteins = neighbors[start_idx:end_idx]
+            window_proteins.append((*row[:6], best_annotation))
+        start_idx = int(neighbor_rows[0][6]) - 1
+        total_proteins = int(neighbor_rows[0][7])
         predicates_by_protein = (
             get_active_predicates(store, [row[0] for row in window_proteins])
             if verbosity >= 1
@@ -633,41 +757,6 @@ def get_neighborhood(
         # Calculate region bounds
         region_start = window_proteins[0][1]
         region_end = window_proteins[-1][2]
-
-        # If all_annotations requested, fetch full annotation sets
-        annotations_by_protein: dict[str, list[dict[str, Any]]] = {}
-        if all_annotations:
-            protein_ids = [p[0] for p in window_proteins]
-            # Batch fetch all annotations for proteins in the window
-            placeholders = ", ".join(["?"] * len(protein_ids))
-            all_annots = store.execute(
-                f"""
-                SELECT
-                    a.protein_id,
-                    a.source,
-                    a.accession,
-                    a.name,
-                    a.description,
-                    a.evalue,
-                    a.score
-                FROM annotations a
-                WHERE a.protein_id IN ({placeholders})
-                ORDER BY a.protein_id, a.source, a.evalue NULLS LAST
-                """,
-                protein_ids,
-            )
-            for row in all_annots:
-                pid = row[0]
-                if pid not in annotations_by_protein:
-                    annotations_by_protein[pid] = []
-                annotations_by_protein[pid].append({
-                    "source": row[1],
-                    "accession": row[2],
-                    "name": row[3],
-                    "description": row[4],
-                    "evalue": row[5],
-                    "score": row[6],
-                })
 
         # Format header
         lines = [
@@ -719,7 +808,7 @@ def get_neighborhood(
         return ctx.make_result(
             data=data,
             rows=len(window_proteins),
-            total_rows=len(neighbors),
+            total_rows=total_proteins,
             raw={
                 "anchor_protein_id": entity_id,
                 "contig_id": contig_id,
@@ -763,8 +852,8 @@ def _format_neighborhood_table_full(
     """
     lines: list[str] = []
 
-    for i, row in enumerate(proteins):
-        protein_id, start, end, strand, length_aa, gene_idx, best_annotation = row
+    for row in proteins:
+        protein_id, start, end, strand, length_aa, gene_idx, _best_annotation = row
         is_anchor = protein_id == anchor_id
 
         marker = ">>>" if is_anchor else f"g{gene_idx}"
@@ -838,7 +927,7 @@ def _format_neighborhood_table(
     ]
 
     for i, row in enumerate(proteins):
-        protein_id, start, end, strand, length_aa, gene_idx, annotation = row
+        protein_id, start, _end, strand, length_aa, _gene_idx, annotation = row
         is_anchor = protein_id == anchor_id
 
         if verbosity >= 1:
@@ -881,20 +970,15 @@ def _format_bp(bp: int) -> str:
     """Format base pairs with appropriate unit."""
     if bp >= 1_000_000:
         return f"{bp / 1_000_000:.1f}Mb"
-    elif bp >= 1_000:
+    if bp >= 1_000:
         return f"{bp / 1_000:.1f}kb"
     return f"{bp}bp"
 
 
-def _format_sequence(seq: str, width: int = 60) -> str:
-    """Format sequence with line breaks."""
-    return "\n".join(seq[i:i+width] for i in range(0, len(seq), width))
-
-
 __all__ = [
+    "get_genome",
+    "get_neighborhood",
+    "get_protein",
     "list_genomes",
     "list_proteins",
-    "get_genome",
-    "get_protein",
-    "get_neighborhood",
 ]

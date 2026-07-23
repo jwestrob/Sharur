@@ -114,6 +114,30 @@ Task attempts have finite leases and opaque fencing tokens. A recovered or
 replacement attempt has exclusive terminal-write authority, including when a
 replacement process reuses the same agent ID.
 
+Long logical tasks can persist a retry-visible checkpoint under that same
+attempt fence:
+
+```python
+ops.put_task_checkpoint(
+    task["id"],
+    "progress",
+    cursor=opaque_cursor,
+    payload={"completed_units": completed_units},
+)
+```
+
+A replacement attempt reads the prior value with
+`get_task_checkpoint()`. Checkpoint writes retain the same token, attempt,
+identity, status, and server-clock lease checks as completion. Batch
+checkpoint writes at scientifically safe boundaries to control SQLite and
+HTTP mutation volume.
+
+Atlas campaigns use the specialized plan and packet contract in
+`.claude/skills/atlas.md`: one task per genome, ordered contig pages,
+sequence-free protein packets, checkpointed contig prefixes, and exact
+coverage manifests. Dataset size changes the number of dynamically claimed
+tasks while preserving exhaustive traversal.
+
 See [`query_service.md`](query_service.md) for launch commands, endpoint
 contracts, resource arithmetic, and access-path selection.
 

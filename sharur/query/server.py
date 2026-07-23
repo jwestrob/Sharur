@@ -35,6 +35,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sharur import __version__
 from sharur.dataset_seal import DEFAULT_SEAL_NAME, DatasetSealError, verify_dataset_seal
 from sharur.operators.base import SharurResult
+from sharur.operators.contigs import get_contig, get_contig_packet, list_contigs
 from sharur.operators.introspection import overview
 from sharur.operators.navigation import (
     get_genome,
@@ -114,6 +115,14 @@ class NeighborhoodQuery(StrictModel):
     window: int = Field(default=10, ge=0, le=100)
     verbosity: int = Field(default=1, ge=0, le=1)
     all_annotations: bool = False
+
+
+class ContigPacketQuery(StrictModel):
+    genome_id: str = Field(min_length=1, max_length=1_024)
+    contig_id: str = Field(min_length=1, max_length=2_048)
+    cursor: str | None = Field(default=None, max_length=4_096)
+    limit: int = Field(default=100, ge=1, le=250)
+    all_annotations: bool = True
 
 
 class PredicateSearch(StrictModel):
@@ -336,6 +345,7 @@ def create_app(
         memory_limit=memory_limit,
         temp_directory=configured_temp,
         max_temp_directory_size=max_temp_directory_size,
+        dataset_id=staged_database.dataset_id if staged_database else None,
     )
     admission = WeightedAdmissionController(
         capacity=capacity_units,
@@ -504,6 +514,7 @@ def create_app(
             "query_id": identifier,
             "operator": operator,
             "class": query_class,
+            "dataset_id": runtime.dataset_id,
             "queue_wait_ms": round(wait_seconds * 1000, 3),
             "execution_ms": round(execution.execution_seconds * 1000, 3),
         }
@@ -608,6 +619,56 @@ def create_app(
             operator="get_genome",
             query_class="light",
             operation=lambda store: get_genome(store, genome_id, verbosity),
+        )
+
+    @router.get("/v1/genomes/{genome_id}/contigs")
+    async def contigs_list(
+        request: Request,
+        genome_id: Annotated[str, FastAPIPath(min_length=1, max_length=1_024)],
+        limit: Annotated[int, Query(ge=1, le=1_000)] = 100,
+        cursor: Annotated[str | None, Query(max_length=4_096)] = None,
+    ):
+        return await run_operator(
+            request,
+            operator="list_contigs",
+            query_class="light",
+            operation=lambda store: list_contigs(
+                store,
+                genome_id,
+                limit=limit,
+                cursor=cursor,
+            ),
+        )
+
+    @router.get("/v1/genomes/{genome_id}/contigs/{contig_id}")
+    async def contig_detail(
+        request: Request,
+        genome_id: Annotated[str, FastAPIPath(min_length=1, max_length=1_024)],
+        contig_id: Annotated[str, FastAPIPath(min_length=1, max_length=2_048)],
+        verbosity: Annotated[int, Query(ge=0, le=1)] = 1,
+    ):
+        return await run_operator(
+            request,
+            operator="get_contig",
+            query_class="light",
+            operation=lambda store: get_contig(
+                store,
+                genome_id,
+                contig_id,
+                verbosity=verbosity,
+            ),
+        )
+
+    @router.post("/v1/contigs/packet")
+    async def contig_packet(body: ContigPacketQuery, request: Request):
+        return await run_operator(
+            request,
+            operator="get_contig_packet",
+            query_class="light",
+            operation=lambda store: get_contig_packet(
+                store,
+                **body.model_dump(),
+            ),
         )
 
     @router.get("/v1/proteins/{protein_id}")

@@ -30,6 +30,13 @@ def test_fresh_db_gets_latest_version(fresh_conn):
     applied = run_migrations(fresh_conn)
     assert applied == SCHEMA_VERSION
     assert get_current_version(fresh_conn) == SCHEMA_VERSION
+    assert fresh_conn.execute(
+        """
+        SELECT COUNT(*)
+        FROM duckdb_indexes()
+        WHERE index_name = 'idx_contigs_bin'
+        """
+    ).fetchone()[0] == 1
 
 
 def test_db_without_version_table_returns_0():
@@ -61,7 +68,7 @@ def test_schema_version_table_has_correct_data(fresh_conn):
 
 def test_schema_version_constant():
     """SCHEMA_VERSION constant matches latest migration."""
-    assert SCHEMA_VERSION == 5
+    assert SCHEMA_VERSION == 6
 
 
 def test_duckdb_store_runs_migrations():
@@ -168,8 +175,8 @@ def test_v5_migration_quarantines_legacy_named_system_calls():
 
     applied = run_migrations(conn)
 
-    assert applied == 1
-    assert get_current_version(conn) == 5
+    assert applied == 2
+    assert get_current_version(conn) == 6
     assert conn.execute("SELECT COUNT(*) FROM secretion_systems").fetchone()[0] == 0
     assert conn.execute(
         "SELECT source FROM annotations ORDER BY annotation_id"
@@ -184,3 +191,10 @@ def test_v5_migration_quarantines_legacy_named_system_calls():
     assert {
         row[0] for row in conn.execute("DESCRIBE secretion_systems").fetchall()
     } >= {"contig_id"}
+    assert conn.execute(
+        """
+        SELECT COUNT(*)
+        FROM duckdb_indexes()
+        WHERE index_name = 'idx_contigs_bin'
+        """
+    ).fetchone()[0] == 1

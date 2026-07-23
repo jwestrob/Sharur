@@ -168,6 +168,26 @@ def test_http_task_and_run_lifecycles_match_direct_store_contract(tmp_path: Path
             },
         )
         assert heartbeat.json()["status"] == "in_progress"
+        checkpoint = client.put(
+            f"/tasks/{task_id}/checkpoint",
+            headers=headers,
+            json={
+                "agent_id": "worker",
+                "checkpoint_key": "atlas_progress",
+                "cursor": "contig_025",
+                "payload": {"completed_contigs": 25},
+                "lease_token": lease_token,
+                "lease_attempt": lease_attempt,
+            },
+        )
+        assert checkpoint.status_code == 200
+        assert checkpoint.json()["cursor"] == "contig_025"
+        restored = client.get(
+            f"/tasks/{task_id}/checkpoints",
+            headers=headers,
+            params={"checkpoint_key": "atlas_progress"},
+        )
+        assert restored.json()["payload"] == {"completed_contigs": 25}
         completed = client.patch(
             f"/tasks/{task_id}",
             headers=headers,

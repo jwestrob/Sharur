@@ -1,4 +1,4 @@
-# Sharur Ops v3 — Storage and Coordination Contract
+# Sharur Ops v4 — Storage and Coordination Contract
 
 Sharur Ops is the durable control plane for multi-agent analyses. It records
 campaigns, identities, logical work, scientific findings, hypotheses,
@@ -72,7 +72,7 @@ adapters. They do not define task semantics or pipeline stage behavior.
 
 ## Schema lifecycle
 
-`OPS_SCHEMA_VERSION = 3`. `ensure_ops_schema()` performs an additive,
+`OPS_SCHEMA_VERSION = 4`. `ensure_ops_schema()` performs an additive,
 transactional migration and returns:
 
 - `True` when it applies a migration;
@@ -180,6 +180,17 @@ capability matching, capacity accounting, selection, and claim inside one
 `BEGIN IMMEDIATE` transaction. `available_tasks()` is a bounded read-only
 queue view.
 
+### `task_checkpoints`
+
+One compact retry-persistent checkpoint per `(task_id, checkpoint_key)`.
+Rows record the writing attempt, agent identity, opaque cursor, bounded JSON
+payload, and update time. Upserts use the same active lease fence as task
+completion. A replacement attempt can read the prior row and then advance it
+under its new token and attempt number.
+
+Checkpoint rows update in place and survive task retry. Workers batch updates
+at scientifically safe recovery boundaries to control central write volume.
+
 ### `runs`, `run_stages`, and `run_events`
 
 Runs describe durable executions. Stage rows are keyed by
@@ -208,8 +219,10 @@ content hash is unique.
 
 The global append-only event stream. Each row has a monotonically increasing
 integer ID, timestamp, actor, campaign, entity type/ID, optional task/run, and
-JSON payload. Mutations append their event in the same SQLite transaction as
-the state change.
+JSON payload. Lifecycle and scientific-state mutations append their event in
+the same SQLite transaction as the state change. High-rate task checkpoints
+remain durable in `task_checkpoints` and use the in-process bus as a bounded
+wake-up signal, limiting append-only event growth.
 
 `GET /events?after_id=N` provides cursor replay. `GET /stream` emits SSE
 records with the durable event ID and honors `Last-Event-ID`. The in-process

@@ -856,7 +856,9 @@ Before saying "Genome A has X but Genome B doesn't", verify B isn't just more fr
 Cytochromes are ubiquitous in bacterial respiration. Claims of absence require validation:
 
 1. **Predicate search**: `b.search_by_predicates(has=["cytochrome"])`
-2. **Sequence motif search**: Look for CxxCH heme-binding sites in protein sequences
+2. **Sequence motif search**: compute CxxCH heme-binding matches locally and
+   return stable protein IDs and counts while keeping sequence text
+   model-hidden
 3. **Raw annotation search**: Query for "cytochrome" in annotation names
 
 Use all three methods before claiming cytochrome absence. If all three find nothing AND genome is high-quality (<50 contigs), absence is plausible. Otherwise, state uncertainty.

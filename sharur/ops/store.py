@@ -1792,6 +1792,140 @@ class OpsStore:
         assert result is not None
         return result
 
+    def put_task_checkpoint(
+        self,
+        task_id: str,
+        checkpoint_key: str,
+        *,
+        cursor: str | None = None,
+        payload: dict[str, Any] | None = None,
+        lease_token: str | None = None,
+        attempt: int | None = None,
+    ) -> dict[str, Any]:
+        """Persist retry-visible progress under an active attempt fence."""
+        normalized_key = checkpoint_key.strip()
+        if not normalized_key or len(normalized_key) > 256:
+            raise ValueError("checkpoint_key must contain 1-256 characters")
+        if cursor is not None:
+            if len(cursor) > 4_096:
+                raise ValueError("checkpoint cursor exceeds 4,096 characters")
+            cursor = _bounded_text(cursor, field="task checkpoint cursor")
+        payload_json = _canonical_json(
+            payload or {},
+            field="task checkpoint payload",
+        )
+        token, attempt_number = self._resolve_lease(
+            task_id,
+            lease_token,
+            attempt,
+        )
+        with self._lock, self._transaction():
+            now = time.time()
+            row = self._conn.execute(
+                """
+                SELECT campaign_id, run_id
+                FROM tasks
+                WHERE id = ? AND assigned_to = ?
+                  AND attempt_count = ? AND lease_token_hash = ?
+                  AND status IN ('claimed', 'in_progress')
+                  AND lease_expires_ts > ?
+                """,
+                (
+                    task_id,
+                    self.agent_id,
+                    attempt_number,
+                    _hash_secret(token),
+                    now,
+                ),
+            ).fetchone()
+            if row is None:
+                raise LeaseFenceError(
+                    f"Task {task_id} has no live attempt {attempt_number} lease "
+                    f"owned by {self.agent_id}"
+                )
+            self._conn.execute(
+                """
+                INSERT INTO task_checkpoints(
+                    task_id, checkpoint_key, attempt, agent_id,
+                    cursor, payload, updated_ts
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(task_id, checkpoint_key) DO UPDATE SET
+                    attempt = excluded.attempt,
+                    agent_id = excluded.agent_id,
+                    cursor = excluded.cursor,
+                    payload = excluded.payload,
+                    updated_ts = excluded.updated_ts
+                """,
+                (
+                    task_id,
+                    normalized_key,
+                    attempt_number,
+                    self.agent_id,
+                    cursor,
+                    payload_json,
+                    now,
+                ),
+            )
+            checkpoint = self._conn.execute(
+                """
+                SELECT *
+                FROM task_checkpoints
+                WHERE task_id = ? AND checkpoint_key = ?
+                """,
+                (task_id, normalized_key),
+            ).fetchone()
+        result = _row_to_dict(checkpoint)
+        assert result is not None
+        return result
+
+    def get_task_checkpoint(
+        self,
+        task_id: str,
+        checkpoint_key: str,
+    ) -> dict[str, Any] | None:
+        """Read the latest checkpoint, including one written by a prior attempt."""
+        normalized_key = checkpoint_key.strip()
+        if not normalized_key or len(normalized_key) > 256:
+            raise ValueError("checkpoint_key must contain 1-256 characters")
+        with self._lock:
+            checkpoint = self._conn.execute(
+                """
+                SELECT *
+                FROM task_checkpoints
+                WHERE task_id = ? AND checkpoint_key = ?
+                """,
+                (task_id, normalized_key),
+            ).fetchone()
+        return _row_to_dict(checkpoint)
+
+    def list_task_checkpoints(
+        self,
+        task_id: str,
+        *,
+        limit: int = DEFAULT_LIST_LIMIT,
+    ) -> list[dict[str, Any]]:
+        """List bounded retry-visible checkpoints for one task."""
+        with self._lock:
+            if (
+                self._conn.execute(
+                    "SELECT 1 FROM tasks WHERE id = ?",
+                    (task_id,),
+                ).fetchone()
+                is None
+            ):
+                raise KeyError(f"Task {task_id} not found")
+            rows = self._conn.execute(
+                """
+                SELECT *
+                FROM task_checkpoints
+                WHERE task_id = ?
+                ORDER BY updated_ts DESC, checkpoint_key
+                LIMIT ?
+                """,
+                (task_id, _validate_limit(limit)),
+            ).fetchall()
+        return [_row_to_dict(row) for row in rows]  # type: ignore[misc]
+
     def complete_task(
         self,
         task_id: str,

@@ -469,7 +469,7 @@ neighborhood = b.get_neighborhood("protein_id", window=10)
 print(neighborhood.data)
 
 # Protein details
-protein = b.get_protein("protein_id", verbosity=2)
+protein = b.get_protein("protein_id", verbosity=1)
 print(protein.data)
 
 # Find similar proteins by embedding

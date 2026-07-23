@@ -19,7 +19,7 @@ def test_trace_uses_live_schema_version(tmp_path):
 
     result = _result_for_store(store)
 
-    assert result.trace.schema_version == "5"
+    assert result.trace.schema_version == "6"
     assert "sharur.duckdb@size=" in result.trace.dataset_version
 
 

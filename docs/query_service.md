@@ -38,9 +38,15 @@ canonical dataset:
 
 ```bash
 pip install -e ".[ops]"
+sharur migrate --db data/DATASET/sharur.duckdb
 sharur seal --db data/DATASET/sharur.duckdb
 sharur verify-seal data/DATASET/dataset.seal.json
 ```
+
+Run migration with query services stopped. Schema migration 6 adds the
+`(bin_id, contig_id)` access path required by contig pagination; migration
+changes canonical database state, so existing datasets require a fresh seal
+and staged replica afterward.
 
 Launch Sharur Ops and register agent identities as described in
 [`agent_ops_spec.md`](../agent_ops_spec.md). Then launch the analytical service:
@@ -76,6 +82,12 @@ context = query.neighborhood(
     hits["raw"][0]["protein_id"],
     window=10,
     all_annotations=True,
+)
+contigs = query.list_contigs("genome-id", limit=25)
+packet = query.contig_packet(
+    "genome-id",
+    contigs["raw"][0]["contig_id"],
+    limit=100,
 )
 ```
 
@@ -156,6 +168,9 @@ surface.
 | `GET` | `/v1/overview` | heavy |
 | `POST` | `/v1/genomes/search` | light |
 | `GET` | `/v1/genomes/{genome_id}` | light |
+| `GET` | `/v1/genomes/{genome_id}/contigs` | light |
+| `GET` | `/v1/genomes/{genome_id}/contigs/{contig_id}` | light |
+| `POST` | `/v1/contigs/packet` | light |
 | `POST` | `/v1/proteins/search` | light |
 | `GET` | `/v1/proteins/{protein_id}` | light |
 | `POST` | `/v1/neighborhood` | light |
@@ -167,6 +182,12 @@ surface.
 Requests reject unknown fields and enforce bounds on strings, lists, offsets,
 windows, and row counts. Protein detail accepts verbosity 0 or 1, keeping raw
 sequences outside agent-visible responses.
+
+Contig lists and packets use opaque keyset cursors. Packet cursors are scoped
+to the sealed dataset ID, genome ID, and contig ID and traverse proteins in
+`gene_index NULLS LAST, start, protein_id` order. A packet contains at most 250
+proteins and separates raw `observed_annotations` from exact structured
+`named_calls` and `loci`. Sequence text remains compute-only.
 
 Every request can supply `X-Sharur-Query-ID`. The Python client generates one
 automatically. A caller can use that identifier with the cancellation endpoint;
@@ -186,8 +207,9 @@ Authenticated endpoints expose:
 - `/auth/whoami`: the principal resolved for the supplied credential.
 
 Responses carry `X-Sharur-Query-ID` plus a `service` object containing the
-operator class, queue wait, and execution duration. Scientific result
-provenance remains in the standard `SharurResult` trace.
+sealed dataset ID, operator class, queue wait, and execution duration.
+`SharurResult.trace.dataset_version` uses the same sealed ID, so staging paths
+and file timestamps cannot change scientific trace identity.
 
 ## Access-path selection
 

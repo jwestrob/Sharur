@@ -322,6 +322,15 @@ class TaskUpdate(StrictModel):
     retry_delay_seconds: int = Field(default=0, ge=0)
 
 
+class TaskCheckpointIn(StrictModel):
+    agent_id: str | None = Field(default=None, min_length=1, max_length=256)
+    checkpoint_key: str = Field(min_length=1, max_length=256)
+    cursor: str | None = Field(default=None, max_length=4_096)
+    payload: dict = Field(default_factory=dict)
+    lease_token: str = Field(min_length=16, max_length=512)
+    lease_attempt: int = Field(ge=1)
+
+
 class RunIn(StrictModel):
     created_by: str | None = Field(default=None, min_length=1, max_length=256)
     run_type: str = Field(min_length=1, max_length=256)
@@ -1001,6 +1010,52 @@ def heartbeat_task(
             raise _conflict(exc) from exc
     _notify(request, "task", task_id)
     return result
+
+
+@router.put("/tasks/{task_id}/checkpoint")
+def put_task_checkpoint(
+    task_id: str,
+    checkpoint: TaskCheckpointIn,
+    request: Request,
+):
+    _require(request, "worker", "coordinator", "operator")
+    actor = _actor_id(request, checkpoint.agent_id)
+    with _store(request, agent_id=actor) as store:
+        try:
+            result = store.put_task_checkpoint(
+                task_id,
+                checkpoint.checkpoint_key,
+                cursor=checkpoint.cursor,
+                payload=checkpoint.payload,
+                lease_token=checkpoint.lease_token,
+                attempt=checkpoint.lease_attempt,
+            )
+        except (KeyError, ValueError, LeaseFenceError) as exc:
+            raise _conflict(exc) from exc
+    _notify(request, "task_checkpoint", task_id)
+    return result
+
+
+@router.get("/tasks/{task_id}/checkpoints")
+def get_task_checkpoints(
+    task_id: str,
+    request: Request,
+    checkpoint_key: str | None = Query(default=None, min_length=1, max_length=256),
+    limit: int = Query(default=50, ge=1, le=1_000),
+):
+    _require(request, "worker", "coordinator", "operator")
+    with _store(request) as store:
+        try:
+            if checkpoint_key is not None:
+                result = store.get_task_checkpoint(task_id, checkpoint_key)
+                if result is None:
+                    raise HTTPException(404, "Task checkpoint was not found")
+                return result
+            return store.list_task_checkpoints(task_id, limit=limit)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise _conflict(exc) from exc
 
 
 @router.post("/runs", status_code=201)

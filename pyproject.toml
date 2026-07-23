@@ -110,6 +110,7 @@ sharur = "sharur.cli:main"
 sharur-ingest = "sharur.ingest_cli:main"
 sharur-ops = "sharur.ops_cli:main"
 sharur-query = "sharur.query_cli:main"
+sharur-atlas = "sharur.atlas_cli:main"
 
 [build-system]
 requires = ["hatchling"]

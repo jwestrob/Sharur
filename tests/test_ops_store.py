@@ -187,6 +187,55 @@ def test_retryable_failure_requeues_without_losing_attempt_count(tmp_path):
     assert claimed_again["attempt_count"] == 2
 
 
+def test_task_checkpoint_survives_retry_and_rejects_stale_attempt(tmp_path):
+    db_path = tmp_path / "sharur_ops.db"
+    coordinator = OpsStore(db_path, agent_id="coordinator")
+    task_id = coordinator.create_task(
+        "atlas_genome_read",
+        "Read one genome",
+        max_attempts=2,
+        lease_seconds=10,
+    )
+    stale_worker = OpsStore(db_path, agent_id="worker_a")
+    first = stale_worker.claim_task(task_id)
+    checkpoint = stale_worker.put_task_checkpoint(
+        task_id,
+        "atlas_progress",
+        cursor="contig_025",
+        payload={"completed_contigs": 25},
+    )
+
+    assert checkpoint["attempt"] == 1
+    assert checkpoint["payload"] == {"completed_contigs": 25}
+    coordinator.recover_expired_tasks(now=first["lease_expires_ts"] + 1)
+
+    replacement = OpsStore(db_path, agent_id="worker_b")
+    second = replacement.claim_task(task_id)
+    restored = replacement.get_task_checkpoint(task_id, "atlas_progress")
+
+    assert restored is not None
+    assert restored["cursor"] == "contig_025"
+    assert restored["attempt"] == 1
+    with pytest.raises(LeaseFenceError, match="attempt 1"):
+        stale_worker.put_task_checkpoint(
+            task_id,
+            "atlas_progress",
+            cursor="contig_050",
+        )
+
+    updated = replacement.put_task_checkpoint(
+        task_id,
+        "atlas_progress",
+        cursor="contig_050",
+        payload={"completed_contigs": 50},
+        lease_token=second["lease_token"],
+        attempt=second["lease_attempt"],
+    )
+    assert updated["attempt"] == 2
+    assert updated["agent_id"] == "worker_b"
+    assert replacement.list_task_checkpoints(task_id) == [updated]
+
+
 def test_task_idempotency_reuses_exact_request_and_rejects_conflict(tmp_path):
     ops = OpsStore(tmp_path / "sharur_ops.db", agent_id="coordinator")
     first = ops.create_task(

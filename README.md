@@ -105,6 +105,22 @@ Agents reuse their Sharur Ops credentials and call typed operators through
 `SharurQuery`. One service owns the DuckDB cache, threads, memory, and spill
 budget. See [`docs/query_service.md`](docs/query_service.md).
 
+Exhaustive genome reading uses deterministic Atlas units over the same data
+plane:
+
+```bash
+sharur migrate --db data/my_dataset/sharur.duckdb
+sharur seal --db data/my_dataset/sharur.duckdb --force
+
+sharur-atlas plan --db data/my_dataset/sharur.duckdb \
+  --output-dir data/my_dataset/atlas
+sharur-atlas enqueue --plan-dir data/my_dataset/atlas \
+  --ops-url http://ops-host:8811 --query-url http://query-host:8812
+```
+
+Each logical task owns one genome, checkpoints ordered contig prefixes, and
+writes a coverage manifest verified by `sharur-atlas verify-coverage`.
+
 ### Use the operators
 
 ```python

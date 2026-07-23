@@ -191,18 +191,22 @@ class OperatorContext:
         if self.store is None:
             return "not_applicable", "not_applicable"
 
-        db_path = getattr(self.store, "db_path", None)
-        if db_path is None:
-            dataset_version = f"memory:{id(self.store)}"
+        sealed_dataset_id = getattr(self.store, "dataset_id", None)
+        if sealed_dataset_id:
+            dataset_version = str(sealed_dataset_id)
         else:
-            path = Path(db_path).expanduser().resolve()
-            try:
-                stat = path.stat()
-                dataset_version = (
-                    f"{path}@size={stat.st_size}:mtime_ns={stat.st_mtime_ns}"
-                )
-            except OSError:
-                dataset_version = str(path)
+            db_path = getattr(self.store, "db_path", None)
+            if db_path is None:
+                dataset_version = f"memory:{id(self.store)}"
+            else:
+                path = Path(db_path).expanduser().resolve()
+                try:
+                    stat = path.stat()
+                    dataset_version = (
+                        f"{path}@size={stat.st_size}:mtime_ns={stat.st_mtime_ns}"
+                    )
+                except OSError:
+                    dataset_version = str(path)
 
         try:
             rows = self.store.execute("SELECT MAX(version) FROM schema_version")

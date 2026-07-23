@@ -237,6 +237,27 @@ Sharur Ops. Typed endpoints enforce queue, execution, row, request, and result
 bounds. See [`docs/query_service.md`](docs/query_service.md) for deployment,
 resource arithmetic, cancellation, and telemetry.
 
+For exhaustive genome-by-genome reading, build sealed one-genome ownership
+units and enqueue them through Ops:
+
+```bash
+sharur migrate --db data/my_dataset/sharur.duckdb
+sharur seal --db data/my_dataset/sharur.duckdb --force
+
+sharur-atlas plan \
+  --db data/my_dataset/sharur.duckdb \
+  --output-dir data/my_dataset/atlas
+
+sharur-atlas enqueue \
+  --plan-dir data/my_dataset/atlas \
+  --ops-url http://ops-host:8811 \
+  --query-url http://query-host:8812
+```
+
+Atlas traverses every contig through bounded sequence-free packets and proves
+completion with per-genome coverage manifests. See
+`.claude/skills/atlas.md`.
+
 For a legacy H5 without sidecars:
 
 ```bash

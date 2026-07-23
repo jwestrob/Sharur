@@ -123,6 +123,16 @@ class TestGetGenome:
         result = get_genome(store, "bin_001")
         assert "Archaea" in result.data or "Euryarchaeota" in result.data
 
+    def test_annotation_stats_separate_proteins_from_repeat_domain_hits(self, store):
+        result = get_genome(store, "bin_003")
+        pfam = next(
+            stat
+            for stat in result.raw["annotation_stats"]
+            if stat["source"] == "pfam"
+        )
+
+        assert pfam == {"source": "pfam", "domain_hits": 3, "proteins": 1}
+
 
 class TestGetProtein:
     """Tests for get_protein() operator."""
@@ -148,6 +158,21 @@ class TestGetProtein:
         """get_protein() should include annotations."""
         result = get_protein(store, "prot_001")
         assert "PF00142" in result.data or "NiFe-hydrogenase" in result.data
+
+    def test_detailed_view_keeps_sequence_compute_only(self, store):
+        store.execute(
+            """
+            UPDATE proteins
+            SET sequence = 'SENSITIVE_SEQUENCE_PAYLOAD'
+            WHERE protein_id = 'prot_001'
+            """
+        )
+
+        result = get_protein(store, "prot_001", verbosity=2)
+
+        assert "SENSITIVE_SEQUENCE_PAYLOAD" not in result.data
+        assert "sequence" not in result.raw
+        assert "compute-only" in result.data
 
     def test_uses_persisted_v2_compatibility_predicates(self, store):
         """Protein views must use the same persisted predicate surface as search."""

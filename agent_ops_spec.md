@@ -1,4 +1,4 @@
-# Sharur Ops v3 — Coordination Layer Specification
+# Sharur Ops v4 — Coordination Layer Specification
 
 ## Purpose
 
@@ -207,6 +207,30 @@ reservation after the delay. Exhausted tasks enter `failed`.
 HTTP recovery always uses the server clock. This removes caller-controlled
 expiration.
 
+### Retry-persistent checkpoints
+
+An active attempt may upsert a compact named checkpoint:
+
+```python
+ops.put_task_checkpoint(
+    task_id,
+    "atlas_progress",
+    cursor=opaque_cursor,
+    payload={"completed_contigs": 250},
+)
+```
+
+Checkpoint writes enforce the same task ID, authenticated identity, attempt,
+token hash, active status, and lease-expiry fence as terminal transitions.
+The latest row survives retry and remains readable by a replacement attempt.
+The replacement then overwrites it under its new attempt fence. Checkpoints
+carry a 4,096-character cursor bound and the standard 256 KiB inline JSON
+bound.
+
+Workers batch checkpoint updates at scientifically safe recovery boundaries.
+For Atlas, the default boundary is a completed page of 25 contigs, with
+additional in-contig checkpoints reserved for unusually large contigs.
+
 ## Resource-aware analysis
 
 Dispatch resources are generic integer slots:
@@ -268,8 +292,11 @@ Legacy JSON arrays remain readable and synchronized.
 
 ## Events and streaming
 
-Every coordination mutation appends a `coordination_events` row in the same
-transaction as the state change. Event IDs are monotonic.
+Lifecycle and scientific-state mutations append a `coordination_events` row
+in the same transaction as the state change. Event IDs are monotonic.
+High-rate progress checkpoints update `task_checkpoints` in place and send a
+bounded in-process wake-up; polling the checkpoint table is authoritative.
+This keeps recovery durable while controlling event-log cardinality.
 
 ```http
 GET /events?after_id=420&campaign_id=...
@@ -309,13 +336,13 @@ Application startup:
 
 1. acquires the owner lock;
 2. opens the first SQLite connection;
-3. applies additive schema migration v3 inside one transaction;
+3. applies additive schema migration v4 inside one transaction;
 4. opens the remaining pool connections;
 5. starts maintenance.
 
 Each store operation checks out one pool connection. `OpsStore` and
 `RunLedger` share that connection and lock, eliminating the former nested
-ledger connection and duplicate schema initialization. A current v3 schema
+ledger connection and duplicate schema initialization. A current v4 schema
 open produces zero schema writes.
 
 `PRAGMA foreign_keys=ON`, WAL, `synchronous=NORMAL`, a 15-second busy timeout,
@@ -355,6 +382,8 @@ and WAL autocheckpointing apply to every pool connection.
 | POST | `/tasks/claim-next` | Atomic compatible queue claim |
 | POST | `/tasks/{id}/claim` | Atomic specific-task claim |
 | POST | `/tasks/{id}/heartbeat` | Renew a fenced attempt |
+| PUT | `/tasks/{id}/checkpoint` | Upsert retry-persistent fenced progress |
+| GET | `/tasks/{id}/checkpoints` | Read one or list task checkpoints |
 | PATCH | `/tasks/{id}` | Complete, fail, or heartbeat a fenced attempt |
 | POST | `/tasks/recover` | Coordinator/operator server-clock recovery |
 | POST/GET | `/runs` | Create or list durable runs |
@@ -444,11 +473,12 @@ live outside the control-plane database in either backend.
 Focused contracts cover:
 
 - same-ID stale-attempt fencing;
+- retry-persistent checkpoints and stale-attempt checkpoint fencing;
 - atomic concurrent claims and claim-next selection;
 - capacity/capability enforcement;
 - dependency and reference integrity;
 - concurrent hypothesis evidence updates;
-- v0/v2 migration and current-schema zero-write opens;
+- legacy migration and current-schema zero-write opens;
 - per-agent credentials, role denial, and identity spoof rejection;
 - server-clock recovery;
 - durable event cursor replay;

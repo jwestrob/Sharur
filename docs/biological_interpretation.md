@@ -94,7 +94,8 @@ For full classification protocol, neighborhood validation markers, and false pos
 Three detection methods:
 1. **Predicates:** `b.search_by_predicates(has=["cytochrome"])`
 2. **Annotations:** `WHERE LOWER(name) LIKE '%cytochrome%'`
-3. **Sequence motifs:** CxxCH heme-binding motif (`re.search(r'C..CH', seq)`)
+3. **Sequence motifs:** compute the CxxCH heme-binding motif locally and expose
+   only stable protein IDs and match counts to the model
 
 If all three find nothing AND genome is high-quality (<50 contigs), absence is plausible.
 

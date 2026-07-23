@@ -93,6 +93,9 @@ def _quote_identifier(value: str) -> str:
 
 def _table_catalog(store: DuckDBStore) -> dict[str, set[str]]:
     """Return stored table schemas, excluding convenience/projection views."""
+    cached = getattr(store, "_sharur_table_catalog", None)
+    if cached is not None:
+        return cached
     rows = store.execute(
         """
         SELECT columns.table_name, columns.column_name
@@ -109,6 +112,8 @@ def _table_catalog(store: DuckDBStore) -> dict[str, set[str]]:
     catalog: dict[str, set[str]] = {}
     for table_name, column_name in rows:
         catalog.setdefault(str(table_name), set()).add(str(column_name))
+    if getattr(store, "read_only", False):
+        store._sharur_table_catalog = catalog
     return catalog
 
 
@@ -152,9 +157,14 @@ def _structured_projection_sources(
     catalog: Mapping[str, set[str]],
 ) -> list[str]:
     """Discover annotation sources used for structured system projections."""
+    cached = getattr(store, "_sharur_projection_sources", None)
+    if cached is not None:
+        return cached
     if "system_proteins" not in catalog:
+        if getattr(store, "read_only", False):
+            store._sharur_projection_sources = []
         return []
-    return [
+    sources = [
         str(row[0])
         for row in store.execute(
             """
@@ -165,6 +175,9 @@ def _structured_projection_sources(
             """
         )
     ]
+    if getattr(store, "read_only", False):
+        store._sharur_projection_sources = sources
+    return sources
 
 
 def _resolve_windows(
@@ -658,6 +671,102 @@ def _load_locus_memberships(
         for protein_id, locus_type in rows:
             result.setdefault(str(protein_id), set()).add(str(locus_type))
     return result
+
+
+def structured_projection_sources(store: DuckDBStore) -> list[str]:
+    """Return raw-annotation sources that project structured caller output.
+
+    These sources belong on the caller-named side of the provenance boundary,
+    so navigation and packet operators can keep them separate from observed
+    per-domain annotations.
+    """
+    catalog = _table_catalog(store)
+    return _structured_projection_sources(store, catalog)
+
+
+def load_context_evidence(
+    store: DuckDBStore,
+    protein_ids: Sequence[str],
+) -> dict[str, Any]:
+    """Batch observed annotations and exact named memberships by protein.
+
+    System names are returned only when ``system_proteins`` membership maps
+    unambiguously to one live structured caller table. Locus memberships come
+    directly from the normalized ``loci``/``locus_proteins`` resources.
+    """
+    unique_ids = sorted(set(protein_ids))
+    result: dict[str, Any] = {
+        "projection_sources": [],
+        "observed_annotations": {},
+        "named_calls": {},
+        "loci": {},
+    }
+    if not unique_ids:
+        return result
+
+    catalog = _table_catalog(store)
+    result["projection_sources"] = _structured_projection_sources(store, catalog)
+    annotation_map = _load_annotation_map(store, unique_ids, catalog)
+    result["observed_annotations"] = {
+        protein_id: [
+            annotation.model_dump(mode="json")
+            for annotation in annotations
+        ]
+        for protein_id, annotations in annotation_map.items()
+    }
+    named_calls = _load_named_call_map(store, unique_ids, catalog)
+    result["named_calls"] = {
+        protein_id: [
+            call.model_dump(mode="json")
+            for call in calls
+        ]
+        for protein_id, calls in named_calls.items()
+    }
+
+    if "locus_proteins" not in catalog or "loci" not in catalog:
+        return result
+    loci_by_protein: dict[str, list[dict[str, Any]]] = {}
+    for start in range(0, len(unique_ids), 5_000):
+        batch = unique_ids[start : start + 5_000]
+        placeholders = ", ".join(["?"] * len(batch))
+        rows = store.execute(
+            f"""
+            SELECT
+                lp.protein_id,
+                l.locus_id,
+                l.locus_type,
+                lp.position,
+                l.confidence
+            FROM locus_proteins AS lp
+            JOIN loci AS l ON l.locus_id = lp.locus_id
+            WHERE lp.protein_id IN ({placeholders})
+            ORDER BY lp.protein_id, l.locus_type, l.locus_id, lp.position
+            """,
+            batch,
+        )
+        for protein_id, locus_id, locus_type, position, confidence in rows:
+            loci_by_protein.setdefault(str(protein_id), []).append(
+                {
+                    "locus_id": str(locus_id),
+                    "locus_type": str(locus_type),
+                    "source_table": "loci",
+                    "position": int(position),
+                    "confidence": (
+                        float(confidence) if confidence is not None else None
+                    ),
+                    "evidence_level": "caller_named",
+                }
+            )
+    result["loci"] = loci_by_protein
+    return result
+
+
+def load_structured_context_evidence(
+    store: DuckDBStore,
+    protein_ids: Sequence[str],
+) -> dict[str, Any]:
+    """Compatibility alias for the complete packet-oriented evidence loader."""
+    return load_context_evidence(store, protein_ids)
 
 
 def _bin_record(store: DuckDBStore, bin_id: str | None) -> dict[str, Any] | None:
@@ -2188,4 +2297,7 @@ class BiologicalCase:
 __all__ = [
     "BiologicalCase",
     "inspect_case",
+    "load_context_evidence",
+    "load_structured_context_evidence",
+    "structured_projection_sources",
 ]

@@ -135,6 +135,14 @@ MIGRATIONS: list[tuple[int, str, str]] = [
             VALUES (5, 'Replicon provenance for validated systems');
         """,
     ),
+    (
+        6,
+        "Contig navigation index",
+        """
+        INSERT INTO schema_version (version, description)
+            VALUES (6, 'Contig navigation index');
+        """,
+    ),
 ]
 
 
@@ -144,6 +152,18 @@ def _column_names(conn: duckdb.DuckDBPyConnection, table_name: str) -> set[str]:
         str(row[1])
         for row in conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()
     }
+
+
+def _add_v6_contig_index(conn: duckdb.DuckDBPyConnection) -> None:
+    """Add the navigation index when the legacy database has contigs."""
+    tables = {str(row[0]) for row in conn.execute("SHOW TABLES").fetchall()}
+    if "contigs" in tables:
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_contigs_bin
+                ON contigs(bin_id, contig_id)
+            """
+        )
 
 
 def _quarantine_pre_v5_system_calls(conn: duckdb.DuckDBPyConnection) -> None:
@@ -327,6 +347,9 @@ def run_migrations(
                 with suppress(Exception):
                     conn.rollback()
                 raise
+        elif version == 6:
+            _add_v6_contig_index(conn)
+            conn.execute(sql)
         else:
             conn.execute(sql)
         applied += 1

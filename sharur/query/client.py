@@ -101,6 +101,59 @@ class SharurQuery:
             params={"verbosity": verbosity},
         ).json()
 
+    def list_contigs(
+        self,
+        genome_id: str,
+        *,
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {"limit": limit}
+        if cursor is not None:
+            params["cursor"] = cursor
+        return self._request(
+            "GET",
+            f"/v1/genomes/{quote(genome_id, safe='')}/contigs",
+            params=params,
+        ).json()
+
+    def get_contig(
+        self,
+        genome_id: str,
+        contig_id: str,
+        *,
+        verbosity: int = 1,
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            (
+                f"/v1/genomes/{quote(genome_id, safe='')}/contigs/"
+                f"{quote(contig_id, safe='')}"
+            ),
+            params={"verbosity": verbosity},
+        ).json()
+
+    def contig_packet(
+        self,
+        genome_id: str,
+        contig_id: str,
+        *,
+        cursor: str | None = None,
+        limit: int = 100,
+        all_annotations: bool = True,
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/v1/contigs/packet",
+            json={
+                "genome_id": genome_id,
+                "contig_id": contig_id,
+                "cursor": cursor,
+                "limit": limit,
+                "all_annotations": all_annotations,
+            },
+        ).json()
+
     def get_protein(self, protein_id: str, *, verbosity: int = 1) -> dict[str, Any]:
         return self._request(
             "GET",

@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Optional
 from sharur.core.session import ExplorationSession
 from sharur.operators.base import OperatorContext, OperatorTrace, ResultMeta, SharurResult
 from sharur.operators.cases import BiologicalCase, inspect_case
+from sharur.operators.contigs import get_contig, get_contig_packet, list_contigs
 from sharur.operators.export import export_fasta, export_neighborhood_fasta, get_sequence
 from sharur.operators.foldseek import (
     list_foldseek_databases,
@@ -286,6 +287,55 @@ class Sharur:
             verbosity: 0=minimal, 1=standard, 2=detailed
         """
         return get_genome(self.store, genome_id=genome_id, verbosity=verbosity)
+
+    def list_contigs(
+        self,
+        genome_id: str,
+        *,
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> SharurResult:
+        """List one genome's contigs with deterministic keyset pagination."""
+        return list_contigs(
+            self.store,
+            genome_id,
+            limit=limit,
+            cursor=cursor,
+        )
+
+    def get_contig(
+        self,
+        genome_id: str,
+        contig_id: str,
+        *,
+        verbosity: int = 1,
+    ) -> SharurResult:
+        """Return metadata and annotation coverage for one exact contig."""
+        return get_contig(
+            self.store,
+            genome_id,
+            contig_id,
+            verbosity=verbosity,
+        )
+
+    def get_contig_packet(
+        self,
+        genome_id: str,
+        contig_id: str,
+        *,
+        cursor: str | None = None,
+        limit: int = 100,
+        all_annotations: bool = True,
+    ) -> SharurResult:
+        """Return one bounded, sequence-free packet for exhaustive reading."""
+        return get_contig_packet(
+            self.store,
+            genome_id,
+            contig_id,
+            cursor=cursor,
+            limit=limit,
+            all_annotations=all_annotations,
+        )
 
     def get_protein(self, protein_id: str, verbosity: int = 1) -> SharurResult:
         """
@@ -1280,6 +1330,9 @@ __all__ = [
     "list_genomes",
     "list_proteins",
     "get_genome",
+    "list_contigs",
+    "get_contig",
+    "get_contig_packet",
     "get_protein",
     "get_neighborhood",
     "inspect_case",

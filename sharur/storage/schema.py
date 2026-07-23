@@ -1,6 +1,6 @@
 """DuckDB schema for Sharur."""
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS bins (
@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS contigs (
 
     FOREIGN KEY (bin_id) REFERENCES bins(bin_id)
 );
+CREATE INDEX IF NOT EXISTS idx_contigs_bin ON contigs(bin_id, contig_id);
 
 CREATE TABLE IF NOT EXISTS proteins (
     protein_id VARCHAR PRIMARY KEY,

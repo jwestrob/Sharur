@@ -196,6 +196,7 @@ def test_stage07_defers_secondary_indexes_until_query_phase(tmp_path):
             ).fetchall()
         }
         assert index_names == {
+            "idx_contigs_bin",
             "idx_proteins_contig",
             "idx_proteins_bin",
             "idx_proteins_coords",
@@ -269,7 +270,7 @@ def test_stage07_restart_v2_preserves_upstream_tables(tmp_path):
     ).fetchone()[0] == 1
     assert builder.conn.execute(
         "SELECT MAX(version) FROM schema_version"
-    ).fetchone()[0] == 5
+    ).fetchone()[0] == 6
     assert "contig_id" in {
         row[0]
         for row in builder.conn.execute("DESCRIBE defense_systems").fetchall()

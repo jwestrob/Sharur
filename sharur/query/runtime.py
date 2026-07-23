@@ -170,9 +170,11 @@ class CursorStore:
         *,
         db_path: Path,
         resource_budget: dict[str, Any],
+        dataset_id: str | None = None,
     ):
         self._cursor = cursor
         self.db_path = db_path
+        self.dataset_id = dataset_id
         self.read_only = True
         self._resource_budget = resource_budget
 
@@ -245,6 +247,7 @@ class ReadOnlyDuckDBRuntime:
         memory_limit: str = "16GB",
         temp_directory: str | Path,
         max_temp_directory_size: str = "128GB",
+        dataset_id: str | None = None,
     ):
         if isinstance(threads, bool) or not isinstance(threads, int) or threads < 1:
             raise ValueError("threads must be a positive integer")
@@ -256,6 +259,7 @@ class ReadOnlyDuckDBRuntime:
             max_temp_directory_size,
             "max_temp_directory_size",
         )
+        self.dataset_id = dataset_id
         self._root: duckdb.DuckDBPyConnection | None = None
         self._thread_local = threading.local()
         self._state_lock = threading.RLock()
@@ -382,6 +386,7 @@ class ReadOnlyDuckDBRuntime:
             cursor,
             db_path=self.db_path,
             resource_budget=self.resource_budget,
+            dataset_id=self.dataset_id,
         )
         self._thread_local.store = store
         self._thread_local.generation = self._generation
@@ -532,6 +537,7 @@ class ReadOnlyDuckDBRuntime:
             return {
                 "open": self._root is not None,
                 "database": str(self.db_path),
+                "dataset_id": self.dataset_id,
                 "owner_lock": str(self._owner_lock_path),
                 "opened_at": self._opened_at,
                 "settings": dict(self._settings),

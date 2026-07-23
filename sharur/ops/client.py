@@ -510,6 +510,55 @@ class SharurOps:
             },
         ).json()
 
+    def put_task_checkpoint(
+        self,
+        task_id: str,
+        checkpoint_key: str,
+        *,
+        cursor: str | None = None,
+        payload: dict[str, Any] | None = None,
+        lease_token: str | None = None,
+        lease_attempt: int | None = None,
+    ) -> dict[str, Any]:
+        """Persist retry-visible progress under the active task lease."""
+        token, attempt = self._lease(task_id, lease_token, lease_attempt)
+        return self._request(
+            "PUT",
+            f"/tasks/{task_id}/checkpoint",
+            json={
+                "agent_id": self.agent_id,
+                "checkpoint_key": checkpoint_key,
+                "cursor": cursor,
+                "payload": payload or {},
+                "lease_token": token,
+                "lease_attempt": attempt,
+            },
+        ).json()
+
+    def get_task_checkpoint(
+        self,
+        task_id: str,
+        checkpoint_key: str,
+    ) -> dict[str, Any]:
+        """Read the latest checkpoint, including progress from a prior attempt."""
+        return self._request(
+            "GET",
+            f"/tasks/{task_id}/checkpoints",
+            params={"checkpoint_key": checkpoint_key},
+        ).json()
+
+    def list_task_checkpoints(
+        self,
+        task_id: str,
+        *,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        return self._request(
+            "GET",
+            f"/tasks/{task_id}/checkpoints",
+            params={"limit": limit},
+        ).json()
+
     def complete_task(
         self,
         task_id: str,

@@ -85,8 +85,8 @@ b.visualize_neighborhood("protein_id", window=12)
 
 **Protein details:**
 ```python
-# Full protein info
-print(b.get_protein("protein_id", verbosity=2))
+# Full model-safe protein metadata and annotations
+print(b.get_protein("protein_id", verbosity=1))
 
 # Just annotations
 b.store.execute("""
@@ -96,6 +96,9 @@ b.store.execute("""
     ORDER BY evalue
 """)
 ```
+
+Raw sequences are compute-only. Use `get_sequence()` or an export operator
+inside a local tool and keep the sequence text out of model-visible output.
 
 ### Response Format
 

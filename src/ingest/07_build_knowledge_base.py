@@ -65,6 +65,7 @@ _V2_INDEX_PREFIXES = (
     "idx_semantic_terms_",
 )
 _QUERY_INDEX_NAMES = (
+    "idx_contigs_bin",
     "idx_proteins_contig",
     "idx_proteins_bin",
     "idx_proteins_coords",

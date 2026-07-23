@@ -6,6 +6,7 @@ import asyncio
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import duckdb
 import pytest
@@ -26,6 +27,7 @@ from sharur.query.runtime import (
     WeightedAdmissionController,
 )
 from sharur.query.server import create_app
+from sharur.query.staging import StagedDatabase
 from sharur.storage.duckdb_store import DuckDBStore
 
 
@@ -139,6 +141,26 @@ def test_query_service_is_lazy_read_only_hardened_and_typed(tmp_path):
         assert protein.json()["raw"]["protein_id"] == "p1"
         assert "sequence" not in protein.json()["raw"]
 
+        contigs = client.get("/v1/genomes/bin1/contigs")
+        assert contigs.status_code == 200
+        assert contigs.json()["raw"][0]["contig_id"] == "contig1"
+
+        contig = client.get("/v1/genomes/bin1/contigs/contig1")
+        assert contig.status_code == 200
+        assert contig.json()["raw"]["protein_count"] == 1
+
+        packet = client.post(
+            "/v1/contigs/packet",
+            json={
+                "genome_id": "bin1",
+                "contig_id": "contig1",
+                "limit": 1,
+            },
+        )
+        assert packet.status_code == 200
+        assert packet.json()["raw"]["proteins"][0]["protein_id"] == "p1"
+        assert "sequence" not in packet.text.lower()
+
         assert client.get("/v1/proteins/p1", params={"verbosity": 2}).status_code == 422
         assert client.post("/v1/sql", json={"sql": "SELECT 1"}).status_code == 404
         assert client.post(
@@ -150,6 +172,29 @@ def test_query_service_is_lazy_read_only_hardened_and_typed(tmp_path):
         assert metrics.status_code == 200
         assert 'sharur_query_requests_total{operator="list_genomes"} 1' in metrics.text
     assert spill.is_dir()
+
+
+def test_query_service_propagates_sealed_dataset_identity(tmp_path):
+    database = _query_database(tmp_path / "sharur.duckdb").resolve()
+    staged = StagedDatabase(
+        path=database,
+        source_path=database,
+        seal_path=Path(tmp_path / "dataset.seal.json"),
+        dataset_id="dataset-identity-1234567890",
+        seal_strength="full",
+        artifact_digest={"algorithm": "sha256", "value": "fixture"},
+        reused=True,
+        staged_at="2026-07-23T00:00:00+00:00",
+    )
+    app = _app(database, tmp_path, staged_database=staged)
+
+    with TestClient(app) as client:
+        response = client.get("/v1/genomes/bin1")
+        body = response.json()
+
+    assert response.status_code == 200
+    assert body["trace"]["dataset_version"] == staged.dataset_id
+    assert body["service"]["dataset_id"] == staged.dataset_id
 
 
 def test_query_service_auth_remote_guard_and_payload_bounds(tmp_path):
@@ -399,6 +444,20 @@ def test_query_client_generates_query_ids_and_escapes_entity_paths():
     assert url == "http://query:8812/v1/proteins/protein%2Fwith%2Fslash"
     assert kwargs["headers"]["X-Sharur-Query-ID"]
     assert session.headers["Authorization"] == "Bearer agent-token"
+
+    assert query.list_contigs("genome/with/slash", limit=5) == {"status": "ok"}
+    assert (
+        session.calls[1][1]
+        == "http://query:8812/v1/genomes/genome%2Fwith%2Fslash/contigs"
+    )
+    assert query.get_contig("genome", "contig/with/slash") == {"status": "ok"}
+    assert (
+        session.calls[2][1]
+        == "http://query:8812/v1/genomes/genome/contigs/contig%2Fwith%2Fslash"
+    )
+    assert query.contig_packet("genome", "contig", limit=25) == {"status": "ok"}
+    assert session.calls[3][1] == "http://query:8812/v1/contigs/packet"
+    assert session.calls[3][2]["json"]["limit"] == 25
 
     with pytest.raises(ValueError, match="timeout"):
         SharurQuery(session=session, timeout=0, verify_connection=False)

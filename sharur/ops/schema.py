@@ -1,10 +1,9 @@
 """Shared, migration-safe SQLite schema for Sharur operational state.
 
-Version 3 turns the original single-process coordination database into a
-durable HTTP control-plane store.  The migration is deliberately additive:
-legacy JSON columns remain readable while normalized relationship tables,
-attempt fencing, campaigns, durable events, agent identities, and artifact
-metadata become authoritative for new writes.
+Version 4 adds attempt-fenced, retry-persistent task checkpoints. The
+migration remains additive: legacy JSON columns stay readable while
+normalized relationships, campaigns, leases, and checkpoint state are
+authoritative for new writes.
 """
 
 from __future__ import annotations
@@ -19,7 +18,7 @@ if TYPE_CHECKING:
     import sqlite3
 
 
-OPS_SCHEMA_VERSION = 3
+OPS_SCHEMA_VERSION = 4
 DEFAULT_LEASE_SECONDS = 900
 
 
@@ -220,6 +219,18 @@ CREATE TABLE IF NOT EXISTS task_result_findings (
     FOREIGN KEY(finding_id) REFERENCES findings(id) ON DELETE RESTRICT
 );
 
+CREATE TABLE IF NOT EXISTS task_checkpoints (
+    task_id TEXT NOT NULL,
+    checkpoint_key TEXT NOT NULL,
+    attempt INTEGER NOT NULL CHECK(attempt >= 1),
+    agent_id TEXT NOT NULL,
+    cursor TEXT,
+    payload TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(payload)),
+    updated_ts REAL NOT NULL,
+    PRIMARY KEY(task_id, checkpoint_key),
+    FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS hypothesis_findings (
     hypothesis_id TEXT NOT NULL,
     finding_id TEXT NOT NULL,
@@ -344,6 +355,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_idempotency
     ON tasks(idempotency_key) WHERE idempotency_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_task_dependencies_parent
     ON task_dependencies(depends_on_task_id, task_id);
+CREATE INDEX IF NOT EXISTS idx_task_checkpoints_updated
+    ON task_checkpoints(updated_ts, task_id);
 
 CREATE INDEX IF NOT EXISTS idx_coordlog_ts ON coordinator_log(ts);
 CREATE INDEX IF NOT EXISTS idx_coordlog_campaign

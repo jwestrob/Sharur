@@ -1,477 +1,291 @@
 # Atlas Skill
 
-Exhaustive bottom-up genome-by-genome reading of a metagenomic dataset. Dispatches subagents per genome batch (3-5 genomes each) to read through every annotation source, sample neighborhoods, and flag items for specialist follow-up.
+Exhaustive bottom-up reading of every genome, contig, and protein in a sealed
+Sharur dataset. Atlas uses deterministic genome ownership, bounded contig
+packets, retry-persistent checkpoints, and machine-verifiable coverage.
 
-**Atlas vs Survey vs Explore:**
-- **Survey**: Top-down pass by functional category. Fast. Gets you started.
-- **Atlas**: Bottom-up reading, genome by genome. Subagent per batch. Hours. Catches what survey misses.
-- **Explore**: Hypothesis-driven follow-up on what survey/atlas found.
+Atlas and scheduler parallelism are separate concepts:
 
-Run atlas AFTER survey to fill coverage gaps, or INSTEAD of survey when you want exhaustive per-genome inventories from the start.
+- Atlas defines scientific work as one logical task per genome.
+- Sharur Ops leases those tasks dynamically to available agents.
+- Sharur Query supplies one shared read-only DuckDB owner and cache.
+- An executor may use persistent workers, local processes, Slurm jobs, arrays,
+  or another runtime. Scheduler packing stays outside Atlas logic.
 
-**AGENT ARCHITECTURE:**
-- Atlas is a **coordinator agent** that dispatches genome-batch subagents
-- Genome-batch subagents are **leaf agents** that read and write findings
-- Subagents CAN dispatch their own sub-subagents for specialist tasks (literature, foldseek)
-- **Small datasets (<20 genomes):** subagents run in PARALLEL (read-only on DB, each writes own file)
-- **Large datasets (20+):** batch subagents run SEQUENTIALLY (concurrent append contention)
-- Literature/web search sub-subagents can always run in parallel (no DB writes)
+This supports Chloroflexi-scale reading directly while retaining the same
+architecture for smaller datasets and future executor strategies.
 
-**CONCURRENCY:** Subagents are read-only on DuckDB. For <20 genomes, dispatch all in parallel — each writes to its own `atlas/inventory_{genome}.jsonl`. Coordinator merges after. For 20+ genomes, batch and run sequentially with shared `atlas/inventories.jsonl`.
+## Required references
 
-> **Mandatory:** Follow the shared validation protocols in `_validation_protocols.md`.
+Read these before coordinating or executing Atlas:
 
----
+- `docs/biological_interpretation.md`
+- `docs/subagent_guide.md`
+- `docs/query_service.md`
+- `agent_ops_spec.md`
+- `.claude/skills/_validation_protocols.md`
 
-## Output Files
+## Invariants
 
-| File | Contents |
-|------|----------|
-| `atlas/inventories.jsonl` | One JSON line per genome: annotation census, flags, summary |
-| `survey/findings.jsonl` | Notable findings (standard schema, `"phase": "atlas"`) |
-| `atlas/ATLAS_SUMMARY.md` | Dataset-wide overview after all batches complete |
-| `atlas/flags_collected.json` | Aggregated flags for specialist dispatch |
+1. Ownership unit: one genome.
+2. Traversal order: `genome_id`, then `contig_id`, then
+   `gene_index NULLS LAST, start, protein_id`.
+3. Model-call unit: one bounded, sequence-free contig packet.
+4. Checkpoint unit: a completed prefix of contigs, with optional in-contig
+   packet state for unusually large contigs.
+5. Completion proof: a per-genome coverage manifest whose contig and protein
+   totals equal the sealed plan.
+6. Dataset identity: every plan, task, query trace, cursor, and coverage
+   manifest carries the sealed `dataset_id`.
+7. Full scale remains exhaustive. Dataset size changes worker count and
+   campaign duration; it never silently changes Atlas into sampling.
+8. Raw nucleotide and amino-acid sequences stay outside model-visible
+   prompts, reports, logs, and summaries.
 
----
+## Observation and naming boundary
 
-## Coordinator Workflow
+Contig packets expose three distinct evidence classes:
 
+- `observed_annotations`: raw per-domain observations.
+- `named_calls`: exact names emitted by live structured caller resources.
+- `loci`: exact normalized locus memberships emitted by live caller resources.
+
+Only `named_calls` and `loci` support their emitted names. Domain combinations
+support a hypothesis phrased as “consistent with …” and tagged `UNVERIFIED`.
+Inspect whatever curated resources exist in the live dataset; treat every
+static list as potentially stale and incomplete.
+
+## Plan and enqueue
+
+Complete all dataset writes, seal the database, and build a stable plan:
+
+```bash
+sharur migrate --db data/DATASET/sharur.duckdb
+sharur seal --db data/DATASET/sharur.duckdb --force
+sharur verify-seal data/DATASET/dataset.seal.json
+
+sharur-atlas plan \
+  --db data/DATASET/sharur.duckdb \
+  --output-dir data/DATASET/atlas \
+  --packet-proteins 100 \
+  --checkpoint-interval-contigs 25
 ```
-1. Query DB for all genomes, get protein counts, sort by size
-2. Split into batches of 3-5 genomes
-3. For each batch (SEQUENTIALLY):
-   a. Craft subagent prompt with genome list + boilerplate
-   b. Dispatch subagent
-   c. Verify subagent wrote inventory entries + findings
-4. After all batches complete:
-   a. Read all inventories, collect flags by type
-   b. Dispatch specialist agents based on flags
-   c. Write atlas/ATLAS_SUMMARY.md
+
+Schema migration 6 installs the `(bin_id, contig_id)` navigation index used by
+large exhaustive scans. Run migration in a maintenance window with query
+services stopped, then reseal and restage. The planner fails closed when this
+index is absent.
+
+The plan writes:
+
+```text
+atlas/
+├── plan.json
+├── units.jsonl
+└── coverage/
 ```
 
-### Step 1: Get Genomes
+`units.jsonl` contains exactly one deterministic unit per live `bins.bin_id`.
+Counts come from live `contigs` and `proteins` tables. Stored `bins.n_contigs`
+is retained only as a diagnostic comparison.
+
+Launch `sharur-ops` and a sealed `sharur-query` replica, then enqueue:
+
+```bash
+sharur-atlas enqueue \
+  --plan-dir data/DATASET/atlas \
+  --ops-url http://ops-host:8811 \
+  --query-url http://query-host:8812
+```
+
+Enqueueing is idempotent by plan ID and unit ID. Each task requires the
+`atlas_reader` capability and one generic CPU slot. Add or remove workers at
+runtime; dynamic claiming balances genomes by completion rate.
+
+## Worker protocol
+
+Each worker receives only its task payload. It must read the references above,
+claim one `atlas_genome_read` task, and use the same per-agent credential for
+Ops and Query.
 
 ```python
-from sharur.operators import Sharur
-import json, os
+from sharur.ops.client import SharurOps
+from sharur.query import SharurQuery
 
-b = Sharur("data/DATASET/sharur.duckdb", read_only=True)
-
-genomes = b.store.execute("""
-    SELECT bin_id,
-           COUNT(*) as n_proteins,
-           COUNT(DISTINCT contig_id) as n_contigs,
-           MAX(sequence_length) as max_protein_length,
-           ROUND(AVG(sequence_length), 0) as avg_protein_length
-    FROM proteins
-    GROUP BY bin_id
-    ORDER BY n_proteins DESC
-""")
-
-print(f"Total genomes: {len(genomes)}")
-for g in genomes[:5]:
-    print(f"  {g[0]}: {g[1]} proteins, {g[2]} contigs")
-```
-
-### Step 2: Choose Dispatch Strategy
-
-```python
-if len(genomes) <= 20:
-    # Small dataset: 1 agent per genome, run ALL in parallel
-    # Each writes to its own file — no contention
-    batches = [[g[0]] for g in genomes]
-    parallel = True
-else:
-    # Large dataset: batch and run sequentially
-    batch_size = min(5, max(3, len(genomes) // 10))
-    batches = []
-    for i in range(0, len(genomes), batch_size):
-        batch = genomes[i:i + batch_size]
-        batches.append([g[0] for g in batch])
-    parallel = False
-
-print(f"Strategy: {'parallel' if parallel else 'sequential'}, {len(batches)} {'agents' if parallel else 'batches'}")
-```
-
-### Step 3: Dispatch Subagents
-
-For small datasets (parallel): dispatch ALL agents in a single message with `run_in_background=True`.
-For large datasets (sequential): dispatch one batch at a time, wait for completion.
-
-### Step 4: Collect Flags and Dispatch Specialists
-
-```python
-import json
-from collections import defaultdict
-
-# Read all inventories
-inventories = []
-with open("data/DATASET/atlas/inventories.jsonl") as f:
-    for line in f:
-        if line.strip():
-            inventories.append(json.loads(line))
-
-# Collect flags
-flags = defaultdict(list)
-for inv in inventories:
-    for flag in inv.get("flags", []):
-        # Extract flag type (e.g., "hyddb_unvalidated" from "hyddb_unvalidated:protein_id")
-        flag_type = flag.split(":")[0] if ":" in flag else flag
-        flags[flag_type].append({"genome": inv["genome"], "flag": flag})
-
-# Dispatch map
-dispatch_map = {
-    "hyddb_unvalidated":       "/hydrogenase — neighborhood curation",
-    "giant_unannotated":       "/characterize or /foldseek — structural homology",
-    "high_prevalence_defense":  "/defense — with superfamily awareness warning",
-    "unknown_clusters":         "/literature — functional ambiguity resolution",
-    "ambiguous_annotation":     "/literature — domain vs function clarification",
-    "novel_operon":             "/explore — locus characterization",
-    "prophage_candidate":       "/prophage — viral element validation",
-}
-
-for flag_type, items in flags.items():
-    specialist = dispatch_map.get(flag_type, "manual review")
-    print(f"  {flag_type}: {len(items)} items -> {specialist}")
-```
-
-### Step 5: Write Summary
-
-After specialists complete, write `atlas/ATLAS_SUMMARY.md` covering:
-- Total genomes read, annotation coverage statistics
-- Per-genome summaries (one paragraph each)
-- Flags dispatched and resolution status
-- Patterns visible only at per-genome resolution that survey missed
-
----
-
-## Subagent Prompt Template
-
-This is the prompt the coordinator sends to each genome-batch subagent. Copy it verbatim and fill in the bracketed values.
-
-```
-You are reading through {N} genomes exhaustively for the Atlas skill.
-
-DB: data/{DATASET}/sharur.duckdb
-Import: from sharur.operators import Sharur; b = Sharur("data/{DATASET}/sharur.duckdb", read_only=True)
-Genomes in this batch: {genome_list}
-Output directory: data/{DATASET}/atlas/
-Draft findings file: data/{DATASET}/atlas/findings_{agent_id}.jsonl
-
-## Database Column Reference
-- Annotations table: 'name' (not annotation_id), 'score' (not bitscore)
-- Proteins table: 'sequence_length' (not 'length')
-- b.store.execute() returns a list — do NOT call .fetchall() or .fetchone()
-- Always COUNT(DISTINCT protein_id) for protein counts — repeat domains inflate COUNT(*)
-- MAG caveat: "Not detected" not "absent"
-
-## Domain Documentation (READ ON DEMAND)
-When you encounter a domain-specific situation, look up the relevant protocol doc:
-Docs path: /Users/jacob/Documents/Obsidian Vault/sharur-docs/
-Key docs:
-  - hydrogenase-classification.md — HydDB curation, Complex I FP detection, neighborhood KEGG KOs
-  - defense-system-validation.md — superfamily FP filtering, prevalence sanity checks
-  - giant-protein-recovery.md — E-value recovery for >1000 aa, ESM3/Foldseek workflow
-  - context-first-protocol.md — co-annotation validation, claim escalation ladder
-  - mag-quality-interpretation.md — fragmentation checks, absence claim language
-Use the Read tool to load any doc when you need it. Don't guess — look it up.
-
-## Your Task
-
-For EACH genome in your batch, perform the following steps and write one inventory
-entry to the agent's unique inventory spool. Log notable findings to the agent's
-unique draft findings spool with phase="atlas"; the coordinator performs a strict merge.
-
-### Step 1: Annotation Source Census
-
-```python
-census = b.store.execute("""
-    SELECT a.source, COUNT(DISTINCT a.protein_id) as n_proteins
-    FROM annotations a
-    JOIN proteins p ON a.protein_id = p.protein_id
-    WHERE p.bin_id = '{genome}'
-    GROUP BY a.source
-    ORDER BY n_proteins DESC
-""")
-
-total_proteins = b.store.execute("""
-    SELECT COUNT(*) FROM proteins WHERE bin_id = '{genome}'
-""")[0][0]
-```
-
-Record: source -> protein count for every annotation source present.
-
-### Step 2: Top Annotations
-
-```python
-top_annots = b.store.execute("""
-    SELECT a.source, a.accession, a.name,
-           COUNT(DISTINCT a.protein_id) as n
-    FROM annotations a
-    JOIN proteins p ON a.protein_id = p.protein_id
-    WHERE p.bin_id = '{genome}'
-    GROUP BY a.source, a.accession, a.name
-    ORDER BY n DESC
-    LIMIT 30
-""")
-```
-
-### Step 3: Context-First Check (CRITICAL)
-
-For any annotation with >10 hits in this genome, run a co-annotation check:
-
-```python
-co_annots = b.store.execute("""
-    SELECT a2.source, a2.accession, a2.name,
-           COUNT(DISTINCT a1.protein_id) as n
-    FROM annotations a1
-    JOIN annotations a2 ON a1.protein_id = a2.protein_id
-    JOIN proteins p ON a1.protein_id = p.protein_id
-    WHERE p.bin_id = '{genome}'
-      AND a1.accession = '{high_hit_accession}'
-      AND a2.accession != '{high_hit_accession}'
-    GROUP BY a2.source, a2.accession, a2.name
-    ORDER BY n DESC LIMIT 10
-""")
-```
-
-Verdict for each:
-- If top co-annotations are from a DIFFERENT enzyme family -> "superfamily_fp"
-- If co-annotations support the claimed function -> "validated"
-- If ambiguous -> "ambiguous_annotation" (flag for literature)
-
-### Step 4: Unannotated Proteins
-
-```python
-unannotated = b.store.execute("""
-    SELECT p.protein_id, p.sequence_length
-    FROM proteins p
-    LEFT JOIN annotations a ON p.protein_id = a.protein_id
-    WHERE p.bin_id = '{genome}'
-      AND a.protein_id IS NULL
-    ORDER BY p.sequence_length DESC
-""")
-```
-
-Report: total unannotated count, list of giant unannotated (>1000 aa).
-
-### Step 5: Giant Proteins
-
-```python
-giants = b.store.execute("""
-    SELECT p.protein_id, p.sequence_length,
-           COUNT(DISTINCT a.accession) as n_annotations
-    FROM proteins p
-    LEFT JOIN annotations a ON p.protein_id = a.protein_id
-    WHERE p.bin_id = '{genome}' AND p.sequence_length > 1000
-    GROUP BY p.protein_id, p.sequence_length
-    ORDER BY p.sequence_length DESC
-""")
-```
-
-Flag unannotated giants (>1000 aa, 0 annotations) as "giant_unannotated".
-Note: giant proteins (>1000 aa) with zero PFAM hits may need E-value recovery
-(PFAM bitscore cutoffs are length-biased).
-
-### Step 6: Sample Neighborhoods (5-8 per genome)
-
-Pick proteins to sample from:
-- Largest unannotated protein
-- Protein with most unusual annotation (rare accession)
-- A HydDB hit (if any) — check for Complex I false positives
-- A DefenseFinder hit — check for superfamily inflation
-- Cluster of 3+ consecutive unannotated proteins
-- Any protein adjacent to a contig edge (fragmentation check)
-
-```python
-nbr = b.get_neighborhood(protein_id, window=8, all_annotations=True)
-```
-
-Record what you see. Flag anything needing specialist follow-up.
-
-### Step 7: Write Inventory Entry
-
-Append one JSON line per genome to atlas/inventories.jsonl:
-
-```python
-import json, os
-
-inventory = {
-    "genome": bin_id,
-    "n_proteins": total_proteins,
-    "n_contigs": n_contigs,
-    "annotation_coverage": {source: count for source, count in census},
-    "unannotated_count": len(unannotated),
-    "unannotated_pct": round(len(unannotated) / total_proteins * 100, 1),
-    "giant_proteins": len(giants),
-    "giant_unannotated": [g[0] for g in giants if g[2] == 0],
-    "neighborhoods_sampled": N_sampled,
-    "flags": collected_flags,  # list of strings
-    "context_first_checks": context_checks,  # list of dicts
-    "summary": one_sentence_summary
-}
-
-os.makedirs("data/{DATASET}/atlas", exist_ok=True)
-with open("data/{DATASET}/atlas/inventories.jsonl", "a") as f:
-    f.write(json.dumps(inventory) + "\n")
-```
-
-### Step 8: Log Notable Findings
-
-For anything genuinely notable (not routine), write to the unique draft spool:
-
-```python
-from sharur.core.analysis_record_io import append_finding_record
-
-finding = {
-    "id": "atlas-{genome}-NNN",  # e.g., atlas-mb104-001
-    "title": "Self-contained title with all qualifiers",
-    "category": "appropriate_category",
-    "description": "Prose paragraph with biological interpretation.",
-    "evidence": {"genome": bin_id, ...},
-    "verification": [
-        {"claim": "...", "query": "...", "expected": "..."},
-    ],
-    "n_genomes": 1,
-    "provenance": {
-        "query": "the SQL that produced this",
-        "raw_result": "literal output",
-        "interpretation": "what it means"
-    },
-    "figures": [],
-    "related_findings": [],
-    "phase": "atlas"
-}
-
-append_finding_record(
-    "data/{DATASET}/atlas/findings_{agent_id}.jsonl",
-    finding,
-    phase="atlas",
-    strict=False,  # draft only; canonical merge must be strict
+ops = SharurOps(ops_url, agent_id=agent_id, api_token=worker_token)
+query = SharurQuery(query_url, api_token=worker_token)
+task = ops.claim_next_task(
+    campaign_id=campaign_id,
+    task_types=["atlas_genome_read"],
 )
 ```
 
-What is "notable" — worth a finding entry:
-- A genome that completely lacks a function present in >80% of others
-- An unusual annotation (rare accession, <5% prevalence dataset-wide)
-- A giant unannotated protein >2000 aa
-- An operon-scale cluster of unannotated genes (5+ consecutive)
-- A defense island (3+ defense systems co-located)
-- A HydDB hit that needs neighborhood curation
-- Any context-first check that overturns a functional assumption
+The claim response contains the plan unit, `query_url`, coverage path,
+checkpoint key, packet limit, and checkpoint interval.
 
-What is NOT worth a finding entry:
-- Routine annotation statistics (those go in the inventory)
-- Expected annotations for the organism type
-- Single unannotated proteins under 1000 aa
-- Annotations already captured by survey findings
+### Resume
 
-## Ambiguity Checks Without Priming
+Read the latest checkpoint before traversal. A checkpoint written by an
+earlier attempt remains visible to the replacement attempt.
 
-Do not give subagents a named list of expected false positives. Require them to inspect
-the live schema for whatever curated callers exist, separate raw observed domains from
-named caller output, and trigger co-annotation/neighborhood/specialist validation when
-the evidence class is broad or unexpectedly prevalent. Record the check and verdict
-without prescribing the answer in advance.
-
-## Flag Types
-
-Flags are strings collected from all subagents and used to dispatch specialists:
-
-| Flag | Meaning | Specialist |
-|------|---------|------------|
-| `hyddb_unvalidated` | HydDB hit without PF00374 corroboration | /hydrogenase |
-| `giant_unannotated` | Protein >1000 aa with zero annotation hits | /characterize or /foldseek |
-| `giant_unannotated_Nk` | Protein >N000 aa unannotated (e.g., `giant_unannotated_5k`) | /foldseek (priority) |
-| `high_prevalence_defense` | DefenseFinder hit at >50% genome prevalence | /defense with superfamily warning |
-| `unknown_clusters` | 5+ consecutive unannotated proteins on one contig | /literature or /explore |
-| `ambiguous_annotation` | Context-first check returned "ambiguous" | /literature |
-| `novel_operon` | Conserved gene cluster not matching known systems | /explore |
-| `prophage_candidate` | VOGdb/phage markers clustered on a contig | /prophage |
-| `no_annotation_source_X` | Genome has zero hits from expected source (e.g., KEGG) | Check pipeline completeness |
-| `contig_edge_giant` | Giant protein at contig edge — likely fragmented | Note in inventory, deprioritize |
-
-Format: `flag_type` or `flag_type:protein_id` or `flag_type:details`
-
-## Finding ID Convention
-
-Atlas findings use the prefix `atlas-{genome_id}-NNN`:
-- `atlas-mb104-001`, `atlas-mb104-002`, etc.
-- This avoids collision with survey (`survey-NNN`) and explore (`ENNN`) IDs
-- Cross-genome patterns found during coordinator summary use `atlas-cross-NNN`
-
-## Coordinator: Writing ATLAS_SUMMARY.md
-
-After all subagents complete and specialists have been dispatched, write a summary:
-
-```markdown
-# Atlas Summary: {DATASET}
-
-## Overview
-- **Genomes read:** N
-- **Total proteins:** N
-- **Mean annotation coverage:** N% (range: N%-N%)
-- **Mean unannotated:** N% (range: N%-N%)
-
-## Annotation Source Coverage
-| Source | Genomes with hits | Mean proteins/genome | Notes |
-...
-
-## Per-Genome Summaries
-(One paragraph per genome, sorted by size. Include: protein count, dominant
-annotation sources, notable features, flags raised.)
-
-## Flags Dispatched
-| Flag type | Count | Specialist | Status |
-...
-
-## Patterns Not Visible in Survey
-(Things that only become apparent when reading genome-by-genome:
-  - Genomes with unusual annotation profiles
-  - Consistent gaps across a clade
-  - Annotation sources that fail for specific genomes
-  - Co-occurrence patterns between rare features)
-
-## Recommendations for Explore
-(Specific hypotheses or loci that merit follow-up investigation.)
+```python
+checkpoint = ops.get_task_checkpoint(
+    task["id"],
+    task["params"]["checkpoint_key"],
+)
 ```
 
-## Scaling Rules
+A missing checkpoint means the genome begins at its first contig. The cursor
+is the next `list_contigs()` page position. Checkpoint payload records exact
+completed-contig and completed-protein counts plus any current large-contig
+packet cursor.
 
-| Dataset size | Agents | Parallelism | Output pattern |
-|---|---|---|---|
-| <20 genomes | 1 per genome | **Parallel** (read-only on DB) | `atlas/inventory_{genome}.jsonl` per agent, merge after |
-| 20-100 genomes | 3-5 per batch | Sequential batches | `atlas/inventories.jsonl` (append) |
-| 100-500 genomes | 5-10 per batch | Sequential batches | `atlas/inventories.jsonl` (append) |
-| 500+ genomes | Sample + batch | Sequential batches | Sample representatives, not all |
+Expired attempts lose checkpoint and terminal-write authority. Treat a fence
+error as immediate evidence that another attempt owns the task.
 
-**Why parallel works for small datasets:** Atlas subagents are read-only on DuckDB — they
-only query, never write to the database. Each agent writes to its own JSONL file, avoiding
-append contention. The coordinator merges all per-genome files after completion.
+### Exhaustive contig traversal
 
-**Parallel output pattern:**
-- Each agent writes: `atlas/inventory_{short_name}.jsonl` (single JSON line)
-- Each agent appends findings to its own: `atlas/findings_{short_name}.jsonl`
-- Coordinator merges: `cat atlas/inventory_*.jsonl > atlas/inventories.jsonl`
-- Coordinator reads every draft finding, resolves duplicate IDs or conflicting claims,
-  and appends accepted records to `survey/findings.jsonl` with
-  `append_finding_record(..., strict=True)`. Never use `cat` for canonical findings.
+Request contig pages using `limit=checkpoint_interval_contigs`. This makes a
+successful page the durable checkpoint batch and bounds recovery replay to at
+most one page.
 
-**Performance:**
-- Each subagent typically takes 2-5 minutes per genome
-- If a subagent fails, re-dispatch it individually after the others complete
-
-## Relationship to Other Phases
-
-Atlas findings feed into the standard pipeline:
-
-```
-Survey  ──┐
-           ├──> Explore ──> Deepen ──> Review ──> Manuscript
-Atlas   ──┘
+```python
+page = query.list_contigs(
+    genome_id,
+    limit=checkpoint_interval_contigs,
+    cursor=contig_cursor,
+)
 ```
 
-Atlas and survey findings both live in `survey/findings.jsonl` (distinguished by
-`"phase": "atlas"` vs `"phase": "survey"`). The explore, deepen, and manuscript
-phases consume them identically. The report manifest groups findings by category,
-not by phase.
+For every contig record in the page:
+
+1. Call `query.get_contig(genome_id, contig_id)` for exact metadata.
+2. Start `packet_cursor=None`.
+3. Repeatedly call `query.contig_packet(...)`.
+4. Read every returned protein record and every evidence class.
+5. Persist a compact contig inventory in the task-local output.
+6. Continue until `raw.complete` is true and `raw.next_cursor` is null.
+7. Record `contig_id`, exact `protein_count`, packet count, and
+   `complete=true` for the coverage manifest.
+
+```python
+packet = query.contig_packet(
+    genome_id,
+    contig_id,
+    cursor=packet_cursor,
+    limit=packet_protein_limit,
+    all_annotations=True,
+)
+packet_cursor = packet["raw"]["next_cursor"]
+```
+
+Packet cursors are opaque and scoped to the exact dataset, genome, and contig.
+Copy them exactly. For a contig spanning many packets, save current packet
+state periodically under the same task checkpoint; this bounds replay while
+preserving a single genome owner.
+
+After every completed contig page:
+
+```python
+ops.put_task_checkpoint(
+    task["id"],
+    checkpoint_key,
+    cursor=page["ref"],
+    payload={
+        "completed_contigs": completed_contigs,
+        "completed_proteins": completed_proteins,
+        "current_contig_id": None,
+        "packet_cursor": None,
+    },
+)
+ops.heartbeat_task(task["id"])
+```
+
+The default interval of 25 reduces a 10.7-million-contig campaign to roughly
+428,000 central checkpoint updates while capping normal replay at 24 completed
+contigs. Tune the interval from the plan when contig-size distributions justify
+a different recovery/write tradeoff.
+
+## Per-genome output
+
+Write separate files per unit. Shared append files create contention and make
+recovery ambiguous.
+
+Recommended task-local outputs:
+
+```text
+atlas/units/{unit_id}/inventory.json
+atlas/units/{unit_id}/contigs.jsonl
+atlas/units/{unit_id}/findings.jsonl
+atlas/coverage/{unit_id}.json
+```
+
+The inventory should include:
+
+- genome ID, plan ID, dataset ID, and unit ID;
+- exact contig/protein totals;
+- observed annotation census by source;
+- exact caller-emitted system/locus inventory by source table;
+- unusual architectures and neighborhood hypotheses;
+- annotation conflicts and unresolved candidates;
+- verification queries for every specific numerical claim.
+
+Register large outputs as content-addressed Ops artifacts. Submit discrete
+findings through Ops with `campaign_id`, `task_id`, and stable idempotency
+keys. Each finding keeps observed evidence separate from caller-emitted names.
+
+## Coverage completion
+
+Build the final per-genome manifest with
+`write_genome_coverage_manifest()` from `sharur.atlas`. Complete the task only
+when its manifest has `coverage_status="complete"` and exact expected totals.
+
+After all tasks finish:
+
+```bash
+sharur-atlas verify-coverage --plan-dir data/DATASET/atlas
+```
+
+The command exits successfully only when:
+
+- every planned unit has one manifest;
+- manifest plan, dataset, unit, genome, and packet identities match;
+- every contig has a terminal packet;
+- per-genome contig and protein totals match the assigned unit;
+- campaign totals match `plan.json`;
+- each manifest content hash is valid.
+
+Coverage failure is a campaign state, not a prose caveat. Requeue the affected
+units and rerun verification.
+
+## Scientific review during reading
+
+For each protein:
+
+- inventory all observed domain hits;
+- inspect exact predicates as retrieval aids;
+- preserve coordinates and stable identifiers;
+- examine local context when evidence is ambiguous or biologically notable;
+- route specialized candidates to the appropriate validation skill;
+- state MAG non-detection with assembly fragmentation/completeness context.
+
+Domain presence suggests compatibility with a function. Exact functional or
+system names require their authoritative caller or an explicitly labeled
+hypothesis. Literature claims use the literature workflow and sourced
+citations.
+
+## Campaign synthesis
+
+Synthesis begins after coverage verification. Aggregate unit inventories with
+set-oriented queries or columnar processing. Produce:
+
+- exact coverage accounting;
+- genome-level annotation and caller-resource matrices;
+- cross-genome prevalence with MAG-aware denominators;
+- validated recurring patterns;
+- unresolved candidate classes for specialist follow-up;
+- a concise record of annotation-resource blind spots.
+
+Atlas findings may join survey findings during synthesis. Preserve their
+Atlas unit ID, genome ID, dataset ID, and verification queries so every claim
+can be traced back to complete genome ownership.
