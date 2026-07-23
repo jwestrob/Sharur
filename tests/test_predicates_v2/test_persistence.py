@@ -510,6 +510,20 @@ def test_full_generation_defers_indexes_and_releases_build_tables(monkeypatch):
     completed_indexes = _explicit_index_names(store)
     assert set(V2_INDEX_NAMES).issubset(completed_indexes)
     assert completed_indexes.isdisjoint(set(V2_ALL_INDEX_NAMES) - set(V2_INDEX_NAMES))
+    index_expressions = dict(store.conn.execute("""
+        SELECT index_name, expressions
+        FROM duckdb_indexes()
+        WHERE index_name IN (
+            'idx_semantic_atoms_protein',
+            'idx_semantic_atoms_facet',
+            'idx_semantic_terms_term'
+        )
+    """).fetchall())
+    assert index_expressions == {
+        "idx_semantic_atoms_protein": "[protein_id]",
+        "idx_semantic_atoms_facet": "[facet]",
+        "idx_semantic_terms_term": "[term_id]",
+    }
     tables = {row[0] for row in store.conn.execute("SHOW TABLES").fetchall()}
     assert not tables.intersection(persistence._GENERATION_TABLES)
 

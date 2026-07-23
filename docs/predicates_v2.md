@@ -133,7 +133,7 @@ resolves from `SLURM_CPUS_ON_NODE`.
 Full refreshes append into constraint-free `v2_generation_*` tables. This keeps
 the dominant write path sequential and leaves the canonical ART indexes out of
 the per-chunk transaction. After the last checkpoint, DuckDB promotes the
-complete generation in one transaction and builds the five query indexes once.
+complete generation in one transaction and builds the six query indexes once.
 Successful publication drops the scratch tables; interrupted runs retain them.
 
 Each chunk updates `v2_generation_checkpoint` in the same transaction as its

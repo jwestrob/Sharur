@@ -144,8 +144,9 @@ CREATE TABLE IF NOT EXISTS semantic_atoms (
 
     PRIMARY KEY (protein_id, atom_id, source_accession)
 );
+CREATE INDEX IF NOT EXISTS idx_semantic_atoms_protein ON semantic_atoms(protein_id);
 CREATE INDEX IF NOT EXISTS idx_semantic_atoms_atom ON semantic_atoms(atom_id);
-CREATE INDEX IF NOT EXISTS idx_semantic_atoms_facet_atom ON semantic_atoms(facet, atom_id);
+CREATE INDEX IF NOT EXISTS idx_semantic_atoms_facet ON semantic_atoms(facet);
 CREATE INDEX IF NOT EXISTS idx_semantic_atoms_source ON semantic_atoms(source_db, source_accession);
 
 -- Predicate V2 per-protein resolved state
@@ -174,7 +175,7 @@ CREATE TABLE IF NOT EXISTS semantic_terms (
     source_db VARCHAR NOT NULL DEFAULT '',
     source_accession VARCHAR NOT NULL DEFAULT ''
 );
-CREATE INDEX IF NOT EXISTS idx_semantic_terms_term ON semantic_terms(term_id, protein_id);
+CREATE INDEX IF NOT EXISTS idx_semantic_terms_term ON semantic_terms(term_id);
 CREATE INDEX IF NOT EXISTS idx_semantic_terms_protein ON semantic_terms(protein_id);
 
 -- Constraint-free append targets used while a resumable full V2 refresh is
