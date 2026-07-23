@@ -166,14 +166,10 @@ def search_by_facet(
     limit: int = 50,
 ) -> list[tuple]:
     """Search proteins by V2 semantic facet."""
-    use_terms = _semantic_terms_has_rows(store)
-    atom_column = "term_id" if use_terms else "atom_id"
-    table_name = "semantic_terms" if use_terms else "semantic_atoms"
+    atom_column = "atom_id"
+    table_name = "semantic_atoms"
     params: list[object] = [facet]
     clauses = ["facet = ?"]
-
-    if use_terms:
-        clauses.append("term_kind = 'atom'")
 
     if atom_ids:
         placeholders = ",".join(["?"] * len(atom_ids))
@@ -212,10 +208,9 @@ def search_atoms(
     limit: int = 50,
 ) -> list[dict]:
     """Search raw V2 atom evidence with optional source/relation filters."""
-    use_terms = _semantic_terms_has_rows(store)
-    table_name = "semantic_terms" if use_terms else "semantic_atoms"
-    atom_column = "term_id" if use_terms else "atom_id"
-    clauses = ["term_kind = 'atom'"] if use_terms else []
+    table_name = "semantic_atoms"
+    atom_column = "atom_id"
+    clauses: list[str] = []
     params: list[object] = []
 
     if atom_id:

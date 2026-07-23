@@ -116,6 +116,18 @@ python src/ingest/06_esm2_embeddings.py \
 
 This is the manual reference sequence behind `sharur-ingest`. `04_astra_scan.py` supplies the correct per-database flags, and `07_build_knowledge_base.py` is the loader that consolidates proteins, annotations, loci, validated systems, and V2 predicates.
 
+If Stage 07 reaches V2 generation and the semantic implementation changes,
+reuse the completed upstream tables with:
+
+```bash
+python src/ingest/07_build_knowledge_base.py \
+  -d data/$DATASET \
+  -o data/$DATASET/sharur.duckdb \
+  --restart-v2
+```
+
+Use `--resume-v2` for an interruption under the same semantic code/config.
+
 ## What Each Stage Does
 
 - `00_prepare_inputs.py`: audits the complete assembly set before publishing it. It rejects

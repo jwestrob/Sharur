@@ -34,7 +34,9 @@ from sharur.predicates_v2.model import (
     SemanticAtom,
     SemanticFacet,
     SemanticState,
+    create_v2_indexes,
     create_v2_tables,
+    drop_v2_indexes,
 )
 from sharur.predicates_v2.review_queue import (
     format_review_queue_tsv,
@@ -55,7 +57,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _GENERATION_KEY = "full_v2"
-_GENERATION_CONTRACT_VERSION = 1
+_GENERATION_CONTRACT_VERSION = 2
+_GENERATION_TABLES = (
+    "v2_generation_atoms",
+    "v2_generation_state",
+    "v2_generation_terms",
+    "v2_generation_legacy",
+)
 
 
 @dataclass
@@ -138,9 +146,6 @@ def generate_and_persist_v2(
         Dict mapping protein_id -> SemanticState when return_states is True,
         otherwise an empty dict.
     """
-    # Ensure V2 tables exist
-    create_v2_tables(store)
-
     if chunk_size <= 0:
         raise ValueError("chunk_size must be positive")
     if workers <= 0:
@@ -152,6 +157,11 @@ def generate_and_persist_v2(
     if resume and return_states:
         raise ValueError("resume requires return_states=False")
 
+    # Subset refreshes keep the canonical indexes online. Full refreshes write
+    # into constraint-free generation tables and restore canonical indexes
+    # once, after bulk promotion.
+    create_v2_tables(store, create_indexes=protein_ids is not None)
+
     if protein_ids is not None:
         protein_ids = list(dict.fromkeys(protein_ids))
         if not protein_ids:
@@ -162,6 +172,7 @@ def generate_and_persist_v2(
 
     start_after: str | None = None
     total_processed = 0
+    checkpoint_complete = False
     checkpoint_enabled = protein_ids is None
     semantic_fingerprint = ""
     input_signature = ""
@@ -176,7 +187,7 @@ def generate_and_persist_v2(
         )
         input_signature = _generation_input_signature(store)
         if resume:
-            start_after, total_processed = _resume_full_generation(
+            start_after, total_processed, checkpoint_complete = _resume_full_generation(
                 store,
                 semantic_fingerprint=semantic_fingerprint,
                 input_signature=input_signature,
@@ -238,6 +249,7 @@ def generate_and_persist_v2(
             if not protein_rows:
                 continue
 
+            chunk_started_at = time.monotonic()
             chunk_protein_ids = [row[0] for row in protein_rows]
             annotations_by_protein = _fetch_annotations_by_protein(
                 store,
@@ -254,6 +266,7 @@ def generate_and_persist_v2(
                 context_atoms_by_protein=context_atoms_by_protein,
                 gc_stats=gc_stats,
             )
+            prepared_at = time.monotonic()
             batch_size = _resolve_worker_batch_size(
                 len(inputs),
                 workers=workers,
@@ -285,8 +298,10 @@ def generate_and_persist_v2(
                 chunk_atoms.extend(batch_result.atoms)
                 chunk_states.update(batch_result.states)
                 legacy_rows.extend(batch_result.legacy_rows)
+            transformed_at = time.monotonic()
 
             chunk_count = len(protein_rows)
+            chunk_atom_count = len(chunk_atoms)
             checkpoint_last_protein_id = protein_rows[-1][0]
             del (
                 annotations_by_protein,
@@ -304,11 +319,13 @@ def generate_and_persist_v2(
                 chunk_states,
                 legacy_rows=legacy_rows,
                 update_legacy_predicates=update_legacy_predicates,
+                use_generation_tables=checkpoint_enabled,
                 checkpoint_processed=(next_processed if checkpoint_enabled else None),
                 checkpoint_last_protein_id=(
                     checkpoint_last_protein_id if checkpoint_enabled else None
                 ),
             )
+            persisted_at = time.monotonic()
             total_processed = next_processed
             if return_states:
                 results.update(chunk_states)
@@ -319,22 +336,46 @@ def generate_and_persist_v2(
             remaining = max(total_count - total_processed, 0)
             eta_seconds = remaining / rate if rate > 0 else 0.0
             logger.info(
-                "V2 progress: %s/%s proteins (%.2f%%), %.1f proteins/s, ETA %.1fh",
+                "V2 progress: %s/%s proteins (%.2f%%), %.1f proteins/s, ETA %.1fh; "
+                "chunk=%s proteins/%s atoms prepare=%.1fs transform=%.1fs persist=%.1fs total=%.1fs",
                 f"{total_processed:,}",
                 f"{total_count:,}",
                 (100.0 * total_processed / total_count) if total_count else 100.0,
                 rate,
                 eta_seconds / 3600.0,
+                f"{chunk_count:,}",
+                f"{chunk_atom_count:,}",
+                prepared_at - chunk_started_at,
+                transformed_at - prepared_at,
+                persisted_at - transformed_at,
+                persisted_at - chunk_started_at,
             )
 
         if checkpoint_enabled:
+            state_table = (
+                "semantic_state" if checkpoint_complete else "v2_generation_state"
+            )
             persisted_states = int(
-                store.execute("SELECT COUNT(*) FROM semantic_state")[0][0]
+                store.execute(f"SELECT COUNT(*) FROM {state_table}")[0][0]
             )
             if total_processed != total_count or persisted_states != total_count:
                 raise RuntimeError(
                     "V2 full refresh ended before every protein state was committed"
                 )
+
+            if not checkpoint_complete:
+                _promote_full_generation(
+                    store,
+                    update_legacy_predicates=update_legacy_predicates,
+                    expected_count=total_count,
+                )
+
+            index_started = time.monotonic()
+            create_v2_indexes(store)
+            logger.info(
+                "V2 canonical indexes ready in %.1fs",
+                time.monotonic() - index_started,
+            )
 
         if output_review_queue:
             queue = _build_review_queue_from_store(
@@ -348,6 +389,7 @@ def generate_and_persist_v2(
 
         if checkpoint_enabled:
             _mark_full_generation_complete(store)
+            _clear_generation_tables_best_effort(store)
     except BaseException:
         if checkpoint_enabled:
             _mark_full_generation_failed(store)
@@ -546,10 +588,12 @@ def _initialize_full_generation(
     """Atomically clear full-refresh products and create its checkpoint."""
     store.conn.execute("BEGIN TRANSACTION;")
     try:
+        drop_v2_indexes(store)
         _clear_v2_tables(
             store,
             update_legacy_predicates=update_legacy_predicates,
         )
+        _clear_generation_tables(store)
         store.execute(
             "DELETE FROM v2_generation_checkpoint WHERE generation_key = ?",
             [_GENERATION_KEY],
@@ -577,7 +621,7 @@ def _resume_full_generation(
     *,
     semantic_fingerprint: str,
     input_signature: str,
-) -> tuple[str | None, int]:
+) -> tuple[str | None, int, bool]:
     """Validate and reopen a full-refresh checkpoint."""
     rows = store.execute(
         """
@@ -606,12 +650,14 @@ def _resume_full_generation(
         raise ValueError("V2 checkpoint protein total disagrees with source tables")
 
     processed = int(processed)
+    complete = status == "complete"
+    state_table = "semantic_state" if complete else "v2_generation_state"
     persisted_count, persisted_max = store.execute(
-        "SELECT COUNT(*), MAX(protein_id) FROM semantic_state"
+        f"SELECT COUNT(*), MAX(protein_id) FROM {state_table}"
     )[0]
     if int(persisted_count) != processed or persisted_max != last_protein_id:
         raise ValueError(
-            "V2 checkpoint disagrees with persisted semantic_state; start a fresh run"
+            f"V2 checkpoint disagrees with persisted {state_table}; start a fresh run"
         )
     if last_protein_id is not None:
         prefix_count = store.execute(
@@ -623,22 +669,24 @@ def _resume_full_generation(
                 "V2 checkpoint boundary disagrees with protein ordering; start a fresh run"
             )
 
-    store.execute(
-        """
-        UPDATE v2_generation_checkpoint
-        SET status = 'running', updated_at = CURRENT_TIMESTAMP,
-            completed_at = NULL
-        WHERE generation_key = ?
-        """,
-        [_GENERATION_KEY],
-    )
+    if not complete:
+        drop_v2_indexes(store)
+        store.execute(
+            """
+            UPDATE v2_generation_checkpoint
+            SET status = 'running', updated_at = CURRENT_TIMESTAMP,
+                completed_at = NULL
+            WHERE generation_key = ?
+            """,
+            [_GENERATION_KEY],
+        )
     logger.info(
         "Resuming V2 generation after %s (%s/%s proteins committed)",
         last_protein_id,
         f"{processed:,}",
         f"{int(total):,}",
     )
-    return last_protein_id, processed
+    return last_protein_id, processed, complete
 
 
 def _mark_full_generation_complete(store: DuckDBStore) -> None:
@@ -1138,6 +1186,85 @@ def _clear_v2_tables(
         store.execute("DELETE FROM protein_predicates;")
 
 
+def _clear_generation_tables(store: DuckDBStore) -> None:
+    """Clear constraint-free full-refresh append tables."""
+    for table_name in _GENERATION_TABLES:
+        store.execute(f"DELETE FROM {table_name};")
+
+
+def _clear_generation_tables_best_effort(store: DuckDBStore) -> None:
+    """Release promoted build rows while preserving a completed generation."""
+    try:
+        for table_name in _GENERATION_TABLES:
+            store.execute(f"DROP TABLE IF EXISTS {table_name};")
+    except Exception:
+        logger.exception("Failed to clear promoted V2 generation tables")
+
+
+def _promote_full_generation(
+    store: DuckDBStore,
+    *,
+    update_legacy_predicates: bool,
+    expected_count: int,
+) -> None:
+    """Bulk-copy validated generation tables into canonical constrained tables."""
+    generation_states = int(
+        store.execute("SELECT COUNT(*) FROM v2_generation_state")[0][0]
+    )
+    if generation_states != expected_count:
+        raise RuntimeError(
+            "V2 generation-state count changed before canonical promotion"
+        )
+    if update_legacy_predicates:
+        generation_legacy = int(
+            store.execute("SELECT COUNT(*) FROM v2_generation_legacy")[0][0]
+        )
+        if generation_legacy != expected_count:
+            raise RuntimeError(
+                "V2 generation legacy-cache count changed before promotion"
+            )
+
+    started_at = time.monotonic()
+    store.conn.execute("BEGIN TRANSACTION;")
+    try:
+        _clear_v2_tables(
+            store,
+            update_legacy_predicates=update_legacy_predicates,
+        )
+        store.execute("""
+            INSERT INTO semantic_atoms
+            SELECT * FROM v2_generation_atoms
+        """)
+        store.execute("""
+            INSERT INTO semantic_state
+            SELECT * FROM v2_generation_state
+        """)
+        store.execute("""
+            INSERT INTO semantic_terms
+            SELECT * FROM v2_generation_terms
+        """)
+        if update_legacy_predicates:
+            store.execute("""
+                INSERT INTO protein_predicates
+                SELECT * FROM v2_generation_legacy
+            """)
+    except BaseException:
+        store.conn.execute("ROLLBACK;")
+        raise
+    else:
+        store.conn.execute("COMMIT;")
+
+    canonical_states = int(
+        store.execute("SELECT COUNT(*) FROM semantic_state")[0][0]
+    )
+    if canonical_states != expected_count:
+        raise RuntimeError("Canonical V2 state count changed during promotion")
+    logger.info(
+        "V2 generation tables promoted in %.1fs",
+        time.monotonic() - started_at,
+    )
+
+
 def _delete_for_proteins(
     store: DuckDBStore,
     protein_ids: list[str],
@@ -1346,15 +1473,31 @@ def _persist_chunk(
     *,
     legacy_rows: list[tuple[str, list[str]]],
     update_legacy_predicates: bool,
+    use_generation_tables: bool = False,
     checkpoint_processed: int | None = None,
     checkpoint_last_protein_id: str | None = None,
 ) -> None:
     """Persist one generation chunk inside one DuckDB transaction."""
+    if use_generation_tables:
+        _persist_generation_chunk(
+            store,
+            atoms,
+            states,
+            legacy_rows=legacy_rows,
+            update_legacy_predicates=update_legacy_predicates,
+            checkpoint_processed=checkpoint_processed,
+            checkpoint_last_protein_id=checkpoint_last_protein_id,
+        )
+        return
+
     store.conn.execute("BEGIN TRANSACTION;")
     try:
         _persist_atoms(store, atoms)
         _persist_states(store, states)
-        _persist_semantic_terms(store, _build_semantic_terms(atoms, states))
+        _persist_semantic_terms(
+            store,
+            _build_semantic_terms(atoms, states),
+        )
         if update_legacy_predicates:
             _persist_legacy_predicates(store, legacy_rows)
         if checkpoint_processed is not None:
@@ -1381,7 +1524,208 @@ def _persist_chunk(
         store.conn.execute("COMMIT;")
 
 
-def _persist_atoms(store: DuckDBStore, atoms: list[SemanticAtom]) -> None:
+def _persist_generation_chunk(
+    store: DuckDBStore,
+    atoms: list[SemanticAtom],
+    states: dict[str, SemanticState],
+    *,
+    legacy_rows: list[tuple[str, list[str]]],
+    update_legacy_predicates: bool,
+    checkpoint_processed: int | None,
+    checkpoint_last_protein_id: str | None,
+) -> None:
+    """Append one full-refresh chunk through reusable vectorized batch views."""
+    raw_atom_rows = [
+        (
+            position,
+            atom.protein_id,
+            atom.atom_id,
+            atom.facet.value,
+            atom.relation.value,
+            atom.source_accession,
+            atom.source_db,
+            atom.evidence_evalue,
+            atom.evidence_score,
+        )
+        for position, atom in enumerate(atoms)
+    ]
+    raw_atom_frame = pd.DataFrame.from_records(
+        raw_atom_rows,
+        columns=[
+            "input_position",
+            "protein_id",
+            "atom_id",
+            "facet",
+            "relation",
+            "source_accession",
+            "source_db",
+            "evidence_evalue",
+            "evidence_score",
+        ],
+    )
+    state_frame = pd.DataFrame.from_records(
+        [
+            (
+                protein_id,
+                state.activities,
+                state.roles,
+                state.architecture,
+                state.localization,
+                json.dumps(state.topology),
+                state.size_class,
+                state.quality_flags,
+                state.composite_predicates,
+                len(state.unresolved_accessions),
+            )
+            for protein_id, state in states.items()
+        ],
+        columns=[
+            "protein_id",
+            "activities",
+            "roles",
+            "architecture",
+            "localization",
+            "topology",
+            "size_class",
+            "quality_flags",
+            "composite_predicates",
+            "unresolved_count",
+        ],
+    )
+    legacy_frame = pd.DataFrame.from_records(
+        legacy_rows,
+        columns=["protein_id", "predicates"],
+    )
+
+    registered_views = [
+        ("_v2_raw_atoms_batch", raw_atom_frame),
+        ("_v2_states_batch", state_frame),
+    ]
+    if update_legacy_predicates:
+        registered_views.append(("_v2_legacy_batch", legacy_frame))
+    for view_name, frame in registered_views:
+        store.conn.register(view_name, frame)
+
+    source_prefix_case = direct_access_prefix_case_sql("source_db")
+    try:
+        store.conn.execute("BEGIN TRANSACTION;")
+        try:
+            # The canonical atom key keeps the last occurrence. ROW_NUMBER
+            # reproduces the prior ordered Python-dict behavior in DuckDB.
+            store.execute("""
+                INSERT INTO v2_generation_atoms
+                SELECT
+                    protein_id, atom_id, facet, relation, source_accession,
+                    source_db, evidence_evalue, evidence_score
+                FROM _v2_raw_atoms_batch
+                QUALIFY ROW_NUMBER() OVER (
+                    PARTITION BY protein_id, atom_id, source_accession
+                    ORDER BY input_position DESC
+                ) = 1
+            """)
+            store.execute("""
+                INSERT INTO v2_generation_state
+                SELECT
+                    protein_id, activities, roles, architecture, localization,
+                    topology, size_class, quality_flags, composite_predicates,
+                    unresolved_count, CURRENT_TIMESTAMP
+                FROM _v2_states_batch
+            """)
+            store.execute(f"""
+                INSERT INTO v2_generation_terms
+                SELECT DISTINCT
+                    protein_id,
+                    atom_id AS term_id,
+                    'atom' AS term_kind,
+                    facet,
+                    relation,
+                    COALESCE(source_db, '') AS source_db,
+                    COALESCE(source_accession, '') AS source_accession
+                FROM _v2_raw_atoms_batch
+                WHERE NOT starts_with(atom_id, '_source_witness:')
+
+                UNION ALL
+
+                SELECT DISTINCT
+                    protein_id,
+                    source_prefix || ':' || source_accession AS term_id,
+                    'direct_access' AS term_kind,
+                    facet,
+                    relation,
+                    COALESCE(source_db, '') AS source_db,
+                    source_accession
+                FROM (
+                    SELECT
+                        protein_id,
+                        {source_prefix_case} AS source_prefix,
+                        facet,
+                        relation,
+                        source_db,
+                        source_accession
+                    FROM _v2_raw_atoms_batch
+                    WHERE NOT starts_with(atom_id, '_source_witness:')
+                      AND source_accession IS NOT NULL
+                      AND NOT starts_with(source_accession, '_')
+                ) direct_terms
+                WHERE source_prefix IS NOT NULL
+
+                UNION ALL
+
+                SELECT DISTINCT
+                    protein_id,
+                    composite AS term_id,
+                    'composite' AS term_kind,
+                    NULL AS facet,
+                    'implies' AS relation,
+                    '_composite' AS source_db,
+                    composite AS source_accession
+                FROM (
+                    SELECT
+                        protein_id,
+                        UNNEST(composite_predicates) AS composite
+                    FROM _v2_states_batch
+                    WHERE LEN(composite_predicates) > 0
+                ) composites
+            """)
+            if update_legacy_predicates:
+                store.execute("""
+                    INSERT INTO v2_generation_legacy
+                    SELECT protein_id, predicates, CURRENT_TIMESTAMP
+                    FROM _v2_legacy_batch
+                """)
+            if checkpoint_processed is not None:
+                updated = store.execute(
+                    """
+                    UPDATE v2_generation_checkpoint
+                    SET last_protein_id = ?, processed_count = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE generation_key = ?
+                    RETURNING generation_key
+                    """,
+                    [
+                        checkpoint_last_protein_id,
+                        checkpoint_processed,
+                        _GENERATION_KEY,
+                    ],
+                )
+                if updated != [(_GENERATION_KEY,)]:
+                    raise RuntimeError(
+                        "V2 checkpoint row disappeared during generation"
+                    )
+        except BaseException:
+            store.conn.execute("ROLLBACK;")
+            raise
+        else:
+            store.conn.execute("COMMIT;")
+    finally:
+        for view_name, _ in reversed(registered_views):
+            store.conn.unregister(view_name)
+
+
+def _persist_atoms(
+    store: DuckDBStore,
+    atoms: list[SemanticAtom],
+) -> None:
     """Write atoms to semantic_atoms table using batch insert."""
     if not atoms:
         return

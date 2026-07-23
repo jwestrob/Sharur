@@ -153,10 +153,8 @@ CREATE TABLE IF NOT EXISTS semantic_atoms (
     evidence_score DOUBLE,
     PRIMARY KEY (protein_id, atom_id, source_accession)
 );
-CREATE INDEX IF NOT EXISTS idx_semantic_atoms_protein ON semantic_atoms(protein_id);
 CREATE INDEX IF NOT EXISTS idx_semantic_atoms_atom ON semantic_atoms(atom_id);
 CREATE INDEX IF NOT EXISTS idx_semantic_atoms_facet_atom ON semantic_atoms(facet, atom_id);
-CREATE INDEX IF NOT EXISTS idx_semantic_atoms_relation ON semantic_atoms(relation);
 CREATE INDEX IF NOT EXISTS idx_semantic_atoms_source ON semantic_atoms(source_db, source_accession);
 
 -- Per-protein aggregated state (resolved view)
@@ -173,9 +171,6 @@ CREATE TABLE IF NOT EXISTS semantic_state (
     unresolved_count INTEGER,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX IF NOT EXISTS idx_semantic_state_size ON semantic_state(size_class);
-CREATE INDEX IF NOT EXISTS idx_semantic_state_updated ON semantic_state(updated_at);
-
 -- Unified materialized search terms
 CREATE TABLE IF NOT EXISTS semantic_terms (
     protein_id VARCHAR NOT NULL,
@@ -188,9 +183,47 @@ CREATE TABLE IF NOT EXISTS semantic_terms (
 );
 CREATE INDEX IF NOT EXISTS idx_semantic_terms_term ON semantic_terms(term_id, protein_id);
 CREATE INDEX IF NOT EXISTS idx_semantic_terms_protein ON semantic_terms(protein_id);
-CREATE INDEX IF NOT EXISTS idx_semantic_terms_facet_term ON semantic_terms(facet, term_id);
-CREATE INDEX IF NOT EXISTS idx_semantic_terms_source ON semantic_terms(source_db, source_accession);
-CREATE INDEX IF NOT EXISTS idx_semantic_terms_kind ON semantic_terms(term_kind);
+
+-- Constraint-free append targets for resumable full refreshes. Completed
+-- generations are promoted into the canonical constrained/indexed tables in
+-- one bulk operation, avoiding random index maintenance on every chunk.
+CREATE TABLE IF NOT EXISTS v2_generation_atoms (
+    protein_id VARCHAR NOT NULL,
+    atom_id VARCHAR NOT NULL,
+    facet VARCHAR NOT NULL,
+    relation VARCHAR NOT NULL,
+    source_accession VARCHAR,
+    source_db VARCHAR,
+    evidence_evalue DOUBLE,
+    evidence_score DOUBLE
+);
+CREATE TABLE IF NOT EXISTS v2_generation_state (
+    protein_id VARCHAR NOT NULL,
+    activities VARCHAR[],
+    roles VARCHAR[],
+    architecture VARCHAR[],
+    localization VARCHAR[],
+    topology JSON,
+    size_class VARCHAR,
+    quality_flags VARCHAR[],
+    composite_predicates VARCHAR[],
+    unresolved_count INTEGER,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS v2_generation_terms (
+    protein_id VARCHAR NOT NULL,
+    term_id VARCHAR NOT NULL,
+    term_kind VARCHAR NOT NULL,
+    facet VARCHAR,
+    relation VARCHAR,
+    source_db VARCHAR NOT NULL DEFAULT '',
+    source_accession VARCHAR NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS v2_generation_legacy (
+    protein_id VARCHAR NOT NULL,
+    predicates VARCHAR[] NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
 -- Atomic full-refresh resume boundary. One row records the latest committed
 -- protein prefix for the active semantic generation contract.
@@ -209,23 +242,72 @@ CREATE TABLE IF NOT EXISTS v2_generation_checkpoint (
 """
 
 
-def create_v2_tables(store: Any) -> None:
+def _v2_schema_statements() -> list[str]:
+    """Return normalized V2 DDL statements."""
+    return [
+        statement.strip() + ";"
+        for statement in V2_SCHEMA.strip().split(";")
+        if statement.strip()
+    ]
+
+
+V2_INDEX_STATEMENTS = tuple(
+    statement
+    for statement in _v2_schema_statements()
+    if statement.lstrip().upper().startswith("CREATE INDEX")
+)
+V2_INDEX_NAMES = tuple(
+    statement.split(" ON ", 1)[0].split()[-1]
+    for statement in V2_INDEX_STATEMENTS
+)
+V2_RETIRED_INDEX_NAMES = (
+    "idx_semantic_atoms_protein",
+    "idx_semantic_atoms_relation",
+    "idx_semantic_state_size",
+    "idx_semantic_state_updated",
+    "idx_semantic_terms_facet_term",
+    "idx_semantic_terms_source",
+    "idx_semantic_terms_kind",
+)
+V2_ALL_INDEX_NAMES = tuple(dict.fromkeys((*V2_INDEX_NAMES, *V2_RETIRED_INDEX_NAMES)))
+
+
+def create_v2_tables(store: Any, *, create_indexes: bool = True) -> None:
     """Create V2 semantic tables in an existing DuckDB database.
 
     Args:
         store: A DuckDBStore or any object with an execute() method.
+        create_indexes: Build secondary query indexes. Full refreshes disable
+            these during append and restore them after bulk promotion.
     """
-    for raw_statement in V2_SCHEMA.strip().split(";"):
-        statement = raw_statement.strip()
-        if statement:
-            store.execute(statement + ";")
+    for statement in _v2_schema_statements():
+        if not create_indexes and statement in V2_INDEX_STATEMENTS:
+            continue
+        store.execute(statement)
+
+
+def create_v2_indexes(store: Any) -> None:
+    """Create the canonical V2 secondary indexes."""
+    for statement in V2_INDEX_STATEMENTS:
+        store.execute(statement)
+
+
+def drop_v2_indexes(store: Any) -> None:
+    """Drop secondary V2 indexes before a bulk full refresh."""
+    for index_name in V2_ALL_INDEX_NAMES:
+        store.execute(f"DROP INDEX IF EXISTS {index_name};")
 
 
 __all__ = [
+    "V2_ALL_INDEX_NAMES",
+    "V2_INDEX_NAMES",
+    "V2_INDEX_STATEMENTS",
     "V2_SCHEMA",
     "ClaimRelation",
     "SemanticAtom",
     "SemanticFacet",
     "SemanticState",
+    "create_v2_indexes",
     "create_v2_tables",
+    "drop_v2_indexes",
 ]

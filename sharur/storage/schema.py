@@ -144,10 +144,8 @@ CREATE TABLE IF NOT EXISTS semantic_atoms (
 
     PRIMARY KEY (protein_id, atom_id, source_accession)
 );
-CREATE INDEX IF NOT EXISTS idx_semantic_atoms_protein ON semantic_atoms(protein_id);
 CREATE INDEX IF NOT EXISTS idx_semantic_atoms_atom ON semantic_atoms(atom_id);
 CREATE INDEX IF NOT EXISTS idx_semantic_atoms_facet_atom ON semantic_atoms(facet, atom_id);
-CREATE INDEX IF NOT EXISTS idx_semantic_atoms_relation ON semantic_atoms(relation);
 CREATE INDEX IF NOT EXISTS idx_semantic_atoms_source ON semantic_atoms(source_db, source_accession);
 
 -- Predicate V2 per-protein resolved state
@@ -164,9 +162,6 @@ CREATE TABLE IF NOT EXISTS semantic_state (
     unresolved_count INTEGER,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX IF NOT EXISTS idx_semantic_state_size ON semantic_state(size_class);
-CREATE INDEX IF NOT EXISTS idx_semantic_state_updated ON semantic_state(updated_at);
-
 -- Predicate V2 unified search terms. This materializes atom IDs, V1-style
 -- direct accession keys, and composite predicates so search does not rebuild
 -- that union for every query.
@@ -181,9 +176,46 @@ CREATE TABLE IF NOT EXISTS semantic_terms (
 );
 CREATE INDEX IF NOT EXISTS idx_semantic_terms_term ON semantic_terms(term_id, protein_id);
 CREATE INDEX IF NOT EXISTS idx_semantic_terms_protein ON semantic_terms(protein_id);
-CREATE INDEX IF NOT EXISTS idx_semantic_terms_facet_term ON semantic_terms(facet, term_id);
-CREATE INDEX IF NOT EXISTS idx_semantic_terms_source ON semantic_terms(source_db, source_accession);
-CREATE INDEX IF NOT EXISTS idx_semantic_terms_kind ON semantic_terms(term_kind);
+
+-- Constraint-free append targets used while a resumable full V2 refresh is
+-- running. They are bulk-promoted into the canonical tables at completion.
+CREATE TABLE IF NOT EXISTS v2_generation_atoms (
+    protein_id VARCHAR NOT NULL,
+    atom_id VARCHAR NOT NULL,
+    facet VARCHAR NOT NULL,
+    relation VARCHAR NOT NULL,
+    source_accession VARCHAR,
+    source_db VARCHAR,
+    evidence_evalue DOUBLE,
+    evidence_score DOUBLE
+);
+CREATE TABLE IF NOT EXISTS v2_generation_state (
+    protein_id VARCHAR NOT NULL,
+    activities VARCHAR[],
+    roles VARCHAR[],
+    architecture VARCHAR[],
+    localization VARCHAR[],
+    topology JSON,
+    size_class VARCHAR,
+    quality_flags VARCHAR[],
+    composite_predicates VARCHAR[],
+    unresolved_count INTEGER,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS v2_generation_terms (
+    protein_id VARCHAR NOT NULL,
+    term_id VARCHAR NOT NULL,
+    term_kind VARCHAR NOT NULL,
+    facet VARCHAR,
+    relation VARCHAR,
+    source_db VARCHAR NOT NULL DEFAULT '',
+    source_accession VARCHAR NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS v2_generation_legacy (
+    protein_id VARCHAR NOT NULL,
+    predicates VARCHAR[] NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
 -- Predicate V2 full-refresh checkpoint. Chunk data and this boundary commit
 -- in one transaction so interrupted generations can resume safely.

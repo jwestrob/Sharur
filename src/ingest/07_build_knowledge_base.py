@@ -50,6 +50,31 @@ DEFAULT_EVALUE_THRESHOLDS: Dict[str, float] = {
     "txsscan": 1e-10,        # No GA thresholds; secretion system HMMs
 }
 
+_SCHEMA_INDEX_SQL_BY_NAME = {
+    match.group(1): match.group(0)
+    for match in re.finditer(
+        r"CREATE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+"
+        r"([A-Za-z_][A-Za-z0-9_]*)\s+ON\s+[^;]+;",
+        SCHEMA,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+}
+_V2_INDEX_PREFIXES = (
+    "idx_semantic_atoms_",
+    "idx_semantic_state_",
+    "idx_semantic_terms_",
+)
+_QUERY_INDEX_NAMES = (
+    "idx_proteins_contig",
+    "idx_proteins_bin",
+    "idx_proteins_coords",
+    "idx_annotations_protein",
+    "idx_annotations_source_acc",
+    "idx_annotations_accession",
+    "idx_loci_contig",
+    "idx_loci_type",
+)
+
 
 def _resolve_thread_count(requested: Optional[int] = None) -> int:
     """Resolve the worker count, honoring a Slurm allocation when present."""
@@ -290,6 +315,7 @@ class KnowledgeBaseBuilder:
             ("Compute metrics", self._compute_basic_metrics),
             ("Classify hydrogenases", self._classify_hydrogenases),
             *([("Classify CAZymes", self._classify_cazymes)] if self.enable_cazymes else []),
+            ("Build query indexes", self._create_query_indexes),
             ("Validate defense systems", self._validate_defense_systems),
             ("Validate secretion systems", self._validate_secretion_systems),
             ("Generate predicates", self._generate_predicates),
@@ -325,6 +351,27 @@ class KnowledgeBaseBuilder:
         console.print(f"Stats: {self.stats}")
         return self.stats
 
+    def restart_v2(self) -> Dict[str, int]:
+        """Rebuild only V2 products while preserving completed upstream tables."""
+        if not self.db_path.exists():
+            raise FileNotFoundError(f"{self.db_path} is required for --restart-v2")
+        self._reacquire_db()
+        restart_start = time.time()
+        self._run_step(
+            "Restart predicates",
+            lambda: self._generate_predicates(resume=False),
+            1,
+            2,
+        )
+        self._run_step("Finalize indexes", self._finalize, 2, 2)
+        elapsed = time.time() - restart_start
+        console.print(
+            f"\n[bold green]V2 restart complete in {elapsed:.0f}s "
+            f"({elapsed / 60:.1f}m)[/bold green]"
+        )
+        console.print(f"Stats: {self.stats}")
+        return self.stats
+
     def _finalize(self) -> None:
         self._create_indexes()
         self._update_stats()
@@ -354,6 +401,7 @@ class KnowledgeBaseBuilder:
         self.conn.execute(f"SET threads = {self.threads}")
         self.conn.execute(SCHEMA)
         run_migrations(self.conn)
+        self._drop_secondary_indexes()
         console.print(f"[blue]Created DuckDB at {self.db_path}[/blue]")
 
     # --- bins ----------------------------------------------------------- #
@@ -1164,18 +1212,50 @@ class KnowledgeBaseBuilder:
             self._reacquire_db()
 
     # --- indexes/stats -------------------------------------------------- #
-    def _create_indexes(self) -> None:
-        idx_sql = [
-            "CREATE INDEX IF NOT EXISTS idx_proteins_spatial ON proteins (contig_id, start, end_coord)",
-            "CREATE INDEX IF NOT EXISTS idx_annotations_src_acc ON annotations (source, accession)",
-            "CREATE INDEX IF NOT EXISTS idx_loci_type ON loci (locus_type)",
-            "CREATE OR REPLACE VIEW bgc_loci AS SELECT * FROM loci WHERE locus_type = 'bgc'",
+    def _drop_secondary_indexes(self) -> None:
+        """Remove empty secondary indexes before the bulk-load phase."""
+        index_names = [
+            row[0]
+            for row in self.conn.execute(
+                "SELECT index_name FROM duckdb_indexes() ORDER BY index_name"
+            ).fetchall()
         ]
-        for sql in idx_sql:
+        for index_name in index_names:
+            quoted = str(index_name).replace('"', '""')
+            self.conn.execute(f'DROP INDEX IF EXISTS "{quoted}"')
+        logger.info("Deferred %s secondary indexes until their read phase", len(index_names))
+
+    def _create_named_indexes(self, index_names: tuple[str, ...]) -> None:
+        """Create a declared set of schema indexes with DuckDB parallelism."""
+        missing = [name for name in index_names if name not in _SCHEMA_INDEX_SQL_BY_NAME]
+        if missing:
+            raise RuntimeError(f"Unknown schema indexes requested: {missing}")
+        for index_name in index_names:
+            self.conn.execute(_SCHEMA_INDEX_SQL_BY_NAME[index_name])
+
+    def _create_query_indexes(self) -> None:
+        """Build source-table indexes once, after all bulk annotation writes."""
+        started_at = time.monotonic()
+        self._create_named_indexes(_QUERY_INDEX_NAMES)
+        console.print(
+            f"  Built {len(_QUERY_INDEX_NAMES)} source query indexes "
+            f"in {time.monotonic() - started_at:.1f}s"
+        )
+
+    def _create_indexes(self) -> None:
+        # V2 indexes are already built by generation. Running the full schema
+        # list here is idempotent and finishes deferred feature/system indexes.
+        for index_name, sql in _SCHEMA_INDEX_SQL_BY_NAME.items():
+            if index_name.startswith(_V2_INDEX_PREFIXES):
+                continue
             try:
                 self.conn.execute(sql)
             except Exception as exc:
                 logger.warning(f"Index creation warning: {exc}")
+        self.conn.execute(
+            "CREATE OR REPLACE VIEW bgc_loci AS "
+            "SELECT * FROM loci WHERE locus_type = 'bgc'"
+        )
 
     def _update_stats(self) -> None:
         for table in [
@@ -1235,6 +1315,11 @@ def main(
         "--resume-v2",
         help="Continue V2 generation from the latest committed database chunk",
     ),
+    restart_v2: bool = typer.Option(
+        False,
+        "--restart-v2",
+        help="Discard V2 products and rebuild them while preserving upstream tables",
+    ),
     enable_cazymes: bool = typer.Option(False, "--enable-cazymes", help="Run dbCAN CAZyme classification (slow, off by default)"),
     threads: Optional[int] = typer.Option(
         None,
@@ -1244,8 +1329,12 @@ def main(
     ),
 ) -> None:
     logging.basicConfig(level=logging.INFO)
-    if resume_v2 and force:
-        raise typer.BadParameter("--resume-v2 and --force select different build modes")
+    if resume_v2 and restart_v2:
+        raise typer.BadParameter("--resume-v2 and --restart-v2 are mutually exclusive")
+    if (resume_v2 or restart_v2) and force:
+        raise typer.BadParameter(
+            "--resume-v2/--restart-v2 and --force select different build modes"
+        )
     canonical_embeddings_dir = data_dir / "embeddings"
     legacy_embeddings_dir = data_dir / "stage06_embeddings"
     embeddings_dir = (
@@ -1272,7 +1361,12 @@ def main(
         enable_cazymes=enable_cazymes,
         threads=threads,
     )
-    stats = builder.resume_v2() if resume_v2 else builder.build()
+    if resume_v2:
+        stats = builder.resume_v2()
+    elif restart_v2:
+        stats = builder.restart_v2()
+    else:
+        stats = builder.build()
     console.print(f"[green]Build complete[/green]: {stats}")
 
 

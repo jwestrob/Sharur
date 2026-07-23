@@ -155,6 +155,90 @@ def test_stage07_uses_slurm_threads_for_every_db_connection(tmp_path, monkeypatc
     builder._release_db()
 
 
+def test_stage07_defers_secondary_indexes_until_query_phase(tmp_path):
+    builder_cls, outputs_cls = _load_kb_module()
+    builder = builder_cls(
+        _pipeline_outputs(outputs_cls, tmp_path),
+        tmp_path / "sharur.duckdb",
+        force=True,
+        threads=2,
+    )
+    builder._init_db()
+
+    try:
+        assert builder.conn.execute(
+            "SELECT index_name FROM duckdb_indexes()"
+        ).fetchall() == []
+
+        builder._create_query_indexes()
+        index_names = {
+            row[0]
+            for row in builder.conn.execute(
+                "SELECT index_name FROM duckdb_indexes()"
+            ).fetchall()
+        }
+        assert index_names == {
+            "idx_proteins_contig",
+            "idx_proteins_bin",
+            "idx_proteins_coords",
+            "idx_annotations_protein",
+            "idx_annotations_source_acc",
+            "idx_annotations_accession",
+            "idx_loci_contig",
+            "idx_loci_type",
+        }
+    finally:
+        builder._release_db()
+
+
+def test_stage07_restart_v2_preserves_upstream_tables(tmp_path):
+    builder_cls, outputs_cls = _load_kb_module()
+    db_path = tmp_path / "sharur.duckdb"
+    builder = builder_cls(
+        _pipeline_outputs(outputs_cls, tmp_path),
+        db_path,
+        force=True,
+        threads=1,
+    )
+    builder._init_db()
+    builder.conn.execute("""
+        INSERT INTO bins (bin_id) VALUES ('bin1');
+        INSERT INTO contigs (contig_id, bin_id, length, gc_content)
+            VALUES ('contig1', 'bin1', 1000, 0.5);
+        INSERT INTO proteins (
+            protein_id, contig_id, bin_id, start, end_coord, strand,
+            gene_index, sequence_length, gc_content
+        ) VALUES ('p1', 'contig1', 'bin1', 1, 300, '+', 1, 100, 0.5);
+        INSERT INTO annotations (
+            annotation_id, protein_id, source, accession, name, description,
+            evalue, score
+        ) VALUES (
+            1, 'p1', 'pfam', 'PF00005', 'ABC_tran', 'ABC transporter',
+            1e-30, 100.0
+        );
+        INSERT INTO semantic_state (
+            protein_id, activities, roles, architecture, localization,
+            topology, size_class, quality_flags, composite_predicates,
+            unresolved_count
+        ) VALUES ('stale', [], [], [], [], '{}', 'small', [], [], 0);
+    """)
+    builder._release_db()
+
+    stats = builder.restart_v2()
+
+    assert stats["semantic_state"] == 1
+    assert builder.conn.execute(
+        "SELECT COUNT(*) FROM proteins"
+    ).fetchone()[0] == 1
+    assert builder.conn.execute(
+        "SELECT COUNT(*) FROM annotations"
+    ).fetchone()[0] == 1
+    assert builder.conn.execute(
+        "SELECT protein_id FROM semantic_state"
+    ).fetchall() == [("p1",)]
+    builder._release_db()
+
+
 def test_stage07_explicit_threads_override_slurm(tmp_path, monkeypatch):
     builder_cls, outputs_cls = _load_kb_module()
     monkeypatch.setenv("SLURM_CPUS_ON_NODE", "48")

@@ -400,12 +400,21 @@ python src/ingest/07_build_knowledge_base.py -d data/DATASET -o data/DATASET/sha
 | `-o`, `--output` | `data/sharur.duckdb` | Output DuckDB path |
 | `-t`, `--threads` | Slurm allocation or host CPU count | Worker threads for FAA parsing, DuckDB, and downstream classifiers |
 | `--force` | off | Overwrite existing database |
+| `--resume-v2` | off | Continue a compatible interrupted V2 generation from its committed checkpoint |
+| `--restart-v2` | off | Rebuild only V2 products while preserving completed upstream database tables |
 | `--enable-cazymes` | off | Run the slower dbCAN three-tool consensus classifier |
 
 When `--threads` is omitted inside Slurm, Stage 07 uses
-`SLURM_CPUS_ON_NODE`. Annotation chunks and curated defense/secretion calls are
-fail-closed: an exception terminates the build before predicates and final
-indexes are written.
+`SLURM_CPUS_ON_NODE`. Fresh builds defer secondary indexes during protein and
+annotation loading, build source query indexes once before caller validation
+and V2 generation, then publish the final indexes after generation. Annotation
+chunks and curated defense/secretion calls are fail-closed: an exception
+terminates the build before predicates and final indexes are written.
+
+`--resume-v2` requires the same semantic code/config and source-table signature
+as the saved checkpoint. Use `--restart-v2` after deploying a changed semantic
+contract; it preserves the completed HMM annotations and starts a fresh,
+checkpointed V2 generation.
 
 **What Stage 07 does automatically (no user intervention needed):**
 1. Loads bins from Stage 02 manifest (or infers bins from Stage 03 FAA files)
@@ -413,6 +422,9 @@ indexes are written.
 3. Loads all annotation TSV files from Stage 04, applying e-value thresholds per source
 4. Loads CRISPR arrays from Stage 05c JSON files into `loci` table
 5. Loads BGC loci from Stage 05a (if present)
+6. Builds source-table query indexes once after bulk annotation writes
+7. Generates V2 products in index-free scratch tables, promotes them
+   atomically, and creates the semantic query indexes once
 6. Computes length z-scores per bin
 7. Runs HydDB subgroup classification (if HydDB annotations exist)
 8. Optionally runs dbCAN three-tool consensus CAZyme classification when `--enable-cazymes` is set

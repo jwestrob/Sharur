@@ -3,6 +3,14 @@
 import pytest
 
 import sharur.predicates_v2.persistence as persistence
+from sharur.predicates_v2.model import (
+    V2_ALL_INDEX_NAMES,
+    V2_INDEX_NAMES,
+    ClaimRelation,
+    SemanticAtom,
+    SemanticFacet,
+    SemanticState,
+)
 from sharur.predicates_v2.persistence import (
     generate_and_persist_v2,
     materialize_semantic_terms_from_v2,
@@ -409,6 +417,16 @@ def _semantic_snapshot(store: DuckDBStore) -> dict[str, list[tuple]]:
     }
 
 
+def _explicit_index_names(store: DuckDBStore) -> set[str]:
+    """Return user-created DuckDB indexes, excluding implicit constraints."""
+    return {
+        row[0]
+        for row in store.conn.execute(
+            "SELECT index_name FROM duckdb_indexes()"
+        ).fetchall()
+    }
+
+
 def _add_parallel_test_proteins(store: DuckDBStore, count: int = 32) -> None:
     """Add deterministic, annotation-free records for multi-chunk coverage."""
     rows = []
@@ -467,6 +485,129 @@ def test_process_parallel_generation_matches_serial_output():
     """).fetchone() == ("complete", "z034", 34, 34)
 
 
+def test_full_generation_defers_indexes_and_releases_build_tables(monkeypatch):
+    """Full refreshes should append index-free and publish indexed tables once."""
+    store = _seed_store()
+    original = persistence._persist_generation_chunk
+    observed_during_append: set[str] | None = None
+
+    def inspect_then_persist(*args, **kwargs):
+        nonlocal observed_during_append
+        observed_during_append = _explicit_index_names(store)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(persistence, "_persist_generation_chunk", inspect_then_persist)
+    generate_and_persist_v2(
+        store,
+        chunk_size=1,
+        workers=1,
+        update_legacy_predicates=True,
+        return_states=False,
+    )
+
+    assert observed_during_append is not None
+    assert observed_during_append.isdisjoint(V2_ALL_INDEX_NAMES)
+    completed_indexes = _explicit_index_names(store)
+    assert set(V2_INDEX_NAMES).issubset(completed_indexes)
+    assert completed_indexes.isdisjoint(set(V2_ALL_INDEX_NAMES) - set(V2_INDEX_NAMES))
+    tables = {row[0] for row in store.conn.execute("SHOW TABLES").fetchall()}
+    assert not tables.intersection(persistence._GENERATION_TABLES)
+
+
+def test_completed_generation_can_be_resumed_after_build_cleanup():
+    """A completed checkpoint should remain resumable after scratch tables drop."""
+    store = _seed_store()
+    generate_and_persist_v2(
+        store,
+        chunk_size=1,
+        workers=1,
+        update_legacy_predicates=True,
+        return_states=False,
+    )
+    before = _semantic_snapshot(store)
+
+    generate_and_persist_v2(
+        store,
+        chunk_size=1,
+        workers=1,
+        resume=True,
+        update_legacy_predicates=True,
+        return_states=False,
+    )
+
+    assert _semantic_snapshot(store) == before
+
+
+def test_generation_preserves_raw_duplicate_evidence_in_terms_and_legacy():
+    """Set-oriented persistence must retain pre-dedup confidence evidence."""
+    store = _seed_store()
+    persistence.create_v2_tables(store, create_indexes=False)
+    persistence._clear_generation_tables(store)
+    atoms = [
+        SemanticAtom(
+            protein_id="p1",
+            atom_id="duplicate_atom",
+            facet=SemanticFacet.role,
+            relation=ClaimRelation.supports,
+            source_accession="PF00005",
+            source_db="pfam",
+        ),
+        SemanticAtom(
+            protein_id="p1",
+            atom_id="duplicate_atom",
+            facet=SemanticFacet.role,
+            relation=ClaimRelation.flags,
+            source_accession="PF00005",
+            source_db="pfam",
+        ),
+    ]
+    states = {
+        "p1": SemanticState(
+            protein_id="p1",
+            roles=["duplicate_atom"],
+            size_class="small",
+        )
+    }
+    exact_legacy = [
+        ("p1", ["duplicate_atom", "confident_hit", "weak_hit"]),
+    ]
+
+    persistence._persist_generation_chunk(
+        store,
+        atoms,
+        states,
+        legacy_rows=exact_legacy,
+        update_legacy_predicates=True,
+        checkpoint_processed=None,
+        checkpoint_last_protein_id=None,
+    )
+    persistence._promote_full_generation(
+        store,
+        update_legacy_predicates=True,
+        expected_count=1,
+    )
+
+    assert store.conn.execute("""
+        SELECT relation FROM semantic_atoms
+        WHERE protein_id = 'p1' AND atom_id = 'duplicate_atom'
+    """).fetchall() == [("flags",)]
+    assert store.conn.execute("""
+        SELECT term_id, term_kind, relation
+        FROM semantic_terms
+        WHERE protein_id = 'p1'
+          AND term_id IN ('duplicate_atom', 'pfam:PF00005')
+        ORDER BY term_kind, relation
+    """).fetchall() == [
+        ("duplicate_atom", "atom", "flags"),
+        ("duplicate_atom", "atom", "supports"),
+        ("pfam:PF00005", "direct_access", "flags"),
+        ("pfam:PF00005", "direct_access", "supports"),
+    ]
+    assert store.conn.execute("""
+        SELECT predicates FROM protein_predicates WHERE protein_id = 'p1'
+    """).fetchone()[0] == exact_legacy[0][1]
+
+
 def test_full_generation_resumes_at_last_atomic_chunk(monkeypatch):
     """A failed run should retain and resume from its committed protein prefix."""
     store = _seed_store()
@@ -496,6 +637,9 @@ def test_full_generation_resumes_at_last_atomic_chunk(monkeypatch):
     """).fetchone() == ("failed", "p1", 1, 2)
     assert store.conn.execute(
         "SELECT protein_id FROM semantic_state ORDER BY protein_id"
+    ).fetchall() == []
+    assert store.conn.execute(
+        "SELECT protein_id FROM v2_generation_state ORDER BY protein_id"
     ).fetchall() == [("p1",)]
 
     monkeypatch.setattr(persistence, "_persist_chunk", original_persist_chunk)
@@ -515,6 +659,51 @@ def test_full_generation_resumes_at_last_atomic_chunk(monkeypatch):
         FROM v2_generation_checkpoint
         WHERE generation_key = 'full_v2'
     """).fetchone() == ("complete", "p2", 2, 2)
+
+
+def test_full_generation_resumes_after_pre_promotion_failure(monkeypatch):
+    """Completed scratch output should survive a failed canonical promotion."""
+    store = _seed_store()
+    original_promote = persistence._promote_full_generation
+
+    def fail_promotion(*args, **kwargs):
+        raise RuntimeError("injected promotion failure")
+
+    monkeypatch.setattr(persistence, "_promote_full_generation", fail_promotion)
+    with pytest.raises(RuntimeError, match="injected promotion failure"):
+        generate_and_persist_v2(
+            store,
+            chunk_size=1,
+            workers=1,
+            update_legacy_predicates=True,
+            return_states=False,
+        )
+
+    assert store.conn.execute("""
+        SELECT status, processed_count, total_count
+        FROM v2_generation_checkpoint
+        WHERE generation_key = 'full_v2'
+    """).fetchone() == ("failed", 2, 2)
+    assert store.conn.execute(
+        "SELECT COUNT(*) FROM v2_generation_state"
+    ).fetchone()[0] == 2
+    assert store.conn.execute(
+        "SELECT COUNT(*) FROM semantic_state"
+    ).fetchone()[0] == 0
+
+    monkeypatch.setattr(persistence, "_promote_full_generation", original_promote)
+    generate_and_persist_v2(
+        store,
+        chunk_size=1,
+        workers=1,
+        resume=True,
+        update_legacy_predicates=True,
+        return_states=False,
+    )
+
+    assert store.conn.execute(
+        "SELECT COUNT(*) FROM semantic_state"
+    ).fetchone()[0] == 2
 
 
 def test_resume_rejects_source_table_drift(monkeypatch):
