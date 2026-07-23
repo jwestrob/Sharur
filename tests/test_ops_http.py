@@ -55,6 +55,12 @@ def test_app_lifecycle_is_lazy_isolated_and_authenticated(tmp_path: Path) -> Non
         assert health.status_code == 200
         assert health.json()["db"] == str(first_db.resolve())
         assert health.json()["auth_required"] is True
+        principal = first.get("/auth/whoami", headers=_headers())
+        assert principal.json() == {
+            "agent_id": "bootstrap-operator",
+            "role": "operator",
+            "bootstrap": True,
+        }
 
         created = first.post(
             "/findings",

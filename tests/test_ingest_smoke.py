@@ -38,6 +38,24 @@ def _write(path: Path, text: str):
     path.write_text(text)
 
 
+def test_finalize_refreshes_optimizer_statistics_after_indexes():
+    builder_cls, _outputs_cls = _load_kb_module()
+    builder = object.__new__(builder_cls)
+    calls = []
+
+    class RecordingConnection:
+        def execute(self, sql):
+            calls.append(sql)
+
+    builder.conn = RecordingConnection()
+    builder._create_indexes = lambda: calls.append("indexes")
+    builder._update_stats = lambda: calls.append("stats")
+
+    builder._finalize()
+
+    assert calls == ["indexes", "ANALYZE", "stats"]
+
+
 def test_ingest_smoke(tmp_path):
     builder_cls, outputs_cls = _load_kb_module()
     data_dir = tmp_path / "data"

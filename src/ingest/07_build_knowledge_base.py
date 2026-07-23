@@ -378,6 +378,12 @@ class KnowledgeBaseBuilder:
 
     def _finalize(self) -> None:
         self._create_indexes()
+        analyze_started = time.monotonic()
+        self.conn.execute("ANALYZE")
+        console.print(
+            f"  Refreshed DuckDB optimizer statistics in "
+            f"{time.monotonic() - analyze_started:.1f}s"
+        )
         self._update_stats()
 
     # --- connection management ------------------------------------------ #

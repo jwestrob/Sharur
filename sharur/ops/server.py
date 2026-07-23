@@ -1484,6 +1484,18 @@ def metrics(request: Request):
     return PlainTextResponse(_prometheus(result), media_type="text/plain; version=0.0.4")
 
 
+@router.get("/auth/whoami")
+def whoami(request: Request):
+    """Expose the authenticated principal for peer-service token introspection."""
+
+    principal = _principal(request)
+    return {
+        "agent_id": principal.agent_id,
+        "role": principal.role,
+        "bootstrap": principal.bootstrap,
+    }
+
+
 @router.get("/health")
 def health(request: Request):
     runtime = _runtime(request)

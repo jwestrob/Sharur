@@ -18,9 +18,9 @@ one sharur-ops service
 dataset-local sharur_ops.db
 ```
 
-The service owns coordination state. Dataset DuckDB files remain analytical
-data sources, and canonical research outputs remain in their versioned
-finding/report artifacts.
+The service owns coordination state. `sharur-query` owns shared analytical
+access to large dataset DuckDB files, and canonical research outputs remain in
+their versioned finding/report artifacts.
 
 ## Scope boundary
 
@@ -31,6 +31,11 @@ Sharur Ops coordinates logical work. Compute launchers execute that work.
 - An executor maps a claimed task onto a local process, persistent worker,
   Slurm job, Slurm array element, Kubernetes job, or another runtime.
 - Pipeline stage algorithms and scheduler packing remain independent.
+
+The analytical data-plane contract lives in
+[`docs/query_service.md`](docs/query_service.md). Sharur Ops resolves agent
+identity through `/auth/whoami`; the query service consumes that endpoint and
+keeps SQLite ownership inside the Ops HTTP process.
 
 This separation supports both large one-off analyses and general
 multi-agent use while keeping scheduler-specific behavior out of the
@@ -214,7 +219,7 @@ Capabilities describe qualitative requirements. An Apple Silicon worker can
 register an `mps` capability with one accelerator slot, enforcing one active
 accelerated task through the same generic capacity model.
 
-Each analytical process also receives an explicit DuckDB budget:
+Local direct-analysis processes receive an explicit DuckDB budget:
 
 ```python
 from sharur.operators import Sharur
@@ -229,7 +234,9 @@ b = Sharur(
 ```
 
 The scheduler/executor chooses these values from the claimed task and host
-allocation. Slurm array construction remains an executor concern.
+allocation. Coordinated campaigns over a large shared database route typed
+operators through `sharur-query`; one service-level budget then governs all
+agents. Slurm array construction remains an executor concern.
 
 ## Durable writes and idempotency
 
@@ -454,7 +461,7 @@ Focused contracts cover:
 - verified online backup;
 - dead-letter and operational metric visibility;
 - exclusive HTTP ownership;
-- per-agent DuckDB thread/memory/spill budgets;
+- direct-process DuckDB budgets and shared query-service admission/resource budgets;
 - concurrent run-stage summary coherence.
 
 Run:

@@ -44,8 +44,10 @@ Use the Read tool to load any doc when you need its protocol. Don't guess — lo
 - Sub-agents CAN spawn further sub-agents for specialist tasks (literature, foldseek, hydrogenase curation)
 - Each sub-agent produces a discrete output (markdown report, JSONL findings)
 - Parent agent synthesizes outputs from all sub-agents
-- Multiple read-only DuckDB sessions may run concurrently. Run database writers
-  sequentially. Use separate output files or the locked findings writer for report records.
+- Local read-only DuckDB sessions may run concurrently with explicit process
+  budgets. Large coordinated campaigns use the shared query service described
+  below. Run database writers sequentially. Use separate output files or the
+  locked findings writer for report records.
 
 ## Coordinated Worker Protocol
 
@@ -73,8 +75,28 @@ The task is logical coordination. Its executor can be a persistent process,
 local launcher, Slurm job, or array element. Keep scheduler packing and array
 construction in the executor layer.
 
-Register each worker with generic capacity and capabilities. Match the
-DuckDB process budget to that registration:
+For a large shared dataset, use the same agent token with Sharur Query:
+
+```python
+from sharur.query import SharurQuery
+
+query = SharurQuery(
+    "http://query-host:8812",
+    api_token=worker_token,
+)
+hits = query.search_predicates(
+    has=["hydrogenase", "membrane_protein"],
+    limit=100,
+)
+```
+
+The service supplies one shared DuckDB cache, thread/memory/spill ceilings,
+weighted admission, execution timeouts, cancellation, and bounded results.
+Findings and task state continue through `SharurOps`. Include the query URL in
+worker prompts when this mode is active.
+
+Register each direct-mode worker with generic capacity and capabilities. Match
+its DuckDB process budget to that registration:
 
 ```python
 from sharur.operators import Sharur
@@ -91,6 +113,9 @@ b = Sharur(
 Task attempts have finite leases and opaque fencing tokens. A recovered or
 replacement attempt has exclusive terminal-write authority, including when a
 replacement process reuses the same agent ID.
+
+See [`query_service.md`](query_service.md) for launch commands, endpoint
+contracts, resource arithmetic, and access-path selection.
 
 ## Practical Tips
 

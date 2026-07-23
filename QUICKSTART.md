@@ -209,6 +209,34 @@ canonical artifact through SHA-256. Tool/reference versions are optional provena
 The command refuses to seal while any ingest run is active. `sharur verify-seal`
 exits non-zero on canonical drift and supports `--format json`.
 
+Stage 07 creates the final indexes and runs DuckDB `ANALYZE` before the dataset
+is sealed, giving the optimizer statistics over the final table state.
+
+## Shared Query Service for Multi-Agent Campaigns
+
+For a large database shared by coordinated agents, launch one bounded read-only
+data plane after sealing:
+
+```bash
+pip install -e ".[ops]"
+
+export SHARUR_OPS_URL=http://ops-host:8811
+export SHARUR_QUERY_STAGE_DIR=/local-nvme/sharur/my_dataset
+
+sharur-query \
+  --db data/my_dataset/sharur.duckdb \
+  --host 0.0.0.0 \
+  --threads 16 \
+  --memory-limit 32GB \
+  --max-temp-size 256GB
+```
+
+The service verifies the dataset seal, stages one atomic immutable local
+replica, owns one DuckDB instance/cache, and authenticates agent tokens through
+Sharur Ops. Typed endpoints enforce queue, execution, row, request, and result
+bounds. See [`docs/query_service.md`](docs/query_service.md) for deployment,
+resource arithmetic, cancellation, and telemetry.
+
 For a legacy H5 without sidecars:
 
 ```bash

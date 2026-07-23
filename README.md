@@ -92,6 +92,19 @@ The default seal is disk-light and samples large canonical artifacts. Use `--ful
 making an archival seal that should stream full SHA-256 over DuckDB, embeddings, and active
 index sidecars.
 
+For a coordinated campaign over a large database, serve one sealed local
+replica through the bounded query data plane:
+
+```bash
+export SHARUR_OPS_URL=http://ops-host:8811
+export SHARUR_QUERY_STAGE_DIR=/local-nvme/sharur/my_dataset
+sharur-query --db data/my_dataset/sharur.duckdb --host 0.0.0.0
+```
+
+Agents reuse their Sharur Ops credentials and call typed operators through
+`SharurQuery`. One service owns the DuckDB cache, threads, memory, and spill
+budget. See [`docs/query_service.md`](docs/query_service.md).
+
 ### Use the operators
 
 ```python
@@ -175,23 +188,27 @@ Sharur ships with skill specs in `.claude/skills/` that give Claude Code structu
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                   Agent (Claude Code, etc.)              │
-│  Skills • Workflows • Multi-turn reasoning              │
-│  sharur/ops: multi-agent coordination (FastAPI+SQLite)  │
-└────────────────────────┬────────────────────────────────┘
-                         │
-┌────────────────────────┴────────────────────────────────┐
-│                    Operator Layer                        │
-│  search • navigate • similarity • export • structure    │
-│  predicates (V2 atoms) • synteny • visualization        │
-└────────────────────────┬────────────────────────────────┘
-                         │
-┌────────────────────────┴────────────────────────────────┐
-│                     Data Layer                           │
-│  DuckDB (proteins, annotations, loci, semantic atoms)   │
-│  FAISS (ESM2/ELSA index) • DuckDB (ELSA result sidecar) │
-└─────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────┐
+│ Agents: skills • workflows • multi-turn reasoning          │
+└───────────────┬────────────────────────┬───────────────────┘
+                │ coordination           │ typed queries
+                v                        v
+┌───────────────────────────┐  ┌─────────────────────────────┐
+│ sharur-ops                │  │ sharur-query                │
+│ one SQLite control owner  │  │ one DuckDB owner and cache │
+└───────────────┬───────────┘  └──────────────┬──────────────┘
+                │                             │
+                v                             v
+┌───────────────────────────┐  ┌─────────────────────────────┐
+│ sharur_ops.db             │  │ Typed operator layer        │
+│ tasks • leases • findings │  │ search • navigate • V2     │
+└───────────────────────────┘  └──────────────┬──────────────┘
+                                              │
+                                              v
+                               ┌─────────────────────────────┐
+                               │ Sealed local DuckDB replica │
+                               │ FAISS / ELSA sidecars       │
+                               └─────────────────────────────┘
 ```
 
 ## Project structure
@@ -204,6 +221,7 @@ Sharur ships with skill specs in `.claude/skills/` that give Claude Code structu
 │   ├── predicates/        # V1 predicate system + PFAM/KEGG/CAZy/VOG mappings
 │   ├── predicates_v2/     # V2 semantic-atom backend (atoms, composites, review queue)
 │   ├── ops/               # Multi-agent coordination server + client
+│   ├── query/             # Bounded shared DuckDB query server + client
 │   └── reports/           # PDF report generation
 ├── config/predicates_v2/  # V2 YAML config: facets, relations, composites
 ├── src/ingest/            # Ingestion pipeline (stages 00-07)

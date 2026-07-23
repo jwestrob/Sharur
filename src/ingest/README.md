@@ -443,6 +443,7 @@ checkpointed V2 generation.
 13. Materializes `protein_predicates` from V2 for legacy query compatibility
 14. Emits CRISPR-overlap quality flags in V2 and the compatibility table
 15. Creates final indexes
+16. Runs DuckDB `ANALYZE` over the final table state for optimizer statistics
 
 **E-value thresholds applied at load time:**
 

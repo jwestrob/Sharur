@@ -25,6 +25,7 @@ Detailed guides live in `docs/` and `.claude/skills/`. **Read the relevant doc b
 | Validating hydrogenases | `.claude/skills/hydrogenase.md` |
 | Querying ELSA synteny results | `.claude/skills/synteny.md` |
 | Coordinating multi-agent runs | `agent_ops_spec.md`, `sharur/ops/` |
+| Serving one large DuckDB to many agents | `docs/query_service.md`, `sharur/query/` |
 | Writing structured findings | `docs/findings_spec.md` |
 | Inspecting cases, comparing ORF context, or adding assembly evidence | `docs/cases_and_evidence.md` |
 
@@ -131,8 +132,11 @@ b.get_neighborhood(protein_id, window=5, all_annotations=True)
 ```
 
 Open analytical sessions with `Sharur(path, read_only=True)`. Multiple independent
-read-only agents may query the same DuckDB concurrently. Serialize any operation that
-writes DuckDB; writing separate report/draft files does not require serializing database reads.
+read-only sessions suit local and modest-concurrency work when each process has explicit
+thread, memory, and spill limits. Coordinated campaigns over large databases use
+`sharur-query`, which provides one shared DuckDB cache, bounded typed operators, admission
+control, and per-agent Ops authentication. Serialize every DuckDB writer; separate
+report/draft files remain independently writable.
 
 ### Scientific Rigor
 

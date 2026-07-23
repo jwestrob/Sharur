@@ -175,6 +175,33 @@ def _stable_file_digest(path: Path, *, full: bool) -> dict[str, Any]:
     return result
 
 
+def verify_artifact_digest(
+    path: str | Path,
+    *,
+    expected_size: int,
+    expected_digest: dict[str, Any],
+) -> bool:
+    """Verify one canonical artifact against its stored seal record.
+
+    This is intentionally narrower than :func:`verify_dataset_seal`: replica
+    staging can validate the copied DuckDB artifact without reconstructing a
+    second dataset directory around it.
+    """
+
+    resolved = Path(path).expanduser().resolve()
+    if not resolved.is_file() or resolved.stat().st_size != expected_size:
+        return False
+    if expected_digest.get("algorithm") != "sha256":
+        raise DatasetSealError(
+            f"Unsupported artifact digest algorithm: {expected_digest.get('algorithm')!r}"
+        )
+    scope = expected_digest.get("scope")
+    if scope not in {"full", "sampled"}:
+        raise DatasetSealError(f"Unsupported artifact digest scope: {scope!r}")
+    observed = _stable_file_digest(resolved, full=scope == "full")
+    return observed == expected_digest
+
+
 def _artifact_snapshot(
     path: Path,
     *,
@@ -948,6 +975,7 @@ __all__ = [
     "SealVerification",
     "build_dataset_seal",
     "seal_dataset",
+    "verify_artifact_digest",
     "verify_dataset_seal",
     "write_dataset_seal",
 ]
