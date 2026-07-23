@@ -14,6 +14,7 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from sharur.ops.schema import OPS_SCHEMA_VERSION
 from sharur.storage.duckdb_store import DuckDBStore
 from sharur.storage.schema import SCHEMA_VERSION
 from sharur.storage.vector_store import inspect_vector_index
@@ -607,21 +608,43 @@ def _ledger_check(db_path: Path) -> Capability:
                 if "runs" in tables
                 else 0
             )
+            ops_schema_version = (
+                int(
+                    conn.execute(
+                        "SELECT COALESCE(MAX(version), 0) FROM ops_schema_meta"
+                    ).fetchone()[0]
+                )
+                if "ops_schema_meta" in tables
+                else 0
+            )
         finally:
             conn.close()
-        if "runs" not in tables or "run_events" not in tables:
+        if (
+            "runs" not in tables
+            or "run_events" not in tables
+            or ops_schema_version < OPS_SCHEMA_VERSION
+        ):
             return Capability(
                 "run_ledger",
                 CapabilityState.stale,
-                "Operational SQLite exists but predates the unified run ledger.",
-                evidence={"path": str(ledger_path), "tables": sorted(tables)},
+                "Operational SQLite requires the current control-plane migration.",
+                evidence={
+                    "path": str(ledger_path),
+                    "tables": sorted(tables),
+                    "schema_version": ops_schema_version,
+                    "required_schema_version": OPS_SCHEMA_VERSION,
+                },
                 remediation="Open it once with current OpsStore or rerun sharur-ingest.",
             )
         return Capability(
             "run_ledger",
             CapabilityState.available,
             "Dataset-local run ledger is readable.",
-            evidence={"path": str(ledger_path), "runs": run_count},
+            evidence={
+                "path": str(ledger_path),
+                "runs": run_count,
+                "schema_version": ops_schema_version,
+            },
         )
     except Exception as exc:
         return Capability(

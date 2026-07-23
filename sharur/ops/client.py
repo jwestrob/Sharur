@@ -1,39 +1,8 @@
-# ruff: noqa: RUF013
-"""
-Sharur Ops Client — drop this into any agent's environment.
+"""Bounded HTTP client for the Sharur Ops control plane."""
 
-Usage:
-    from sharur.ops.client import SharurOps
-    ops = SharurOps("http://localhost:8811", agent_id="dpann_surveyor")
+from __future__ import annotations
 
-    # Post a finding
-    fid = ops.finding(
-        finding_type="cassette",
-        domain="dpann",
-        summary="Novel CHAT protease defense cassette: GHG + ELV-DEIG + PTW",
-        evidence={"genes": [...], "conservation_count": 44, "phyla_observed": [...]},
-        confidence=0.85,
-        novelty=3,
-        reasoning="Found via ELSA neighborhood search at tau=0.85..."
-    )
-
-    # Check for tasks
-    tasks = ops.my_tasks()
-
-    # Claim an unassigned task
-    ops.claim_task(task_id)
-
-    # Post a hypothesis for cross-domain validation
-    ops.hypothesis(
-        hypothesis="CHAT protease cassette is present in Bathyarchaeia",
-        source_finding_ids=[fid],
-        domains_relevant=["bathyarchaeia", "omnitrophota"]
-    )
-
-    # Check what other agents have found
-    new_stuff = ops.recent_findings(min_novelty=2)
-"""
-
+import time
 from typing import Any
 
 import requests
@@ -50,11 +19,11 @@ class SharurOps:
         base_url: str = "http://localhost:8811",
         agent_id: str = "unnamed",
         *,
-        api_token: str = None,
+        api_token: str | None = None,
         timeout: float | tuple[float, float] = DEFAULT_TIMEOUT,
         retries: int = 2,
         backoff_factor: float = 0.25,
-        session: requests.Session = None,
+        session: requests.Session | None = None,
         verify_connection: bool = True,
     ):
         if retries < 0:
@@ -67,6 +36,9 @@ class SharurOps:
         self.base = base_url.rstrip("/")
         self.agent_id = agent_id
         self.timeout = timeout
+        self._mutation_retries = retries
+        self._backoff_factor = backoff_factor
+        self._lease_tokens: dict[str, tuple[str, int]] = {}
         self._owns_session = session is None
         self._session = session or requests.Session()
         if api_token:
@@ -88,16 +60,146 @@ class SharurOps:
         if verify_connection:
             self._request("GET", "/health")
 
-    def _request(self, method: str, path: str, **kwargs: Any) -> requests.Response:
-        """Send one bounded request; only idempotent reads are retried."""
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        retry_mutation: bool = False,
+        **kwargs: Any,
+    ) -> requests.Response:
+        """Send a bounded request.
+
+        GET/HEAD retries live in the HTTP adapter. A mutation retries only when
+        its caller supplied an idempotency key (or another natural immutable
+        identity, such as an artifact content hash).
+        """
+
         url = path if path.startswith(("http://", "https://")) else f"{self.base}{path}"
         kwargs.setdefault("timeout", self.timeout)
-        response = self._session.request(method, url, **kwargs)
-        response.raise_for_status()
-        return response
+        attempts = self._mutation_retries + 1 if retry_mutation else 1
+        for attempt in range(attempts):
+            try:
+                response = self._session.request(method, url, **kwargs)
+                response.raise_for_status()
+                return response
+            except (requests.ConnectionError, requests.Timeout):
+                if attempt + 1 >= attempts:
+                    raise
+                time.sleep(self._backoff_factor * (2**attempt))
+        raise AssertionError("unreachable")
+
+    def _remember_lease(self, task: dict[str, Any]) -> dict[str, Any]:
+        token = task.get("lease_token")
+        attempt = task.get("lease_attempt")
+        if token is not None and attempt is not None:
+            self._lease_tokens[str(task["id"])] = (str(token), int(attempt))
+        return task
+
+    def _lease(
+        self,
+        task_id: str,
+        lease_token: str | None,
+        lease_attempt: int | None,
+    ) -> tuple[str, int]:
+        cached = self._lease_tokens.get(task_id)
+        token = lease_token or (cached[0] if cached else None)
+        attempt = lease_attempt if lease_attempt is not None else (cached[1] if cached else None)
+        if token is None or attempt is None:
+            raise ValueError(
+                f"Task {task_id} requires the lease token returned by claim_task "
+                "or claim_next_task"
+            )
+        return token, int(attempt)
 
     # ------------------------------------------------------------------
-    # Findings
+    # Campaigns and agents
+    # ------------------------------------------------------------------
+
+    def create_campaign(
+        self,
+        name: str,
+        *,
+        description: str = "",
+        dataset_path: str | None = None,
+        metadata: dict | None = None,
+        idempotency_key: str | None = None,
+    ) -> str:
+        response = self._request(
+            "POST",
+            "/campaigns",
+            json={
+                "name": name,
+                "description": description,
+                "dataset_path": dataset_path,
+                "metadata": metadata or {},
+                "idempotency_key": idempotency_key,
+            },
+            retry_mutation=idempotency_key is not None,
+        )
+        return response.json()["id"]
+
+    def list_campaigns(self, **filters: Any) -> list[dict[str, Any]]:
+        return self._request("GET", "/campaigns", params=filters).json()
+
+    def get_campaign(self, campaign_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/campaigns/{campaign_id}").json()
+
+    def update_campaign(self, campaign_id: str, status: str) -> dict[str, Any]:
+        return self._request(
+            "PATCH",
+            f"/campaigns/{campaign_id}",
+            json={"status": status},
+        ).json()
+
+    def register_agent(
+        self,
+        agent_id: str,
+        *,
+        role: str = "worker",
+        capabilities: list[str] | None = None,
+        max_concurrent_tasks: int = 1,
+        capacity_cpu_slots: int = 1,
+        capacity_memory_mb: int = 0,
+        capacity_accelerator_slots: int = 0,
+        host: str | None = None,
+        metadata: dict | None = None,
+        rotate_token: bool = False,
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/agents",
+            json={
+                "agent_id": agent_id,
+                "role": role,
+                "capabilities": capabilities or [],
+                "max_concurrent_tasks": max_concurrent_tasks,
+                "capacity_cpu_slots": capacity_cpu_slots,
+                "capacity_memory_mb": capacity_memory_mb,
+                "capacity_accelerator_slots": capacity_accelerator_slots,
+                "host": host,
+                "metadata": metadata or {},
+                "rotate_token": rotate_token,
+            },
+        ).json()
+
+    def list_agents(self, **filters: Any) -> list[dict[str, Any]]:
+        return self._request("GET", "/agents", params=filters).json()
+
+    def heartbeat_agent(
+        self,
+        *,
+        status: str = "active",
+        host: str | None = None,
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/agents/me/heartbeat",
+            json={"status": status, "host": host},
+        ).json()
+
+    # ------------------------------------------------------------------
+    # Findings and artifacts
     # ------------------------------------------------------------------
 
     def finding(
@@ -105,14 +207,19 @@ class SharurOps:
         finding_type: str,
         domain: str,
         summary: str,
-        evidence: dict = None,
+        evidence: dict | None = None,
         confidence: float = 0.5,
         novelty: int = 0,
-        parent_finding_id: str = None,
+        parent_finding_id: str | None = None,
         reasoning: str = "",
+        *,
+        campaign_id: str | None = None,
+        task_id: str | None = None,
+        idempotency_key: str | None = None,
+        schema_version: int = 1,
+        validation_status: str = "unreviewed",
     ) -> str:
-        """Post a finding. Returns the finding ID."""
-        r = self._request(
+        response = self._request(
             "POST",
             "/findings",
             json={
@@ -125,38 +232,104 @@ class SharurOps:
                 "novelty": novelty,
                 "parent_finding_id": parent_finding_id,
                 "reasoning": reasoning,
+                "campaign_id": campaign_id,
+                "task_id": task_id,
+                "idempotency_key": idempotency_key,
+                "schema_version": schema_version,
+                "validation_status": validation_status,
             },
+            retry_mutation=idempotency_key is not None,
         )
-        return r.json()["id"]
+        return response.json()["id"]
 
     def recent_findings(
         self,
         since: float = 0,
         min_novelty: int = 0,
-        finding_type: str = None,
-        domain: str = None,
-        agent_id: str = None,
+        finding_type: str | None = None,
+        domain: str | None = None,
+        agent_id: str | None = None,
+        campaign_id: str | None = None,
+        before_ts: float | None = None,
         limit: int = 50,
-    ) -> list[dict]:
-        """Query recent findings, optionally filtered."""
-        params = {"since": since, "min_novelty": min_novelty, "limit": limit}
-        if finding_type:
-            params["finding_type"] = finding_type
-        if domain:
-            params["domain"] = domain
-        if agent_id:
-            params["agent_id"] = agent_id
-        r = self._request("GET", "/findings", params=params)
-        return r.json()
+    ) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {
+            "since": since,
+            "min_novelty": min_novelty,
+            "limit": limit,
+        }
+        for key, value in (
+            ("finding_type", finding_type),
+            ("domain", domain),
+            ("agent_id", agent_id),
+            ("campaign_id", campaign_id),
+            ("before_ts", before_ts),
+        ):
+            if value is not None:
+                params[key] = value
+        return self._request("GET", "/findings", params=params).json()
 
-    def get_finding(self, finding_id: str) -> dict:
-        r = self._request("GET", f"/findings/{finding_id}")
-        return r.json()
+    def get_finding(self, finding_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/findings/{finding_id}").json()
 
-    def search_findings(self, text: str, limit: int = 20) -> list[dict]:
-        """Full-text search across findings."""
-        r = self._request("GET", f"/findings/search/{text}", params={"limit": limit})
-        return r.json()
+    def search_findings(
+        self,
+        text: str,
+        limit: int = 20,
+        *,
+        campaign_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {"limit": limit}
+        if campaign_id is not None:
+            params["campaign_id"] = campaign_id
+        return self._request(
+            "GET",
+            f"/findings/search/{text}",
+            params=params,
+        ).json()
+
+    def register_artifact(
+        self,
+        content_hash: str,
+        uri: str,
+        size_bytes: int,
+        *,
+        media_type: str = "application/octet-stream",
+        campaign_id: str | None = None,
+        task_id: str | None = None,
+        run_id: str | None = None,
+        metadata: dict | None = None,
+    ) -> str:
+        response = self._request(
+            "POST",
+            "/artifacts",
+            json={
+                "content_hash": content_hash,
+                "uri": uri,
+                "size_bytes": size_bytes,
+                "media_type": media_type,
+                "campaign_id": campaign_id,
+                "task_id": task_id,
+                "run_id": run_id,
+                "metadata": metadata or {},
+            },
+            retry_mutation=True,
+        )
+        return response.json()["id"]
+
+    def attach_artifact(
+        self,
+        finding_id: str,
+        artifact_id: str,
+        *,
+        relation: str = "evidence",
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            f"/findings/{finding_id}/artifacts",
+            json={"artifact_id": artifact_id, "relation": relation},
+            retry_mutation=True,
+        ).json()
 
     # ------------------------------------------------------------------
     # Hypotheses
@@ -165,11 +338,14 @@ class SharurOps:
     def hypothesis(
         self,
         hypothesis: str,
-        source_finding_ids: list[str] = None,
-        domains_relevant: list[str] = None,
+        source_finding_ids: list[str] | None = None,
+        domains_relevant: list[str] | None = None,
+        *,
+        campaign_id: str | None = None,
+        idempotency_key: str | None = None,
+        schema_version: int = 1,
     ) -> str:
-        """Propose a hypothesis. Returns the hypothesis ID."""
-        r = self._request(
+        response = self._request(
             "POST",
             "/hypotheses",
             json={
@@ -177,23 +353,34 @@ class SharurOps:
                 "source_finding_ids": source_finding_ids or [],
                 "hypothesis": hypothesis,
                 "domains_relevant": domains_relevant or [],
+                "campaign_id": campaign_id,
+                "idempotency_key": idempotency_key,
+                "schema_version": schema_version,
             },
+            retry_mutation=idempotency_key is not None,
         )
-        return r.json()["id"]
+        return response.json()["id"]
 
-    def open_hypotheses(self, unassigned: bool = True) -> list[dict]:
-        """Get hypotheses needing investigation."""
-        r = self._request(
-            "GET",
-            "/hypotheses",
-            params={"status": "proposed", "unassigned": unassigned},
-        )
-        return r.json()
+    def open_hypotheses(
+        self,
+        unassigned: bool = True,
+        *,
+        campaign_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {
+            "status": "proposed",
+            "unassigned": unassigned,
+        }
+        if campaign_id is not None:
+            params["campaign_id"] = campaign_id
+        return self._request("GET", "/hypotheses", params=params).json()
 
-    def update_hypothesis(self, hyp_id: str, **kwargs) -> dict:
-        """Update hypothesis status/evidence."""
-        r = self._request("PATCH", f"/hypotheses/{hyp_id}", json=kwargs)
-        return r.json()
+    def update_hypothesis(self, hyp_id: str, **kwargs: Any) -> dict[str, Any]:
+        return self._request(
+            "PATCH",
+            f"/hypotheses/{hyp_id}",
+            json=kwargs,
+        ).json()
 
     # ------------------------------------------------------------------
     # Tasks
@@ -203,19 +390,21 @@ class SharurOps:
         self,
         task_type: str,
         description: str,
-        params: dict = None,
+        params: dict | None = None,
         priority: int = 1,
-        domain_hint: str = None,
-        assigned_to: str = None,
+        domain_hint: str | None = None,
+        assigned_to: str | None = None,
         *,
-        run_id: str = None,
-        idempotency_key: str = None,
-        depends_on: list[str] = None,
+        run_id: str | None = None,
+        campaign_id: str | None = None,
+        idempotency_key: str | None = None,
+        depends_on: list[str] | None = None,
+        required_capabilities: list[str] | None = None,
+        resource_request: dict[str, int] | None = None,
         max_attempts: int = 3,
         lease_seconds: int = 900,
     ) -> str:
-        """Create a task (usually called by orchestrator). Returns task ID."""
-        r = self._request(
+        response = self._request(
             "POST",
             "/tasks",
             json={
@@ -227,87 +416,154 @@ class SharurOps:
                 "domain_hint": domain_hint,
                 "assigned_to": assigned_to,
                 "run_id": run_id,
+                "campaign_id": campaign_id,
                 "idempotency_key": idempotency_key,
                 "depends_on": depends_on or [],
+                "required_capabilities": required_capabilities or [],
+                "resource_request": resource_request or {},
                 "max_attempts": max_attempts,
                 "lease_seconds": lease_seconds,
             },
+            retry_mutation=idempotency_key is not None,
         )
-        return r.json()["id"]
+        return response.json()["id"]
 
-    def my_tasks(self, status: str = None) -> list[dict]:
-        """Get tasks assigned to this agent."""
-        params = {"assigned_to": self.agent_id}
-        if status:
+    def my_tasks(
+        self,
+        status: str | None = None,
+        *,
+        campaign_id: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {
+            "assigned_to": self.agent_id,
+            "limit": limit,
+        }
+        if status is not None:
             params["status"] = status
-        r = self._request("GET", "/tasks", params=params)
-        return r.json()
+        if campaign_id is not None:
+            params["campaign_id"] = campaign_id
+        return self._request("GET", "/tasks", params=params).json()
 
-    def available_tasks(self) -> list[dict]:
-        """Get unassigned pending tasks."""
-        r = self._request("GET", "/tasks", params={"unassigned": True})
-        return r.json()
+    def available_tasks(
+        self,
+        *,
+        campaign_id: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {"unassigned": True, "limit": limit}
+        if campaign_id is not None:
+            params["campaign_id"] = campaign_id
+        return self._request("GET", "/tasks", params=params).json()
 
-    def claim_task(self, task_id: str, lease_seconds: int = None) -> dict:
-        """Atomically claim a pending task."""
-        params = {"agent_id": self.agent_id}
-        if lease_seconds is not None:
-            params["lease_seconds"] = lease_seconds
-        r = self._request("POST", f"/tasks/{task_id}/claim", params=params)
-        return r.json()
+    def claim_task(
+        self,
+        task_id: str,
+        lease_seconds: int | None = None,
+    ) -> dict[str, Any]:
+        task = self._request(
+            "POST",
+            f"/tasks/{task_id}/claim",
+            json={
+                "agent_id": self.agent_id,
+                "lease_seconds": lease_seconds,
+            },
+        ).json()
+        return self._remember_lease(task)
 
-    def heartbeat_task(self, task_id: str, lease_seconds: int = None) -> dict:
-        """Extend this agent's task lease and mark the task in progress."""
-        params = {"agent_id": self.agent_id}
-        if lease_seconds is not None:
-            params["lease_seconds"] = lease_seconds
-        r = self._request(
+    def claim_next_task(
+        self,
+        *,
+        campaign_id: str | None = None,
+        task_types: list[str] | None = None,
+        lease_seconds: int | None = None,
+    ) -> dict[str, Any] | None:
+        task = self._request(
+            "POST",
+            "/tasks/claim-next",
+            json={
+                "agent_id": self.agent_id,
+                "campaign_id": campaign_id,
+                "task_types": task_types,
+                "lease_seconds": lease_seconds,
+            },
+        ).json()
+        return self._remember_lease(task) if task is not None else None
+
+    def heartbeat_task(
+        self,
+        task_id: str,
+        lease_seconds: int | None = None,
+        *,
+        lease_token: str | None = None,
+        lease_attempt: int | None = None,
+    ) -> dict[str, Any]:
+        token, attempt = self._lease(task_id, lease_token, lease_attempt)
+        return self._request(
             "POST",
             f"/tasks/{task_id}/heartbeat",
-            params=params,
-        )
-        return r.json()
+            json={
+                "agent_id": self.agent_id,
+                "lease_token": token,
+                "lease_attempt": attempt,
+                "lease_seconds": lease_seconds,
+            },
+        ).json()
 
-    def complete_task(self, task_id: str, result_finding_ids: list[str] = None) -> dict:
-        """Mark a task as complete with optional result findings."""
-        r = self._request(
+    def complete_task(
+        self,
+        task_id: str,
+        result_finding_ids: list[str] | None = None,
+        *,
+        lease_token: str | None = None,
+        lease_attempt: int | None = None,
+    ) -> dict[str, Any]:
+        token, attempt = self._lease(task_id, lease_token, lease_attempt)
+        result = self._request(
             "PATCH",
             f"/tasks/{task_id}",
             json={
                 "status": "complete",
                 "agent_id": self.agent_id,
+                "lease_token": token,
+                "lease_attempt": attempt,
                 "result_finding_ids": result_finding_ids or [],
             },
-        )
-        return r.json()
+        ).json()
+        self._lease_tokens.pop(task_id, None)
+        return result
 
     def fail_task(
         self,
         task_id: str,
         *,
-        error: str = None,
+        error: str | None = None,
         retryable: bool = False,
         retry_delay_seconds: int = 0,
-    ) -> dict:
-        r = self._request(
+        lease_token: str | None = None,
+        lease_attempt: int | None = None,
+    ) -> dict[str, Any]:
+        token, attempt = self._lease(task_id, lease_token, lease_attempt)
+        result = self._request(
             "PATCH",
             f"/tasks/{task_id}",
             json={
                 "status": "failed",
                 "agent_id": self.agent_id,
+                "lease_token": token,
+                "lease_attempt": attempt,
                 "error": error,
                 "retryable": retryable,
                 "retry_delay_seconds": retry_delay_seconds,
             },
-        )
-        return r.json()
+        ).json()
+        self._lease_tokens.pop(task_id, None)
+        return result
 
-    def recover_expired_tasks(self, now: float = None) -> dict:
-        params = {}
+    def recover_expired_tasks(self, now: float | None = None) -> dict[str, Any]:
         if now is not None:
-            params["now"] = now
-        r = self._request("POST", "/tasks/recover", params=params)
-        return r.json()
+            raise ValueError("HTTP recovery uses the server clock")
+        return self._request("POST", "/tasks/recover").json()
 
     # ------------------------------------------------------------------
     # Runs
@@ -318,11 +574,12 @@ class SharurOps:
         run_type: str,
         dataset_path: str,
         *,
-        config: dict = None,
-        idempotency_key: str = None,
-        parent_run_id: str = None,
+        config: dict | None = None,
+        idempotency_key: str | None = None,
+        parent_run_id: str | None = None,
+        campaign_id: str | None = None,
     ) -> str:
-        r = self._request(
+        response = self._request(
             "POST",
             "/runs",
             json={
@@ -332,81 +589,96 @@ class SharurOps:
                 "config": config or {},
                 "idempotency_key": idempotency_key,
                 "parent_run_id": parent_run_id,
+                "campaign_id": campaign_id,
             },
+            retry_mutation=idempotency_key is not None,
         )
-        return r.json()["id"]
+        return response.json()["id"]
 
-    def start_run(self, run_id: str) -> dict:
-        r = self._request("POST", f"/runs/{run_id}/start")
-        return r.json()
+    def start_run(self, run_id: str) -> dict[str, Any]:
+        return self._request("POST", f"/runs/{run_id}/start").json()
 
-    def submit_run(self, run_id: str) -> dict:
-        r = self._request("POST", f"/runs/{run_id}/submit")
-        return r.json()
+    def submit_run(self, run_id: str) -> dict[str, Any]:
+        return self._request("POST", f"/runs/{run_id}/submit").json()
 
-    def heartbeat_run(self, run_id: str) -> dict:
-        r = self._request("POST", f"/runs/{run_id}/heartbeat")
-        return r.json()
+    def heartbeat_run(self, run_id: str) -> dict[str, Any]:
+        return self._request("POST", f"/runs/{run_id}/heartbeat").json()
 
-    def complete_run(self, run_id: str, result: dict = None) -> dict:
-        r = self._request(
+    def complete_run(self, run_id: str, result: dict | None = None) -> dict[str, Any]:
+        return self._request(
             "PATCH",
             f"/runs/{run_id}",
             json={"status": "complete", "result": result or {}},
-        )
-        return r.json()
+        ).json()
 
-    def fail_run(self, run_id: str, error: str) -> dict:
-        r = self._request(
+    def fail_run(self, run_id: str, error: str) -> dict[str, Any]:
+        return self._request(
             "PATCH",
             f"/runs/{run_id}",
             json={"status": "failed", "error": error},
-        )
-        return r.json()
+        ).json()
 
-    def get_run(self, run_id: str) -> dict:
-        r = self._request("GET", f"/runs/{run_id}")
-        return r.json()
+    def get_run(self, run_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/runs/{run_id}").json()
 
-    def list_runs(self, **filters) -> list[dict]:
-        r = self._request("GET", "/runs", params=filters)
-        return r.json()
+    def list_runs(self, **filters: Any) -> list[dict[str, Any]]:
+        return self._request("GET", "/runs", params=filters).json()
 
-    def run_events(self, run_id: str) -> list[dict]:
-        r = self._request("GET", f"/runs/{run_id}/events")
-        return r.json()
+    def run_events(
+        self,
+        run_id: str,
+        *,
+        after_id: int = 0,
+        limit: int = 1_000,
+    ) -> list[dict[str, Any]]:
+        return self._request(
+            "GET",
+            f"/runs/{run_id}/events",
+            params={"after_id": after_id, "limit": limit},
+        ).json()
 
-    def run_stages(self, run_id: str, stage_id: str = None) -> list[dict]:
+    def run_stages(
+        self,
+        run_id: str,
+        stage_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         params = {"stage_id": stage_id} if stage_id is not None else None
-        r = self._request("GET", f"/runs/{run_id}/stages", params=params)
-        return r.json()
+        return self._request(
+            "GET",
+            f"/runs/{run_id}/stages",
+            params=params,
+        ).json()
 
     def recover_stale_runs(
         self,
         *,
         stale_after_seconds: int = 300,
-        now: float = None,
-    ) -> dict:
-        params = {"stale_after_seconds": stale_after_seconds}
+        now: float | None = None,
+    ) -> dict[str, Any]:
         if now is not None:
-            params["now"] = now
-        r = self._request("POST", "/runs/recover", params=params)
-        return r.json()
+            raise ValueError("HTTP recovery uses the server clock")
+        return self._request(
+            "POST",
+            "/runs/recover",
+            params={"stale_after_seconds": stale_after_seconds},
+        ).json()
 
     # ------------------------------------------------------------------
-    # Coordinator log
+    # Coordinator log, events, and diagnostics
     # ------------------------------------------------------------------
 
     def log(
         self,
         action_type: str,
         reasoning: str,
-        referenced_finding_ids: list[str] = None,
-        referenced_hypothesis_ids: list[str] = None,
-        decisions_made: dict = None,
+        referenced_finding_ids: list[str] | None = None,
+        referenced_hypothesis_ids: list[str] | None = None,
+        decisions_made: dict | None = None,
+        *,
+        campaign_id: str | None = None,
+        idempotency_key: str | None = None,
     ) -> str:
-        """Write a coordinator log entry (primarily for orchestrator use)."""
-        r = self._request(
+        response = self._request(
             "POST",
             "/coordinator/log",
             json={
@@ -415,35 +687,64 @@ class SharurOps:
                 "referenced_finding_ids": referenced_finding_ids or [],
                 "referenced_hypothesis_ids": referenced_hypothesis_ids or [],
                 "decisions_made": decisions_made or {},
+                "campaign_id": campaign_id,
+                "idempotency_key": idempotency_key,
             },
+            retry_mutation=idempotency_key is not None,
         )
-        return r.json()["id"]
+        return response.json()["id"]
 
-    def recent_log(self, limit: int = 20, since: float = 0) -> list[dict]:
-        r = self._request(
-            "GET",
-            "/coordinator/log",
-            params={"limit": limit, "since": since},
-        )
-        return r.json()
+    def recent_log(
+        self,
+        limit: int = 20,
+        since: float = 0,
+        *,
+        campaign_id: str | None = None,
+        before_ts: float | None = None,
+    ) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {"limit": limit, "since": since}
+        if campaign_id is not None:
+            params["campaign_id"] = campaign_id
+        if before_ts is not None:
+            params["before_ts"] = before_ts
+        return self._request("GET", "/coordinator/log", params=params).json()
 
-    # ------------------------------------------------------------------
-    # Stats
-    # ------------------------------------------------------------------
+    def events(
+        self,
+        *,
+        after_id: int = 0,
+        campaign_id: str | None = None,
+        entity_type: str | None = None,
+        limit: int = 1_000,
+    ) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {"after_id": after_id, "limit": limit}
+        if campaign_id is not None:
+            params["campaign_id"] = campaign_id
+        if entity_type is not None:
+            params["entity_type"] = entity_type
+        return self._request("GET", "/events", params=params).json()
 
-    def stats(self) -> dict:
-        r = self._request("GET", "/stats")
-        return r.json()
+    def backup(self) -> dict[str, Any]:
+        return self._request("POST", "/admin/backup").json()
+
+    def integrity_check(self) -> dict[str, Any]:
+        return self._request("GET", "/admin/integrity").json()
+
+    def stats(self) -> dict[str, Any]:
+        return self._request("GET", "/stats").json()
 
     def close(self) -> None:
         if self._owns_session:
             self._session.close()
 
-    def __enter__(self):
+    def __enter__(self) -> SharurOps:
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback):
+    def __exit__(self, *_exc_info: object) -> None:
         self.close()
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"SharurOps(base='{self.base}', agent_id='{self.agent_id}')"
+
+
+__all__ = ["DEFAULT_TIMEOUT", "SharurOps"]

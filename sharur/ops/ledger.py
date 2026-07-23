@@ -9,9 +9,14 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from sharur.ops.db import SQLiteDirectAccessLock, open_ops_connection
 from sharur.ops.schema import ensure_ops_schema
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 _JSON_FIELDS = {
@@ -52,17 +57,51 @@ class StageAlreadyCompleteError(RuntimeError):
 class RunLedger:
     """Append-oriented record of runs, events, and stage attempts."""
 
-    def __init__(self, db_path: str | Path):
+    def __init__(
+        self,
+        db_path: str | Path,
+        *,
+        connection: sqlite3.Connection | None = None,
+        lock: threading.RLock | None = None,
+        initialize: bool = True,
+        close_callback: Callable[[sqlite3.Connection], None] | None = None,
+        agent_id: str = "operator",
+        transaction_wait_observer: Callable[[float], None] | None = None,
+    ):
         self.db_path = Path(db_path)
+        self.agent_id = agent_id
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._lock = threading.RLock()
-        self._conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA busy_timeout=5000")
-        self._conn.execute("PRAGMA synchronous=NORMAL")
-        with self._lock:
-            ensure_ops_schema(self._conn)
+        self._lock = lock or threading.RLock()
+        self._close_callback = close_callback
+        self._transaction_wait_observer = transaction_wait_observer
+        self._owns_connection = connection is None
+        self._direct_lock: SQLiteDirectAccessLock | None = None
+        if connection is None:
+            self._direct_lock = SQLiteDirectAccessLock(self.db_path)
+            self._direct_lock.acquire()
+            try:
+                self._conn = open_ops_connection(
+                    self.db_path,
+                    initialize=initialize,
+                )
+            except Exception:
+                self._direct_lock.release()
+                self._direct_lock = None
+                raise
+        else:
+            self._conn = connection
+        if connection is not None:
+            self._conn.row_factory = sqlite3.Row
+            self._conn.execute("PRAGMA foreign_keys=ON")
+            if initialize:
+                with self._lock:
+                    ensure_ops_schema(self._conn)
+
+    def _begin_immediate(self) -> None:
+        started = time.perf_counter()
+        self._conn.execute("BEGIN IMMEDIATE")
+        if self._transaction_wait_observer is not None:
+            self._transaction_wait_observer(time.perf_counter() - started)
 
     def create_run(
         self,
@@ -73,6 +112,7 @@ class RunLedger:
         config: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
         parent_run_id: str | None = None,
+        campaign_id: str | None = None,
     ) -> str:
         if not run_type.strip():
             raise ValueError("run_type must be non-empty")
@@ -81,7 +121,7 @@ class RunLedger:
         normalized_path = str(Path(dataset_path).expanduser().resolve())
         config_json = _canonical_json(config or {})
         with self._lock:
-            self._conn.execute("BEGIN IMMEDIATE")
+            self._begin_immediate()
             try:
                 if idempotency_key:
                     existing = self._conn.execute(
@@ -95,6 +135,7 @@ class RunLedger:
                             or existing["config"] != config_json
                             or existing["created_by"] != created_by
                             or existing["parent_run_id"] != parent_run_id
+                            or existing["campaign_id"] != campaign_id
                         ):
                             raise ValueError(
                                 "Run idempotency key already exists with a different payload"
@@ -108,8 +149,8 @@ class RunLedger:
                     """
                     INSERT INTO runs(
                         id, idempotency_key, run_type, dataset_path, created_by,
-                        status, created_ts, parent_run_id, config
-                    ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+                        status, created_ts, parent_run_id, config, campaign_id
+                    ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
                     """,
                     (
                         run_id,
@@ -120,9 +161,15 @@ class RunLedger:
                         now,
                         parent_run_id,
                         config_json,
+                        campaign_id,
                     ),
                 )
-                self._append_event_locked(run_id, "run_created", payload=config or {})
+                self._append_event_locked(
+                    run_id,
+                    "run_created",
+                    payload=config or {},
+                    actor_agent_id=created_by,
+                )
                 self._conn.commit()
                 return run_id
             except Exception:
@@ -168,12 +215,14 @@ class RunLedger:
 
     def heartbeat_run(self, run_id: str) -> dict[str, Any]:
         with self._lock:
+            now = time.time()
             cursor = self._conn.execute(
                 "UPDATE runs SET heartbeat_ts = ? WHERE id = ? AND status = 'running'",
-                (time.time(), run_id),
+                (now, run_id),
             )
             if cursor.rowcount == 0:
                 raise ValueError(f"Run {run_id} is not running")
+            self._append_event_locked(run_id, "run_heartbeat")
             self._conn.commit()
             return self.get_run(run_id)
 
@@ -181,7 +230,7 @@ class RunLedger:
         """Return an active run to submitted state when no stage is executing."""
         now = time.time()
         with self._lock:
-            self._conn.execute("BEGIN IMMEDIATE")
+            self._begin_immediate()
             try:
                 run = self._conn.execute(
                     "SELECT status FROM runs WHERE id = ?",
@@ -221,6 +270,11 @@ class RunLedger:
                         WHERE id = ?
                         """,
                         (now, running_stage["stage_id"], run_id),
+                    )
+                    self._append_event_locked(
+                        run_id,
+                        "run_scheduler_state_refreshed",
+                        stage_id=running_stage["stage_id"],
                     )
                 self._conn.commit()
                 return self.get_run(run_id)
@@ -289,6 +343,8 @@ class RunLedger:
         dataset_path: str | Path | None = None,
         run_type: str | None = None,
         status: str | None = None,
+        campaign_id: str | None = None,
+        before_ts: float | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
         clauses: list[str] = []
@@ -302,6 +358,12 @@ class RunLedger:
         if status is not None:
             clauses.append("status = ?")
             params.append(status)
+        if campaign_id is not None:
+            clauses.append("campaign_id = ?")
+            params.append(campaign_id)
+        if before_ts is not None:
+            clauses.append("created_ts < ?")
+            params.append(before_ts)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         params.append(limit)
         rows = self._conn.execute(
@@ -375,7 +437,9 @@ class RunLedger:
         stage_id: str | None = None,
         attempt: int | None = None,
         payload: dict[str, Any] | None = None,
+        actor_agent_id: str | None = None,
     ) -> int:
+        now = time.time()
         cursor = self._conn.execute(
             """
             INSERT INTO run_events(run_id, ts, event_type, stage_id, attempt, payload)
@@ -383,11 +447,38 @@ class RunLedger:
             """,
             (
                 run_id,
-                time.time(),
+                now,
                 event_type,
                 stage_id,
                 attempt,
                 _canonical_json(payload or {}),
+            ),
+        )
+        run = self._conn.execute(
+            "SELECT campaign_id FROM runs WHERE id = ?",
+            (run_id,),
+        ).fetchone()
+        self._conn.execute(
+            """
+            INSERT INTO coordination_events(
+                ts, event_type, actor_agent_id, campaign_id, entity_type,
+                entity_id, run_id, payload
+            ) VALUES (?, ?, ?, ?, 'run', ?, ?, ?)
+            """,
+            (
+                now,
+                event_type,
+                actor_agent_id or self.agent_id,
+                run["campaign_id"] if run is not None else None,
+                run_id,
+                run_id,
+                _canonical_json(
+                    {
+                        "stage_id": stage_id,
+                        "attempt": attempt,
+                        **(payload or {}),
+                    }
+                ),
             ),
         )
         return int(cursor.lastrowid)
@@ -405,7 +496,7 @@ class RunLedger:
     ) -> int:
         now = time.time()
         with self._lock:
-            self._conn.execute("BEGIN IMMEDIATE")
+            self._begin_immediate()
             try:
                 run = self._conn.execute(
                     "SELECT status FROM runs WHERE id = ?",
@@ -450,8 +541,9 @@ class RunLedger:
                     """
                     INSERT INTO run_stages(
                         run_id, stage_id, attempt, signature, status, started_ts,
-                        heartbeat_ts, command, inputs, outputs, resource_profile
-                    ) VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?)
+                        heartbeat_ts, command, inputs, outputs, resource_profile,
+                        owner_agent_id
+                    ) VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         run_id,
@@ -464,6 +556,7 @@ class RunLedger:
                         _canonical_json(inputs or {}),
                         _canonical_json(outputs or {}),
                         _canonical_json(resource_profile or {}),
+                        self.agent_id,
                     ),
                 )
                 self._conn.execute(
@@ -505,6 +598,12 @@ class RunLedger:
                 "UPDATE runs SET heartbeat_ts = ? WHERE id = ?",
                 (now, run_id),
             )
+            self._append_event_locked(
+                run_id,
+                "stage_heartbeat",
+                stage_id=stage_id,
+                attempt=attempt,
+            )
             self._conn.commit()
 
     def complete_stage(
@@ -537,9 +636,10 @@ class RunLedger:
             if cursor.rowcount == 0:
                 raise ValueError("Stage attempt is not running")
             self._conn.execute(
-                "UPDATE runs SET heartbeat_ts = ?, current_stage = NULL WHERE id = ?",
+                "UPDATE runs SET heartbeat_ts = ? WHERE id = ?",
                 (now, run_id),
             )
+            self._refresh_run_stage_state_locked(run_id, now)
             self._append_event_locked(
                 run_id,
                 "stage_completed",
@@ -578,9 +678,10 @@ class RunLedger:
             if cursor.rowcount == 0:
                 raise ValueError("Stage attempt is not running")
             self._conn.execute(
-                "UPDATE runs SET heartbeat_ts = ?, current_stage = NULL WHERE id = ?",
+                "UPDATE runs SET heartbeat_ts = ? WHERE id = ?",
                 (now, run_id),
             )
+            self._refresh_run_stage_state_locked(run_id, now)
             self._append_event_locked(
                 run_id,
                 "stage_failed",
@@ -607,7 +708,7 @@ class RunLedger:
     ) -> None:
         now = time.time()
         with self._lock:
-            self._conn.execute("BEGIN IMMEDIATE")
+            self._begin_immediate()
             try:
                 run = self._conn.execute(
                     "SELECT status FROM runs WHERE id = ?",
@@ -708,7 +809,7 @@ class RunLedger:
         recovered_stages: list[dict[str, Any]] = []
         recovered_runs: set[str] = set()
         with self._lock:
-            self._conn.execute("BEGIN IMMEDIATE")
+            self._begin_immediate()
             try:
                 rows = self._conn.execute(
                     """
@@ -751,6 +852,7 @@ class RunLedger:
                         }
                     )
                     recovered_runs.add(row["run_id"])
+                    self._refresh_run_stage_state_locked(row["run_id"], current)
 
                 stale_runs = self._conn.execute(
                     """
@@ -786,15 +888,56 @@ class RunLedger:
             "stages": recovered_stages,
         }
 
-    def events(self, run_id: str) -> list[dict[str, Any]]:
-        rows = self._conn.execute(
-            "SELECT * FROM run_events WHERE run_id = ? ORDER BY id",
+    def _refresh_run_stage_state_locked(self, run_id: str, now: float) -> None:
+        """Keep the run summary coherent when stages execute concurrently."""
+
+        active = self._conn.execute(
+            """
+            SELECT stage_id
+            FROM run_stages
+            WHERE run_id = ? AND status = 'running'
+            ORDER BY started_ts DESC, stage_id
+            LIMIT 1
+            """,
             (run_id,),
+        ).fetchone()
+        if active is None:
+            self._conn.execute(
+                "UPDATE runs SET current_stage = NULL, heartbeat_ts = ? WHERE id = ?",
+                (now, run_id),
+            )
+        else:
+            self._conn.execute(
+                """
+                UPDATE runs
+                SET status = 'running', current_stage = ?, heartbeat_ts = ?
+                WHERE id = ? AND status IN ('pending', 'submitted', 'running')
+                """,
+                (active["stage_id"], now, run_id),
+            )
+
+    def events(
+        self,
+        run_id: str,
+        *,
+        after_id: int = 0,
+        limit: int = 1_000,
+    ) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            "SELECT * FROM run_events WHERE run_id = ? AND id > ? ORDER BY id LIMIT ?",
+            (run_id, after_id, limit),
         ).fetchall()
         return [_decode_row(row) for row in rows]  # type: ignore[misc]
 
     def close(self) -> None:
-        self._conn.close()
+        if self._close_callback is not None:
+            self._close_callback(self._conn)
+            self._close_callback = None
+        elif self._owns_connection:
+            self._conn.close()
+        if self._direct_lock is not None:
+            self._direct_lock.release()
+            self._direct_lock = None
 
 
 __all__ = ["RunLedger", "StageAlreadyCompleteError"]

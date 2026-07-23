@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -25,6 +26,9 @@ class DuckDBStore:
         db_path: Path | None = None,
         *,
         read_only: bool = False,
+        threads: int | None = None,
+        memory_limit: str | None = None,
+        temp_directory: Path | str | None = None,
     ):
         """
         Initialize store.
@@ -33,6 +37,29 @@ class DuckDBStore:
         """
         self.db_path = Path(db_path) if db_path else None
         self.read_only = read_only
+        if threads is not None and (
+            isinstance(threads, bool) or not isinstance(threads, int) or threads < 1
+        ):
+            raise ValueError("threads must be a positive integer")
+        if memory_limit is not None:
+            normalized_memory = memory_limit.strip()
+            if not re.fullmatch(
+                r"(?:\d+(?:\.\d+)?)\s*(?:B|KB|MB|GB|TB|KiB|MiB|GiB|TiB)",
+                normalized_memory,
+                flags=re.IGNORECASE,
+            ):
+                raise ValueError(
+                    "memory_limit must include a supported unit, for example '4GB'"
+                )
+            self.memory_limit = normalized_memory
+        else:
+            self.memory_limit = None
+        self.threads = threads
+        self.temp_directory = (
+            Path(temp_directory).expanduser().resolve()
+            if temp_directory is not None
+            else None
+        )
         self._conn: duckdb.DuckDBPyConnection | None = None
 
     # ------------------------------------------------------------------ #
@@ -50,9 +77,34 @@ class DuckDBStore:
             else:
                 self._conn = duckdb.connect(":memory:")
 
+            self._configure_resources()
             if not self.read_only:
                 self._initialize_schema()
         return self._conn
+
+    def _configure_resources(self) -> None:
+        """Apply per-process limits before any analytical work begins."""
+
+        assert self._conn is not None
+        if self.threads is not None:
+            self._conn.execute("SET threads = ?", [self.threads])
+        if self.memory_limit is not None:
+            self._conn.execute("SET memory_limit = ?", [self.memory_limit])
+        if self.temp_directory is not None:
+            self.temp_directory.mkdir(parents=True, exist_ok=True)
+            self._conn.execute("SET temp_directory = ?", [str(self.temp_directory)])
+
+    @property
+    def resource_budget(self) -> dict[str, object | None]:
+        """Return the explicitly configured per-connection resource budget."""
+
+        return {
+            "threads": self.threads,
+            "memory_limit": self.memory_limit,
+            "temp_directory": (
+                str(self.temp_directory) if self.temp_directory is not None else None
+            ),
+        }
 
     def _initialize_schema(self) -> None:
         """Create tables if they don't exist, then run pending migrations."""

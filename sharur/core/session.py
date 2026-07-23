@@ -46,10 +46,18 @@ class ExplorationSession:
         db_path: Optional[Path] = None,
         *,
         read_only: bool = False,
+        duckdb_threads: int | None = None,
+        duckdb_memory_limit: str | None = None,
+        duckdb_temp_directory: Path | str | None = None,
     ):
         self.session_id = session_id or uuid.uuid4()
         self.created_at = datetime.now(timezone.utc)
         self.read_only = read_only
+        self._duckdb_options = {
+            "threads": duckdb_threads,
+            "memory_limit": duckdb_memory_limit,
+            "temp_directory": duckdb_temp_directory,
+        }
 
         # State
         self._working_sets: dict[str, WorkingSet] = {}
@@ -59,7 +67,15 @@ class ExplorationSession:
 
         # Database connection
         self._db_path = Path(db_path) if db_path else None
-        self._db = DuckDBStore(db_path, read_only=read_only) if db_path else None
+        self._db = (
+            DuckDBStore(
+                db_path,
+                read_only=read_only,
+                **self._duckdb_options,
+            )
+            if db_path
+            else None
+        )
         self._vector_store = None
         self._vector_store_path: Optional[Path] = None
         self._vector_store_initialized = False
@@ -76,7 +92,10 @@ class ExplorationSession:
     @property
     def db(self) -> DuckDBStore:
         if self._db is None:
-            self._db = DuckDBStore(read_only=self.read_only)
+            self._db = DuckDBStore(
+                read_only=self.read_only,
+                **self._duckdb_options,
+            )
         return self._db
 
     @property

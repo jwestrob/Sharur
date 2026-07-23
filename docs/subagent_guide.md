@@ -40,13 +40,60 @@ Use the Read tool to load any doc when you need its protocol. Don't guess — lo
 **For survey/explore subagents**, read the full skill spec and paste the protocol sections, finding schema, and validation rules into the prompt.
 
 ## Sub-Agent Protocol
+
 - Sub-agents CAN spawn further sub-agents for specialist tasks (literature, foldseek, hydrogenase curation)
 - Each sub-agent produces a discrete output (markdown report, JSONL findings)
 - Parent agent synthesizes outputs from all sub-agents
 - Multiple read-only DuckDB sessions may run concurrently. Run database writers
   sequentially. Use separate output files or the locked findings writer for report records.
 
+## Coordinated Worker Protocol
+
+Use the Ops HTTP service for distributed agents. One service process owns
+`sharur_ops.db`; workers use per-agent credentials and communicate through
+`SharurOps`.
+
+```python
+from sharur.ops.client import SharurOps
+
+ops = SharurOps(
+    "http://ops-host:8811",
+    agent_id="worker-07",
+    api_token=worker_token,
+)
+
+task = ops.claim_next_task(campaign_id=campaign_id)
+if task is not None:
+    # heartbeat_task(), complete_task(), and fail_task() automatically use the
+    # attempt token cached from this claim.
+    ops.heartbeat_task(task["id"])
+```
+
+The task is logical coordination. Its executor can be a persistent process,
+local launcher, Slurm job, or array element. Keep scheduler packing and array
+construction in the executor layer.
+
+Register each worker with generic capacity and capabilities. Match the
+DuckDB process budget to that registration:
+
+```python
+from sharur.operators import Sharur
+
+b = Sharur(
+    "data/DATASET/sharur.duckdb",
+    read_only=True,
+    duckdb_threads=4,
+    duckdb_memory_limit="8GB",
+    duckdb_temp_directory="/local-scratch/worker-07",
+)
+```
+
+Task attempts have finite leases and opaque fencing tokens. A recovered or
+replacement attempt has exclusive terminal-write authority, including when a
+replacement process reuses the same agent ID.
+
 ## Practical Tips
+
 - **Parallel genome browser agents** work well (quarters or groups)
 - **JSONL for findings** — easy to append, merge, and process
 - **Check database schema** before writing queries (`DESCRIBE table_name`)
@@ -56,6 +103,7 @@ Use the Read tool to load any doc when you need its protocol. Don't guess — lo
 ## Large Dataset Performance (>50k proteins)
 
 **Rules:**
+
 1. **Never** `b.search_proteins(query="")` on large datasets — use SQL counts or specific predicates
 2. **Always** check result size before iterating (use `result.records`)
 3. **Always** limit iteration (e.g., `for pid in proteins[:10]`)

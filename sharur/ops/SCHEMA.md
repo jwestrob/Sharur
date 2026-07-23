@@ -1,212 +1,318 @@
-# Sharur Ops Layer — Schema Design
+# Sharur Ops v3 — Storage and Coordination Contract
 
-## Access Modes
+Sharur Ops is the durable control plane for multi-agent analyses. It records
+campaigns, identities, logical work, scientific findings, hypotheses,
+execution attempts, artifacts, and an ordered event stream in one SQLite
+database.
 
-Two backends expose the same API and schema:
+## Ownership topology
+
+Use one of these two modes:
+
+1. Local, single-process work uses `OpsStore` directly.
+2. Distributed work runs one `sharur-ops` HTTP server, and every agent uses
+   `SharurOps`.
 
 ```python
-import os
-
-# Direct SQLite (no server needed — use for local/single-machine runs)
+# Local single-process mode
 from sharur.ops.store import OpsStore
-ops = OpsStore("data/DATASET/sharur_ops.db", agent_id="my_agent")
 
-# HTTP client (requires `pip install -e ".[ops]"` and `sharur-ops`)
+ops = OpsStore("data/DATASET/sharur_ops.db", agent_id="local-operator")
+
+# Distributed mode
 from sharur.ops.client import SharurOps
+
 ops = SharurOps(
-    "http://localhost:8811",
-    agent_id="my_agent",
-    api_token=os.environ.get("SHARUR_OPS_TOKEN"),
+    "http://ops-host:8811",
+    agent_id="worker-07",
+    api_token=worker_token,
 )
 ```
 
-Both support findings/hypotheses, leased tasks, idempotent runs, recovery, coordinator logs,
-and stats. Point the HTTP server and direct clients at the same dataset-local SQLite file.
-The server opens no database at import time, binds to loopback by default, requires bearer
-authentication for remote use, and uses short-lived request connections. HTTP clients have
-bounded timeouts and retry only idempotent reads.
+The server holds an advisory owner lock, initializes schema migrations once,
+and serves requests through a bounded connection pool. This makes a
+dataset-local SQLite file on NFS safe under the intended topology: every
+SQLite connection originates in one server process on one host. Route all
+remote clients through HTTP. Local direct clients take shared locks; the
+server takes the exclusive lock, enforcing a single access topology.
 
-## Design Principles
+SQLite remains the target backend for one service instance and tens of
+low-rate agents. Select PostgreSQL when the deployment requires any of:
 
-1. **Mixed granularity**: Findings range from single genes to multi-phylum observations.
-   Common columns for everything queryable; a flexible JSON `evidence` payload for type-specific data.
-2. **Flexible agents**: No hardcoded domain assignment. Agents declare capabilities;
-   orchestrator routes by capability + availability.
-3. **Append-heavy, update-light**: Findings are immutable once written. Hypotheses and tasks
-   have status transitions but no payload edits. This keeps the write path simple.
-4. **Orchestrator queries, doesn't subscribe to firehoses**: Every table has timestamp +
-   novelty/priority flags so the orchestrator pulls what it needs, when it needs it.
-5. **Finite ownership**: Task authority is a renewable lease. A dead worker cannot strand
-   work forever, and an expired worker cannot complete a task it no longer owns.
-6. **Replayable execution**: Runs have append-only events; every stage attempt records its
-   signature, command, resources, inputs, outputs, heartbeat, and reuse origin.
+- multiple API replicas or automatic failover;
+- database writers on multiple hosts;
+- sustained lock waits or `SQLITE_BUSY` errors above 0.1% of writes;
+- sustained p95 mutation latency above 100 ms after query/index tuning;
+- hundreds of simultaneously active workers or a sustained write rate above
+  roughly 10 mutations per second.
 
----
+These are operational migration triggers, not logical-schema changes. The
+HTTP API is the portability boundary.
 
-## Tables
+## Coordination and execution are separate concepts
+
+An Ops task is logical work with dependencies, requirements, ownership, and
+results. Its executor can be a local process, a long-lived worker, a Slurm
+job, a Slurm array element, or another scheduler adapter. The schema carries
+generic capabilities and resources:
+
+```json
+{
+  "required_capabilities": ["duckdb", "annotation-review"],
+  "resource_request": {
+    "cpu_slots": 4,
+    "memory_mb": 8192,
+    "accelerator_slots": 0
+  }
+}
+```
+
+Scheduler packing, array construction, and job submission live in executor
+adapters. They do not define task semantics or pipeline stage behavior.
+
+## Schema lifecycle
+
+`OPS_SCHEMA_VERSION = 3`. `ensure_ops_schema()` performs an additive,
+transactional migration and returns:
+
+- `True` when it applies a migration;
+- `False` when the database already has the current schema.
+
+A current-schema open performs schema reads and connection PRAGMAs only.
+Legacy JSON reference columns remain available for compatibility. New writes
+also populate normalized, foreign-key-backed relationship tables.
+
+## Primary tables
+
+### `campaigns`
+
+A namespace for one coordinated analysis. Fields include identity, name,
+dataset path, lifecycle status, creator, timestamps, metadata, and an
+idempotency key. Findings, hypotheses, tasks, runs, logs, events, and
+artifacts can carry `campaign_id`.
+
+### `agents`
+
+Server-derived identities and dispatch capacity:
+
+| Field | Meaning |
+|---|---|
+| `id` | Credential identity |
+| `role` | `reader`, `worker`, `coordinator`, or `operator` |
+| `token_hash`, `token_hint` | Hashed per-agent bearer credential and display hint |
+| `capabilities` | JSON array of dispatch labels |
+| `max_concurrent_tasks` | Active-task ceiling |
+| `capacity_cpu_slots` | Generic CPU capacity |
+| `capacity_memory_mb` | Generic memory capacity |
+| `capacity_accelerator_slots` | Generic accelerator capacity |
+| `host`, `status`, `heartbeat_ts` | Presence and drain/revoke state |
+| `metadata` | Structured executor metadata |
+
+Raw agent tokens are returned once at registration or rotation. The database
+stores their SHA-256 hashes.
 
 ### `findings`
 
-The core scientific output. Every agent writes here.
+Immutable scientific records. Core fields are:
 
-| Column | Type | Description |
-|---|---|---|
-| `id` | TEXT (uuid) | Unique finding ID, generated on insert |
-| `agent_id` | TEXT | Which agent produced this |
-| `ts` | REAL | Unix timestamp |
-| `finding_type` | TEXT | Caller-defined non-empty category; use stable project conventions |
-| `domain` | TEXT | Caller-defined dataset/domain slug |
-| `summary` | TEXT | One-line human-readable description |
-| `evidence` | TEXT (JSON) | Type-specific structured payload (see below) |
-| `confidence` | REAL | 0.0–1.0, agent's self-assessment |
-| `novelty` | INTEGER | 0=routine, 1=interesting, 2=novel, 3=potentially_significant |
-| `parent_finding_id` | TEXT | Nullable. Links follow-up findings to their parent |
-| `reasoning` | TEXT | Agent's interpretive logic (the lab notebook entry) |
+- producer, timestamp, type, domain, summary, reasoning;
+- structured `evidence`;
+- confidence and novelty;
+- parent, campaign, and producing task;
+- caller-stable idempotency key;
+- record schema version and validation status;
+- ID of the durable creation event.
 
-**Evidence payload examples by finding_type:**
-
-```json
-// gene
-{"gene_id": "...", "genome_id": "...", "annotation": "...", "evalue": 1e-50, 
- "coordinates": {"contig": "...", "start": 100, "end": 500, "strand": "+"}}
-
-// neighborhood / cassette
-{"genes": [{"gene_id": "...", "annotation": "...", "position": 1}, ...],
- "genome_ids": ["..."], "conservation_count": 44, "phyla_observed": ["...", "..."]}
-
-// domain_architecture  
-{"protein_id": "...", "length_aa": 85804, "domains": [{"name": "...", "start": 0, "end": 500}, ...],
- "notable_features": ["solenoid", "dockerin-cohesin"]}
-
-// phylogenetic
-{"clade": "...", "anomaly_type": "long_branch|unexpected_topology|horizontal_transfer",
- "support_value": 0.98, "taxa_involved": ["...", "..."]}
-
-// observation
-{"description": "...", "supporting_finding_ids": ["...", "..."],
- "scope": "single_genome|clade|phylum|cross_phylum"}
-```
+The inline JSON ceiling is 256 KiB. Larger outputs enter `artifacts` and are
+referenced by ID. An FTS5 index covers summary, reasoning, and evidence when
+the SQLite build provides FTS5.
 
 ### `hypotheses`
 
-Cross-agent coordination. Testable claims that need validation.
+Testable claims with status, assignment, relevant domains, source findings,
+supporting findings, opposing findings, and resolution. The JSON arrays
+remain the compatibility view; `hypothesis_findings` is the normalized
+relationship table.
 
-| Column | Type | Description |
-|---|---|---|
-| `id` | TEXT (uuid) | |
-| `source_agent_id` | TEXT | Who proposed it |
-| `source_finding_ids` | TEXT (JSON array) | Findings that motivated this hypothesis |
-| `ts` | REAL | |
-| `hypothesis` | TEXT | The testable claim |
-| `status` | TEXT | `proposed`, `investigating`, `supported`, `refuted`, `inconclusive` |
-| `assigned_agent_id` | TEXT | Nullable — who's working on it |
-| `domains_relevant` | TEXT (JSON array) | Which lineage DBs should be checked |
-| `evidence_for` | TEXT (JSON array) | Finding IDs supporting |
-| `evidence_against` | TEXT (JSON array) | Finding IDs contradicting |
-| `resolution_summary` | TEXT | Nullable — written when status is terminal |
+Hypothesis evidence updates acquire one writer transaction across read,
+deduplication, normalized inserts, JSON-view update, and event append. This
+preserves concurrent writers.
 
 ### `tasks`
 
-Orchestrator → agent work queue.
+The logical work queue. Important fields include:
 
-| Column | Type | Description |
-|---|---|---|
-| `id` | TEXT (uuid) | |
-| `created_by` | TEXT | Usually `coordinator`, but agents can spawn sub-tasks |
-| `assigned_to` | TEXT | Nullable = unassigned, agent claims by writing its ID |
-| `ts` | REAL | Created timestamp |
-| `claimed_ts` | REAL | Nullable — when an agent claimed it |
-| `completed_ts` | REAL | Nullable |
-| `status` | TEXT | `pending`, `claimed`, `in_progress`, `retry_wait`, `complete`, `failed` |
-| `priority` | INTEGER | 0=low, 1=normal, 2=high, 3=urgent |
-| `task_type` | TEXT | `investigate`, `validate_hypothesis`, `cross_domain_search`, `follow_up`, `survey` |
-| `description` | TEXT | What to do |
-| `params` | TEXT (JSON) | Task-specific parameters (query templates, gene IDs, etc.) |
-| `domain_hint` | TEXT | Nullable — suggested domain DB |
-| `result_finding_ids` | TEXT (JSON array) | Populated on completion |
-| `run_id` | TEXT | Optional parent run |
-| `idempotency_key` | TEXT | Unique caller-stable creation key |
-| `dependency_ids` | TEXT (JSON array) | Tasks that must all complete before claim |
-| `attempt_count`, `max_attempts` | INTEGER | Bounded attempt accounting |
-| `lease_seconds` | INTEGER | Lease duration requested at claim |
-| `lease_expires_ts`, `heartbeat_ts` | REAL | Live ownership boundary |
-| `retry_after_ts` | REAL | Delayed retry eligibility |
-| `last_error` | TEXT | Most recent worker/recovery error |
+| Field | Meaning |
+|---|---|
+| `status` | `pending`, `claimed`, `in_progress`, `retry_wait`, `complete`, `failed`, or `cancelled` |
+| `assigned_to` | Reservation while pending; lease owner while active |
+| `reserved_for` | Persistent reservation across retries |
+| `priority` | 0–3 |
+| `params` | Bounded task-specific JSON |
+| `run_id`, `campaign_id` | Optional execution and analysis parents |
+| `attempt_count`, `max_attempts` | Bounded retry accounting |
+| `lease_seconds`, `lease_expires_ts` | Finite authority window |
+| `lease_token_hash` | Hash of the attempt-specific fencing token |
+| `required_capabilities` | JSON capability set |
+| `resource_request` | Generic CPU/memory/accelerator request |
+
+`task_dependencies` and `task_result_findings` are the authoritative
+relationship tables. The legacy JSON arrays remain synchronized for clients
+that still read them.
+
+Preassignment creates a pending reservation. The reserved worker performs an
+explicit claim and receives:
+
+```json
+{
+  "lease_token": "opaque-secret",
+  "lease_attempt": 2
+}
+```
+
+Every heartbeat, completion, and failure presents both values. The mutation
+predicate checks task ID, credential identity, attempt number, token hash,
+status, and live expiration. A stale process using the same agent ID therefore
+loses authority when a replacement attempt begins.
+
+`claim_next_task()` performs recovery, retry promotion, dependency filtering,
+capability matching, capacity accounting, selection, and claim inside one
+`BEGIN IMMEDIATE` transaction. `available_tasks()` is a bounded read-only
+queue view.
+
+### `runs`, `run_stages`, and `run_events`
+
+Runs describe durable executions. Stage rows are keyed by
+`(run_id, stage_id, attempt)` and record signatures, commands, inputs,
+outputs, resource profiles, ownership, heartbeat, and reuse origin.
+
+The attempt number fences stale stage completion. Multiple distinct stages
+can execute concurrently; run summary state retains one currently active
+stage until the active set becomes empty. `run_events` provides an ordered
+run-local history.
 
 ### `coordinator_log`
 
-Orchestrator's own reasoning trail. Survives context compaction.
+The coordinator's durable reasoning trail. Normalized link tables connect log
+entries to findings and hypotheses. Idempotency keys make lost-response retry
+safe.
 
-| Column | Type | Description |
-|---|---|---|
-| `id` | TEXT (uuid) | |
-| `ts` | REAL | |
-| `action_type` | TEXT | `synthesis`, `task_assignment`, `escalation`, `hypothesis_generated`, `checkpoint` |
-| `reasoning` | TEXT | The orchestrator's thought process |
-| `referenced_finding_ids` | TEXT (JSON array) | |
-| `referenced_hypothesis_ids` | TEXT (JSON array) | |
-| `decisions_made` | TEXT (JSON) | Structured record of what was decided and why |
+### `artifacts` and `finding_artifacts`
 
-### `runs`
+Artifact rows register metadata; the HTTP service does not proxy bulk bytes.
+Each artifact has an algorithm-qualified content hash, URI, byte size, media
+type, creator, timestamps, optional campaign/task/run, and metadata. The
+content hash is unique.
 
-One record per durable execution. The row includes `id`, optional unique
-`idempotency_key`, `run_type`, normalized `dataset_path`, creator, status
-(`pending|submitted|running|complete|failed`), lifecycle timestamps/heartbeat,
-parent/current stage, canonical JSON config/result, and terminal error. `submitted` is a
-scheduler handoff with no stage currently executing (before or between jobs) and is not
-subject to running-heartbeat recovery.
+### `coordination_events`
 
-### `run_events`
+The global append-only event stream. Each row has a monotonically increasing
+integer ID, timestamp, actor, campaign, entity type/ID, optional task/run, and
+JSON payload. Mutations append their event in the same SQLite transaction as
+the state change.
 
-Append-only ordered lifecycle events: run ID, timestamp, event type, optional stage/attempt,
-and JSON payload.
+`GET /events?after_id=N` provides cursor replay. `GET /stream` emits SSE
+records with the durable event ID and honors `Last-Event-ID`. The in-process
+bus is only a wake-up signal; queue eviction cannot erase durable events.
 
-### `run_stages`
+## Authentication and authorization
 
-One row per `(run_id, stage_id, attempt)`. It records the deterministic stage signature,
-status, timestamps/heartbeat, command, input/output snapshots, resource profile, error, and
-optional source run/attempt for reuse. Reused stages use attempt zero in the new run.
+`SHARUR_OPS_TOKEN` is the bootstrap operator credential. Use it to register
+per-agent credentials, then give each worker its own token.
 
-### `ops_schema_meta`
+| Role | Core authority |
+|---|---|
+| `reader` | Read records, events, health, and metrics |
+| `worker` | Write findings/hypotheses; claim, heartbeat, complete, and fail owned tasks |
+| `coordinator` | Worker rights plus create/recover tasks and write coordinator logs |
+| `operator` | Full administration, campaigns, runs, agents, backups, and integrity checks |
 
-Records the applied ops schema version. Opening a legacy four-table database adds task
-lease/retry/dependency/idempotency columns and the run-ledger tables in place.
+The credential establishes `agent_id` server-side. Operator credentials may
+act on behalf of a named principal for bootstrap and compatibility workflows.
+Other roles receive HTTP 403 for an identity mismatch.
 
----
+Recovery endpoints use the server clock. Direct `OpsStore` accepts an injected
+`now` only for deterministic local tests and offline administrative tooling.
 
-## Key Query Patterns
+## Limits, observability, and recovery
 
-```sql
--- Orchestrator: "What's new and interesting?"
-SELECT * FROM findings WHERE novelty >= 2 AND ts > ? ORDER BY novelty DESC, ts DESC;
+- HTTP request body default: 1 MiB.
+- Inline JSON/text default: 256 KiB.
+- List endpoints: bounded `limit`; time-ordered collections accept
+  `before_ts`.
+- Event replay: bounded `after_id` cursor.
+- SQLite request pool: four connections by default.
+- Maintenance: task/run recovery every 15 seconds by default.
+- Metrics: record/status counts, oldest queue age, active and expired leases,
+  failed/dead-letter tasks, per-agent active resource allocation,
+  database/WAL sizes, pool acquisition and SQLite writer-slot waits, rolling
+  HTTP p95 latency, `SQLITE_BUSY`, SSE wake-up overflow, and backup
+  age/failures.
+- `GET /metrics`: Prometheus text.
+- `GET /admin/integrity`: SQLite and foreign-key checks.
+- `POST /admin/backup`: online SQLite backup with integrity verification.
 
--- Orchestrator: "Any hypotheses need assignment?"
-SELECT * FROM hypotheses WHERE status = 'proposed' AND assigned_agent_id IS NULL;
+Scheduled backups use:
 
--- Agent: "Do I have currently owned work?"
-SELECT * FROM tasks
-WHERE assigned_to = ?
-  AND status IN ('claimed', 'in_progress')
-  AND lease_expires_ts > unixepoch('subsec');
-
--- Orchestrator: "Cross-domain patterns?"
-SELECT f1.summary, f2.summary, f1.domain, f2.domain
-FROM findings f1 JOIN findings f2 
-ON json_extract(f1.evidence, '$.annotation') = json_extract(f2.evidence, '$.annotation')
-WHERE f1.domain != f2.domain AND f1.novelty >= 1 AND f2.novelty >= 1;
-
--- Agent: "Has anyone else seen this gene neighborhood?"
-SELECT * FROM findings WHERE finding_type = 'neighborhood' 
-AND evidence LIKE '%"GHG protease"%';
-
--- Orchestrator: "Recover my train of thought"
-SELECT * FROM coordinator_log ORDER BY ts DESC LIMIT 10;
-
--- Operator: "What happened in this run?"
-SELECT ts, event_type, stage_id, attempt, payload
-FROM run_events WHERE run_id = ? ORDER BY id;
+```bash
+export SHARUR_OPS_BACKUP_DIR=/durable/backup/path
+export SHARUR_OPS_BACKUP_INTERVAL_SECONDS=3600
 ```
 
-Do not claim tasks with ad-hoc SQL. Use `OpsStore.claim_task()` or
-`POST /tasks/{id}/claim`; those paths transactionally recover expirations, promote eligible
-retries, enforce dependencies, and increment attempts.
+Backup filenames carry nanosecond-resolution timestamps. The online SQLite
+backup API produces each copy, `PRAGMA integrity_check` verifies it, and the
+service records last-success age only after verification succeeds.
+
+## Per-agent DuckDB budgets
+
+Analytical resource limits are explicit on each DuckDB connection:
+
+```python
+from sharur.operators import Sharur
+
+b = Sharur(
+    "data/DATASET/sharur.duckdb",
+    read_only=True,
+    duckdb_threads=4,
+    duckdb_memory_limit="8GB",
+    duckdb_temp_directory="/local-scratch/agent-07",
+)
+```
+
+These settings prevent multiple analysis agents from each inheriting
+host-scale DuckDB defaults. They remain independent of the scheduler used to
+launch those agents.
+
+## Operational query examples
+
+```sql
+-- Queue head with normalized dependency filtering
+SELECT t.*
+FROM tasks AS t
+WHERE t.status = 'pending'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM task_dependencies AS d
+      JOIN tasks AS parent ON parent.id = d.depends_on_task_id
+      WHERE d.task_id = t.id AND parent.status <> 'complete'
+  )
+ORDER BY t.priority DESC, t.ts, t.id
+LIMIT 50;
+
+-- Active authority
+SELECT id, assigned_to, attempt_count, lease_expires_ts
+FROM tasks
+WHERE status IN ('claimed', 'in_progress')
+  AND lease_expires_ts > unixepoch('subsec');
+
+-- Replay one campaign
+SELECT *
+FROM coordination_events
+WHERE campaign_id = ? AND id > ?
+ORDER BY id
+LIMIT 1000;
+```
+
+Task claims and terminal transitions always use `OpsStore` or the HTTP API;
+application-level token generation and transactional predicates are part of
+the authority contract.

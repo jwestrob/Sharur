@@ -9,10 +9,10 @@ import pytest
 from sharur.ingest.resources import ResourceRequest
 from sharur.ingest.stage_runner import execute_stage
 from sharur.ops.ledger import RunLedger
-from sharur.ops.store import OpsStore
+from sharur.ops.store import LeaseFenceError, OpsStore
 
 
-def test_preassigned_task_starts_claimed(tmp_path):
+def test_preassigned_task_is_reserved_until_worker_claims(tmp_path):
     coordinator = OpsStore(
         tmp_path / "ops" / "sharur_ops.db",
         agent_id="coordinator",
@@ -23,15 +23,20 @@ def test_preassigned_task_starts_claimed(tmp_path):
         assigned_to="worker",
     )
 
-    task = OpsStore(
+    worker = OpsStore(
         coordinator.db_path,
         agent_id="worker",
-    ).my_tasks()[0]
+    )
+    task = worker.my_tasks()[0]
 
     assert task["id"] == task_id
-    assert task["status"] == "claimed"
-    assert task["claimed_ts"] is not None
+    assert task["status"] == "pending"
+    assert task["reserved_for"] == "worker"
+    assert task["claimed_ts"] is None
     assert coordinator.available_tasks() == []
+    claimed = worker.claim_task(task_id)
+    assert claimed["status"] == "claimed"
+    assert claimed["lease_attempt"] == 1
 
 
 def test_only_one_agent_can_claim_task(tmp_path):
@@ -64,34 +69,42 @@ def test_task_completion_requires_current_owner(tmp_path):
         assigned_to="worker",
     )
 
-    intruder = OpsStore(db_path, agent_id="intruder")
-    with pytest.raises(ValueError, match="assigned to intruder"):
-        intruder.complete_task(task_id)
-
     worker = OpsStore(db_path, agent_id="worker")
-    completed = worker.complete_task(task_id, ["finding-1"])
+    claimed = worker.claim_task(task_id)
+    intruder = OpsStore(db_path, agent_id="intruder")
+    with pytest.raises(LeaseFenceError, match="not active"):
+        intruder.complete_task(
+            task_id,
+            lease_token=claimed["lease_token"],
+            attempt=claimed["lease_attempt"],
+        )
+
+    finding_id = worker.finding("observation", "fixture", "result")
+    completed = worker.complete_task(task_id, [finding_id])
     assert completed["status"] == "complete"
-    assert completed["result_finding_ids"] == ["finding-1"]
+    assert completed["result_finding_ids"] == [finding_id]
 
 
 def test_completing_missing_task_has_typed_error(tmp_path):
     ops = OpsStore(tmp_path / "sharur_ops.db", agent_id="worker")
 
-    with pytest.raises(ValueError, match="not active"):
-        ops.complete_task("missing")
+    with pytest.raises(LeaseFenceError, match="not active"):
+        ops.complete_task("missing", lease_token="x" * 32, attempt=1)
 
 
 def test_hypothesis_evidence_updates_append_and_deduplicate(tmp_path):
     ops = OpsStore(tmp_path / "sharur_ops.db", agent_id="worker")
     hypothesis_id = ops.hypothesis("A testable claim")
+    f1 = ops.finding("observation", "fixture", "first")
+    f2 = ops.finding("observation", "fixture", "second")
 
-    ops.update_hypothesis(hypothesis_id, evidence_for=["f1"])
+    ops.update_hypothesis(hypothesis_id, evidence_for=[f1])
     updated = ops.update_hypothesis(
         hypothesis_id,
-        evidence_for=["f1", "f2"],
+        evidence_for=[f1, f2],
     )
 
-    assert updated["evidence_for"] == ["f1", "f2"]
+    assert updated["evidence_for"] == [f1, f2]
 
 
 def test_updating_missing_hypothesis_raises_key_error(tmp_path):
@@ -170,7 +183,6 @@ def test_retryable_failure_requeues_without_losing_attempt_count(tmp_path):
     assert waiting["status"] == "retry_wait"
     assert waiting["attempt_count"] == 1
 
-    assert coordinator.available_tasks()[0]["id"] == task_id
     claimed_again = OpsStore(db_path, agent_id="worker_2").claim_task(task_id)
     assert claimed_again["attempt_count"] == 2
 

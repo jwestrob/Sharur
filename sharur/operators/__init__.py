@@ -85,6 +85,9 @@ class Sharur:
         assembly_evidence_path: Path | str | None = None,
         synteny_path: Path | str | None = None,
         allow_stale_synteny: bool = False,
+        duckdb_threads: int | None = None,
+        duckdb_memory_limit: str | None = None,
+        duckdb_temp_directory: Path | str | None = None,
     ):
         """
         Initialize Sharur instance.
@@ -101,6 +104,11 @@ class Sharur:
                 database.
             allow_stale_synteny: Explicitly permit querying an ELSA run whose
                 dataset identity differs from the live Sharur seal.
+            duckdb_threads: Per-agent DuckDB worker-thread ceiling.
+            duckdb_memory_limit: Per-agent DuckDB memory ceiling with units,
+                for example ``"8GB"``.
+            duckdb_temp_directory: Spill directory for this agent's DuckDB
+                connection.
         """
         self._db_path = Path(db_path) if db_path else None
         self._read_only = read_only
@@ -113,6 +121,11 @@ class Sharur:
             Path(synteny_path) if synteny_path is not None else None
         )
         self._allow_stale_synteny = allow_stale_synteny
+        self._duckdb_options = {
+            "duckdb_threads": duckdb_threads,
+            "duckdb_memory_limit": duckdb_memory_limit,
+            "duckdb_temp_directory": duckdb_temp_directory,
+        }
         self._session: Optional[ExplorationSession] = None
         self._manifest: Optional[AnalysisManifest] = None
         self._hypothesis_registry = None
@@ -124,6 +137,7 @@ class Sharur:
             self._session = ExplorationSession(
                 db_path=self._db_path,
                 read_only=self._read_only,
+                **self._duckdb_options,
             )
         return self._session
 
