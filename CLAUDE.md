@@ -72,6 +72,27 @@ rerunning a specific stage, or intentionally customizing the stage sequence. If
 
 ---
 
+## Large Multi-Agent Database Access
+
+Route coordinated campaigns over large DuckDB datasets through three distinct
+services:
+
+- `sharur-ops` owns campaigns, task leases, findings, agent identities, and
+  resource-aware dispatch.
+- `sharur-query` owns one sealed, campaign-local, read-only DuckDB replica and
+  serves bounded typed queries through a shared cache. Agents authenticate with
+  their Ops credentials.
+- Local or Slurm executors run heavy computation selected by claimed Ops tasks.
+
+Use `Sharur(path, read_only=True)` directly for a single analyst or modest local
+concurrency with explicit DuckDB thread, memory, and spill budgets. Route every
+large coordinated campaign through one query-service owner instead of opening
+one large DuckDB connection per agent. Serialize canonical DuckDB writes in a
+maintenance window, then seal and restage the updated database.
+
+Read `docs/query_service.md`, `agent_ops_spec.md`, and
+`docs/subagent_guide.md` before launching a distributed campaign.
+
 ## Core Rules (always apply)
 
 ### Model-visible sequence handling
