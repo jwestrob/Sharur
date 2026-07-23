@@ -222,6 +222,22 @@ def test_stage07_restart_v2_preserves_upstream_tables(tmp_path):
             unresolved_count
         ) VALUES ('stale', [], [], [], [], '{}', 'small', [], [], 0);
     """)
+    # Model a completed database created before the validated-system replicon
+    # migration. Restart mode must bring its schema current before generating
+    # semantic rows, while retaining raw upstream observations.
+    builder.conn.execute("""
+        DELETE FROM schema_version WHERE version > 1;
+        ALTER TABLE defense_systems DROP COLUMN contig_id;
+        ALTER TABLE secretion_systems DROP COLUMN contig_id;
+        INSERT INTO annotations (
+            annotation_id, protein_id, source, accession, name
+        ) VALUES (
+            2, 'p1', 'defensefinder_system', 'legacy-system', 'legacy-system'
+        );
+        INSERT INTO defense_systems (
+            system_id, genome_id, system_type, genes_count, protein_ids
+        ) VALUES ('legacy-system', 'bin1', 'legacy-type', 1, 'p1');
+    """)
     builder._release_db()
 
     stats = builder.restart_v2()
@@ -233,6 +249,16 @@ def test_stage07_restart_v2_preserves_upstream_tables(tmp_path):
     assert builder.conn.execute(
         "SELECT COUNT(*) FROM annotations"
     ).fetchone()[0] == 1
+    assert builder.conn.execute(
+        "SELECT MAX(version) FROM schema_version"
+    ).fetchone()[0] == 5
+    assert "contig_id" in {
+        row[0]
+        for row in builder.conn.execute("DESCRIBE defense_systems").fetchall()
+    }
+    assert builder.conn.execute(
+        "SELECT COUNT(*) FROM defense_systems"
+    ).fetchone()[0] == 0
     assert builder.conn.execute(
         "SELECT protein_id FROM semantic_state"
     ).fetchall() == [("p1",)]

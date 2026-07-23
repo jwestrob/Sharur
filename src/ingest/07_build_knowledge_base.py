@@ -334,7 +334,7 @@ class KnowledgeBaseBuilder:
         """Continue an interrupted V2 generation against an existing DB."""
         if not self.db_path.exists():
             raise FileNotFoundError(f"{self.db_path} is required for --resume-v2")
-        self._reacquire_db()
+        self._prepare_existing_db()
         resume_start = time.time()
         self._run_step(
             "Resume predicates",
@@ -355,7 +355,7 @@ class KnowledgeBaseBuilder:
         """Rebuild only V2 products while preserving completed upstream tables."""
         if not self.db_path.exists():
             raise FileNotFoundError(f"{self.db_path} is required for --restart-v2")
-        self._reacquire_db()
+        self._prepare_existing_db()
         restart_start = time.time()
         self._run_step(
             "Restart predicates",
@@ -388,6 +388,11 @@ class KnowledgeBaseBuilder:
         """Re-open the DB connection after external scripts finish."""
         self.conn = duckdb.connect(str(self.db_path))
         self.conn.execute(f"SET threads = {self.threads}")
+
+    def _prepare_existing_db(self) -> None:
+        """Open an existing database and apply pending schema migrations."""
+        self._reacquire_db()
+        run_migrations(self.conn)
 
     # --- init ----------------------------------------------------------- #
     def _init_db(self) -> None:
