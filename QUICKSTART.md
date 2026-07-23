@@ -42,6 +42,7 @@ sharur-ingest \
   --input-dir /path/to/genome_fastas \
   --data-dir data/my_dataset \
   --output data/my_dataset/sharur.duckdb \
+  --pipeline-depth 2 \
   --profile auto
 ```
 
@@ -68,6 +69,10 @@ helper. Enable them deliberately with `--with-quast`, `--with-dfast`, `--with-ge
 or `--with-legacy-dbcan`. The distinct Stage 07 dbCAN three-tool consensus classifier is
 opt-in with `--enable-cazymes`. Use `--dry-run` to inspect stage order and paths
 without creating the dataset directory.
+
+`--pipeline-depth 2` is the bounded Stage 07 default. It keeps two ordered V2
+transform chunks in flight while the sole DuckDB writer commits the preceding
+chunk.
 
 ## Manual Stage-by-Stage Pipeline
 
@@ -105,7 +110,8 @@ python src/ingest/minced_crispr.py \
 # Stage 07: build DuckDB knowledge base + V2 predicates
 python src/ingest/07_build_knowledge_base.py \
   -d data/$DATASET \
-  -o data/$DATASET/sharur.duckdb
+  -o data/$DATASET/sharur.duckdb \
+  --pipeline-depth 2
 
 # Stage 06: embeddings (run after Stage 07)
 python src/ingest/06_esm2_embeddings.py \
@@ -115,6 +121,11 @@ python src/ingest/06_esm2_embeddings.py \
 ```
 
 This is the manual reference sequence behind `sharur-ingest`. `04_astra_scan.py` supplies the correct per-database flags, and `07_build_knowledge_base.py` is the loader that consolidates proteins, annotations, loci, validated systems, and V2 predicates.
+
+Stage 07 defaults to a bounded depth-two V2 pipeline that overlaps source
+reading, process-pool transformation, and ordered single-writer DuckDB commits.
+Its checkpoint always describes a fully committed source prefix, so
+`--resume-v2` retains exact restart semantics.
 
 If Stage 07 reaches V2 generation and the semantic implementation changes,
 reuse the completed upstream tables with:

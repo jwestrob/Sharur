@@ -743,6 +743,12 @@ def compute_predicates(
         "--worker-batch-size",
         help="Optional proteins per transform task",
     ),
+    pipeline_depth: int = typer.Option(
+        2,
+        "--pipeline-depth",
+        min=1,
+        help="Bounded full-dataset chunks overlapped across read/transform/write",
+    ),
     resume: bool = typer.Option(False, "--resume", help="Continue the latest full V2 checkpoint"),
     review_queue: Optional[Path] = typer.Option(
         None,
@@ -795,6 +801,7 @@ def compute_predicates(
             chunk_size=chunk_size,
             workers=workers,
             worker_batch_size=worker_batch_size,
+            pipeline_depth=pipeline_depth,
             update_legacy_predicates=True,
             return_states=True,
             predict_topology=False,
@@ -820,6 +827,7 @@ def compute_predicates(
             chunk_size=chunk_size,
             workers=workers,
             worker_batch_size=worker_batch_size,
+            pipeline_depth=pipeline_depth,
             resume=resume,
             update_legacy_predicates=True,
             return_states=False,

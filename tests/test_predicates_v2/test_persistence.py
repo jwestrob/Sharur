@@ -1,5 +1,7 @@
 """Tests for V2 predicate persistence."""
 
+import threading
+
 import pytest
 
 import sharur.predicates_v2.persistence as persistence
@@ -483,6 +485,139 @@ def test_process_parallel_generation_matches_serial_output():
         FROM v2_generation_checkpoint
         WHERE generation_key = 'full_v2'
     """).fetchone() == ("complete", "z034", 34, 34)
+
+
+def test_parallel_pipeline_overlaps_reader_with_ordered_commits(monkeypatch):
+    """Read-ahead should progress while the parent commits the prior chunk."""
+    store = _seed_store()
+    _add_parallel_test_proteins(store, count=6)
+    original_prepare = persistence._prepare_transform_inputs
+    original_persist = persistence._persist_chunk
+    prepare_lock = threading.Lock()
+    prepare_calls = 0
+    persist_calls = 0
+    third_prepare_started = threading.Event()
+    first_persist_started = threading.Event()
+    third_prepare_finished = threading.Event()
+
+    def coordinated_prepare(*args, **kwargs):
+        nonlocal prepare_calls
+        with prepare_lock:
+            prepare_calls += 1
+            call_number = prepare_calls
+        if call_number == 3:
+            third_prepare_started.set()
+            assert first_persist_started.wait(60)
+        prepared = original_prepare(*args, **kwargs)
+        if call_number == 3:
+            third_prepare_finished.set()
+        return prepared
+
+    def coordinated_persist(*args, **kwargs):
+        nonlocal persist_calls
+        persist_calls += 1
+        if persist_calls == 1:
+            assert third_prepare_started.wait(60)
+            first_persist_started.set()
+            assert third_prepare_finished.wait(60)
+        return original_persist(*args, **kwargs)
+
+    monkeypatch.setattr(
+        persistence,
+        "_prepare_transform_inputs",
+        coordinated_prepare,
+    )
+    monkeypatch.setattr(persistence, "_persist_chunk", coordinated_persist)
+
+    generate_and_persist_v2(
+        store,
+        chunk_size=1,
+        workers=2,
+        worker_batch_size=1,
+        pipeline_depth=2,
+        update_legacy_predicates=True,
+        return_states=False,
+    )
+
+    assert prepare_calls == 8
+    assert persist_calls == 8
+    assert store.conn.execute(
+        "SELECT COUNT(*) FROM semantic_state"
+    ).fetchone()[0] == 8
+
+
+def test_pipeline_depth_must_be_positive():
+    store = _seed_store()
+
+    with pytest.raises(ValueError, match="pipeline_depth must be positive"):
+        generate_and_persist_v2(store, pipeline_depth=0)
+
+
+def test_parallel_columnar_pipeline_resumes_from_atomic_checkpoint(monkeypatch):
+    """A columnar pipeline failure should retain only committed chunk prefixes."""
+    store = _seed_store()
+    _add_parallel_test_proteins(store, count=4)
+    original_persist = persistence._persist_generation_frames
+    persist_calls = 0
+
+    def fail_second_frame_commit(*args, **kwargs):
+        nonlocal persist_calls
+        persist_calls += 1
+        if persist_calls == 2:
+            raise RuntimeError("injected columnar pipeline failure")
+        return original_persist(*args, **kwargs)
+
+    monkeypatch.setattr(
+        persistence,
+        "_persist_generation_frames",
+        fail_second_frame_commit,
+    )
+    with pytest.raises(
+        RuntimeError,
+        match="injected columnar pipeline failure",
+    ):
+        generate_and_persist_v2(
+            store,
+            chunk_size=2,
+            workers=2,
+            worker_batch_size=1,
+            pipeline_depth=2,
+            return_states=False,
+        )
+
+    assert store.conn.execute("""
+        SELECT status, last_protein_id, processed_count, total_count
+        FROM v2_generation_checkpoint
+        WHERE generation_key = 'full_v2'
+    """).fetchone() == ("failed", "p2", 2, 6)
+    assert store.conn.execute(
+        "SELECT protein_id FROM v2_generation_state ORDER BY protein_id"
+    ).fetchall() == [("p1",), ("p2",)]
+
+    monkeypatch.setattr(
+        persistence,
+        "_persist_generation_frames",
+        original_persist,
+    )
+    generate_and_persist_v2(
+        store,
+        chunk_size=2,
+        workers=1,
+        pipeline_depth=2,
+        resume=True,
+        return_states=False,
+    )
+
+    assert store.conn.execute(
+        "SELECT protein_id FROM semantic_state ORDER BY protein_id"
+    ).fetchall() == [
+        ("p1",),
+        ("p2",),
+        ("z003",),
+        ("z004",),
+        ("z005",),
+        ("z006",),
+    ]
 
 
 def test_full_generation_defers_indexes_and_releases_build_tables(monkeypatch):

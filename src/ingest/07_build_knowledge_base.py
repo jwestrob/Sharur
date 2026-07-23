@@ -238,12 +238,16 @@ class PipelineOutputs:
 # --------------------------------------------------------------------------- #
 class KnowledgeBaseBuilder:
     def __init__(self, outputs: PipelineOutputs, db_path: Path, force: bool = False,
-                 enable_cazymes: bool = False, threads: Optional[int] = None):
+                 enable_cazymes: bool = False, threads: Optional[int] = None,
+                 pipeline_depth: int = 2):
         self.outputs = outputs
         self.db_path = db_path
         self.force = force
         self.enable_cazymes = enable_cazymes
         self.threads = _resolve_thread_count(threads)
+        if pipeline_depth < 1:
+            raise ValueError("pipeline_depth must be positive")
+        self.pipeline_depth = pipeline_depth
         self.conn: Optional[duckdb.DuckDBPyConnection] = None
         self.embeddings_path: Optional[str] = None
         self.stats: Dict[str, int] = {
@@ -992,13 +996,14 @@ class KnowledgeBaseBuilder:
         console.print(
             f"  Generating V2 atoms/states for {protein_count:,} proteins "
             f"(chunk_size={chunk_size:,}, workers={self.threads}, "
-            f"resume={resume})"
+            f"pipeline_depth={self.pipeline_depth}, resume={resume})"
         )
         generate_and_persist_v2(
             _StoreAdapter(self.conn),
             output_review_queue=str(review_queue_path),
             chunk_size=chunk_size,
             workers=self.threads,
+            pipeline_depth=self.pipeline_depth,
             resume=resume,
             update_legacy_predicates=True,
             return_states=False,
@@ -1332,6 +1337,12 @@ def main(
         "-t",
         help="Worker threads (defaults to SLURM_CPUS_ON_NODE, then host CPU count)",
     ),
+    pipeline_depth: int = typer.Option(
+        2,
+        "--pipeline-depth",
+        min=1,
+        help="Bounded V2 chunks overlapped across read/transform/write",
+    ),
 ) -> None:
     logging.basicConfig(level=logging.INFO)
     if resume_v2 and restart_v2:
@@ -1365,6 +1376,7 @@ def main(
         force=force,
         enable_cazymes=enable_cazymes,
         threads=threads,
+        pipeline_depth=pipeline_depth,
     )
     if resume_v2:
         stats = builder.resume_v2()

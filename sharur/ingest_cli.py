@@ -111,6 +111,7 @@ def _build_tools_dag(
     skip_crispr: bool,
     skip_embeddings: bool,
     enable_cazymes: bool,
+    pipeline_depth: int = 2,
 ) -> IngestDAG:
     """Build the selected stage graph and its concrete resource-tuned commands."""
     stage_dir = _stage_script_dir()
@@ -299,6 +300,8 @@ def _build_tools_dag(
         str(data_dir),
         "--output",
         str(output),
+        "--pipeline-depth",
+        str(pipeline_depth),
         "--force",
     ]
     if enable_cazymes:
@@ -688,6 +691,14 @@ def run(
             help="Run the optional Stage 07 dbCAN three-tool consensus classifier",
         ),
     ] = False,
+    pipeline_depth: Annotated[
+        int,
+        typer.Option(
+            "--pipeline-depth",
+            min=1,
+            help="Maximum ordered V2 transform chunks in flight during Stage 07",
+        ),
+    ] = 2,
     skip_crispr: Annotated[
         bool,
         typer.Option(help="Skip standard Stage 05c (CRISPR arrays via minced_crispr.py)"),
@@ -780,6 +791,8 @@ def run(
             str(data_dir),
             "--output",
             str(output),
+            "--pipeline-depth",
+            str(pipeline_depth),
             "--force",
         ]
         if enable_cazymes:
@@ -810,6 +823,7 @@ def run(
             skip_crispr=skip_crispr,
             skip_embeddings=skip_embeddings,
             enable_cazymes=enable_cazymes,
+            pipeline_depth=pipeline_depth,
         )
     else:
         raise typer.BadParameter("mode must be 'tools' or 'fast'")

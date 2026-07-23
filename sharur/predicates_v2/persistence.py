@@ -12,12 +12,16 @@ import json
 import logging
 import math
 import multiprocessing
+import queue
+import threading
 import time
-from concurrent.futures import ProcessPoolExecutor
+from collections import deque
+from concurrent.futures import Future, ProcessPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 import pandas as pd
 
 from sharur.predicates.generator import AnnotationRecord, ProteinRecord
@@ -89,6 +93,50 @@ class _TransformBatchResult:
 
 
 @dataclass
+class _GenerationFrames:
+    """Columnar generation payload registered directly with DuckDB."""
+
+    raw_atoms: pd.DataFrame
+    states: pd.DataFrame
+    legacy: pd.DataFrame
+
+
+@dataclass
+class _TransformBatchFrames:
+    """Columnar worker output that avoids parent-side object reconstruction."""
+
+    frames: _GenerationFrames
+    atom_count: int
+
+
+@dataclass
+class _PreparedChunk:
+    """One bounded source chunk ready for process-parallel transformation."""
+
+    inputs: list[_ProteinTransformInput]
+    chunk_count: int
+    checkpoint_last_protein_id: str
+    started_at: float
+    prepared_at: float
+
+
+@dataclass
+class _InFlightChunk:
+    """Ordered transform futures for one prepared database chunk."""
+
+    prepared: _PreparedChunk
+    futures: list[Future[_TransformBatchResult | _TransformBatchFrames]]
+    submitted_at: float
+
+
+@dataclass
+class _PreparedChunkFailure:
+    """Exception transported from the dedicated DuckDB reader thread."""
+
+    error: BaseException
+
+
+@dataclass
 class _TransformWorkerState:
     """Process-local immutable rule state initialized once per worker."""
 
@@ -98,6 +146,47 @@ class _TransformWorkerState:
 
 
 _WORKER_STATE = _TransformWorkerState()
+_PREPARED_CHUNKS_COMPLETE = object()
+_RAW_ATOM_COLUMNS = [
+    "input_position",
+    "protein_id",
+    "atom_id",
+    "facet",
+    "relation",
+    "source_accession",
+    "source_db",
+    "evidence_evalue",
+    "evidence_score",
+]
+_STATE_COLUMNS = [
+    "protein_id",
+    "activities",
+    "roles",
+    "architecture",
+    "localization",
+    "topology",
+    "size_class",
+    "quality_flags",
+    "composite_predicates",
+    "unresolved_count",
+]
+_LEGACY_COLUMNS = ["protein_id", "predicates"]
+
+
+class _CursorStore:
+    """Minimal store facade around a thread-owned DuckDB cursor."""
+
+    def __init__(self, conn: Any):
+        self.conn = conn
+
+    def execute(
+        self,
+        query: str,
+        params: dict | list | tuple | None = None,
+    ) -> list[tuple]:
+        if params is not None:
+            return self.conn.execute(query, params).fetchall()
+        return self.conn.execute(query).fetchall()
 
 
 def generate_and_persist_v2(
@@ -107,6 +196,7 @@ def generate_and_persist_v2(
     chunk_size: int = 25_000,
     workers: int = 1,
     worker_batch_size: int | None = None,
+    pipeline_depth: int = 2,
     resume: bool = False,
     update_legacy_predicates: bool = False,
     return_states: bool = True,
@@ -131,6 +221,9 @@ def generate_and_persist_v2(
             writes remain in this parent process.
         worker_batch_size: Proteins per worker task. By default, each database
             chunk is split into about two tasks per worker, capped at 5,000.
+        pipeline_depth: Maximum prepared/transforming chunks kept in flight.
+            Values above one overlap source reads, process transforms, and
+            ordered DuckDB commits. Serial generation always uses depth one.
         resume: Resume the last full-dataset generation checkpoint. Resume is
             supported for full refreshes with ``return_states=False``.
         update_legacy_predicates: Also materialize V2-compatible flat
@@ -152,6 +245,8 @@ def generate_and_persist_v2(
         raise ValueError("workers must be positive")
     if worker_batch_size is not None and worker_batch_size <= 0:
         raise ValueError("worker_batch_size must be positive")
+    if pipeline_depth <= 0:
+        raise ValueError("pipeline_depth must be positive")
     if resume and protein_ids is not None:
         raise ValueError("resume is supported only for full-dataset generation")
     if resume and return_states:
@@ -240,89 +335,63 @@ def generate_and_persist_v2(
                 initargs=(predict_topology, update_legacy_predicates),
             )
 
-        for protein_rows in _iter_protein_chunks(
-            store,
-            protein_ids,
-            chunk_size,
-            start_after=start_after,
-        ):
-            if not protein_rows:
-                continue
+        def persist_transformed_chunk(
+            prepared: _PreparedChunk,
+            batch_results: list[_TransformBatchResult | _TransformBatchFrames],
+            *,
+            transform_started_at: float,
+        ) -> None:
+            """Merge and commit one completed chunk in deterministic order."""
+            nonlocal total_processed
 
-            chunk_started_at = time.monotonic()
-            chunk_protein_ids = [row[0] for row in protein_rows]
-            annotations_by_protein = _fetch_annotations_by_protein(
-                store,
-                chunk_protein_ids,
-            )
-            context_atoms_by_protein = _fetch_context_atoms_by_protein(
-                store,
-                chunk_protein_ids,
-            )
-            inputs = _prepare_transform_inputs(
-                protein_rows,
-                annotations_by_protein=annotations_by_protein,
-                validated_system_annotations=validated_system_annotations,
-                context_atoms_by_protein=context_atoms_by_protein,
-                gc_stats=gc_stats,
-            )
-            prepared_at = time.monotonic()
-            batch_size = _resolve_worker_batch_size(
-                len(inputs),
-                workers=workers,
-                requested=worker_batch_size,
-            )
-            batches = list(_chunks(inputs, batch_size))
-
-            if executor is None:
-                assert serial_generator is not None
-                assert serial_composites is not None
-                batch_results = [
-                    _transform_batch(
-                        batch,
-                        generator=serial_generator,
-                        composites=serial_composites,
-                        update_legacy_predicates=update_legacy_predicates,
-                    )
-                    for batch in batches
-                ]
-            else:
-                # map() preserves input order; the parent merges and commits
-                # every database chunk deterministically through one writer.
-                batch_results = list(executor.map(_transform_batch_worker, batches))
-
-            chunk_atoms: list[SemanticAtom] = []
+            generation_frames: _GenerationFrames | None = None
             chunk_states: dict[str, SemanticState] = {}
-            legacy_rows: list[tuple[str, list[str]]] = []
-            for batch_result in batch_results:
-                chunk_atoms.extend(batch_result.atoms)
-                chunk_states.update(batch_result.states)
-                legacy_rows.extend(batch_result.legacy_rows)
+            if batch_results and isinstance(
+                batch_results[0],
+                _TransformBatchFrames,
+            ):
+                frame_results = [
+                    result
+                    for result in batch_results
+                    if isinstance(result, _TransformBatchFrames)
+                ]
+                if len(frame_results) != len(batch_results):
+                    raise RuntimeError("Mixed V2 worker payload types in one chunk")
+                generation_frames = _concat_generation_frames(frame_results)
+                chunk_atom_count = sum(
+                    result.atom_count for result in frame_results
+                )
+                chunk_atoms: list[SemanticAtom] = []
+                legacy_rows: list[tuple[str, list[str]]] = []
+            else:
+                chunk_atoms = []
+                legacy_rows = []
+                for batch_result in batch_results:
+                    if not isinstance(batch_result, _TransformBatchResult):
+                        raise RuntimeError(
+                            "Mixed V2 worker payload types in one chunk"
+                        )
+                    chunk_atoms.extend(batch_result.atoms)
+                    chunk_states.update(batch_result.states)
+                    legacy_rows.extend(batch_result.legacy_rows)
+                chunk_atom_count = len(chunk_atoms)
+            batch_results.clear()
             transformed_at = time.monotonic()
 
-            chunk_count = len(protein_rows)
-            chunk_atom_count = len(chunk_atoms)
-            checkpoint_last_protein_id = protein_rows[-1][0]
-            del (
-                annotations_by_protein,
-                batch_results,
-                batches,
-                context_atoms_by_protein,
-                inputs,
-                protein_rows,
-            )
-
-            next_processed = total_processed + chunk_count
+            next_processed = total_processed + prepared.chunk_count
             _persist_chunk(
                 store,
                 chunk_atoms,
                 chunk_states,
                 legacy_rows=legacy_rows,
+                generation_frames=generation_frames,
                 update_legacy_predicates=update_legacy_predicates,
                 use_generation_tables=checkpoint_enabled,
                 checkpoint_processed=(next_processed if checkpoint_enabled else None),
                 checkpoint_last_protein_id=(
-                    checkpoint_last_protein_id if checkpoint_enabled else None
+                    prepared.checkpoint_last_protein_id
+                    if checkpoint_enabled
+                    else None
                 ),
             )
             persisted_at = time.monotonic()
@@ -337,19 +406,121 @@ def generate_and_persist_v2(
             eta_seconds = remaining / rate if rate > 0 else 0.0
             logger.info(
                 "V2 progress: %s/%s proteins (%.2f%%), %.1f proteins/s, ETA %.1fh; "
-                "chunk=%s proteins/%s atoms prepare=%.1fs transform=%.1fs persist=%.1fs total=%.1fs",
+                "chunk=%s proteins/%s atoms prepare=%.1fs transform=%.1fs "
+                "persist=%.1fs latency=%.1fs",
                 f"{total_processed:,}",
                 f"{total_count:,}",
                 (100.0 * total_processed / total_count) if total_count else 100.0,
                 rate,
                 eta_seconds / 3600.0,
-                f"{chunk_count:,}",
+                f"{prepared.chunk_count:,}",
                 f"{chunk_atom_count:,}",
-                prepared_at - chunk_started_at,
-                transformed_at - prepared_at,
+                prepared.prepared_at - prepared.started_at,
+                transformed_at - transform_started_at,
                 persisted_at - transformed_at,
-                persisted_at - chunk_started_at,
+                persisted_at - prepared.started_at,
             )
+
+        if executor is None:
+            assert serial_generator is not None
+            assert serial_composites is not None
+            for prepared in _iter_prepared_chunks(
+                store,
+                protein_ids,
+                chunk_size,
+                start_after=start_after,
+                validated_system_annotations=validated_system_annotations,
+                gc_stats=gc_stats,
+            ):
+                batch_size = _resolve_worker_batch_size(
+                    len(prepared.inputs),
+                    workers=workers,
+                    requested=worker_batch_size,
+                )
+                batches = list(_chunks(prepared.inputs, batch_size))
+                transform_started_at = time.monotonic()
+                batch_results = [
+                    _transform_batch(
+                        batch,
+                        generator=serial_generator,
+                        composites=serial_composites,
+                        update_legacy_predicates=update_legacy_predicates,
+                    )
+                    for batch in batches
+                ]
+                prepared.inputs.clear()
+                persist_transformed_chunk(
+                    prepared,
+                    batch_results,
+                    transform_started_at=transform_started_at,
+                )
+        else:
+            effective_pipeline_depth = max(1, pipeline_depth)
+            columnar_worker_output = checkpoint_enabled and not return_states
+            logger.info(
+                "V2 bounded pipeline enabled: workers=%s depth=%s prefetch=1 "
+                "columnar_worker_output=%s",
+                workers,
+                effective_pipeline_depth,
+                columnar_worker_output,
+            )
+            in_flight: deque[_InFlightChunk] = deque()
+            prepared_chunks = _iter_prefetched_prepared_chunks(
+                store,
+                protein_ids,
+                chunk_size,
+                start_after=start_after,
+                validated_system_annotations=validated_system_annotations,
+                gc_stats=gc_stats,
+                prefetch_chunks=1,
+            )
+
+            def drain_oldest_chunk() -> None:
+                work = in_flight.popleft()
+                batch_results = [future.result() for future in work.futures]
+                work.futures.clear()
+                persist_transformed_chunk(
+                    work.prepared,
+                    batch_results,
+                    transform_started_at=work.submitted_at,
+                )
+
+            try:
+                for prepared in prepared_chunks:
+                    batch_size = _resolve_worker_batch_size(
+                        len(prepared.inputs),
+                        workers=workers,
+                        requested=worker_batch_size,
+                    )
+                    batches = list(_chunks(prepared.inputs, batch_size))
+                    submitted_at = time.monotonic()
+                    transform_worker = (
+                        _transform_batch_frames_worker
+                        if columnar_worker_output
+                        else _transform_batch_worker
+                    )
+                    futures = [
+                        executor.submit(transform_worker, batch)
+                        for batch in batches
+                    ]
+                    prepared.inputs.clear()
+                    del batches
+                    in_flight.append(_InFlightChunk(
+                        prepared=prepared,
+                        futures=futures,
+                        submitted_at=submitted_at,
+                    ))
+
+                    if len(in_flight) >= effective_pipeline_depth:
+                        drain_oldest_chunk()
+
+                while in_flight:
+                    drain_oldest_chunk()
+            finally:
+                prepared_chunks.close()
+                for work in in_flight:
+                    for future in work.futures:
+                        future.cancel()
 
         if checkpoint_enabled:
             state_table = (
@@ -425,6 +596,45 @@ def _transform_batch_worker(
     )
 
 
+def _transform_batch_frames_worker(
+    inputs: list[_ProteinTransformInput],
+) -> _TransformBatchFrames:
+    """Transform one microbatch into columnar frames inside its worker."""
+    if _WORKER_STATE.generator is None or _WORKER_STATE.composites is None:
+        raise RuntimeError("V2 transform worker was not initialized")
+    return _transform_batch_to_frames(
+        inputs,
+        generator=_WORKER_STATE.generator,
+        composites=_WORKER_STATE.composites,
+        update_legacy_predicates=_WORKER_STATE.update_legacy_predicates,
+    )
+
+
+def _transform_protein(
+    item: _ProteinTransformInput,
+    *,
+    generator: AtomGenerator,
+    composites: list[Any],
+) -> tuple[list[SemanticAtom], SemanticState]:
+    """Generate exact semantic atoms and resolved state for one protein."""
+    protein = ProteinRecord(
+        protein_id=item.protein_id,
+        sequence_length=item.sequence_length,
+        gc_content=item.gc_content,
+        contig_gc_mean=item.contig_gc_mean,
+        contig_gc_std=item.contig_gc_std,
+    )
+    atoms = generator.generate_atoms(protein, item.annotations)
+    atoms.extend(item.context_atoms)
+    state = aggregate_atoms(item.protein_id, atoms)
+    state.composite_predicates = evaluate_composites(
+        atoms,
+        composites,
+        state.topology,
+    )
+    return atoms, state
+
+
 def _transform_batch(
     inputs: list[_ProteinTransformInput],
     *,
@@ -438,20 +648,10 @@ def _transform_batch(
     legacy_rows: list[tuple[str, list[str]]] = []
 
     for item in inputs:
-        protein = ProteinRecord(
-            protein_id=item.protein_id,
-            sequence_length=item.sequence_length,
-            gc_content=item.gc_content,
-            contig_gc_mean=item.contig_gc_mean,
-            contig_gc_std=item.contig_gc_std,
-        )
-        atoms = generator.generate_atoms(protein, item.annotations)
-        atoms.extend(item.context_atoms)
-        state = aggregate_atoms(item.protein_id, atoms)
-        state.composite_predicates = evaluate_composites(
-            atoms,
-            composites,
-            state.topology,
+        atoms, state = _transform_protein(
+            item,
+            generator=generator,
+            composites=composites,
         )
 
         atoms_out.extend(atoms)
@@ -467,6 +667,240 @@ def _transform_batch(
         states=states_out,
         legacy_rows=legacy_rows,
     )
+
+
+def _transform_batch_to_frames(
+    inputs: list[_ProteinTransformInput],
+    *,
+    generator: AtomGenerator,
+    composites: list[Any],
+    update_legacy_predicates: bool,
+) -> _TransformBatchFrames:
+    """Build primitive columnar output before crossing the process boundary."""
+    raw_atom_rows: list[tuple] = []
+    state_rows: list[tuple] = []
+    legacy_rows: list[tuple[str, list[str]]] = []
+    input_position = 0
+
+    for item in inputs:
+        atoms, state = _transform_protein(
+            item,
+            generator=generator,
+            composites=composites,
+        )
+        for atom in atoms:
+            raw_atom_rows.append((
+                input_position,
+                atom.protein_id,
+                atom.atom_id,
+                atom.facet.value,
+                atom.relation.value,
+                atom.source_accession,
+                atom.source_db,
+                atom.evidence_evalue,
+                atom.evidence_score,
+            ))
+            input_position += 1
+
+        state_rows.append((
+            item.protein_id,
+            state.activities,
+            state.roles,
+            state.architecture,
+            state.localization,
+            json.dumps(state.topology),
+            state.size_class,
+            state.quality_flags,
+            state.composite_predicates,
+            len(state.unresolved_accessions),
+        ))
+        if update_legacy_predicates:
+            legacy_rows.append((
+                item.protein_id,
+                semantic_state_to_predicates(state, atoms=atoms),
+            ))
+
+    return _TransformBatchFrames(
+        frames=_GenerationFrames(
+            raw_atoms=pd.DataFrame.from_records(
+                raw_atom_rows,
+                columns=_RAW_ATOM_COLUMNS,
+            ),
+            states=pd.DataFrame.from_records(
+                state_rows,
+                columns=_STATE_COLUMNS,
+            ),
+            legacy=pd.DataFrame.from_records(
+                legacy_rows,
+                columns=_LEGACY_COLUMNS,
+            ),
+        ),
+        atom_count=len(raw_atom_rows),
+    )
+
+
+def _concat_generation_frames(
+    batch_results: list[_TransformBatchFrames],
+) -> _GenerationFrames:
+    """Concatenate ordered worker frames with one columnar operation per table."""
+    def concatenate(
+        frames: list[pd.DataFrame],
+        columns: list[str],
+    ) -> pd.DataFrame:
+        populated = [frame for frame in frames if not frame.empty]
+        if not populated:
+            return pd.DataFrame(columns=columns)
+        if len(populated) == 1:
+            return populated[0].reset_index(drop=True)
+        return pd.DataFrame({
+            column: np.concatenate([
+                frame[column].to_numpy(copy=False)
+                for frame in populated
+            ])
+            for column in columns
+        })
+
+    return _GenerationFrames(
+        raw_atoms=concatenate(
+            [result.frames.raw_atoms for result in batch_results],
+            _RAW_ATOM_COLUMNS,
+        ),
+        states=concatenate(
+            [result.frames.states for result in batch_results],
+            _STATE_COLUMNS,
+        ),
+        legacy=concatenate(
+            [result.frames.legacy for result in batch_results],
+            _LEGACY_COLUMNS,
+        ),
+    )
+
+
+def _iter_prepared_chunks(
+    store: DuckDBStore,
+    protein_ids: list[str] | None,
+    chunk_size: int,
+    *,
+    start_after: str | None,
+    validated_system_annotations: dict[str, list[AnnotationRecord]],
+    gc_stats: dict[str, tuple[float, float]],
+) -> Iterable[_PreparedChunk]:
+    """Read and prepare deterministic protein chunks through one connection."""
+    for protein_rows in _iter_protein_chunks(
+        store,
+        protein_ids,
+        chunk_size,
+        start_after=start_after,
+    ):
+        if not protein_rows:
+            continue
+
+        chunk_started_at = time.monotonic()
+        chunk_protein_ids = [row[0] for row in protein_rows]
+        annotations_by_protein = _fetch_annotations_by_protein(
+            store,
+            chunk_protein_ids,
+        )
+        context_atoms_by_protein = _fetch_context_atoms_by_protein(
+            store,
+            chunk_protein_ids,
+        )
+        inputs = _prepare_transform_inputs(
+            protein_rows,
+            annotations_by_protein=annotations_by_protein,
+            validated_system_annotations=validated_system_annotations,
+            context_atoms_by_protein=context_atoms_by_protein,
+            gc_stats=gc_stats,
+        )
+        yield _PreparedChunk(
+            inputs=inputs,
+            chunk_count=len(protein_rows),
+            checkpoint_last_protein_id=protein_rows[-1][0],
+            started_at=chunk_started_at,
+            prepared_at=time.monotonic(),
+        )
+
+
+def _iter_prefetched_prepared_chunks(
+    store: DuckDBStore,
+    protein_ids: list[str] | None,
+    chunk_size: int,
+    *,
+    start_after: str | None,
+    validated_system_annotations: dict[str, list[AnnotationRecord]],
+    gc_stats: dict[str, tuple[float, float]],
+    prefetch_chunks: int,
+) -> Iterable[_PreparedChunk]:
+    """Prepare chunks on a thread-owned cursor with bounded read-ahead.
+
+    The parent connection remains the sole writer. DuckDB's thread-local
+    cursor reads immutable source tables while the parent commits the prior
+    generation chunk. The queue bounds source-object memory independently of
+    dataset size.
+    """
+    if prefetch_chunks <= 0:
+        raise ValueError("prefetch_chunks must be positive")
+
+    messages: queue.Queue[object] = queue.Queue(maxsize=prefetch_chunks)
+    stop_requested = threading.Event()
+
+    def publish(message: object) -> bool:
+        while not stop_requested.is_set():
+            try:
+                messages.put(message, timeout=0.1)
+                return True
+            except queue.Full:
+                continue
+        return False
+
+    def produce() -> None:
+        reader_conn = None
+        try:
+            # DuckDB requires a cursor/duplicate connection owned by each
+            # Python thread. It shares the same in-memory or file database.
+            reader_conn = store.conn.cursor()
+            reader_store = _CursorStore(reader_conn)
+            for prepared in _iter_prepared_chunks(
+                reader_store,
+                protein_ids,
+                chunk_size,
+                start_after=start_after,
+                validated_system_annotations=validated_system_annotations,
+                gc_stats=gc_stats,
+            ):
+                if not publish(prepared):
+                    return
+        except BaseException as exc:
+            if not publish(_PreparedChunkFailure(exc)):
+                return
+        finally:
+            try:
+                if reader_conn is not None:
+                    reader_conn.close()
+            finally:
+                publish(_PREPARED_CHUNKS_COMPLETE)
+
+    producer = threading.Thread(
+        target=produce,
+        name="sharur-v2-reader",
+        daemon=True,
+    )
+    producer.start()
+    try:
+        while True:
+            message = messages.get()
+            if message is _PREPARED_CHUNKS_COMPLETE:
+                break
+            if isinstance(message, _PreparedChunkFailure):
+                raise message.error
+            if not isinstance(message, _PreparedChunk):
+                raise RuntimeError(
+                    f"Unexpected V2 reader message: {type(message).__name__}"
+                )
+            yield message
+    finally:
+        stop_requested.set()
+        producer.join()
 
 
 def _prepare_transform_inputs(
@@ -1472,6 +1906,7 @@ def _persist_chunk(
     states: dict[str, SemanticState],
     *,
     legacy_rows: list[tuple[str, list[str]]],
+    generation_frames: _GenerationFrames | None = None,
     update_legacy_predicates: bool,
     use_generation_tables: bool = False,
     checkpoint_processed: int | None = None,
@@ -1479,16 +1914,27 @@ def _persist_chunk(
 ) -> None:
     """Persist one generation chunk inside one DuckDB transaction."""
     if use_generation_tables:
-        _persist_generation_chunk(
-            store,
-            atoms,
-            states,
-            legacy_rows=legacy_rows,
-            update_legacy_predicates=update_legacy_predicates,
-            checkpoint_processed=checkpoint_processed,
-            checkpoint_last_protein_id=checkpoint_last_protein_id,
-        )
+        if generation_frames is None:
+            _persist_generation_chunk(
+                store,
+                atoms,
+                states,
+                legacy_rows=legacy_rows,
+                update_legacy_predicates=update_legacy_predicates,
+                checkpoint_processed=checkpoint_processed,
+                checkpoint_last_protein_id=checkpoint_last_protein_id,
+            )
+        else:
+            _persist_generation_frames(
+                store,
+                generation_frames,
+                update_legacy_predicates=update_legacy_predicates,
+                checkpoint_processed=checkpoint_processed,
+                checkpoint_last_protein_id=checkpoint_last_protein_id,
+            )
         return
+    if generation_frames is not None:
+        raise ValueError("generation_frames require generation tables")
 
     store.conn.execute("BEGIN TRANSACTION;")
     try:
@@ -1551,17 +1997,7 @@ def _persist_generation_chunk(
     ]
     raw_atom_frame = pd.DataFrame.from_records(
         raw_atom_rows,
-        columns=[
-            "input_position",
-            "protein_id",
-            "atom_id",
-            "facet",
-            "relation",
-            "source_accession",
-            "source_db",
-            "evidence_evalue",
-            "evidence_score",
-        ],
+        columns=_RAW_ATOM_COLUMNS,
     )
     state_frame = pd.DataFrame.from_records(
         [
@@ -1579,30 +2015,40 @@ def _persist_generation_chunk(
             )
             for protein_id, state in states.items()
         ],
-        columns=[
-            "protein_id",
-            "activities",
-            "roles",
-            "architecture",
-            "localization",
-            "topology",
-            "size_class",
-            "quality_flags",
-            "composite_predicates",
-            "unresolved_count",
-        ],
+        columns=_STATE_COLUMNS,
     )
     legacy_frame = pd.DataFrame.from_records(
         legacy_rows,
-        columns=["protein_id", "predicates"],
+        columns=_LEGACY_COLUMNS,
+    )
+    _persist_generation_frames(
+        store,
+        _GenerationFrames(
+            raw_atoms=raw_atom_frame,
+            states=state_frame,
+            legacy=legacy_frame,
+        ),
+        update_legacy_predicates=update_legacy_predicates,
+        checkpoint_processed=checkpoint_processed,
+        checkpoint_last_protein_id=checkpoint_last_protein_id,
     )
 
+
+def _persist_generation_frames(
+    store: DuckDBStore,
+    frames: _GenerationFrames,
+    *,
+    update_legacy_predicates: bool,
+    checkpoint_processed: int | None,
+    checkpoint_last_protein_id: str | None,
+) -> None:
+    """Append prebuilt columnar frames and advance the atomic checkpoint."""
     registered_views = [
-        ("_v2_raw_atoms_batch", raw_atom_frame),
-        ("_v2_states_batch", state_frame),
+        ("_v2_raw_atoms_batch", frames.raw_atoms),
+        ("_v2_states_batch", frames.states),
     ]
     if update_legacy_predicates:
-        registered_views.append(("_v2_legacy_batch", legacy_frame))
+        registered_views.append(("_v2_legacy_batch", frames.legacy))
     for view_name, frame in registered_views:
         store.conn.register(view_name, frame)
 

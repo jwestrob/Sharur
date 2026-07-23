@@ -92,7 +92,11 @@ class TestSharurFacade:
 
     def test_v2_search_by_atoms_direct_access(self, sharur):
         """V2 atom search should include V1-style direct accession keys."""
-        sharur.generate_v2(protein_ids=["prot_008"], chunk_size=1)
+        sharur.generate_v2(
+            protein_ids=["prot_008"],
+            chunk_size=1,
+            pipeline_depth=1,
+        )
 
         result = sharur.search_by_atoms(has=["pfam:PF00005"])
 

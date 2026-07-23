@@ -227,6 +227,7 @@ def test_slurm_bundle_preserves_dependencies_and_keeps_minced_local(tmp_path):
         skip_crispr=False,
         skip_embeddings=False,
         enable_cazymes=False,
+        pipeline_depth=3,
     )
 
     submit = _emit_slurm_bundle(
@@ -245,6 +246,9 @@ def test_slurm_bundle_preserves_dependencies_and_keeps_minced_local(tmp_path):
     assert "--gres=gpu" in (data_dir / "slurm" / "06.sbatch").read_text()
     assert "--gres=gpu" not in (data_dir / "slurm" / "06i.sbatch").read_text()
     assert "--skip-index" in (data_dir / "slurm" / "06.sbatch").read_text()
+    stage07_command = dag.nodes["07"].command
+    pipeline_option = stage07_command.index("--pipeline-depth")
+    assert stage07_command[pipeline_option + 1] == "3"
     submit_text = submit.read_text()
     assert "bash" in submit_text
     assert "05c.local.sh" in submit_text

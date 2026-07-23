@@ -9,6 +9,7 @@ sharur-ingest \
   --input-dir /path/to/genome_fastas \
   --data-dir data/my_dataset \
   --output data/my_dataset/sharur.duckdb \
+  --pipeline-depth 2 \
   --profile auto
 ```
 
@@ -19,7 +20,8 @@ The default plan runs the core stages and skips optional QUAST, DFAST, GECCO, an
 deprecated legacy dbCAN helper. Opt in with `--with-quast`, `--with-dfast`,
 `--with-gecco`, or `--with-legacy-dbcan`. The separate Stage 07 dbCAN three-tool
 consensus classifier is opt-in with `--enable-cazymes`. `--dry-run` prints the exact
-stage order and paths without creating the dataset directory.
+stage order and paths without creating the dataset directory. The bounded Stage 07
+pipeline defaults to `--pipeline-depth 2`.
 
 The primary CLI builds a dependency DAG and writes its run, stage attempts, signatures,
 heartbeats, resources, commands, and output snapshots to `data/my_dataset/sharur_ops.db`.
@@ -402,6 +404,7 @@ python src/ingest/07_build_knowledge_base.py -d data/DATASET -o data/DATASET/sha
 | `--force` | off | Overwrite existing database |
 | `--resume-v2` | off | Continue a compatible interrupted V2 generation from its committed checkpoint |
 | `--restart-v2` | off | Rebuild only V2 products while preserving completed upstream database tables |
+| `--pipeline-depth` | `2` | Maximum V2 transform chunks in flight while the ordered writer commits the preceding chunk |
 | `--enable-cazymes` | off | Run the slower dbCAN three-tool consensus classifier |
 
 When `--threads` is omitted inside Slurm, Stage 07 uses
@@ -410,6 +413,14 @@ annotation loading, build source query indexes once before caller validation
 and V2 generation, then publish the final indexes after generation. Annotation
 chunks and curated defense/secretion calls are fail-closed: an exception
 terminates the build before predicates and final indexes are written.
+
+Parallel V2 generation uses a bounded three-stage pipeline: a dedicated reader
+prefetches one chunk, process workers return columnar atom/state frames, and the
+parent process commits completed chunks in source order. The parent remains the
+sole DuckDB writer, so each checkpoint still identifies an atomically committed
+prefix. `--pipeline-depth 2` overlaps one transform with the preceding commit
+while bounding in-flight chunk memory; increase it only after measuring a
+workload where transformation remains the limiting stage.
 
 `--resume-v2` requires the same semantic code/config and source-table signature
 as the saved checkpoint. Use `--restart-v2` after deploying a changed semantic
@@ -422,18 +433,16 @@ checkpointed V2 generation.
 3. Loads all annotation TSV files from Stage 04, applying e-value thresholds per source
 4. Loads CRISPR arrays from Stage 05c JSON files into `loci` table
 5. Loads BGC loci from Stage 05a (if present)
-6. Builds source-table query indexes once after bulk annotation writes
-7. Generates V2 products in index-free scratch tables, promotes them
-   atomically, and creates the semantic query indexes once
 6. Computes length z-scores per bin
 7. Runs HydDB subgroup classification (if HydDB annotations exist)
 8. Optionally runs dbCAN three-tool consensus CAZyme classification when `--enable-cazymes` is set
-9. Calls DefenseFinder systems with replicon-local model semantics → `defense_systems`, normalized membership, and `defensefinder_system` annotations
-10. Calls TXSScan systems with replicon-local model semantics → `secretion_systems`, normalized membership, and `txsscan_system` annotations
-11. Generates V2 semantic atoms/states for all proteins
-12. Materializes `protein_predicates` from V2 for legacy query compatibility
-13. Emits CRISPR-overlap quality flags in V2 and the compatibility table
-14. Creates indexes
+9. Builds source-table query indexes once after bulk annotation writes
+10. Calls DefenseFinder systems with replicon-local model semantics → `defense_systems`, normalized membership, and `defensefinder_system` annotations
+11. Calls TXSScan systems with replicon-local model semantics → `secretion_systems`, normalized membership, and `txsscan_system` annotations
+12. Generates V2 products in index-free scratch tables, promotes them atomically, and creates the semantic query indexes once
+13. Materializes `protein_predicates` from V2 for legacy query compatibility
+14. Emits CRISPR-overlap quality flags in V2 and the compatibility table
+15. Creates final indexes
 
 **E-value thresholds applied at load time:**
 

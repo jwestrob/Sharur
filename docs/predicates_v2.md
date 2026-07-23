@@ -112,6 +112,7 @@ b.generate_v2(update_legacy_predicates=True)
 b.generate_v2(
     workers=64,
     chunk_size=100_000,
+    pipeline_depth=2,
     update_legacy_predicates=True,
 )
 ```
@@ -120,15 +121,32 @@ b.generate_v2(
 
 Full-dataset generation splits each database chunk into bounded worker
 microbatches. The default microbatch target is about two tasks per worker,
-capped at 5,000 proteins. Worker results return in input order and one parent
-process appends atoms, states, search terms, compatibility predicates, and the
-checkpoint through a single DuckDB connection.
+capped at 5,000 proteins. Parallel full refreshes use a three-stage bounded
+pipeline:
 
-This design holds bulk data memory near one database chunk plus its worker
-shards. Each worker also carries one Python interpreter and one copy of the
-predicate rule state, so that smaller component scales with worker count.
-Stage 07 passes its resolved `--threads` value directly to V2; under Slurm this
-resolves from `SLURM_CPUS_ON_NODE`.
+1. A thread-owned DuckDB cursor reads and prepares the next source chunk.
+2. Persistent worker processes transform current chunks and return columnar
+   atom/state/compatibility frames.
+3. The parent process commits completed chunks in protein order through the
+   sole DuckDB writer.
+
+The default `pipeline_depth=2` keeps two ordered transform chunks in flight and
+one read-ahead queue slot. Source reads and transforms therefore continue
+during the prior chunk's commit. Checkpoint order remains identical to the
+serial path. `pipeline_depth=1` provides a low-memory diagnostic baseline;
+larger values add bounded buffers and can be benchmarked for unusually
+high-latency storage.
+
+Each worker maintains a 100,000-entry LRU cache of immutable annotation mapping
+specifications. Repeated PFAM, KEGG, CAZy, VOGdb, HydDB, and curated-caller
+annotations reuse hierarchy/facet/relation work while each hit receives its
+own protein ID, score, and e-value. Worker outputs cross the process boundary
+as primitive columnar frames and register directly with DuckDB.
+
+Bulk memory is bounded by the configured pipeline, read-ahead slot, worker
+microbatches, and per-worker mapping caches. Stage 07 passes its resolved
+`--threads` value directly to V2; under Slurm this resolves from
+`SLURM_CPUS_ON_NODE`.
 
 Full refreshes append into constraint-free `v2_generation_*` tables. This keeps
 the dominant write path sequential and leaves the canonical ART indexes out of
@@ -147,6 +165,7 @@ python src/ingest/07_build_knowledge_base.py \
   --data-dir data/my_dataset \
   --output data/my_dataset/sharur.duckdb \
   --threads 64 \
+  --pipeline-depth 2 \
   --force
 
 # Continue an interrupted V2 phase from its latest committed chunk
@@ -166,10 +185,29 @@ python src/ingest/07_build_knowledge_base.py \
 ```
 
 The facade exposes the same recovery path with
-`b.generate_v2(workers=64, resume=True, return_states=False)`. Resume applies
-to a compatible interrupted generation. `--restart-v2` selects a new semantic
-generation contract and reuses the completed upstream database tables. Subset
-refreshes retain their targeted replacement behavior.
+`b.generate_v2(workers=64, pipeline_depth=2, resume=True,
+return_states=False)`. Resume applies to a compatible interrupted generation.
+`--restart-v2` selects a new semantic generation contract and reuses the
+completed upstream database tables. Subset refreshes retain their targeted
+replacement behavior.
+
+Use the synthetic, end-to-end benchmark to tune a host while verifying exact
+state and atom counts:
+
+```bash
+python scripts/benchmark_v2_pipeline.py \
+  --proteins 100000 \
+  --workers 8 \
+  --chunk-size 10000 \
+  --pipeline-depth 1 2 3
+```
+
+On the development Mac benchmark, the combined mapping cache and depth-two
+pipeline processed the 100,000-protein/900,000-atom corpus at 2,194.5
+proteins/s versus 1,257.6 proteins/s for the pre-change depth-one baseline.
+Both runs produced exactly 100,000 states and 900,000 atoms. Treat host-local
+benchmarks as tuning evidence; production throughput also reflects annotation
+diversity, storage latency, promotion, and index construction.
 
 Review queue generation performs a set-oriented aggregation over persisted
 `semantic_atoms` after the final chunk. Its Python memory footprint therefore

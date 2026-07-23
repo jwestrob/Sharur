@@ -2,6 +2,7 @@
 
 import pytest
 
+import sharur.predicates_v2.generator as generator_module
 from sharur.predicates.generator import AnnotationRecord, ProteinRecord
 from sharur.predicates_v2.generator import AtomGenerator
 from sharur.predicates_v2.model import ClaimRelation, SemanticFacet
@@ -221,6 +222,66 @@ class TestAtomGenerator:
         for atom in ann_atoms:
             assert atom.evidence_evalue == 3.14e-42
             assert atom.evidence_score == 187.3
+
+    def test_repeated_annotation_mapping_reuses_specs_with_fresh_evidence(self):
+        """Cached mapping specs must retain per-hit IDs and evidence values."""
+        gen = AtomGenerator()
+        first = gen.generate_atoms(
+            ProteinRecord(protein_id="first", sequence_length=500),
+            [AnnotationRecord(
+                source="pfam",
+                accession="PF00005",
+                name="ABC_tran",
+                description="ABC transporter",
+                evalue=1e-20,
+                score=100.0,
+            )],
+        )
+        second = gen.generate_atoms(
+            ProteinRecord(protein_id="second", sequence_length=500),
+            [AnnotationRecord(
+                source="pfam",
+                accession="PF00005",
+                name="ABC_tran",
+                description="ABC transporter",
+                evalue=1e-80,
+                score=400.0,
+            )],
+        )
+
+        assert len(gen._annotation_atom_spec_cache) == 1
+        first_transporter = next(
+            atom for atom in first if atom.atom_id == "transporter"
+        )
+        second_transporter = next(
+            atom for atom in second if atom.atom_id == "transporter"
+        )
+        assert first_transporter.protein_id == "first"
+        assert first_transporter.evidence_evalue == 1e-20
+        assert first_transporter.evidence_score == 100.0
+        assert second_transporter.protein_id == "second"
+        assert second_transporter.evidence_evalue == 1e-80
+        assert second_transporter.evidence_score == 400.0
+
+    def test_annotation_mapping_cache_is_lru_bounded(self, monkeypatch):
+        monkeypatch.setattr(generator_module, "_ANNOTATION_ATOM_CACHE_SIZE", 2)
+        gen = AtomGenerator()
+        protein = ProteinRecord(protein_id="test", sequence_length=100)
+
+        for accession in ("UNKNOWN_1", "UNKNOWN_2", "UNKNOWN_3"):
+            gen.generate_atoms(
+                protein,
+                [AnnotationRecord(source="pfam", accession=accession)],
+            )
+
+        assert len(gen._annotation_atom_spec_cache) == 2
+        assert (
+            "pfam", "UNKNOWN_1", "", ""
+        ) not in gen._annotation_atom_spec_cache
+        assert list(gen._annotation_atom_spec_cache) == [
+            ("pfam", "UNKNOWN_2", "", ""),
+            ("pfam", "UNKNOWN_3", "", ""),
+        ]
 
     def test_cazy_annotation(self):
         """Should generate atoms from CAZy annotation."""

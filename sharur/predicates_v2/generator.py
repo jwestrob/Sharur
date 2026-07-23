@@ -8,7 +8,7 @@ but wraps each emitted predicate with facet + relation metadata.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from collections import OrderedDict
 
 from sharur.predicates.generator import (
     AnnotationRecord,
@@ -18,8 +18,8 @@ from sharur.predicates.generator import (
 from sharur.predicates_v2.model import ClaimRelation, SemanticAtom, SemanticFacet
 from sharur.predicates_v2.rules import get_facet, get_relation
 
-if TYPE_CHECKING:
-    pass
+
+_ANNOTATION_ATOM_CACHE_SIZE = 100_000
 
 
 class AtomGenerator:
@@ -33,7 +33,7 @@ class AtomGenerator:
         self,
         expand_hierarchy: bool = True,
         predict_topology: bool = True,
-        vog_reference_path: Optional[str] = None,
+        vog_reference_path: str | None = None,
     ):
         """Initialize the atom generator.
 
@@ -50,6 +50,13 @@ class AtomGenerator:
             predict_topology=predict_topology,
             vog_reference_path=vog_reference_path,
         )
+        # Annotation mappings repeat heavily across proteomes. Cache immutable
+        # atom specifications while attaching protein IDs and evidence values
+        # afresh for each hit.
+        self._annotation_atom_spec_cache: OrderedDict[
+            tuple[str, str, str, str],
+            tuple[tuple[str, SemanticFacet, ClaimRelation], ...],
+        ] = OrderedDict()
 
     def generate_atoms(
         self,
@@ -125,9 +132,7 @@ class AtomGenerator:
         # Replicate V1's _validate_hydrogenase_calls: NiFe hydrogenase
         # hits from HydDB are false positives when Complex I domains
         # are present without PF00374 (NiFeSe_Hases).
-        atoms = self._validate_hydrogenase_atoms(atoms)
-
-        return atoms
+        return self._validate_hydrogenase_atoms(atoms)
 
     def _atoms_from_annotation(
         self,
@@ -139,50 +144,57 @@ class AtomGenerator:
         Uses V1's _predicates_from_annotation internally, then wraps
         each predicate with the appropriate facet and relation.
         """
-        # Get V1 predicates for this annotation
-        v1_preds = self._v1_gen._predicates_from_annotation(ann)
-
-        # Also run hierarchy expansion on them
-        if self._v1_gen.expand_hierarchy:
-            v1_preds = self._v1_gen._expand_hierarchy(v1_preds)
-
-        atoms = []
         source_db = ann.source.lower()
+        cache_key = (
+            source_db,
+            ann.accession or "",
+            ann.name or "",
+            ann.description or "",
+        )
+        specs = self._annotation_atom_spec_cache.get(cache_key)
+        if specs is not None:
+            self._annotation_atom_spec_cache.move_to_end(cache_key)
+        else:
+            # Get V1 predicates for this annotation.
+            v1_preds = self._v1_gen._predicates_from_annotation(ann)
 
-        # Get the base relation for this source + accession
-        base_relation = get_relation(source_db, ann.accession)
+            # Also run hierarchy expansion on them.
+            if self._v1_gen.expand_hierarchy:
+                v1_preds = self._v1_gen._expand_hierarchy(v1_preds)
 
-        # Meta-predicates that V1 emits per-annotation but are not
-        # semantic mappings — they indicate annotation quality, not function.
-        # (hypothetical is kept — it flows through as a quality_flag atom)
-        _META_PREDICATES = {
-            "confident_hit", "weak_hit",
-        }
+            # Meta-predicates that V1 emits per-annotation but are not
+            # semantic mappings — they indicate annotation quality, not
+            # function. Hypothetical remains a semantic quality atom.
+            meta_predicates = {
+                "confident_hit", "weak_hit",
+            }
+            base_relation = get_relation(source_db, ann.accession)
+            built_specs: list[
+                tuple[str, SemanticFacet, ClaimRelation]
+            ] = []
+            for pred_id in v1_preds:
+                # Direct-access predicates are index keys rather than atoms.
+                if ":" in pred_id and pred_id.split(":")[0] in (
+                    "pfam", "kegg", "kofam", "cazy", "vog", "hyddb",
+                    "hyddb_subgroup", "defensefinder", "txsscan",
+                ):
+                    continue
+                if pred_id.endswith("_annotated"):
+                    continue
+                if pred_id in meta_predicates:
+                    continue
+                built_specs.append((
+                    pred_id,
+                    get_facet(pred_id),
+                    base_relation,
+                ))
+            specs = tuple(built_specs)
+            self._annotation_atom_spec_cache[cache_key] = specs
+            if len(self._annotation_atom_spec_cache) > _ANNOTATION_ATOM_CACHE_SIZE:
+                self._annotation_atom_spec_cache.popitem(last=False)
 
-        for pred_id in v1_preds:
-            # Skip direct-access predicates (pfam:PF00005, kegg:K00001, etc.)
-            # These are not semantic atoms — they're index keys
-            if ":" in pred_id and pred_id.split(":")[0] in (
-                "pfam", "kegg", "kofam", "cazy", "vog", "hyddb",
-                "hyddb_subgroup", "defensefinder", "txsscan",
-            ):
-                continue
-
-            # Skip source-annotated flags that are quality indicators
-            # (pfam_annotated, kegg_annotated, etc.) — handled separately
-            if pred_id.endswith("_annotated"):
-                continue
-
-            # Skip meta-predicates (confidence, hypothetical status)
-            # These are generated per-annotation by V1 but belong in
-            # annotation status atoms, not semantic mapping atoms.
-            if pred_id in _META_PREDICATES:
-                continue
-
-            facet = get_facet(pred_id)
-            relation = base_relation
-
-            atoms.append(SemanticAtom(
+        return [
+            SemanticAtom(
                 protein_id=protein_id,
                 atom_id=pred_id,
                 facet=facet,
@@ -191,9 +203,9 @@ class AtomGenerator:
                 source_db=source_db,
                 evidence_evalue=ann.evalue,
                 evidence_score=ann.score,
-            ))
-
-        return atoms
+            )
+            for pred_id, facet, relation in specs
+        ]
 
     def _atoms_from_properties(
         self, protein: ProteinRecord,
@@ -298,7 +310,7 @@ class AtomGenerator:
 
 
 __all__ = [
-    "AtomGenerator",
     "AnnotationRecord",
+    "AtomGenerator",
     "ProteinRecord",
 ]
