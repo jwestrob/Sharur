@@ -221,21 +221,22 @@ data plane after sealing:
 pip install -e ".[ops]"
 
 export SHARUR_OPS_URL=http://ops-host:8811
-export SHARUR_QUERY_STAGE_DIR=/local-nvme/sharur/my_dataset
 
 sharur-query \
   --db data/my_dataset/sharur.duckdb \
+  --direct \
   --host 0.0.0.0 \
   --threads 16 \
   --memory-limit 32GB \
   --max-temp-size 256GB
 ```
 
-The service verifies the dataset seal, stages one atomic immutable local
-replica, owns one DuckDB instance/cache, and authenticates agent tokens through
-Sharur Ops. Typed endpoints enforce queue, execution, row, request, and result
-bounds. See [`docs/query_service.md`](docs/query_service.md) for deployment,
-resource arithmetic, cancellation, and telemetry.
+The service verifies the dataset seal, owns one read-only DuckDB instance/cache,
+and authenticates agent tokens through Sharur Ops. Direct mode avoids a
+same-tier copy; `--stage-dir` remains available for a genuinely distinct
+storage tier. Typed endpoints enforce queue, execution, row, request, and
+result bounds. See [`docs/query_service.md`](docs/query_service.md) for
+deployment, resource arithmetic, cancellation, and telemetry.
 
 For exhaustive genome-by-genome reading, build sealed one-genome ownership
 units and enqueue them through Ops:
@@ -246,7 +247,17 @@ sharur seal --db data/my_dataset/sharur.duckdb --force
 
 sharur-atlas plan \
   --db data/my_dataset/sharur.duckdb \
-  --output-dir data/my_dataset/atlas
+  --output-dir data/my_dataset/atlas \
+  --packet-contigs 128 \
+  --packet-proteins 500 \
+  --packet-bytes 524288
+
+sharur-atlas packet-census \
+  --plan-dir data/my_dataset/atlas
+
+sharur-atlas verify-packet-census \
+  --plan-dir data/my_dataset/atlas \
+  --deep
 
 sharur-atlas enqueue \
   --plan-dir data/my_dataset/atlas \
@@ -254,10 +265,13 @@ sharur-atlas enqueue \
   --query-url http://query-host:8812
 ```
 
-Atlas traverses every contig through bounded sequence-free packets and proves
-completion with per-genome coverage manifests. Each scanner also emits typed
-candidate occurrences and one reconciled unit disposition. Reduce and route
-the resulting review DAG:
+Atlas packs consecutive records from exactly one bin per bounded,
+sequence-free model packet. Whole contigs stay together when they fit;
+oversized contigs resume by stable protein offset. The zero-model-call census
+must pass before enqueue, and per-genome coverage manifests prove every frame,
+contig segment, and protein total. Each scanner also emits typed candidate
+occurrences and one reconciled unit disposition. Reduce and route the
+resulting review DAG:
 
 ```bash
 sharur-review reduce --ops-url http://ops-host:8811 \

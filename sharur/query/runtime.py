@@ -392,6 +392,16 @@ class ReadOnlyDuckDBRuntime:
         self._thread_local.generation = self._generation
         return store
 
+    def cursor_store(self) -> CursorStore:
+        """Return this thread's cursor over the shared read-only DuckDB instance.
+
+        Offline bounded workflows use this surface to parallelize typed
+        operators while retaining one database owner, buffer cache, memory
+        ceiling, thread pool, and spill budget. HTTP execution continues
+        through :meth:`execute` for cancellation and telemetry.
+        """
+        return self._store_for_thread()
+
     def _discard_store(self, store: CursorStore) -> None:
         with self._state_lock, contextlib.suppress(ValueError):
             self._cursors.remove(store.conn)

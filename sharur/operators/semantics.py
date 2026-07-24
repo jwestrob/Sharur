@@ -81,10 +81,16 @@ def get_active_predicates_for_protein(
 
 
 def _table_names(store: DuckDBStore) -> set[str]:
+    cached = getattr(store, "_sharur_semantic_table_names", None)
+    if cached is not None:
+        return cached
     try:
-        return {str(row[0]) for row in store.execute("SHOW TABLES")}
+        table_names = {str(row[0]) for row in store.execute("SHOW TABLES")}
     except Exception:
         return set()
+    if getattr(store, "read_only", False):
+        store._sharur_semantic_table_names = table_names
+    return table_names
 
 
 __all__ = ["get_active_predicates", "get_active_predicates_for_protein"]

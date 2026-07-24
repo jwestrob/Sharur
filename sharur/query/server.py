@@ -35,7 +35,18 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sharur import __version__
 from sharur.dataset_seal import DEFAULT_SEAL_NAME, DatasetSealError, verify_dataset_seal
 from sharur.operators.base import SharurResult
-from sharur.operators.contigs import get_contig, get_contig_packet, list_contigs
+from sharur.operators.contigs import (
+    DEFAULT_GENOME_PACKET_BYTES,
+    DEFAULT_GENOME_PACKET_CONTIGS,
+    DEFAULT_GENOME_PACKET_PROTEINS,
+    MAX_GENOME_PACKET_BYTES,
+    MAX_GENOME_PACKET_CONTIGS,
+    MAX_GENOME_PACKET_PROTEINS,
+    get_contig,
+    get_contig_packet,
+    get_genome_packet,
+    list_contigs,
+)
 from sharur.operators.introspection import overview
 from sharur.operators.navigation import (
     get_genome,
@@ -122,6 +133,27 @@ class ContigPacketQuery(StrictModel):
     contig_id: str = Field(min_length=1, max_length=2_048)
     cursor: str | None = Field(default=None, max_length=4_096)
     limit: int = Field(default=100, ge=1, le=250)
+    all_annotations: bool = True
+
+
+class GenomePacketQuery(StrictModel):
+    genome_id: str = Field(min_length=1, max_length=1_024)
+    cursor: str | None = Field(default=None, max_length=4_096)
+    max_contigs: int = Field(
+        default=DEFAULT_GENOME_PACKET_CONTIGS,
+        ge=1,
+        le=MAX_GENOME_PACKET_CONTIGS,
+    )
+    max_proteins: int = Field(
+        default=DEFAULT_GENOME_PACKET_PROTEINS,
+        ge=1,
+        le=MAX_GENOME_PACKET_PROTEINS,
+    )
+    max_model_payload_bytes: int = Field(
+        default=DEFAULT_GENOME_PACKET_BYTES,
+        ge=1_024,
+        le=MAX_GENOME_PACKET_BYTES,
+    )
     all_annotations: bool = True
 
 
@@ -671,6 +703,18 @@ def create_app(
             ),
         )
 
+    @router.post("/v1/genomes/packet")
+    async def genome_packet(body: GenomePacketQuery, request: Request):
+        return await run_operator(
+            request,
+            operator="get_genome_packet",
+            query_class="light",
+            operation=lambda store: get_genome_packet(
+                store,
+                **body.model_dump(),
+            ),
+        )
+
     @router.get("/v1/proteins/{protein_id}")
     async def protein_detail(
         request: Request,
@@ -790,7 +834,7 @@ def main() -> None:
     parser.add_argument(
         "--direct",
         action="store_true",
-        help="Open the verified source database in place instead of staging a replica",
+        help="Open the verified immutable source database in place",
     )
     parser.add_argument("--seal", type=Path)
     parser.add_argument(
@@ -873,7 +917,7 @@ def main() -> None:
     if not args.direct and args.stage_dir is None:
         parser.error(
             "--stage-dir (or SHARUR_QUERY_STAGE_DIR) is required; "
-            "use --direct only for an already-local immutable database"
+            "use --direct to serve the verified immutable source in place"
         )
     token = os.environ.get("SHARUR_QUERY_TOKEN")
     if not is_loopback(args.host) and not token and not args.ops_url:

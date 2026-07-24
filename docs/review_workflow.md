@@ -22,7 +22,9 @@ remains reconstructable.
 ## Scope boundary
 
 Atlas owns scientific partitioning: one logical unit per genome and exhaustive
-contig traversal within that unit. Ops owns leases, retries, review routing,
+bin-scoped packet traversal within that unit. Each model frame draws from one
+exact `bins.bin_id`; its packing census and coverage receipts preserve every
+contig segment and protein offset. Ops owns leases, retries, review routing,
 and provenance. Executors map tasks to Codex sessions, Claude agents, local
 workers, Slurm jobs, arrays, or another runtime.
 

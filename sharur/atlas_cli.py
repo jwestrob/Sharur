@@ -9,11 +9,19 @@ from typing import Annotated
 import typer
 
 from sharur.atlas import (
-    DEFAULT_CHECKPOINT_INTERVAL_CONTIGS,
+    DEFAULT_CENSUS_MAX_TEMP_SIZE,
+    DEFAULT_CENSUS_MEMORY_LIMIT,
+    DEFAULT_CENSUS_WORKERS,
+    DEFAULT_CHECKPOINT_INTERVAL_FRAMES,
+    DEFAULT_PACKET_BYTES,
+    DEFAULT_PACKET_CONTIGS,
     DEFAULT_PACKET_PROTEINS,
+    DEFAULT_QUERY_RESULT_LIMIT_BYTES,
+    build_atlas_packet_census,
     build_atlas_plan,
     enqueue_atlas_plan,
     verify_atlas_coverage,
+    verify_atlas_packet_census,
 )
 from sharur.ops.client import SharurOps
 
@@ -33,14 +41,30 @@ def plan_command(
         Path | None,
         typer.Option("--seal", exists=True, dir_okay=False),
     ] = None,
+    packet_contigs: Annotated[
+        int,
+        typer.Option("--packet-contigs", min=1, max=512),
+    ] = DEFAULT_PACKET_CONTIGS,
     packet_proteins: Annotated[
         int,
-        typer.Option("--packet-proteins", min=1, max=250),
+        typer.Option("--packet-proteins", min=1, max=500),
     ] = DEFAULT_PACKET_PROTEINS,
-    checkpoint_interval_contigs: Annotated[
+    packet_bytes: Annotated[
         int,
-        typer.Option("--checkpoint-interval-contigs", min=1),
-    ] = DEFAULT_CHECKPOINT_INTERVAL_CONTIGS,
+        typer.Option("--packet-bytes", min=1_024, max=1_500_000),
+    ] = DEFAULT_PACKET_BYTES,
+    all_annotations: Annotated[
+        bool,
+        typer.Option("--all-annotations/--top-annotation-only"),
+    ] = True,
+    checkpoint_interval_frames: Annotated[
+        int,
+        typer.Option("--checkpoint-interval-frames", min=1),
+    ] = DEFAULT_CHECKPOINT_INTERVAL_FRAMES,
+    query_result_bytes: Annotated[
+        int,
+        typer.Option("--query-result-bytes", min=4_097),
+    ] = DEFAULT_QUERY_RESULT_LIMIT_BYTES,
     threads: Annotated[int, typer.Option("--threads", min=1)] = 4,
     verify_seal: Annotated[
         bool,
@@ -52,10 +76,90 @@ def plan_command(
         db,
         output_dir,
         seal_path=seal,
+        packet_contig_limit=packet_contigs,
         packet_protein_limit=packet_proteins,
-        checkpoint_interval_contigs=checkpoint_interval_contigs,
+        packet_model_payload_bytes=packet_bytes,
+        packet_all_annotations=all_annotations,
+        checkpoint_interval_frames=checkpoint_interval_frames,
+        query_result_limit_bytes=query_result_bytes,
         threads=threads,
         verify_seal=verify_seal,
+    )
+    typer.echo(json.dumps(result, indent=2, sort_keys=True))
+
+
+@app.command("packet-census")
+def packet_census_command(
+    plan_dir: Annotated[Path, typer.Option("--plan-dir", exists=True, file_okay=False)],
+    output_dir: Annotated[Path | None, typer.Option("--output-dir")] = None,
+    workers: Annotated[int, typer.Option("--workers", min=1)] = DEFAULT_CENSUS_WORKERS,
+    threads: Annotated[int, typer.Option("--threads", min=1)] = 4,
+    memory_limit: Annotated[
+        str,
+        typer.Option("--memory-limit"),
+    ] = DEFAULT_CENSUS_MEMORY_LIMIT,
+    temp_directory: Annotated[Path | None, typer.Option("--temp-directory")] = None,
+    max_temp_size: Annotated[
+        str,
+        typer.Option("--max-temp-size"),
+    ] = DEFAULT_CENSUS_MAX_TEMP_SIZE,
+    resume: Annotated[bool, typer.Option("--resume/--recompute")] = True,
+    verify_seal: Annotated[
+        bool,
+        typer.Option("--verify-seal/--skip-seal-verification"),
+    ] = True,
+) -> None:
+    """Count exact bin-scoped packets and payload sizes with zero model calls."""
+
+    def report_progress(progress: dict) -> None:
+        completed = int(progress["completed_units"])
+        total = int(progress["total_units"])
+        if (
+            completed == total
+            or completed % 100 == 0
+            or progress["status"] == "resumed"
+        ):
+            percent = 100.0 * completed / total if total else 100.0
+            typer.echo(
+                (
+                    f"packet-census {completed:,}/{total:,} units "
+                    f"({percent:.2f}%); "
+                    f"{int(progress['cumulative_frame_count']):,} frames"
+                ),
+                err=True,
+            )
+
+    result = build_atlas_packet_census(
+        plan_dir,
+        output_dir=output_dir,
+        workers=workers,
+        threads=threads,
+        memory_limit=memory_limit,
+        temp_directory=temp_directory,
+        max_temp_directory_size=max_temp_size,
+        resume=resume,
+        verify_seal=verify_seal,
+        progress_callback=report_progress,
+    )
+    typer.echo(json.dumps(result, indent=2, sort_keys=True))
+    if result["status"] != "complete":
+        raise typer.Exit(code=1)
+
+
+@app.command("verify-packet-census")
+def verify_packet_census_command(
+    plan_dir: Annotated[Path, typer.Option("--plan-dir", exists=True, file_okay=False)],
+    census_dir: Annotated[
+        Path | None,
+        typer.Option("--census-dir", exists=True, file_okay=False),
+    ] = None,
+    deep: Annotated[bool, typer.Option("--deep/--summary-only")] = False,
+) -> None:
+    """Verify the zero-model-call launch gate and optional unit records."""
+    result = verify_atlas_packet_census(
+        plan_dir,
+        census_dir=census_dir,
+        deep=deep,
     )
     typer.echo(json.dumps(result, indent=2, sort_keys=True))
 

@@ -133,10 +133,11 @@ checkpoint writes at scientifically safe boundaries to control SQLite and
 HTTP mutation volume.
 
 Atlas campaigns use the specialized plan and packet contract in
-`.claude/skills/atlas.md`: one task per genome, ordered contig pages,
-sequence-free protein packets, checkpointed contig prefixes, and exact
-coverage manifests. Dataset size changes the number of dynamically claimed
-tasks while preserving exhaustive traversal.
+`.claude/skills/atlas.md`: one task per genome, adaptive sequence-free packets
+containing data from exactly one bin, packet-cursor checkpoints, a mandatory
+zero-model-call packet census, and exact frame/contig/protein coverage
+manifests. Dataset size changes the number of dynamically claimed tasks while
+preserving exhaustive traversal.
 
 ### Hierarchical review workers
 

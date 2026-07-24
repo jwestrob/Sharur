@@ -266,7 +266,7 @@ ops.put_task_checkpoint(
     task_id,
     "atlas_progress",
     cursor=opaque_cursor,
-    payload={"completed_contigs": 250},
+    payload={"completed_frames": 50, "completed_contigs": 250},
 )
 ```
 
@@ -278,8 +278,8 @@ carry a 4,096-character cursor bound and the standard 256 KiB inline JSON
 bound.
 
 Workers batch checkpoint updates at scientifically safe recovery boundaries.
-For Atlas, the default boundary is a completed page of 25 contigs, with
-additional in-contig checkpoints reserved for unusually large contigs.
+For Atlas, the default boundary is one completed bin-scoped model frame. The
+opaque genome-packet cursor carries any oversized-contig continuation.
 
 ## Resource-aware analysis
 

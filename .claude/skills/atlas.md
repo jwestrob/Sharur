@@ -1,8 +1,8 @@
 # Atlas Skill
 
 Exhaustive bottom-up reading of every genome, contig, and protein in a sealed
-Sharur dataset. Atlas uses deterministic genome ownership, bounded contig
-packets, retry-persistent checkpoints, and machine-verifiable coverage.
+Sharur dataset. Atlas uses deterministic genome ownership, bounded adaptive
+genome packets, retry-persistent checkpoints, and machine-verifiable coverage.
 
 Atlas and scheduler parallelism are separate concepts:
 
@@ -31,11 +31,13 @@ Read these before coordinating or executing Atlas:
 1. Ownership unit: one genome.
 2. Traversal order: `genome_id`, then `contig_id`, then
    `gene_index NULLS LAST, start, protein_id`.
-3. Model-call unit: one bounded, sequence-free contig packet.
-4. Checkpoint unit: a completed prefix of contigs, with optional in-contig
-   packet state for unusually large contigs.
-5. Completion proof: a per-genome coverage manifest whose contig and protein
-   totals equal the sealed plan.
+3. Model-call unit: one bounded, sequence-free packet containing consecutive
+   data from exactly one `bins.bin_id`. A packet may carry several contigs.
+   Oversized contigs continue across packets by stable protein offset.
+4. Checkpoint unit: a completed prefix of genome packets represented by one
+   opaque packet cursor.
+5. Completion proof: a per-genome coverage manifest whose frame, contig,
+   segment, and protein receipts equal the sealed plan.
 6. Dataset identity: every plan, task, query trace, cursor, and coverage
    manifest carries the sealed `dataset_id`.
 7. Full scale remains exhaustive. Dataset size changes worker count and
@@ -47,7 +49,7 @@ Read these before coordinating or executing Atlas:
 
 ## Observation and naming boundary
 
-Contig packets expose three distinct evidence classes:
+Genome packets expose three distinct evidence classes:
 
 - `observed_annotations`: raw per-domain observations.
 - `named_calls`: exact names emitted by live structured caller resources.
@@ -70,14 +72,19 @@ sharur verify-seal data/DATASET/dataset.seal.json
 sharur-atlas plan \
   --db data/DATASET/sharur.duckdb \
   --output-dir data/DATASET/atlas \
-  --packet-proteins 100 \
-  --checkpoint-interval-contigs 25
+  --packet-contigs 128 \
+  --packet-proteins 500 \
+  --packet-bytes 524288 \
+  --query-result-bytes 2097152 \
+  --checkpoint-interval-frames 1
 ```
 
 Schema migration 6 installs the `(bin_id, contig_id)` navigation index used by
 large exhaustive scans. Run migration in a maintenance window with query
-services stopped, then reseal and restage. The planner fails closed when this
-index is absent.
+services stopped, then reseal and restart the verified query service. A
+campaign-local replica applies when it resides on a genuinely distinct storage
+tier; Biotite serves the canonical immutable database directly from VAST. The
+planner fails closed when this index is absent.
 
 The plan writes:
 
@@ -85,6 +92,9 @@ The plan writes:
 atlas/
 ├── plan.json
 ├── units.jsonl
+├── packet_census/
+│   ├── census.json
+│   └── units/
 └── coverage/
 ```
 
@@ -92,7 +102,36 @@ atlas/
 Counts come from live `contigs` and `proteins` tables. Stored `bins.n_contigs`
 is retained only as a diagnostic comparison.
 
-Launch `sharur-ops` and a sealed `sharur-query` replica, then enqueue:
+Before launching any model worker, enumerate the exact packet stream:
+
+```bash
+sharur-atlas packet-census \
+  --plan-dir data/DATASET/atlas \
+  --workers 4 \
+  --threads 4
+
+sharur-atlas verify-packet-census \
+  --plan-dir data/DATASET/atlas \
+  --deep
+```
+
+The census invokes the real packet builder and zero models. It records exact
+model invocation count, exact canonical payload bytes, transparent 2/3/4
+bytes-per-token scenarios, payload-size distributions, split-contig counts,
+one-bin frame proofs, and projected compact HTTP result sizes with a reserved
+service envelope. Unit records are atomic and resumable. Any target-exceeding
+singleton, query-result overflow, mixed-bin frame, offset gap, duplicated
+segment, or count mismatch blocks enqueue.
+
+The census parallelizes independent genome units through thread-local cursors
+over one read-only DuckDB instance, buffer cache, memory ceiling, and spill
+budget. `--threads` is the shared DuckDB CPU budget and `--workers` is capped
+to that value. A Slurm wrapper must pass its full allocated CPU count to both
+settings; retain the remote cluster preflight rules when choosing where to run
+it.
+
+Launch `sharur-ops` and sealed `sharur-query`, inspect and approve the census,
+then enqueue:
 
 ```bash
 sharur-atlas enqueue \
@@ -107,6 +146,8 @@ Enqueueing is idempotent by plan ID and unit ID. Each task requires the
 slot. Add or remove workers at runtime; dynamic claiming balances genomes by
 completion rate. The profile name resolves to the exact provider, model, and
 effort in the review policy while Atlas retains genome-level ownership.
+`enqueue` verifies the matching completed packet census and attaches its hash
+to the campaign and every task.
 
 ## Worker protocol
 
@@ -127,7 +168,8 @@ task = ops.claim_next_task(
 ```
 
 The claim response contains the plan unit, `query_url`, coverage path,
-checkpoint key, packet limit, and checkpoint interval.
+packet-census path/hash, checkpoint key, exact packet-packing contract, and
+checkpoint interval.
 
 ### Resume
 
@@ -141,76 +183,66 @@ checkpoint = ops.get_task_checkpoint(
 )
 ```
 
-A missing checkpoint means the genome begins at its first contig. The cursor
-is the next `list_contigs()` page position. Checkpoint payload records exact
-completed-contig and completed-protein counts plus any current large-contig
-packet cursor.
+A missing checkpoint means the genome begins at its first packet. The cursor
+is the next `genome_packet()` position and already carries an optional
+in-contig continuation. Checkpoint payload records exact completed-frame,
+contig, and protein counts plus that opaque cursor.
 
 Expired attempts lose checkpoint and terminal-write authority. Treat a fence
 error as immediate evidence that another attempt owns the task.
 
-### Exhaustive contig traversal
+### Exhaustive bin-scoped packet traversal
 
-Request contig pages using `limit=checkpoint_interval_contigs`. This makes a
-successful page the durable checkpoint batch and bounds recovery replay to at
-most one page.
+Request adaptive packets directly from the genome endpoint:
 
 ```python
-page = query.list_contigs(
+packet = query.genome_packet(
     genome_id,
-    limit=checkpoint_interval_contigs,
-    cursor=contig_cursor,
-)
-```
-
-For every contig record in the page:
-
-1. Call `query.get_contig(genome_id, contig_id)` for exact metadata.
-2. Start `packet_cursor=None`.
-3. Repeatedly call `query.contig_packet(...)`.
-4. Read every returned protein record and every evidence class.
-5. Persist a compact contig inventory in the task-local output.
-6. Continue until `raw.complete` is true and `raw.next_cursor` is null.
-7. Record `contig_id`, exact `protein_count`, packet count, and
-   `complete=true` for the coverage manifest.
-
-```python
-packet = query.contig_packet(
-    genome_id,
-    contig_id,
     cursor=packet_cursor,
-    limit=packet_protein_limit,
-    all_annotations=True,
+    max_contigs=task["params"]["packet_contig_limit"],
+    max_proteins=task["params"]["packet_protein_limit"],
+    max_model_payload_bytes=task["params"]["packet_model_payload_bytes"],
+    all_annotations=task["params"]["packet_all_annotations"],
 )
-packet_cursor = packet["raw"]["next_cursor"]
+raw = packet["raw"]
 ```
 
-Packet cursors are opaque and scoped to the exact dataset, genome, and contig.
-Copy them exactly. For a contig spanning many packets, save current packet
-state periodically under the same task checkpoint; this bounds replay while
-preserving a single genome owner.
+For every nonempty `raw.model_payload.contigs` frame:
 
-After every completed contig page:
+1. Verify `raw.dataset_id`, `raw.bin_id`, and
+   `raw.packing_contract_hash` against the task.
+2. Make exactly one model invocation over `raw.model_payload`.
+3. Read every protein record and all three evidence classes.
+4. Aggregate `raw.coverage_receipts` by contig. Protein offsets must remain
+   contiguous and segment indices must increase by one.
+5. Record `frame_coverage_receipt(raw)` for the final coverage manifest.
+6. Copy `raw.next_cursor` exactly and continue through `raw.complete=true`.
+
+The packet builder retains whole contigs whenever they fit a fresh frame.
+Only a contig whose remaining record payload exceeds the contract is split.
+Every contig and receipt carries the requested bin ID, and the operator
+asserts the same bin on every selected protein before serialization.
+
+After each configured frame interval:
 
 ```python
 ops.put_task_checkpoint(
     task["id"],
     checkpoint_key,
-    cursor=page["ref"],
+    cursor=raw["next_cursor"],
     payload={
+        "completed_frames": completed_frames,
         "completed_contigs": completed_contigs,
         "completed_proteins": completed_proteins,
-        "current_contig_id": None,
-        "packet_cursor": None,
+        "packet_cursor": raw["next_cursor"],
     },
 )
 ops.heartbeat_task(task["id"])
 ```
 
-The default interval of 25 reduces a 10.7-million-contig campaign to roughly
-428,000 central checkpoint updates while capping normal replay at 24 completed
-contigs. Tune the interval from the plan when contig-size distributions justify
-a different recovery/write tradeoff.
+The default interval is one model frame. This aligns durable progress with
+paid inference and confines ordinary recovery replay to the current frame.
+Tune it only after the packet census quantifies the write/replay tradeoff.
 
 ## Per-genome output
 
@@ -296,9 +328,11 @@ calibration.
 ## Coverage completion
 
 Build the final per-genome manifest with
-`write_genome_coverage_manifest()` from `sharur.atlas`. Complete the task only
-when its manifest has `coverage_status="complete"`, exact expected totals, all
-candidate writes, and its active unit disposition.
+`write_genome_coverage_manifest(unit, contigs, frames, output_path)` from
+`sharur.atlas`. Use `frame_coverage_receipt()` on each packet. Complete the
+task only when its manifest has `coverage_status="complete"`, exact expected
+totals, contiguous frame and contig-segment receipts, all candidate writes,
+and its active unit disposition.
 
 After all tasks finish:
 
@@ -309,8 +343,9 @@ sharur-atlas verify-coverage --plan-dir data/DATASET/atlas
 The command exits successfully only when:
 
 - every planned unit has one manifest;
-- manifest plan, dataset, unit, genome, and packet identities match;
-- every contig has a terminal packet;
+- manifest plan, dataset, unit, genome, packet, and packing identities match;
+- every frame belongs to the assigned bin and every contig has a terminal
+  segment;
 - per-genome contig and protein totals match the assigned unit;
 - campaign totals match `plan.json`;
 - each manifest content hash is valid.

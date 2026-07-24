@@ -20,7 +20,12 @@ from typing import TYPE_CHECKING, Optional
 from sharur.core.session import ExplorationSession
 from sharur.operators.base import OperatorContext, OperatorTrace, ResultMeta, SharurResult
 from sharur.operators.cases import BiologicalCase, inspect_case
-from sharur.operators.contigs import get_contig, get_contig_packet, list_contigs
+from sharur.operators.contigs import (
+    get_contig,
+    get_contig_packet,
+    get_genome_packet,
+    list_contigs,
+)
 from sharur.operators.export import export_fasta, export_neighborhood_fasta, get_sequence
 from sharur.operators.foldseek import (
     list_foldseek_databases,
@@ -334,6 +339,27 @@ class Sharur:
             contig_id,
             cursor=cursor,
             limit=limit,
+            all_annotations=all_annotations,
+        )
+
+    def get_genome_packet(
+        self,
+        genome_id: str,
+        *,
+        cursor: str | None = None,
+        max_contigs: int = 128,
+        max_proteins: int = 500,
+        max_model_payload_bytes: int = 512 * 1024,
+        all_annotations: bool = True,
+    ) -> SharurResult:
+        """Pack consecutive records from one exact bin for model reading."""
+        return get_genome_packet(
+            self.store,
+            genome_id,
+            cursor=cursor,
+            max_contigs=max_contigs,
+            max_proteins=max_proteins,
+            max_model_payload_bytes=max_model_payload_bytes,
             all_annotations=all_annotations,
         )
 
@@ -1333,6 +1359,7 @@ __all__ = [
     "list_contigs",
     "get_contig",
     "get_contig_packet",
+    "get_genome_packet",
     "get_protein",
     "get_neighborhood",
     "inspect_case",

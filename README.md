@@ -92,13 +92,13 @@ The default seal is disk-light and samples large canonical artifacts. Use `--ful
 making an archival seal that should stream full SHA-256 over DuckDB, embeddings, and active
 index sidecars.
 
-For a coordinated campaign over a large database, serve one sealed local
-replica through the bounded query data plane:
+For a coordinated campaign over a large database, serve one sealed immutable
+database through the bounded query data plane. Direct mode is appropriate
+when a replica would occupy the same storage tier:
 
 ```bash
 export SHARUR_OPS_URL=http://ops-host:8811
-export SHARUR_QUERY_STAGE_DIR=/local-nvme/sharur/my_dataset
-sharur-query --db data/my_dataset/sharur.duckdb --host 0.0.0.0
+sharur-query --db data/my_dataset/sharur.duckdb --direct --host 0.0.0.0
 ```
 
 Agents reuse their Sharur Ops credentials and call typed operators through
@@ -113,15 +113,20 @@ sharur migrate --db data/my_dataset/sharur.duckdb
 sharur seal --db data/my_dataset/sharur.duckdb --force
 
 sharur-atlas plan --db data/my_dataset/sharur.duckdb \
-  --output-dir data/my_dataset/atlas
+  --output-dir data/my_dataset/atlas \
+  --packet-contigs 128 --packet-proteins 500 --packet-bytes 524288
+sharur-atlas packet-census --plan-dir data/my_dataset/atlas
+sharur-atlas verify-packet-census --plan-dir data/my_dataset/atlas --deep
 sharur-atlas enqueue --plan-dir data/my_dataset/atlas \
   --ops-url http://ops-host:8811 --query-url http://query-host:8812
 ```
 
-Each logical task owns one genome, checkpoints ordered contig prefixes, and
-writes a coverage manifest plus typed candidates and one reconciled unit
-disposition. Reduce and route those records through the hierarchical review
-DAG:
+Each logical task owns one genome. Every model packet contains data from that
+single bin, combines whole consecutive contigs when they fit, and splits only
+oversized contigs. Enqueue requires the zero-model-call invocation/payload
+census. Workers checkpoint packet cursors and write a coverage manifest plus
+typed candidates and one reconciled unit disposition. Reduce and route those
+records through the hierarchical review DAG:
 
 ```bash
 sharur-review reduce --ops-url http://ops-host:8811 \

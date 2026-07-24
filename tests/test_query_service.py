@@ -161,6 +161,23 @@ def test_query_service_is_lazy_read_only_hardened_and_typed(tmp_path):
         assert packet.json()["raw"]["proteins"][0]["protein_id"] == "p1"
         assert "sequence" not in packet.text.lower()
 
+        genome_packet = client.post(
+            "/v1/genomes/packet",
+            json={
+                "genome_id": "bin1",
+                "max_contigs": 128,
+                "max_proteins": 500,
+                "max_model_payload_bytes": 524_288,
+            },
+        )
+        assert genome_packet.status_code == 200
+        assert genome_packet.json()["raw"]["bin_id"] == "bin1"
+        assert {
+            contig["bin_id"]
+            for contig in genome_packet.json()["raw"]["model_payload"]["contigs"]
+        } == {"bin1"}
+        assert "sequence" not in genome_packet.text.lower()
+
         assert client.get("/v1/proteins/p1", params={"verbosity": 2}).status_code == 422
         assert client.post("/v1/sql", json={"sql": "SELECT 1"}).status_code == 404
         assert client.post(
@@ -458,6 +475,10 @@ def test_query_client_generates_query_ids_and_escapes_entity_paths():
     assert query.contig_packet("genome", "contig", limit=25) == {"status": "ok"}
     assert session.calls[3][1] == "http://query:8812/v1/contigs/packet"
     assert session.calls[3][2]["json"]["limit"] == 25
+    assert query.genome_packet("genome", max_proteins=500) == {"status": "ok"}
+    assert session.calls[4][1] == "http://query:8812/v1/genomes/packet"
+    assert session.calls[4][2]["json"]["genome_id"] == "genome"
+    assert session.calls[4][2]["json"]["max_proteins"] == 500
 
     with pytest.raises(ValueError, match="timeout"):
         SharurQuery(session=session, timeout=0, verify_connection=False)

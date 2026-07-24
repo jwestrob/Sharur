@@ -8,10 +8,13 @@ import duckdb
 import pytest
 
 from sharur.atlas import (
+    build_atlas_packet_census,
     build_atlas_plan,
+    build_genome_coverage_manifest,
     enqueue_atlas_plan,
     load_atlas_plan,
     verify_atlas_coverage,
+    verify_atlas_packet_census,
     write_genome_coverage_manifest,
 )
 from sharur.dataset_seal import build_dataset_seal, write_dataset_seal
@@ -60,6 +63,36 @@ def _atlas_database(root: Path) -> Path:
     return database
 
 
+def _coverage_frames(unit, contigs):
+    return [
+        {
+            "frame_id": f"frame-{unit['unit_id']}-0",
+            "frame_index": 0,
+            "bin_id": unit["genome_id"],
+            "packet_packing_contract_hash": unit[
+                "packet_packing_contract_hash"
+            ],
+            "model_payload_sha256": "a" * 64,
+            "model_payload_bytes": 1_024,
+            "contig_ids": [record["contig_id"] for record in contigs],
+            "segments": [
+                {
+                    "bin_id": unit["genome_id"],
+                    "contig_id": record["contig_id"],
+                    "total_protein_count": record["protein_count"],
+                    "protein_offset_start": 0,
+                    "protein_offset_end": record["protein_count"],
+                    "segment_index": 0,
+                    "complete": True,
+                }
+                for record in contigs
+            ],
+            "protein_count": sum(record["protein_count"] for record in contigs),
+            "target_exceeded": False,
+        }
+    ]
+
+
 def test_atlas_plan_is_deterministic_and_uses_actual_live_counts(tmp_path):
     database = _atlas_database(tmp_path)
     first = build_atlas_plan(database, tmp_path / "first", threads=1)
@@ -105,6 +138,106 @@ def test_atlas_plan_requires_contig_navigation_index(tmp_path):
         build_atlas_plan(database, tmp_path / "plan", threads=1)
 
 
+def test_atlas_packet_census_is_exact_bin_scoped_and_zero_model_call(tmp_path):
+    database = _atlas_database(tmp_path)
+    build_atlas_plan(
+        database,
+        tmp_path / "plan",
+        packet_protein_limit=1,
+        threads=1,
+    )
+    progress = []
+
+    first = build_atlas_packet_census(
+        tmp_path / "plan",
+        workers=2,
+        threads=2,
+        progress_callback=progress.append,
+    )
+    second = build_atlas_packet_census(
+        tmp_path / "plan",
+        workers=2,
+        threads=2,
+    )
+    verified = verify_atlas_packet_census(tmp_path / "plan", deep=True)
+
+    assert first["status"] == second["status"] == "complete"
+    assert first["census_sha256"] == second["census_sha256"]
+    assert first["model_calls_made"] == 0
+    assert first["census_resources"]["workers"] == 2
+    assert progress[-1]["completed_units"] == 2
+    assert progress[-1]["cumulative_frame_count"] == 3
+    assert first["model_invocation_count"] == 3
+    assert first["maximum_bins_per_frame"] == 1
+    assert first["mixed_bin_frames"] == 0
+    assert first["query_result_budget_exceeded_frames"] == 0
+    assert first["observed_contigs"] == first["expected_contigs"] == 3
+    assert first["observed_proteins"] == first["expected_proteins"] == 3
+    assert first["frame_protein_distribution"]["maximum"] == 1
+    assert verified["verification"] == "passed"
+    assert verified["deep_verified"] is True
+
+
+def test_atlas_packet_census_blocks_target_exceeding_singleton(tmp_path):
+    database = _atlas_database(tmp_path)
+    store = DuckDBStore(database)
+    store.execute(
+        """
+        INSERT INTO annotations(
+            annotation_id, protein_id, source, accession, name, description,
+            evalue, score
+        ) VALUES (1, 'a_p1', 'pfam', 'PF-LARGE', 'large_record', ?, 1e-20, 80)
+        """,
+        ["x" * 5_000],
+    )
+    store.close()
+    seal = build_dataset_seal(database, max_hash_bytes=0)
+    write_dataset_seal(seal, tmp_path / "dataset.seal.json", force=True)
+    build_atlas_plan(
+        database,
+        tmp_path / "plan",
+        packet_model_payload_bytes=1_024,
+        threads=1,
+    )
+
+    census = build_atlas_packet_census(tmp_path / "plan", threads=1)
+
+    assert census["status"] == "blocked"
+    assert census["target_exceeded_frames"] == 1
+    assert census["model_calls_made"] == 0
+    with pytest.raises(RuntimeError, match="blocks enqueue"):
+        verify_atlas_packet_census(tmp_path / "plan")
+
+
+def test_atlas_packet_census_blocks_query_result_overflow(tmp_path):
+    database = _atlas_database(tmp_path)
+    build_atlas_plan(
+        database,
+        tmp_path / "plan",
+        query_result_limit_bytes=4_097,
+        threads=1,
+    )
+
+    census = build_atlas_packet_census(tmp_path / "plan", threads=1)
+
+    assert census["status"] == "blocked"
+    assert census["query_result_budget_exceeded_frames"] == 2
+    with pytest.raises(RuntimeError, match="query-result overflows"):
+        verify_atlas_packet_census(tmp_path / "plan")
+
+
+def test_atlas_enqueue_requires_completed_packet_census(tmp_path):
+    database = _atlas_database(tmp_path)
+    build_atlas_plan(database, tmp_path / "plan", threads=1)
+
+    with pytest.raises(ValueError, match="packet_census"):
+        enqueue_atlas_plan(
+            tmp_path / "plan",
+            query_url="http://query:8812",
+            ops=_FakeOps(),
+        )
+
+
 def test_atlas_coverage_verifies_every_owned_genome_and_exact_counts(tmp_path):
     database = _atlas_database(tmp_path)
     build_atlas_plan(database, tmp_path / "plan", threads=1)
@@ -116,13 +249,13 @@ def test_atlas_coverage_verifies_every_owned_genome_and_exact_counts(tmp_path):
             {
                 "contig_id": "a_1",
                 "protein_count": 1,
-                "packet_count": 1,
+                "segment_count": 1,
                 "complete": True,
             },
             {
                 "contig_id": "a_2",
                 "protein_count": 1,
-                "packet_count": 1,
+                "segment_count": 1,
                 "complete": True,
             },
         ],
@@ -130,7 +263,7 @@ def test_atlas_coverage_verifies_every_owned_genome_and_exact_counts(tmp_path):
             {
                 "contig_id": "b_1",
                 "protein_count": 1,
-                "packet_count": 1,
+                "segment_count": 1,
                 "complete": True,
             }
         ],
@@ -139,6 +272,7 @@ def test_atlas_coverage_verifies_every_owned_genome_and_exact_counts(tmp_path):
         write_genome_coverage_manifest(
             unit,
             records[unit["genome_id"]],
+            _coverage_frames(unit, records[unit["genome_id"]]),
             coverage / f"{unit['unit_id']}.json",
         )
 
@@ -161,10 +295,21 @@ def test_atlas_coverage_reports_missing_and_incomplete_units(tmp_path):
             {
                 "contig_id": "a_1",
                 "protein_count": 1,
-                "packet_count": 1,
+                "segment_count": 1,
                 "complete": True,
             }
         ],
+        _coverage_frames(
+            first,
+            [
+                {
+                    "contig_id": "a_1",
+                    "protein_count": 1,
+                    "segment_count": 1,
+                    "complete": True,
+                }
+            ],
+        ),
         tmp_path / "plan" / "coverage" / f"{first['unit_id']}.json",
     )
 
@@ -173,6 +318,29 @@ def test_atlas_coverage_reports_missing_and_incomplete_units(tmp_path):
     assert result["status"] == "incomplete"
     assert first["unit_id"] in result["invalid_units"]
     assert units[1]["unit_id"] in result["missing_units"]
+
+
+def test_atlas_coverage_rejects_cross_bin_frame_receipt(tmp_path):
+    database = _atlas_database(tmp_path)
+    build_atlas_plan(database, tmp_path / "plan", threads=1)
+    _manifest, units = load_atlas_plan(tmp_path / "plan")
+    unit = units[1]
+    contigs = [
+        {
+            "contig_id": "b_1",
+            "protein_count": 1,
+            "segment_count": 1,
+            "complete": True,
+        }
+    ]
+    frames = _coverage_frames(unit, contigs)
+    frames[0]["bin_id"] = "genome_a"
+    frames[0]["segments"][0]["bin_id"] = "genome_a"
+
+    coverage = build_genome_coverage_manifest(unit, contigs, frames)
+
+    assert coverage["coverage_status"] == "incomplete"
+    assert any("belongs to bin genome_a" in error for error in coverage["errors"])
 
 
 class _FakeOps:
@@ -192,6 +360,7 @@ class _FakeOps:
 def test_atlas_enqueue_creates_one_idempotent_genome_task(tmp_path):
     database = _atlas_database(tmp_path)
     plan = build_atlas_plan(database, tmp_path / "plan", threads=1)
+    census = build_atlas_packet_census(tmp_path / "plan", threads=1)
     ops = _FakeOps()
 
     result = enqueue_atlas_plan(
@@ -216,6 +385,10 @@ def test_atlas_enqueue_creates_one_idempotent_genome_task(tmp_path):
     )
     assert all(
         task[2]["params"]["execution_profile"] == "atlas_scan"
+        for task in ops.tasks
+    )
+    assert all(
+        task[2]["params"]["packet_census_sha256"] == census["census_sha256"]
         for task in ops.tasks
     )
     assert all(

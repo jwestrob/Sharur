@@ -5,9 +5,11 @@ import json
 import pytest
 
 from sharur.operators.contigs import (
+    GENOME_PACKET_VERSION,
     PACKET_VERSION,
     get_contig,
     get_contig_packet,
+    get_genome_packet,
     list_contigs,
 )
 
@@ -162,10 +164,151 @@ def test_packet_cursor_is_scoped_to_exact_genome_and_contig(store):
         )
 
 
+def test_genome_packet_combines_contigs_and_never_crosses_bins(store):
+    store.execute(
+        """
+        UPDATE proteins
+        SET sequence = 'SENSITIVE_SEQUENCE_PAYLOAD'
+        WHERE protein_id = 'prot_001'
+        """
+    )
+
+    result = get_genome_packet(
+        store,
+        "bin_001",
+        max_contigs=10,
+        max_proteins=10,
+        max_model_payload_bytes=100_000,
+    )
+
+    payload = result.raw["model_payload"]
+    assert result.raw["packet_version"] == GENOME_PACKET_VERSION
+    assert result.raw["complete"] is True
+    assert payload["bin_id"] == "bin_001"
+    assert [contig["contig_id"] for contig in payload["contigs"]] == [
+        "contig_001",
+        "contig_002",
+    ]
+    assert {contig["bin_id"] for contig in payload["contigs"]} == {"bin_001"}
+    protein_ids = [
+        protein["protein_id"]
+        for contig in payload["contigs"]
+        for protein in contig["proteins"]
+    ]
+    assert protein_ids == [
+        "prot_001",
+        "prot_002",
+        "prot_003",
+        "prot_004",
+        "prot_005",
+    ]
+    assert "sequence" not in json.dumps(result.raw).lower()
+    assert result.raw["model_payload_bytes"] == len(
+        json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ).encode()
+    )
+
+
+def test_genome_packet_splits_only_oversized_contig_with_contiguous_receipts(store):
+    cursor = None
+    receipts = []
+    protein_ids = []
+    frame_count = 0
+    while True:
+        result = get_genome_packet(
+            store,
+            "bin_001",
+            cursor=cursor,
+            max_contigs=10,
+            max_proteins=2,
+            max_model_payload_bytes=100_000,
+        )
+        frame_count += 1
+        receipts.extend(result.raw["coverage_receipts"])
+        protein_ids.extend(
+            protein["protein_id"]
+            for contig in result.raw["model_payload"]["contigs"]
+            for protein in contig["proteins"]
+        )
+        if result.raw["complete"]:
+            break
+        cursor = result.raw["next_cursor"]
+
+    assert frame_count == 3
+    assert protein_ids == [
+        "prot_001",
+        "prot_002",
+        "prot_003",
+        "prot_004",
+        "prot_005",
+    ]
+    contig_001 = [
+        receipt for receipt in receipts if receipt["contig_id"] == "contig_001"
+    ]
+    assert [
+        (
+            receipt["protein_offset_start"],
+            receipt["protein_offset_end"],
+            receipt["segment_index"],
+            receipt["complete"],
+        )
+        for receipt in contig_001
+    ] == [
+        (0, 2, 0, False),
+        (2, 4, 1, False),
+        (4, 5, 2, True),
+    ]
+    assert receipts[-1] == {
+        "bin_id": "bin_001",
+        "contig_id": "contig_002",
+        "total_protein_count": 0,
+        "protein_offset_start": 0,
+        "protein_offset_end": 0,
+        "segment_index": 0,
+        "complete": True,
+    }
+
+
+def test_genome_packet_cursor_is_bound_to_bin_and_packing_contract(store):
+    first = get_genome_packet(
+        store,
+        "bin_001",
+        max_contigs=10,
+        max_proteins=1,
+        max_model_payload_bytes=100_000,
+    )
+
+    with pytest.raises(ValueError, match="genome_id"):
+        get_genome_packet(
+            store,
+            "bin_002",
+            cursor=first.ref,
+            max_contigs=10,
+            max_proteins=1,
+            max_model_payload_bytes=100_000,
+        )
+    with pytest.raises(ValueError, match="packing_contract_hash"):
+        get_genome_packet(
+            store,
+            "bin_001",
+            cursor=first.ref,
+            max_contigs=10,
+            max_proteins=2,
+            max_model_payload_bytes=100_000,
+        )
+
+
 def test_missing_genome_or_contig_returns_typed_empty_result(store):
     missing_genome = list_contigs(store, "missing")
     missing_contig = get_contig_packet(store, "bin_001", "missing")
+    missing_genome_packet = get_genome_packet(store, "missing")
 
     assert missing_genome.status == "empty"
     assert missing_contig.status == "empty"
     assert missing_contig.raw["complete"] is True
+    assert missing_genome_packet.status == "empty"
+    assert missing_genome_packet.raw["complete"] is True

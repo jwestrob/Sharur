@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -18,21 +19,38 @@ from sharur.dataset_seal import (
     verify_dataset_seal,
 )
 from sharur.ingest.input_integrity import write_json_atomic
-from sharur.operators.contigs import PACKET_VERSION
+from sharur.operators.contigs import (
+    DEFAULT_GENOME_PACKET_BYTES,
+    DEFAULT_GENOME_PACKET_CONTIGS,
+    DEFAULT_GENOME_PACKET_PROTEINS,
+    GENOME_PACKET_VERSION,
+    genome_packet_packing_contract,
+    get_genome_packet,
+)
+from sharur.query.runtime import ReadOnlyDuckDBRuntime
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
     from sharur.ops.client import SharurOps
 
 
-ATLAS_PLAN_SCHEMA = "atlas-plan/1.0"
-ATLAS_UNIT_SCHEMA = "atlas-unit/1.0"
-ATLAS_COVERAGE_SCHEMA = "atlas-coverage/1.0"
+ATLAS_PLAN_SCHEMA = "atlas-plan/2.0"
+ATLAS_UNIT_SCHEMA = "atlas-unit/2.0"
+ATLAS_COVERAGE_SCHEMA = "atlas-coverage/2.0"
 ATLAS_REVIEW_OUTPUT_SCHEMA = "atlas-review-output/1.0"
-DEFAULT_PACKET_PROTEINS = 100
-DEFAULT_CHECKPOINT_INTERVAL_CONTIGS = 25
+ATLAS_PACKET_CENSUS_SCHEMA = "atlas-packet-census/1.0"
+ATLAS_PACKET_CENSUS_UNIT_SCHEMA = "atlas-packet-census-unit/1.0"
+DEFAULT_PACKET_CONTIGS = DEFAULT_GENOME_PACKET_CONTIGS
+DEFAULT_PACKET_PROTEINS = DEFAULT_GENOME_PACKET_PROTEINS
+DEFAULT_PACKET_BYTES = DEFAULT_GENOME_PACKET_BYTES
+DEFAULT_CHECKPOINT_INTERVAL_FRAMES = 1
+DEFAULT_QUERY_RESULT_LIMIT_BYTES = 2 * 1024 * 1024
+QUERY_RESULT_ENVELOPE_RESERVE_BYTES = 4 * 1024
+DEFAULT_CENSUS_WORKERS = 4
+DEFAULT_CENSUS_MEMORY_LIMIT = "16GB"
+DEFAULT_CENSUS_MAX_TEMP_SIZE = "128GB"
 WORK_WEIGHT_FORMULA = "n_proteins + 32 * n_contigs"
 
 
@@ -175,16 +193,29 @@ def build_atlas_plan(
     output_dir: str | Path,
     *,
     seal_path: str | Path | None = None,
+    packet_contig_limit: int = DEFAULT_PACKET_CONTIGS,
     packet_protein_limit: int = DEFAULT_PACKET_PROTEINS,
-    checkpoint_interval_contigs: int = DEFAULT_CHECKPOINT_INTERVAL_CONTIGS,
+    packet_model_payload_bytes: int = DEFAULT_PACKET_BYTES,
+    packet_all_annotations: bool = True,
+    checkpoint_interval_frames: int = DEFAULT_CHECKPOINT_INTERVAL_FRAMES,
+    query_result_limit_bytes: int = DEFAULT_QUERY_RESULT_LIMIT_BYTES,
     threads: int = 4,
     verify_seal: bool = True,
 ) -> dict[str, Any]:
     """Build one stable genome-owned work unit per live database bin."""
-    if not 1 <= packet_protein_limit <= 250:
-        raise ValueError("packet_protein_limit must be between 1 and 250")
-    if checkpoint_interval_contigs < 1:
-        raise ValueError("checkpoint_interval_contigs must be positive")
+    packet_contract = genome_packet_packing_contract(
+        max_contigs=packet_contig_limit,
+        max_proteins=packet_protein_limit,
+        max_model_payload_bytes=packet_model_payload_bytes,
+        all_annotations=packet_all_annotations,
+    )
+    packet_contract_hash = _sha256(packet_contract)
+    if checkpoint_interval_frames < 1:
+        raise ValueError("checkpoint_interval_frames must be positive")
+    if query_result_limit_bytes <= QUERY_RESULT_ENVELOPE_RESERVE_BYTES:
+        raise ValueError(
+            "query_result_limit_bytes must exceed the HTTP envelope reserve"
+        )
     database = Path(db_path).expanduser().resolve()
     destination = Path(output_dir).expanduser().resolve()
     resolved_seal = (
@@ -203,11 +234,22 @@ def build_atlas_plan(
     plan_identity = {
         "schema_version": ATLAS_PLAN_SCHEMA,
         "dataset_id": dataset_id,
-        "packet_version": PACKET_VERSION,
+        "packet_version": GENOME_PACKET_VERSION,
+        "packet_packing_contract": packet_contract,
+        "packet_packing_contract_hash": packet_contract_hash,
+        "packet_contig_limit": packet_contig_limit,
         "packet_protein_limit": packet_protein_limit,
-        "checkpoint_interval_contigs": checkpoint_interval_contigs,
+        "packet_model_payload_bytes": packet_model_payload_bytes,
+        "packet_all_annotations": packet_all_annotations,
+        "checkpoint_interval_frames": checkpoint_interval_frames,
+        "query_result_limit_bytes": query_result_limit_bytes,
+        "query_result_envelope_reserve_bytes": (
+            QUERY_RESULT_ENVELOPE_RESERVE_BYTES
+        ),
         "ownership_unit": "genome",
-        "checkpoint_order": "contig_id",
+        "model_call_unit": "one adaptive packet from one exact bins.bin_id",
+        "checkpoint_order": "genome-packet cursor",
+        "contig_order": "contig_id",
         "protein_order": "gene_index NULLS LAST, start, protein_id",
     }
     plan_id = _sha256(plan_identity)
@@ -235,10 +277,15 @@ def build_atlas_plan(
                 "declared_n_contigs": declared,
                 "n_contigs": actual_contigs,
                 "n_proteins": actual_proteins,
-                "packet_version": PACKET_VERSION,
+                "packet_version": GENOME_PACKET_VERSION,
+                "packet_packing_contract_hash": packet_contract_hash,
+                "packet_contig_limit": packet_contig_limit,
                 "packet_protein_limit": packet_protein_limit,
+                "packet_model_payload_bytes": packet_model_payload_bytes,
+                "packet_all_annotations": packet_all_annotations,
                 "checkpoint_key": "atlas_progress",
-                "checkpoint_interval_contigs": checkpoint_interval_contigs,
+                "checkpoint_interval_frames": checkpoint_interval_frames,
+                "query_result_limit_bytes": query_result_limit_bytes,
                 "work_weight": actual_proteins + 32 * actual_contigs,
             }
         )
@@ -263,6 +310,7 @@ def build_atlas_plan(
         "declared_contig_count_mismatches": declared_mismatches,
         "work_weight_formula": WORK_WEIGHT_FORMULA,
         "coverage_directory": "coverage",
+        "packet_census_file": "packet_census/census.json",
     }
     manifest_path = destination / "plan.json"
     write_json_atomic(manifest, manifest_path)
@@ -304,6 +352,701 @@ def load_atlas_plan(
     return manifest, units
 
 
+def _packet_kwargs(plan: dict[str, Any]) -> dict[str, Any]:
+    contract = plan.get("packet_packing_contract")
+    if not isinstance(contract, dict):
+        raise ValueError("Atlas plan lacks packet_packing_contract")
+    if _sha256(contract) != plan.get("packet_packing_contract_hash"):
+        raise ValueError("Atlas packet packing-contract hash is invalid")
+    expected = genome_packet_packing_contract(
+        max_contigs=int(plan["packet_contig_limit"]),
+        max_proteins=int(plan["packet_protein_limit"]),
+        max_model_payload_bytes=int(plan["packet_model_payload_bytes"]),
+        all_annotations=bool(plan["packet_all_annotations"]),
+    )
+    if contract != expected:
+        raise ValueError("Atlas packet packing contract differs from plan fields")
+    return {
+        "max_contigs": int(contract["max_contigs"]),
+        "max_proteins": int(contract["max_proteins"]),
+        "max_model_payload_bytes": int(contract["max_model_payload_bytes"]),
+        "all_annotations": bool(contract["all_annotations"]),
+    }
+
+
+def _distribution(values: list[int]) -> dict[str, int | float | None]:
+    if not values:
+        return {
+            "count": 0,
+            "minimum": None,
+            "p50": None,
+            "p90": None,
+            "p95": None,
+            "p99": None,
+            "maximum": None,
+            "mean": None,
+        }
+    ordered = sorted(values)
+
+    def percentile(fraction: float) -> int:
+        return ordered[round((len(ordered) - 1) * fraction)]
+
+    return {
+        "count": len(ordered),
+        "minimum": ordered[0],
+        "p50": percentile(0.50),
+        "p90": percentile(0.90),
+        "p95": percentile(0.95),
+        "p99": percentile(0.99),
+        "maximum": ordered[-1],
+        "mean": round(sum(ordered) / len(ordered), 3),
+    }
+
+
+def _census_unit_hash(record: dict[str, Any]) -> str:
+    identity = {
+        key: value
+        for key, value in record.items()
+        if key not in {"generated_at", "unit_census_sha256"}
+    }
+    return _sha256(identity)
+
+
+def _validate_census_unit(
+    record: dict[str, Any],
+    *,
+    plan: dict[str, Any],
+    unit: dict[str, Any],
+) -> None:
+    expected = {
+        "schema_version": ATLAS_PACKET_CENSUS_UNIT_SCHEMA,
+        "plan_id": plan["plan_id"],
+        "dataset_id": plan["dataset_id"],
+        "packet_version": plan["packet_version"],
+        "packet_packing_contract_hash": plan["packet_packing_contract_hash"],
+        "unit_id": unit["unit_id"],
+        "genome_id": unit["genome_id"],
+        "expected_contigs": int(unit["n_contigs"]),
+        "expected_proteins": int(unit["n_proteins"]),
+        "maximum_query_result_bytes": int(plan["query_result_limit_bytes"]),
+    }
+    for key, value in expected.items():
+        if record.get(key) != value:
+            raise ValueError(
+                f"Packet census unit {unit['unit_id']} has mismatched {key}"
+            )
+    if record.get("unit_census_sha256") != _census_unit_hash(record):
+        raise ValueError(f"Packet census unit {unit['unit_id']} has an invalid hash")
+    if record.get("status") not in {"complete", "blocked"}:
+        raise ValueError(f"Packet census unit {unit['unit_id']} has invalid status")
+    if record.get("observed_contigs") != int(unit["n_contigs"]):
+        raise ValueError(f"Packet census unit {unit['unit_id']} missed contigs")
+    if record.get("observed_proteins") != int(unit["n_proteins"]):
+        raise ValueError(f"Packet census unit {unit['unit_id']} missed proteins")
+    if record.get("mixed_bin_frames") != 0:
+        raise ValueError(f"Packet census unit {unit['unit_id']} mixed bins")
+    if (
+        record.get("status") == "complete"
+        and record.get("query_result_budget_exceeded_frames") != 0
+    ):
+        raise ValueError(
+            f"Packet census unit {unit['unit_id']} exceeded the query-result budget"
+        )
+    if record.get("frame_count") != record.get("model_invocation_count"):
+        raise ValueError(
+            f"Packet census unit {unit['unit_id']} has inconsistent invocation count"
+        )
+
+
+def _census_genome_packets(
+    store: Any,
+    *,
+    plan: dict[str, Any],
+    unit: dict[str, Any],
+    packet_kwargs: dict[str, Any],
+) -> dict[str, Any]:
+    genome_id = str(unit["genome_id"])
+    cursor: str | None = None
+    seen_cursors: set[str] = set()
+    frame_payload_bytes: list[int] = []
+    frame_http_result_bytes: list[int] = []
+    frame_protein_counts: list[int] = []
+    frame_contig_segment_counts: list[int] = []
+    token_scenarios = {
+        "at_2_bytes_per_token": 0,
+        "at_3_bytes_per_token": 0,
+        "at_4_bytes_per_token": 0,
+    }
+    contig_state: dict[str, dict[str, int | bool]] = {}
+    target_exceeded_frames = 0
+    query_result_budget_exceeded_frames = 0
+    mixed_bin_frames = 0
+
+    while True:
+        result = get_genome_packet(
+            store,
+            genome_id,
+            cursor=cursor,
+            **packet_kwargs,
+        )
+        packet = result.raw
+        if packet.get("dataset_id") != plan["dataset_id"]:
+            raise RuntimeError(f"Packet census dataset drift in {genome_id}")
+        if packet.get("bin_id") != genome_id:
+            mixed_bin_frames += 1
+            raise RuntimeError(f"Packet census received another bin in {genome_id}")
+        if (
+            packet.get("packing_contract_hash")
+            != plan["packet_packing_contract_hash"]
+        ):
+            raise RuntimeError(f"Packet census contract drift in {genome_id}")
+        model_payload = packet.get("model_payload")
+        if not isinstance(model_payload, dict):
+            raise RuntimeError(f"Packet census received an invalid payload in {genome_id}")
+        contigs = model_payload.get("contigs")
+        if not isinstance(contigs, list):
+            raise RuntimeError(f"Packet census received invalid contigs in {genome_id}")
+        encoded_payload = _canonical_bytes(model_payload)
+        if len(encoded_payload) != packet.get("model_payload_bytes"):
+            raise RuntimeError(f"Packet byte count is invalid in {genome_id}")
+        if hashlib.sha256(encoded_payload).hexdigest() != packet.get(
+            "model_payload_sha256"
+        ):
+            raise RuntimeError(f"Packet payload hash is invalid in {genome_id}")
+
+        if contigs:
+            frame_payload_bytes.append(len(encoded_payload))
+            operator_payload = json.loads(result.to_json())
+            operator_payload_bytes = len(
+                json.dumps(
+                    operator_payload,
+                    default=str,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            )
+            projected_http_bytes = (
+                operator_payload_bytes + QUERY_RESULT_ENVELOPE_RESERVE_BYTES
+            )
+            frame_http_result_bytes.append(projected_http_bytes)
+            if projected_http_bytes > int(plan["query_result_limit_bytes"]):
+                query_result_budget_exceeded_frames += 1
+            frame_protein_counts.append(
+                sum(
+                    len(contig.get("proteins", []))
+                    for contig in contigs
+                    if isinstance(contig, dict)
+                )
+            )
+            frame_contig_segment_counts.append(len(contigs))
+            scenarios = packet.get("token_scenarios")
+            if not isinstance(scenarios, dict):
+                raise RuntimeError(
+                    f"Packet census received invalid token scenarios in {genome_id}"
+                )
+            for key in token_scenarios:
+                value = scenarios.get(key)
+                if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                    raise RuntimeError(
+                        f"Packet census received invalid {key} in {genome_id}"
+                    )
+                token_scenarios[key] += value
+            if packet.get("target_exceeded") is True:
+                target_exceeded_frames += 1
+
+        receipts = packet.get("coverage_receipts")
+        if not isinstance(receipts, list) or len(receipts) != len(contigs):
+            raise RuntimeError(f"Packet census receipt mismatch in {genome_id}")
+        for contig, receipt in zip(contigs, receipts, strict=True):
+            if not isinstance(contig, dict) or not isinstance(receipt, dict):
+                raise RuntimeError(f"Packet census record is invalid in {genome_id}")
+            if contig.get("bin_id") != genome_id or receipt.get("bin_id") != genome_id:
+                mixed_bin_frames += 1
+                raise RuntimeError(f"Packet census detected mixed bins in {genome_id}")
+            contig_id = contig.get("contig_id")
+            if not isinstance(contig_id, str) or receipt.get("contig_id") != contig_id:
+                raise RuntimeError(f"Packet census contig identity drift in {genome_id}")
+            if any(
+                "sequence" in protein
+                for protein in contig.get("proteins", [])
+                if isinstance(protein, dict)
+            ):
+                raise RuntimeError(f"Packet census exposed sequence data in {genome_id}")
+            total = receipt.get("total_protein_count")
+            start = receipt.get("protein_offset_start")
+            end = receipt.get("protein_offset_end")
+            segment_index = receipt.get("segment_index")
+            if any(
+                isinstance(value, bool) or not isinstance(value, int) or value < 0
+                for value in (total, start, end, segment_index)
+            ):
+                raise RuntimeError(f"Packet census has invalid offsets in {genome_id}")
+            state = contig_state.setdefault(
+                contig_id,
+                {
+                    "total": int(total),
+                    "next_offset": 0,
+                    "next_segment": 0,
+                    "complete": False,
+                },
+            )
+            if state["complete"] is True:
+                raise RuntimeError(
+                    f"Packet census repeated completed contig {genome_id}/{contig_id}"
+                )
+            if state["total"] != total:
+                raise RuntimeError(
+                    f"Packet census changed contig total {genome_id}/{contig_id}"
+                )
+            if state["next_offset"] != start or state["next_segment"] != segment_index:
+                raise RuntimeError(
+                    f"Packet census has a gap or overlap in {genome_id}/{contig_id}"
+                )
+            if end < start or end > total:
+                raise RuntimeError(
+                    f"Packet census has an invalid range in {genome_id}/{contig_id}"
+                )
+            if len(contig.get("proteins", [])) != end - start:
+                raise RuntimeError(
+                    f"Packet census protein count differs in {genome_id}/{contig_id}"
+                )
+            complete_contig = receipt.get("complete") is True
+            if complete_contig != (end == total):
+                raise RuntimeError(
+                    f"Packet census terminal receipt differs in {genome_id}/{contig_id}"
+                )
+            state["next_offset"] = int(end)
+            state["next_segment"] = int(segment_index) + 1
+            state["complete"] = complete_contig
+
+        complete = packet.get("complete") is True
+        next_cursor = packet.get("next_cursor")
+        if complete:
+            if next_cursor is not None:
+                raise RuntimeError(
+                    f"Packet census terminal frame has a cursor in {genome_id}"
+                )
+            break
+        if not isinstance(next_cursor, str) or not next_cursor:
+            raise RuntimeError(f"Packet census lacks continuation in {genome_id}")
+        if next_cursor in seen_cursors:
+            raise RuntimeError(f"Packet census repeated a cursor in {genome_id}")
+        seen_cursors.add(next_cursor)
+        cursor = next_cursor
+
+    observed_contigs = len(contig_state)
+    observed_proteins = sum(int(state["next_offset"]) for state in contig_state.values())
+    if observed_contigs != int(unit["n_contigs"]):
+        raise RuntimeError(
+            f"Packet census observed {observed_contigs} contigs in {genome_id}; "
+            f"expected {int(unit['n_contigs'])}"
+        )
+    if observed_proteins != int(unit["n_proteins"]):
+        raise RuntimeError(
+            f"Packet census observed {observed_proteins} proteins in {genome_id}; "
+            f"expected {int(unit['n_proteins'])}"
+        )
+    incomplete_contigs = [
+        contig_id
+        for contig_id, state in contig_state.items()
+        if state["complete"] is not True
+    ]
+    if incomplete_contigs:
+        raise RuntimeError(f"Packet census left incomplete contigs in {genome_id}")
+    split_contigs = sum(
+        int(state["next_segment"]) > 1 for state in contig_state.values()
+    )
+    status = (
+        "blocked"
+        if target_exceeded_frames or query_result_budget_exceeded_frames
+        else "complete"
+    )
+    identity = {
+        "schema_version": ATLAS_PACKET_CENSUS_UNIT_SCHEMA,
+        "status": status,
+        "plan_id": plan["plan_id"],
+        "dataset_id": plan["dataset_id"],
+        "packet_version": plan["packet_version"],
+        "packet_packing_contract_hash": plan["packet_packing_contract_hash"],
+        "unit_id": unit["unit_id"],
+        "genome_id": genome_id,
+        "expected_contigs": int(unit["n_contigs"]),
+        "observed_contigs": observed_contigs,
+        "expected_proteins": int(unit["n_proteins"]),
+        "observed_proteins": observed_proteins,
+        "frame_count": len(frame_payload_bytes),
+        "model_invocation_count": len(frame_payload_bytes),
+        "model_invocation_rule": "one invocation per nonempty bin-scoped frame",
+        "total_model_payload_bytes": sum(frame_payload_bytes),
+        "maximum_query_result_bytes": int(plan["query_result_limit_bytes"]),
+        "query_result_envelope_reserve_bytes": (
+            QUERY_RESULT_ENVELOPE_RESERVE_BYTES
+        ),
+        "query_result_budget_exceeded_frames": (
+            query_result_budget_exceeded_frames
+        ),
+        "token_scenarios": token_scenarios,
+        "target_exceeded_frames": target_exceeded_frames,
+        "mixed_bin_frames": mixed_bin_frames,
+        "split_contigs": split_contigs,
+        "frame_payload_bytes": frame_payload_bytes,
+        "frame_http_result_bytes": frame_http_result_bytes,
+        "frame_protein_counts": frame_protein_counts,
+        "frame_contig_segment_counts": frame_contig_segment_counts,
+    }
+    return {
+        **identity,
+        "unit_census_sha256": _sha256(identity),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def build_atlas_packet_census(
+    plan_dir: str | Path,
+    *,
+    output_dir: str | Path | None = None,
+    workers: int = DEFAULT_CENSUS_WORKERS,
+    threads: int = 4,
+    memory_limit: str = DEFAULT_CENSUS_MEMORY_LIMIT,
+    temp_directory: str | Path | None = None,
+    max_temp_directory_size: str = DEFAULT_CENSUS_MAX_TEMP_SIZE,
+    resume: bool = True,
+    verify_seal: bool = True,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
+) -> dict[str, Any]:
+    """Enumerate exact bin-scoped model packets while making zero model calls."""
+    if threads < 1:
+        raise ValueError("threads must be positive")
+    if workers < 1:
+        raise ValueError("workers must be positive")
+    effective_workers = min(workers, threads)
+    root = Path(plan_dir).expanduser().resolve()
+    plan, units = load_atlas_plan(root)
+    packet_kwargs = _packet_kwargs(plan)
+    database = Path(str(plan["database"])).expanduser().resolve()
+    seal_path = Path(str(plan["seal_path"])).expanduser().resolve()
+    dataset_id, _seal_strength = _sealed_identity(
+        database,
+        seal_path,
+        verify=verify_seal,
+    )
+    if dataset_id != plan["dataset_id"]:
+        raise DatasetSealError("Atlas plan dataset_id differs from the live seal")
+    census_root = (
+        Path(output_dir).expanduser().resolve()
+        if output_dir is not None
+        else root / "packet_census"
+    )
+    unit_root = census_root / "units"
+    records_by_unit: dict[str, dict[str, Any]] = {}
+    pending_units: list[dict[str, Any]] = []
+    for unit in units:
+        unit_path = unit_root / f"{unit['unit_id']}.json"
+        if resume and unit_path.is_file():
+            candidate = _read_json_object(unit_path)
+            _validate_census_unit(candidate, plan=plan, unit=unit)
+            records_by_unit[str(unit["unit_id"])] = candidate
+        else:
+            pending_units.append(unit)
+    completed_units = len(records_by_unit)
+    cumulative_frame_count = sum(
+        int(record["frame_count"]) for record in records_by_unit.values()
+    )
+    if progress_callback is not None and completed_units:
+        progress_callback(
+            {
+                "completed_units": completed_units,
+                "total_units": len(units),
+                "reused_units": completed_units,
+                "computed_units": 0,
+                "unit_id": None,
+                "genome_id": None,
+                "status": "resumed",
+                "unit_frame_count": None,
+                "cumulative_frame_count": cumulative_frame_count,
+            }
+        )
+
+    resolved_temp_directory = (
+        Path(temp_directory).expanduser().resolve()
+        if temp_directory is not None
+        else census_root / "spill"
+    )
+    if pending_units:
+        runtime = ReadOnlyDuckDBRuntime(
+            database,
+            threads=threads,
+            memory_limit=memory_limit,
+            temp_directory=resolved_temp_directory,
+            max_temp_directory_size=max_temp_directory_size,
+            dataset_id=dataset_id,
+        )
+        runtime.open()
+        try:
+
+            def census_one(unit: dict[str, Any]) -> dict[str, Any]:
+                record = _census_genome_packets(
+                    runtime.cursor_store(),
+                    plan=plan,
+                    unit=unit,
+                    packet_kwargs=packet_kwargs,
+                )
+                write_json_atomic(
+                    record,
+                    unit_root / f"{unit['unit_id']}.json",
+                )
+                return record
+
+            with ThreadPoolExecutor(
+                max_workers=min(effective_workers, len(pending_units)),
+                thread_name_prefix="atlas-packet-census",
+            ) as executor:
+                futures = {
+                    executor.submit(census_one, unit): unit
+                    for unit in pending_units
+                }
+                for computed_units, future in enumerate(
+                    as_completed(futures),
+                    start=1,
+                ):
+                    unit = futures[future]
+                    record = future.result()
+                    records_by_unit[str(unit["unit_id"])] = record
+                    cumulative_frame_count += int(record["frame_count"])
+                    if progress_callback is not None:
+                        progress_callback(
+                            {
+                                "completed_units": completed_units
+                                + computed_units,
+                                "total_units": len(units),
+                                "reused_units": completed_units,
+                                "computed_units": computed_units,
+                                "unit_id": unit["unit_id"],
+                                "genome_id": unit["genome_id"],
+                                "status": record["status"],
+                                "unit_frame_count": record["frame_count"],
+                                "cumulative_frame_count": (
+                                    cumulative_frame_count
+                                ),
+                            }
+                        )
+        finally:
+            runtime.close()
+
+    unit_records = [
+        records_by_unit[str(unit["unit_id"])]
+        for unit in units
+    ]
+
+    frame_payload_bytes = [
+        int(value)
+        for record in unit_records
+        for value in record["frame_payload_bytes"]
+    ]
+    frame_http_result_bytes = [
+        int(value)
+        for record in unit_records
+        for value in record["frame_http_result_bytes"]
+    ]
+    frame_protein_counts = [
+        int(value)
+        for record in unit_records
+        for value in record["frame_protein_counts"]
+    ]
+    frame_contig_segment_counts = [
+        int(value)
+        for record in unit_records
+        for value in record["frame_contig_segment_counts"]
+    ]
+    blocked_units = [
+        str(record["unit_id"])
+        for record in unit_records
+        if record["status"] != "complete"
+    ]
+    total_token_scenarios = {
+        key: sum(int(record["token_scenarios"][key]) for record in unit_records)
+        for key in (
+            "at_2_bytes_per_token",
+            "at_3_bytes_per_token",
+            "at_4_bytes_per_token",
+        )
+    }
+    unit_record_digest = _sha256(
+        [
+            {
+                "unit_id": record["unit_id"],
+                "unit_census_sha256": record["unit_census_sha256"],
+            }
+            for record in unit_records
+        ]
+    )
+    target_exceeded_frames = sum(
+        int(record["target_exceeded_frames"]) for record in unit_records
+    )
+    query_result_budget_exceeded_frames = sum(
+        int(record["query_result_budget_exceeded_frames"])
+        for record in unit_records
+    )
+    mixed_bin_frames = sum(
+        int(record["mixed_bin_frames"]) for record in unit_records
+    )
+    status = (
+        "complete"
+        if not blocked_units
+        and target_exceeded_frames == 0
+        and query_result_budget_exceeded_frames == 0
+        and mixed_bin_frames == 0
+        else "blocked"
+    )
+    identity = {
+        "schema_version": ATLAS_PACKET_CENSUS_SCHEMA,
+        "status": status,
+        "plan_id": plan["plan_id"],
+        "dataset_id": plan["dataset_id"],
+        "packet_version": plan["packet_version"],
+        "packet_packing_contract": plan["packet_packing_contract"],
+        "packet_packing_contract_hash": plan["packet_packing_contract_hash"],
+        "census_resources": {
+            "requested_workers": workers,
+            "workers": effective_workers,
+            "duckdb_threads": threads,
+            "memory_limit": memory_limit,
+            "temp_directory": str(resolved_temp_directory),
+            "max_temp_directory_size": max_temp_directory_size,
+        },
+        "model_calls_made": 0,
+        "model_invocation_rule": "one invocation per nonempty bin-scoped frame",
+        "model_invocation_count": len(frame_payload_bytes),
+        "prompt_and_output_tokens_included": False,
+        "token_accounting": (
+            "deterministic serialized-payload scenarios; exact provider "
+            "tokenizers are executor-specific"
+        ),
+        "token_scenarios": total_token_scenarios,
+        "total_model_payload_bytes": sum(frame_payload_bytes),
+        "maximum_query_result_bytes": int(plan["query_result_limit_bytes"]),
+        "query_result_envelope_reserve_bytes": (
+            QUERY_RESULT_ENVELOPE_RESERVE_BYTES
+        ),
+        "query_result_budget_exceeded_frames": (
+            query_result_budget_exceeded_frames
+        ),
+        "unit_count": len(unit_records),
+        "expected_units": int(plan["unit_count"]),
+        "observed_contigs": sum(
+            int(record["observed_contigs"]) for record in unit_records
+        ),
+        "expected_contigs": int(plan["total_contigs"]),
+        "observed_proteins": sum(
+            int(record["observed_proteins"]) for record in unit_records
+        ),
+        "expected_proteins": int(plan["total_proteins"]),
+        "mixed_bin_frames": mixed_bin_frames,
+        "maximum_bins_per_frame": 1 if frame_payload_bytes else 0,
+        "target_exceeded_frames": target_exceeded_frames,
+        "split_contigs": sum(int(record["split_contigs"]) for record in unit_records),
+        "blocked_units": blocked_units,
+        "frame_payload_byte_distribution": _distribution(frame_payload_bytes),
+        "frame_http_result_byte_distribution": _distribution(
+            frame_http_result_bytes
+        ),
+        "frame_protein_distribution": _distribution(frame_protein_counts),
+        "frame_contig_segment_distribution": _distribution(
+            frame_contig_segment_counts
+        ),
+        "unit_records_directory": "units",
+        "unit_records_sha256": unit_record_digest,
+    }
+    summary = {
+        **identity,
+        "census_sha256": _sha256(identity),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    write_json_atomic(summary, census_root / "census.json")
+    return {
+        "census_path": str(census_root / "census.json"),
+        **summary,
+    }
+
+
+def verify_atlas_packet_census(
+    plan_dir: str | Path,
+    *,
+    census_dir: str | Path | None = None,
+    deep: bool = False,
+) -> dict[str, Any]:
+    """Verify the launch-gating zero-model-call packet census."""
+    root = Path(plan_dir).expanduser().resolve()
+    plan, units = load_atlas_plan(root)
+    census_root = (
+        Path(census_dir).expanduser().resolve()
+        if census_dir is not None
+        else root / "packet_census"
+    )
+    summary = _read_json_object(census_root / "census.json")
+    expected = {
+        "schema_version": ATLAS_PACKET_CENSUS_SCHEMA,
+        "plan_id": plan["plan_id"],
+        "dataset_id": plan["dataset_id"],
+        "packet_version": plan["packet_version"],
+        "packet_packing_contract_hash": plan["packet_packing_contract_hash"],
+        "model_calls_made": 0,
+        "unit_count": int(plan["unit_count"]),
+        "expected_units": int(plan["unit_count"]),
+        "observed_contigs": int(plan["total_contigs"]),
+        "expected_contigs": int(plan["total_contigs"]),
+        "observed_proteins": int(plan["total_proteins"]),
+        "expected_proteins": int(plan["total_proteins"]),
+        "mixed_bin_frames": 0,
+        "maximum_query_result_bytes": int(plan["query_result_limit_bytes"]),
+    }
+    for key, value in expected.items():
+        if summary.get(key) != value:
+            raise ValueError(f"Atlas packet census has mismatched {key}")
+    identity = {
+        key: value
+        for key, value in summary.items()
+        if key not in {"census_sha256", "generated_at"}
+    }
+    if summary.get("census_sha256") != _sha256(identity):
+        raise ValueError("Atlas packet census hash is invalid")
+    if summary.get("status") != "complete":
+        raise RuntimeError(
+            "Atlas packet census blocks enqueue: "
+            f"{summary.get('target_exceeded_frames', 0)} target-exceeded frames, "
+            f"{summary.get('query_result_budget_exceeded_frames', 0)} "
+            "query-result overflows, "
+            f"{len(summary.get('blocked_units', []))} blocked units"
+        )
+    if summary.get("target_exceeded_frames") != 0:
+        raise RuntimeError("Atlas packet census contains target-exceeded frames")
+    if summary.get("query_result_budget_exceeded_frames") != 0:
+        raise RuntimeError("Atlas packet census exceeds the query-result budget")
+    if deep:
+        unit_records: list[dict[str, Any]] = []
+        for unit in units:
+            path = census_root / "units" / f"{unit['unit_id']}.json"
+            record = _read_json_object(path)
+            _validate_census_unit(record, plan=plan, unit=unit)
+            unit_records.append(record)
+        digest = _sha256(
+            [
+                {
+                    "unit_id": record["unit_id"],
+                    "unit_census_sha256": record["unit_census_sha256"],
+                }
+                for record in unit_records
+            ]
+        )
+        if digest != summary.get("unit_records_sha256"):
+            raise ValueError("Atlas packet census unit-record digest is invalid")
+    return {
+        **summary,
+        "verification": "passed",
+        "deep_verified": deep,
+        "census_path": str(census_root / "census.json"),
+    }
+
+
 def enqueue_atlas_plan(
     plan_dir: str | Path,
     *,
@@ -319,6 +1062,7 @@ def enqueue_atlas_plan(
     if not scan_execution_profile:
         raise ValueError("scan_execution_profile must be non-empty")
     manifest, units = load_atlas_plan(plan_dir)
+    packet_census = verify_atlas_packet_census(plan_dir)
     root = Path(plan_dir).expanduser().resolve()
     campaign_id = ops.create_campaign(
         f"Atlas {manifest['dataset_id'][:12]}",
@@ -330,6 +1074,8 @@ def enqueue_atlas_plan(
             "unit_count": manifest["unit_count"],
             "query_url": query_url,
             "scan_execution_profile": scan_execution_profile,
+            "packet_census_sha256": packet_census["census_sha256"],
+            "model_invocation_count": packet_census["model_invocation_count"],
         },
         idempotency_key=f"atlas-campaign:{manifest['plan_id']}",
     )
@@ -344,6 +1090,8 @@ def enqueue_atlas_plan(
                     **unit,
                     "query_url": query_url,
                     "plan_path": str(root / "plan.json"),
+                    "packet_census_path": packet_census["census_path"],
+                    "packet_census_sha256": packet_census["census_sha256"],
                     "coverage_manifest": str(root / "coverage" / f"{unit_id}.json"),
                     "execution_profile": scan_execution_profile,
                     "review_output_contract": {
@@ -378,9 +1126,43 @@ def enqueue_atlas_plan(
     }
 
 
+def frame_coverage_receipt(packet: dict[str, Any]) -> dict[str, Any] | None:
+    """Project one genome packet into a compact, model-call coverage receipt."""
+    model_payload = packet.get("model_payload")
+    if not isinstance(model_payload, dict):
+        raise ValueError("Genome packet lacks model_payload")
+    contigs = model_payload.get("contigs")
+    if not isinstance(contigs, list):
+        raise ValueError("Genome packet model_payload lacks contigs")
+    if not contigs:
+        return None
+    segments = packet.get("coverage_receipts")
+    if not isinstance(segments, list) or len(segments) != len(contigs):
+        raise ValueError("Genome packet coverage receipts differ from contigs")
+    return {
+        "frame_id": packet.get("frame_id"),
+        "frame_index": packet.get("frame_index"),
+        "bin_id": packet.get("bin_id"),
+        "packet_packing_contract_hash": packet.get(
+            "packing_contract_hash"
+        ),
+        "model_payload_sha256": packet.get("model_payload_sha256"),
+        "model_payload_bytes": packet.get("model_payload_bytes"),
+        "contig_ids": [contig.get("contig_id") for contig in contigs],
+        "segments": segments,
+        "protein_count": sum(
+            len(contig.get("proteins", []))
+            for contig in contigs
+            if isinstance(contig, dict)
+        ),
+        "target_exceeded": packet.get("target_exceeded") is True,
+    }
+
+
 def build_genome_coverage_manifest(
     unit: dict[str, Any],
     contigs: list[dict[str, Any]],
+    frames: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """Build a complete or explicitly incomplete per-genome coverage record."""
     required = {
@@ -391,6 +1173,7 @@ def build_genome_coverage_manifest(
         "n_contigs",
         "n_proteins",
         "packet_version",
+        "packet_packing_contract_hash",
     }
     missing_fields = sorted(required - set(unit))
     if missing_fields:
@@ -401,7 +1184,9 @@ def build_genome_coverage_manifest(
     for record in sorted(contigs, key=lambda value: str(value.get("contig_id", ""))):
         contig_id = record.get("contig_id")
         protein_count = record.get("protein_count")
-        packet_count = record.get("packet_count")
+        segment_count = record.get("segment_count")
+        if segment_count is None:
+            segment_count = record.get("packet_count")
         if not isinstance(contig_id, str) or not contig_id:
             raise ValueError("Coverage contig_id must be a non-empty string")
         if contig_id in seen:
@@ -414,11 +1199,11 @@ def build_genome_coverage_manifest(
         ):
             raise ValueError("Coverage protein_count must be a non-negative integer")
         if (
-            isinstance(packet_count, bool)
-            or not isinstance(packet_count, int)
-            or packet_count < 0
+            isinstance(segment_count, bool)
+            or not isinstance(segment_count, int)
+            or segment_count < 0
         ):
-            raise ValueError("Coverage packet_count must be a non-negative integer")
+            raise ValueError("Coverage segment_count must be a non-negative integer")
         complete = record.get("complete") is True
         if not complete:
             errors.append(f"Contig {contig_id} lacks a terminal packet")
@@ -426,7 +1211,7 @@ def build_genome_coverage_manifest(
             {
                 "contig_id": contig_id,
                 "protein_count": protein_count,
-                "packet_count": packet_count,
+                "segment_count": segment_count,
                 "complete": complete,
             }
         )
@@ -440,6 +1225,186 @@ def build_genome_coverage_manifest(
         errors.append(
             f"Observed {observed_proteins} proteins; expected {int(unit['n_proteins'])}"
         )
+    normalized_frames: list[dict[str, Any]] = []
+    seen_frames: set[str] = set()
+    expected_frame_index = 0
+    known_contigs = {record["contig_id"] for record in normalized}
+    segment_state: dict[str, dict[str, int | bool]] = {}
+    for frame in sorted(frames, key=lambda value: value.get("frame_index", -1)):
+        frame_id = frame.get("frame_id")
+        frame_index = frame.get("frame_index")
+        bin_id = frame.get("bin_id")
+        payload_hash = frame.get("model_payload_sha256")
+        payload_bytes = frame.get("model_payload_bytes")
+        protein_count = frame.get("protein_count")
+        contig_ids = frame.get("contig_ids")
+        segments = frame.get("segments")
+        if not isinstance(frame_id, str) or not frame_id:
+            raise ValueError("Coverage frame_id must be a non-empty string")
+        if frame_id in seen_frames:
+            raise ValueError(f"Coverage repeats frame_id {frame_id!r}")
+        seen_frames.add(frame_id)
+        if (
+            isinstance(frame_index, bool)
+            or not isinstance(frame_index, int)
+            or frame_index < 0
+        ):
+            raise ValueError("Coverage frame_index must be a non-negative integer")
+        if frame_index != expected_frame_index:
+            errors.append(
+                f"Frame index {frame_index} follows {expected_frame_index - 1}"
+            )
+        expected_frame_index = frame_index + 1
+        if bin_id != unit["genome_id"]:
+            errors.append(f"Frame {frame_id} belongs to bin {bin_id}")
+        if (
+            frame.get("packet_packing_contract_hash")
+            != unit["packet_packing_contract_hash"]
+        ):
+            errors.append(f"Frame {frame_id} uses another packing contract")
+        if not isinstance(payload_hash, str) or len(payload_hash) != 64:
+            raise ValueError("Coverage model_payload_sha256 must be a SHA-256 hex")
+        if (
+            isinstance(payload_bytes, bool)
+            or not isinstance(payload_bytes, int)
+            or payload_bytes < 0
+        ):
+            raise ValueError(
+                "Coverage model_payload_bytes must be a non-negative integer"
+            )
+        if (
+            isinstance(protein_count, bool)
+            or not isinstance(protein_count, int)
+            or protein_count < 0
+        ):
+            raise ValueError("Coverage frame protein_count must be non-negative")
+        if (
+            not isinstance(contig_ids, list)
+            or not contig_ids
+            or any(not isinstance(value, str) or not value for value in contig_ids)
+        ):
+            raise ValueError("Coverage frame contig_ids must be non-empty strings")
+        if not isinstance(segments, list) or len(segments) != len(contig_ids):
+            raise ValueError("Coverage frame segments must match contig_ids")
+        if any(not isinstance(segment, dict) for segment in segments):
+            raise ValueError("Coverage frame segment must be an object")
+        if [segment.get("contig_id") for segment in segments] != contig_ids:
+            raise ValueError("Coverage frame segment order differs from contig_ids")
+        unknown_contigs = sorted(set(contig_ids) - known_contigs)
+        if unknown_contigs:
+            errors.append(
+                f"Frame {frame_id} references unknown contigs: "
+                f"{', '.join(unknown_contigs[:5])}"
+            )
+        if frame.get("target_exceeded") is True:
+            errors.append(f"Frame {frame_id} exceeds the model-payload target")
+        normalized_segments: list[dict[str, Any]] = []
+        frame_segment_proteins = 0
+        for segment in segments:
+            contig_id = segment.get("contig_id")
+            segment_bin_id = segment.get("bin_id")
+            total = segment.get("total_protein_count")
+            start = segment.get("protein_offset_start")
+            end = segment.get("protein_offset_end")
+            segment_index = segment.get("segment_index")
+            if segment_bin_id != unit["genome_id"]:
+                errors.append(
+                    f"Frame {frame_id} segment {contig_id} belongs to "
+                    f"bin {segment_bin_id}"
+                )
+            if any(
+                isinstance(value, bool) or not isinstance(value, int) or value < 0
+                for value in (total, start, end, segment_index)
+            ):
+                raise ValueError(
+                    "Coverage frame segment offsets must be non-negative integers"
+                )
+            state = segment_state.setdefault(
+                str(contig_id),
+                {
+                    "total": int(total),
+                    "next_offset": 0,
+                    "next_segment": 0,
+                    "complete": False,
+                },
+            )
+            if state["complete"] is True:
+                errors.append(
+                    f"Frame {frame_id} repeats completed contig {contig_id}"
+                )
+            if state["total"] != total:
+                errors.append(f"Frame {frame_id} changes total for {contig_id}")
+            if state["next_offset"] != start or state["next_segment"] != segment_index:
+                errors.append(
+                    f"Frame {frame_id} has a gap or overlap for {contig_id}"
+                )
+            if end < start or end > total:
+                errors.append(f"Frame {frame_id} has an invalid range for {contig_id}")
+            complete_segment = segment.get("complete") is True
+            if complete_segment != (end == total):
+                errors.append(
+                    f"Frame {frame_id} has an invalid terminal flag for {contig_id}"
+                )
+            state["next_offset"] = int(end)
+            state["next_segment"] = int(segment_index) + 1
+            state["complete"] = complete_segment
+            frame_segment_proteins += int(end) - int(start)
+            normalized_segments.append(
+                {
+                    "bin_id": segment_bin_id,
+                    "contig_id": contig_id,
+                    "total_protein_count": total,
+                    "protein_offset_start": start,
+                    "protein_offset_end": end,
+                    "segment_index": segment_index,
+                    "complete": complete_segment,
+                }
+            )
+        if frame_segment_proteins != protein_count:
+            errors.append(f"Frame {frame_id} protein count differs from its segments")
+        normalized_frames.append(
+            {
+                "frame_id": frame_id,
+                "frame_index": frame_index,
+                "bin_id": bin_id,
+                "packet_packing_contract_hash": frame[
+                    "packet_packing_contract_hash"
+                ],
+                "model_payload_sha256": payload_hash,
+                "model_payload_bytes": payload_bytes,
+                "contig_ids": contig_ids,
+                "segments": normalized_segments,
+                "protein_count": protein_count,
+                "target_exceeded": frame.get("target_exceeded") is True,
+            }
+        )
+    if sum(len(frame["contig_ids"]) for frame in normalized_frames) != sum(
+        record["segment_count"] for record in normalized
+    ):
+        errors.append("Frame contig-segment total differs from contig receipts")
+    if sum(frame["protein_count"] for frame in normalized_frames) != observed_proteins:
+        errors.append("Frame protein total differs from contig receipts")
+    for record in normalized:
+        state = segment_state.get(record["contig_id"])
+        if state is None:
+            errors.append(f"Contig {record['contig_id']} has no frame segment")
+            continue
+        if state["total"] != record["protein_count"]:
+            errors.append(
+                f"Contig {record['contig_id']} protein total differs from frames"
+            )
+        if state["next_offset"] != record["protein_count"]:
+            errors.append(
+                f"Contig {record['contig_id']} terminal offset differs from total"
+            )
+        if state["next_segment"] != record["segment_count"]:
+            errors.append(
+                f"Contig {record['contig_id']} segment count differs from frames"
+            )
+        if state["complete"] is not record["complete"]:
+            errors.append(
+                f"Contig {record['contig_id']} completion differs from frames"
+            )
     coverage_identity = {
         "schema_version": ATLAS_COVERAGE_SCHEMA,
         "unit_id": unit["unit_id"],
@@ -447,11 +1412,21 @@ def build_genome_coverage_manifest(
         "dataset_id": unit["dataset_id"],
         "genome_id": unit["genome_id"],
         "packet_version": unit["packet_version"],
+        "packet_packing_contract_hash": unit[
+            "packet_packing_contract_hash"
+        ],
         "expected_n_contigs": int(unit["n_contigs"]),
         "observed_n_contigs": observed_contigs,
         "expected_n_proteins": int(unit["n_proteins"]),
         "observed_n_proteins": observed_proteins,
-        "packet_count": sum(record["packet_count"] for record in normalized),
+        "model_frame_count": len(normalized_frames),
+        "contig_segment_count": sum(
+            record["segment_count"] for record in normalized
+        ),
+        "model_payload_bytes": sum(
+            frame["model_payload_bytes"] for frame in normalized_frames
+        ),
+        "frames": normalized_frames,
         "contigs": normalized,
         "coverage_status": "complete" if not errors else "incomplete",
         "errors": errors,
@@ -466,10 +1441,11 @@ def build_genome_coverage_manifest(
 def write_genome_coverage_manifest(
     unit: dict[str, Any],
     contigs: list[dict[str, Any]],
+    frames: list[dict[str, Any]],
     output_path: str | Path,
 ) -> dict[str, Any]:
     """Atomically write one per-genome coverage manifest."""
-    manifest = build_genome_coverage_manifest(unit, contigs)
+    manifest = build_genome_coverage_manifest(unit, contigs, frames)
     write_json_atomic(manifest, Path(output_path).expanduser().resolve())
     return manifest
 
@@ -499,7 +1475,14 @@ def verify_atlas_coverage(
             continue
         manifest = _read_json_object(path)
         errors: list[str] = []
-        for key in ("unit_id", "plan_id", "dataset_id", "genome_id", "packet_version"):
+        for key in (
+            "unit_id",
+            "plan_id",
+            "dataset_id",
+            "genome_id",
+            "packet_version",
+            "packet_packing_contract_hash",
+        ):
             if manifest.get(key) != unit.get(key):
                 errors.append(f"{key} differs from the assigned unit")
         identity = {
@@ -538,16 +1521,28 @@ def verify_atlas_coverage(
 
 __all__ = [
     "ATLAS_COVERAGE_SCHEMA",
+    "ATLAS_PACKET_CENSUS_SCHEMA",
+    "ATLAS_PACKET_CENSUS_UNIT_SCHEMA",
     "ATLAS_PLAN_SCHEMA",
     "ATLAS_REVIEW_OUTPUT_SCHEMA",
     "ATLAS_UNIT_SCHEMA",
-    "DEFAULT_CHECKPOINT_INTERVAL_CONTIGS",
+    "DEFAULT_CENSUS_MAX_TEMP_SIZE",
+    "DEFAULT_CENSUS_MEMORY_LIMIT",
+    "DEFAULT_CENSUS_WORKERS",
+    "DEFAULT_CHECKPOINT_INTERVAL_FRAMES",
+    "DEFAULT_PACKET_BYTES",
+    "DEFAULT_PACKET_CONTIGS",
     "DEFAULT_PACKET_PROTEINS",
+    "DEFAULT_QUERY_RESULT_LIMIT_BYTES",
+    "QUERY_RESULT_ENVELOPE_RESERVE_BYTES",
     "WORK_WEIGHT_FORMULA",
+    "build_atlas_packet_census",
     "build_atlas_plan",
     "build_genome_coverage_manifest",
     "enqueue_atlas_plan",
+    "frame_coverage_receipt",
     "load_atlas_plan",
     "verify_atlas_coverage",
+    "verify_atlas_packet_census",
     "write_genome_coverage_manifest",
 ]
