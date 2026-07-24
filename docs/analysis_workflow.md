@@ -17,6 +17,12 @@ dispatches, reads outputs, and repeats.
 - **Task agents** (survey topic, explore hypothesis, literature search, section writer):
   leaf agents that produce outputs and return. Do not dispatch further agents.
 
+This describes harness ownership for the classic five-phase workflow.
+Atlas-scale hierarchical review uses data-flow levels in Ops v5: scanner,
+deep reviewer, blind independent reviewers, adjudicator, and canonical
+reviewer. Each remains a leaf executor task; durable records and the policy
+controller carry information upward. Read `docs/review_workflow.md`.
+
 Each task agent:
 
 - Gets **curated context**: only the findings, data, and instructions relevant to its task
@@ -60,9 +66,10 @@ Orchestrator (reads state, crafts prompts, dispatches subagents)
 │   └── Create report manifest + compile COMPREHENSIVE_REPORT.md
 │
 ├── 4. Review (independent validation)
-│   ├── Run: verify_claims.py → CLAIM_VERIFICATION.jsonl (mechanical)
-│   ├── Dispatch /reviewer_2 agent → review/correction_queue.md (interpretive)
-│   └── Fix all critical/meaningful corrections before proceeding
+│   ├── Local workflow: verify_claims.py + /reviewer_2
+│   ├── Distributed workflow: exact candidate reduction + v5 review DAG
+│   ├── Append executable verification records and resolve discrepancies
+│   └── Materialize and publish findings that pass canonical gates
 │
 └── 5. Manuscript (section-by-section — see docs/manuscript_guide.md)
     ├── Dispatch section-writing subagents (sequential by topic)

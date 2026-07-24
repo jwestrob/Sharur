@@ -1,4 +1,4 @@
-"""Adversarial, migration, and scale contracts for Sharur Ops v4."""
+"""Adversarial, migration, and scale contracts for Sharur Ops v5."""
 
 from __future__ import annotations
 

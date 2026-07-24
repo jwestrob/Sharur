@@ -23,6 +23,18 @@ Run coordination state flows through the OpsStore. Scientific source-of-truth re
 remain the canonical findings archives. Your operational log survives context compaction
 through `ops.recent_log()`.
 
+For distributed Atlas-scale work, read `docs/review_workflow.md` and run the
+v5 review DAG:
+
+```text
+scanner profiles -> typed occurrences -> exact reducer -> deep review
+-> blind cross-provider reviews -> adjudication -> materialized finding
+-> canonical review -> strict publication
+```
+
+The coordinator controls policy, budgets, and convergence. Executors control
+process/session/scheduler packing. Keep these responsibilities separate.
+
 ---
 
 ## Setup
@@ -118,7 +130,34 @@ After a wave of agents completes:
 
 ### Phase 4: Quality Control
 
-**Auto-dispatch reviewer_2 when:**
+For a distributed v5 campaign, reduce candidates and run the event controller:
+
+```bash
+sharur-review reduce \
+  --ops-url "$OPS_URL" \
+  --campaign-id "$CAMPAIGN_ID"
+
+sharur-review route \
+  --ops-url "$OPS_URL" \
+  --campaign-id "$CAMPAIGN_ID" \
+  --watch
+```
+
+Register executor identities with the exact `profile:<name>` capability they
+serve. Each claimed review task supplies its target, tier, blindness
+contract, policy hash, rubric, and resolved provider/model/effort. Submit
+reviews and executable verification records through the review endpoints.
+
+The policy controller automatically routes:
+
+- verified deep-review promotions to two blind independent profiles;
+- independent quorums and disagreements to adjudication;
+- successful adjudication to finding materialization;
+- materialized findings to canonical review;
+- verified canonical promotions to a publish decision;
+- deterministic samples of clear units and rejected clusters to audit queues.
+
+**Local/draft-spool fallback triggers reviewer_2 when:**
 - Any finding has `novelty >= 3`
 - A finding contradicts a prior finding
 - A quantitative claim seems surprising (e.g., "13,400 mercury resistance proteins" — the mercury agent already caught this one)
@@ -151,6 +190,18 @@ Spawn brainstorm agent with:
 ```
 
 The brainstorm agent posts its top proposals as tasks to the ops store. Review them, adjust priorities, then seed the next wave.
+
+Monitor the distributed funnel with:
+
+```bash
+sharur-review status --ops-url "$OPS_URL" --campaign-id "$CAMPAIGN_ID"
+sharur-review trace --ops-url "$OPS_URL" --campaign-id "$CAMPAIGN_ID" \
+  --subject-kind candidate_cluster --subject-id "$CLUSTER_ID"
+```
+
+Use exact queue, disagreement, verification, audit, and publication counts to
+decide whether to add executor capacity, revise a threshold, or declare
+convergence.
 
 ---
 

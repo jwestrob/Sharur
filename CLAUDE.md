@@ -25,6 +25,7 @@ Detailed guides live in `docs/` and `.claude/skills/`. **Read the relevant doc b
 | Validating hydrogenases | `.claude/skills/hydrogenase.md` |
 | Querying ELSA synteny results | `.claude/skills/synteny.md` |
 | Coordinating multi-agent runs | `agent_ops_spec.md`, `sharur/ops/` |
+| Running hierarchical candidate review | `docs/review_workflow.md`, `sharur/review/` |
 | Serving one large DuckDB to many agents | `docs/query_service.md`, `sharur/query/` |
 | Writing structured findings | `docs/findings_spec.md` |
 | Inspecting cases, comparing ORF context, or adding assembly evidence | `docs/cases_and_evidence.md` |
@@ -82,6 +83,8 @@ services:
 - `sharur-query` owns one sealed, campaign-local, read-only DuckDB replica and
   serves bounded typed queries through a shared cache. Agents authenticate with
   their Ops credentials.
+- `sharur-review` reduces typed occurrences, routes blind review tiers, executes
+  bounded verification, and traces candidate-to-publication provenance.
 - Local or Slurm executors run heavy computation selected by claimed Ops tasks.
 
 Use `Sharur(path, read_only=True)` directly for a single analyst or modest local

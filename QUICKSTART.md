@@ -255,8 +255,20 @@ sharur-atlas enqueue \
 ```
 
 Atlas traverses every contig through bounded sequence-free packets and proves
-completion with per-genome coverage manifests. See
-`.claude/skills/atlas.md`.
+completion with per-genome coverage manifests. Each scanner also emits typed
+candidate occurrences and one reconciled unit disposition. Reduce and route
+the resulting review DAG:
+
+```bash
+sharur-review reduce --ops-url http://ops-host:8811 \
+  --campaign-id CAMPAIGN_ID
+sharur-review route --ops-url http://ops-host:8811 \
+  --campaign-id CAMPAIGN_ID --watch
+sharur-review status --ops-url http://ops-host:8811 \
+  --campaign-id CAMPAIGN_ID
+```
+
+See `.claude/skills/atlas.md` and `docs/review_workflow.md`.
 
 For a legacy H5 without sidecars:
 

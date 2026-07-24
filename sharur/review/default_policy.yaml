@@ -1,0 +1,133 @@
+schema_version: sharur-review-policy/1.0
+name: atlas-tiered-scientific-review
+version: "1"
+controller_id: sharur-review-controller
+rubric_version: scientific-review/1.0
+
+profiles:
+  atlas_scan:
+    provider: openai
+    model: gpt-5.6-terra
+    reasoning_effort: medium
+    capability: profile:atlas_scan
+    max_pending_tasks: 50000
+    resource_request:
+      cpu_slots: 1
+  finding_deepen:
+    provider: openai
+    model: gpt-5.6-terra
+    reasoning_effort: high
+    capability: profile:finding_deepen
+    max_pending_tasks: 5000
+    resource_request:
+      cpu_slots: 1
+  independent_openai:
+    provider: openai
+    model: gpt-5.6-terra
+    reasoning_effort: xhigh
+    capability: profile:independent_openai
+    max_pending_tasks: 1000
+    resource_request:
+      cpu_slots: 1
+  independent_anthropic:
+    provider: anthropic
+    model: claude-opus-4-6
+    reasoning_effort: high
+    capability: profile:independent_anthropic
+    max_pending_tasks: 1000
+    resource_request:
+      cpu_slots: 1
+  final_adjudication:
+    provider: openai
+    model: gpt-5.6-terra
+    reasoning_effort: xhigh
+    capability: profile:final_adjudication
+    max_pending_tasks: 500
+    resource_request:
+      cpu_slots: 1
+  canonical_synthesis:
+    provider: openai
+    model: gpt-5.6-terra
+    reasoning_effort: xhigh
+    capability: profile:canonical_synthesis
+    max_pending_tasks: 500
+    resource_request:
+      cpu_slots: 1
+  canonical_review:
+    provider: anthropic
+    model: claude-opus-4-6
+    reasoning_effort: high
+    capability: profile:canonical_review
+    max_pending_tasks: 500
+    resource_request:
+      cpu_slots: 1
+  audit_clear:
+    provider: openai
+    model: gpt-5.6-terra
+    reasoning_effort: high
+    capability: profile:audit_clear
+    max_pending_tasks: 1000
+    resource_request:
+      cpu_slots: 1
+  audit_reject:
+    provider: anthropic
+    model: claude-opus-4-6
+    reasoning_effort: high
+    capability: profile:audit_reject
+    max_pending_tasks: 500
+    resource_request:
+      cpu_slots: 1
+
+tiers:
+  deepen:
+    profiles: [finding_deepen]
+    minimum_reviews: 1
+    minimum_promote_reviews: 1
+    minimum_confidence: 0.65
+    blind_to_prior_scores: true
+    blind_to_other_reviews: true
+    next_tier: independent
+  independent:
+    profiles: [independent_openai, independent_anthropic]
+    minimum_reviews: 2
+    minimum_promote_reviews: 2
+    minimum_confidence: 0.7
+    require_distinct_providers: true
+    require_distinct_reviewers: true
+    blind_to_prior_scores: true
+    blind_to_other_reviews: true
+    next_tier: adjudication
+  adjudication:
+    profiles: [final_adjudication]
+    minimum_reviews: 1
+    minimum_promote_reviews: 1
+    minimum_confidence: 0.75
+    blind_to_prior_scores: false
+    blind_to_other_reviews: false
+    next_tier: canonical
+  canonical:
+    profiles: [canonical_review]
+    minimum_reviews: 1
+    minimum_promote_reviews: 1
+    minimum_confidence: 0.8
+    blind_to_prior_scores: false
+    blind_to_other_reviews: false
+
+routing:
+  initial_tier: deepen
+  independent_tier: independent
+  adjudication_tier: adjudication
+  canonical_tier: canonical
+  materialization_profile: canonical_synthesis
+
+audit:
+  sampling_seed: sharur-review-audit-v1
+  clear_unit_rate: 0.01
+  rejected_cluster_rate: 0.05
+  clear_profile: audit_clear
+  rejected_profile: audit_reject
+  stratification_fields: [taxonomy_class, completeness_bin]
+
+limits:
+  max_evidence_tasks_per_review: 8
+  event_batch_size: 500

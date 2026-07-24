@@ -73,6 +73,10 @@ def enqueue_command(
     priority: Annotated[int, typer.Option("--priority", min=0, max=3)] = 1,
     max_attempts: Annotated[int, typer.Option("--max-attempts", min=1)] = 5,
     lease_seconds: Annotated[int, typer.Option("--lease-seconds", min=1)] = 900,
+    scan_execution_profile: Annotated[
+        str,
+        typer.Option("--scan-execution-profile"),
+    ] = "atlas_scan",
 ) -> None:
     """Create an idempotent Ops campaign and one task per genome."""
     with SharurOps(
@@ -87,6 +91,7 @@ def enqueue_command(
             priority=priority,
             max_attempts=max_attempts,
             lease_seconds=lease_seconds,
+            scan_execution_profile=scan_execution_profile,
         )
     typer.echo(json.dumps(result, indent=2, sort_keys=True))
 

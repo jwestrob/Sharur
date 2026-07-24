@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 
 from sharur.ops.db import SQLiteDirectAccessLock, open_ops_connection
 from sharur.ops.ledger import RunLedger
+from sharur.ops.review_store import ReviewStoreMixin, assert_sequence_free
 from sharur.ops.schema import (
     DEFAULT_LEASE_SECONDS,
     OPS_SCHEMA,
@@ -64,6 +65,24 @@ _JSON_FIELDS = {
     "inputs",
     "outputs",
     "resource_profile",
+    "reason_codes",
+    "strata",
+    "provenance",
+    "signature",
+    "verification",
+    "uncertainty",
+    "subject_refs",
+    "reduction_features",
+    "counts",
+    "reconstructed_observations",
+    "claim_assessment",
+    "verification_summary",
+    "discrepancies",
+    "proposed_tasks",
+    "specification",
+    "expected",
+    "actual",
+    "audit_stratum",
 }
 _SENSITIVE_FIELDS = {"token_hash", "lease_token_hash"}
 
@@ -147,7 +166,7 @@ def _normalize_resources(value: dict[str, Any] | None) -> dict[str, int]:
     return normalized
 
 
-class OpsStore:
+class OpsStore(ReviewStoreMixin):
     """SQLite operational store with transactional coordination semantics."""
 
     def __init__(
@@ -661,6 +680,14 @@ class OpsStore:
         evidence_json = _canonical_json(evidence or {}, field="finding evidence")
         summary = _bounded_text(summary, field="finding summary")
         reasoning = _bounded_text(reasoning, field="finding reasoning")
+        assert_sequence_free(
+            {
+                "summary": summary,
+                "evidence": evidence or {},
+                "reasoning": reasoning,
+            },
+            field="Finding",
+        )
         immutable = {
             "finding_type": finding_type,
             "domain": domain,
@@ -686,13 +713,23 @@ class OpsStore:
                     label="parent findings",
                 )
             if idempotency_key:
-                existing = self._conn.execute(
-                    """
-                    SELECT * FROM findings
-                    WHERE agent_id = ? AND idempotency_key = ?
-                    """,
-                    (self.agent_id, idempotency_key),
-                ).fetchone()
+                if task_id is not None:
+                    existing = self._conn.execute(
+                        """
+                        SELECT * FROM findings
+                        WHERE task_id = ? AND idempotency_key = ?
+                        """,
+                        (task_id, idempotency_key),
+                    ).fetchone()
+                else:
+                    existing = self._conn.execute(
+                        """
+                        SELECT * FROM findings
+                        WHERE task_id IS NULL
+                          AND agent_id = ? AND idempotency_key = ?
+                        """,
+                        (self.agent_id, idempotency_key),
+                    ).fetchone()
                 if existing is not None:
                     conflicts = [
                         key for key, value in immutable.items() if existing[key] != value
@@ -1271,7 +1308,19 @@ class OpsStore:
         dependencies = list(dict.fromkeys(depends_on or []))
         capabilities = _normalize_capabilities(required_capabilities)
         resources = _normalize_resources(resource_request)
-        params_json = _canonical_json(params or {}, field="task params")
+        normalized_params = dict(params or {})
+        raw_execution_profile = normalized_params.get("execution_profile")
+        if raw_execution_profile is not None and (
+            not isinstance(raw_execution_profile, str)
+            or not raw_execution_profile.strip()
+        ):
+            raise ValueError("Task execution_profile must be a non-empty string")
+        execution_profile = (
+            raw_execution_profile.strip()
+            if isinstance(raw_execution_profile, str)
+            else None
+        )
+        params_json = _canonical_json(normalized_params, field="task params")
         dependencies_json = _canonical_json(dependencies, field="task dependencies")
         capabilities_json = _canonical_json(capabilities, field="task capabilities")
         resources_json = _canonical_json(resources, field="task resources")
@@ -1280,6 +1329,7 @@ class OpsStore:
             "task_type": task_type,
             "description": description,
             "params": params_json,
+            "execution_profile": execution_profile,
             "priority": priority,
             "domain_hint": domain_hint,
             "run_id": run_id,
@@ -1320,11 +1370,14 @@ class OpsStore:
                 """
                 INSERT INTO tasks(
                     id, created_by, assigned_to, reserved_for, ts, status,
-                    priority, task_type, description, params, domain_hint,
+                    priority, task_type, description, params, execution_profile,
+                    domain_hint,
                     run_id, campaign_id, idempotency_key, dependency_ids,
                     required_capabilities, resource_request, attempt_count,
                     max_attempts, lease_seconds
-                ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+                ) VALUES (
+                    ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?
+                )
                 """,
                 (
                     task_id,
@@ -1336,6 +1389,7 @@ class OpsStore:
                     task_type,
                     description,
                     params_json,
+                    execution_profile,
                     domain_hint,
                     run_id,
                     campaign_id,
@@ -1941,6 +1995,122 @@ class OpsStore:
                 result_finding_ids,
                 label="result findings",
             )
+            task_row = self._conn.execute(
+                "SELECT campaign_id, params FROM tasks WHERE id = ?",
+                (task_id,),
+            ).fetchone()
+            if task_row is None:
+                raise LeaseFenceError(
+                    f"Task {task_id} is not active under attempt {attempt_number} "
+                    f"for {self.agent_id}"
+                )
+            task_params = json.loads(task_row["params"])
+            if task_params.get("review_output_contract") is not None:
+                unit_id = task_params.get("unit_id")
+                dataset_id = task_params.get("dataset_id")
+                disposition = self._conn.execute(
+                    """
+                    SELECT * FROM unit_dispositions
+                    WHERE campaign_id = ? AND task_id = ? AND unit_id = ?
+                      AND dataset_id = ? AND record_status = 'active'
+                    ORDER BY version DESC LIMIT 1
+                    """,
+                    (
+                        task_row["campaign_id"],
+                        task_id,
+                        unit_id,
+                        dataset_id,
+                    ),
+                ).fetchone()
+                if disposition is None:
+                    raise ValueError(
+                        "Task review-output contract requires an active unit "
+                        "disposition before completion"
+                    )
+                if disposition["disposition"] not in {"clear", "candidate"}:
+                    raise ValueError(
+                        "Incomplete or failed unit disposition blocks task completion"
+                    )
+                task_candidate_count = int(
+                    self._conn.execute(
+                        """
+                        SELECT COUNT(*) FROM candidate_occurrences
+                        WHERE campaign_id = ? AND task_id = ? AND unit_id = ?
+                          AND dataset_id = ? AND genome_id = ?
+                        """,
+                        (
+                            task_row["campaign_id"],
+                            task_id,
+                            unit_id,
+                            dataset_id,
+                            task_params.get("genome_id"),
+                        ),
+                    ).fetchone()[0]
+                )
+                if task_candidate_count != int(disposition["candidate_count"]):
+                    raise ValueError(
+                        "Task candidate records differ from its active unit disposition"
+                    )
+            if task_params.get("review_contract") is not None:
+                review_count = int(
+                    self._conn.execute(
+                        "SELECT COUNT(*) FROM finding_reviews WHERE task_id = ?",
+                        (task_id,),
+                    ).fetchone()[0]
+                )
+                if review_count != 1:
+                    raise ValueError(
+                        "Scientific-review task completion requires exactly one "
+                        "task-owned review"
+                    )
+            if task_params.get("materialization_contract") is not None:
+                target = dict(task_params.get("target") or {})
+                output_contract = dict(task_params.get("output_contract") or {})
+                if target.get("kind") != "candidate_cluster" or not target.get("id"):
+                    raise ValueError(
+                        "Materialization task lacks an exact candidate-cluster target"
+                    )
+                if len(finding_ids) != 1:
+                    raise ValueError(
+                        "Materialization task completion requires exactly one "
+                        "result finding"
+                    )
+                expected_relation = str(
+                    output_contract.get("link_cluster_relation") or "materializes"
+                )
+                materialized = self._conn.execute(
+                    """
+                    SELECT f.validation_status
+                    FROM findings AS f
+                    JOIN cluster_findings AS cf ON cf.finding_id = f.id
+                    WHERE f.id = ?
+                      AND f.task_id = ?
+                      AND f.campaign_id = ?
+                      AND cf.cluster_id = ?
+                      AND cf.relation = ?
+                    """,
+                    (
+                        finding_ids[0],
+                        task_id,
+                        task_row["campaign_id"],
+                        target["id"],
+                        expected_relation,
+                    ),
+                ).fetchone()
+                if materialized is None:
+                    raise ValueError(
+                        "Materialization task requires its task-owned finding "
+                        "and typed source-cluster link before completion"
+                    )
+                expected_status = output_contract.get("validation_status")
+                if (
+                    expected_status is not None
+                    and materialized["validation_status"] != expected_status
+                ):
+                    raise ValueError(
+                        "Materialized finding validation status differs from "
+                        "its task contract"
+                    )
             now = time.time()
             cursor = self._conn.execute(
                 """
@@ -2522,6 +2692,13 @@ class OpsStore:
                 "run_stages",
                 "coordination_events",
                 "artifacts",
+                "unit_dispositions",
+                "candidate_occurrences",
+                "candidate_clusters",
+                "finding_reviews",
+                "review_verifications",
+                "promotion_decisions",
+                "canonical_publications",
             )
             counts = {
                 table: int(
@@ -2537,6 +2714,22 @@ class OpsStore:
                 ("runs_by_status", "runs", "status"),
                 ("stages_by_status", "run_stages", "status"),
                 ("agents_by_status", "agents", "status"),
+                (
+                    "unit_dispositions_by_disposition",
+                    "unit_dispositions",
+                    "disposition",
+                ),
+                ("reviews_by_verdict", "finding_reviews", "verdict"),
+                (
+                    "review_verifications_by_status",
+                    "review_verifications",
+                    "status",
+                ),
+                (
+                    "promotion_decisions_by_decision",
+                    "promotion_decisions",
+                    "decision",
+                ),
             ):
                 grouped[key] = {
                     str(row[0]): int(row[1])

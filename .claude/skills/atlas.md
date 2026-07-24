@@ -23,6 +23,7 @@ Read these before coordinating or executing Atlas:
 - `docs/subagent_guide.md`
 - `docs/query_service.md`
 - `agent_ops_spec.md`
+- `docs/review_workflow.md`
 - `.claude/skills/_validation_protocols.md`
 
 ## Invariants
@@ -41,6 +42,8 @@ Read these before coordinating or executing Atlas:
    campaign duration; it never silently changes Atlas into sampling.
 8. Raw nucleotide and amino-acid sequences stay outside model-visible
    prompts, reports, logs, and summaries.
+9. Each unit emits typed candidates first and exactly one active unit
+   disposition last. Task completion reconciles both record classes.
 
 ## Observation and naming boundary
 
@@ -95,12 +98,15 @@ Launch `sharur-ops` and a sealed `sharur-query` replica, then enqueue:
 sharur-atlas enqueue \
   --plan-dir data/DATASET/atlas \
   --ops-url http://ops-host:8811 \
-  --query-url http://query-host:8812
+  --query-url http://query-host:8812 \
+  --scan-execution-profile atlas_scan
 ```
 
 Enqueueing is idempotent by plan ID and unit ID. Each task requires the
-`atlas_reader` capability and one generic CPU slot. Add or remove workers at
-runtime; dynamic claiming balances genomes by completion rate.
+`atlas_reader` plus `profile:atlas_scan` capabilities and one generic CPU
+slot. Add or remove workers at runtime; dynamic claiming balances genomes by
+completion rate. The profile name resolves to the exact provider, model, and
+effort in the review policy while Atlas retains genome-level ownership.
 
 ## Worker protocol
 
@@ -231,14 +237,68 @@ The inventory should include:
 - verification queries for every specific numerical claim.
 
 Register large outputs as content-addressed Ops artifacts. Submit discrete
-findings through Ops with `campaign_id`, `task_id`, and stable idempotency
-keys. Each finding keeps observed evidence separate from caller-emitted names.
+candidate occurrences through Ops with `campaign_id`, `task_id`, `unit_id`,
+`genome_id`, and stable idempotency keys. Each candidate keeps observed
+evidence separate from caller-emitted names.
+
+### Candidate and disposition output
+
+Emit one record per reviewable occurrence:
+
+```python
+candidate_id = ops.create_candidate_occurrence(
+    campaign_id=task["campaign_id"],
+    task_id=task["id"],
+    dataset_id=task["params"]["dataset_id"],
+    unit_id=task["params"]["unit_id"],
+    genome_id=task["params"]["genome_id"],
+    candidate_type="VERSIONED_TYPED_CLASS",
+    signature_schema="VERSIONED_SIGNATURE_SCHEMA",
+    signature=typed_signature,
+    evidence=observed_evidence,
+    verification=verification_specs,
+    subject_refs=stable_subject_refs,
+    uncertainty=uncertainty,
+    reduction_features=reduction_features,
+    provenance=execution_provenance,
+    idempotency_key=stable_candidate_key,
+)
+```
+
+The signature is structured and type-specific. It excludes interpretive
+prose. A named biological claim enters evidence only through the exact live
+purpose-built caller output.
+
+After the terminal coverage manifest exists and every candidate write has
+returned, append one unit disposition:
+
+```python
+ops.record_unit_disposition(
+    campaign_id=task["campaign_id"],
+    task_id=task["id"],
+    unit_id=task["params"]["unit_id"],
+    dataset_id=task["params"]["dataset_id"],
+    genome_id=task["params"]["genome_id"],
+    coverage_hash=coverage["coverage_sha256"],
+    candidate_count=len(candidate_ids),
+    disposition="candidate" if candidate_ids else "clear",
+    evidence_bundle_hash=unit_evidence_bundle_hash,
+    strata=audit_strata,
+    provenance=execution_provenance,
+    idempotency_key=stable_disposition_key,
+)
+```
+
+An audit correction appends a new disposition with
+`supersedes_disposition_id`. The original version remains available for
+calibration.
 
 ## Coverage completion
 
 Build the final per-genome manifest with
 `write_genome_coverage_manifest()` from `sharur.atlas`. Complete the task only
-when its manifest has `coverage_status="complete"` and exact expected totals.
+when its manifest has `coverage_status="complete"`, exact expected totals, all
+candidate writes, and its active unit disposition.
 
 After all tasks finish:
 

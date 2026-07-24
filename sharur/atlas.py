@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 ATLAS_PLAN_SCHEMA = "atlas-plan/1.0"
 ATLAS_UNIT_SCHEMA = "atlas-unit/1.0"
 ATLAS_COVERAGE_SCHEMA = "atlas-coverage/1.0"
+ATLAS_REVIEW_OUTPUT_SCHEMA = "atlas-review-output/1.0"
 DEFAULT_PACKET_PROTEINS = 100
 DEFAULT_CHECKPOINT_INTERVAL_CONTIGS = 25
 WORK_WEIGHT_FORMULA = "n_proteins + 32 * n_contigs"
@@ -311,8 +312,12 @@ def enqueue_atlas_plan(
     priority: int = 1,
     max_attempts: int = 5,
     lease_seconds: int = 900,
+    scan_execution_profile: str = "atlas_scan",
 ) -> dict[str, Any]:
     """Create an idempotent campaign and one claimable task per genome."""
+    scan_execution_profile = scan_execution_profile.strip()
+    if not scan_execution_profile:
+        raise ValueError("scan_execution_profile must be non-empty")
     manifest, units = load_atlas_plan(plan_dir)
     root = Path(plan_dir).expanduser().resolve()
     campaign_id = ops.create_campaign(
@@ -324,6 +329,7 @@ def enqueue_atlas_plan(
             "dataset_id": manifest["dataset_id"],
             "unit_count": manifest["unit_count"],
             "query_url": query_url,
+            "scan_execution_profile": scan_execution_profile,
         },
         idempotency_key=f"atlas-campaign:{manifest['plan_id']}",
     )
@@ -339,12 +345,24 @@ def enqueue_atlas_plan(
                     "query_url": query_url,
                     "plan_path": str(root / "plan.json"),
                     "coverage_manifest": str(root / "coverage" / f"{unit_id}.json"),
+                    "execution_profile": scan_execution_profile,
+                    "review_output_contract": {
+                        "schema_version": ATLAS_REVIEW_OUTPUT_SCHEMA,
+                        "candidate_endpoint": "/review/candidates",
+                        "disposition_endpoint": "/review/unit-dispositions",
+                        "ordering": "candidates_before_disposition",
+                        "completion_requires_active_disposition": True,
+                        "candidate_reduction": "exact_typed_signature",
+                    },
                 },
                 priority=priority,
                 domain_hint="genome_reading",
                 campaign_id=campaign_id,
                 idempotency_key=f"atlas-task:{manifest['plan_id']}:{unit_id}",
-                required_capabilities=["atlas_reader"],
+                required_capabilities=[
+                    "atlas_reader",
+                    f"profile:{scan_execution_profile}",
+                ],
                 resource_request={"cpu_slots": 1},
                 max_attempts=max_attempts,
                 lease_seconds=lease_seconds,
@@ -354,6 +372,7 @@ def enqueue_atlas_plan(
         "campaign_id": campaign_id,
         "plan_id": manifest["plan_id"],
         "dataset_id": manifest["dataset_id"],
+        "scan_execution_profile": scan_execution_profile,
         "task_count": len(task_ids),
         "task_ids": task_ids,
     }
@@ -520,6 +539,7 @@ def verify_atlas_coverage(
 __all__ = [
     "ATLAS_COVERAGE_SCHEMA",
     "ATLAS_PLAN_SCHEMA",
+    "ATLAS_REVIEW_OUTPUT_SCHEMA",
     "ATLAS_UNIT_SCHEMA",
     "DEFAULT_CHECKPOINT_INTERVAL_CONTIGS",
     "DEFAULT_PACKET_PROTEINS",

@@ -138,6 +138,36 @@ sequence-free protein packets, checkpointed contig prefixes, and exact
 coverage manifests. Dataset size changes the number of dynamically claimed
 tasks while preserving exhaustive traversal.
 
+### Hierarchical review workers
+
+Read `docs/review_workflow.md` before serving a review profile. Register one
+or more semantic capabilities, for example:
+
+```python
+registration = operator.register_agent(
+    "independent-reviewer-openai-01",
+    role="worker",
+    capabilities=["profile:independent_openai"],
+    max_concurrent_tasks=1,
+    capacity_cpu_slots=1,
+)
+```
+
+Claimed `scientific_review` tasks provide a frozen target, review tier,
+execution profile, resolved provider/model/effort, policy hash, rubric,
+blindness flags, and source-review manifest. The submitting identity must own
+the task. Its review record must reproduce the task's target and execution
+contract exactly.
+
+Independent profiles receive empty source-review manifests. Adjudication
+profiles receive the two frozen independent reviews. This data flow supplies
+hierarchy across Codex and Claude executors while keeping model-session
+creation in the executor layer.
+
+Every promotion review appends executable verification results before the
+controller advances it. Use `sharur-review status` for queue and funnel
+metrics and `sharur-review trace` for a bounded provenance reconstruction.
+
 See [`query_service.md`](query_service.md) for launch commands, endpoint
 contracts, resource arithmetic, and access-path selection.
 

@@ -205,7 +205,17 @@ def test_atlas_enqueue_creates_one_idempotent_genome_task(tmp_path):
     assert len(ops.tasks) == 2
     assert all(task[0] == "atlas_genome_read" for task in ops.tasks)
     assert all(
-        task[2]["required_capabilities"] == ["atlas_reader"]
+        task[2]["required_capabilities"]
+        == ["atlas_reader", "profile:atlas_scan"]
+        for task in ops.tasks
+    )
+    assert all(
+        task[2]["params"]["review_output_contract"]["schema_version"]
+        == "atlas-review-output/1.0"
+        for task in ops.tasks
+    )
+    assert all(
+        task[2]["params"]["execution_profile"] == "atlas_scan"
         for task in ops.tasks
     )
     assert all(

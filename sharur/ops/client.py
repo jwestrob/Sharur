@@ -288,6 +288,22 @@ class SharurOps:
             params=params,
         ).json()
 
+    def link_findings(
+        self,
+        finding_id: str,
+        related_finding_id: str,
+        *,
+        relation: str,
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            f"/findings/{finding_id}/links",
+            json={
+                "related_finding_id": related_finding_id,
+                "relation": relation,
+            },
+        ).json()
+
     def register_artifact(
         self,
         content_hash: str,
@@ -329,6 +345,359 @@ class SharurOps:
             f"/findings/{finding_id}/artifacts",
             json={"artifact_id": artifact_id, "relation": relation},
             retry_mutation=True,
+        ).json()
+
+    # ------------------------------------------------------------------
+    # Typed candidates and scientific review DAG
+    # ------------------------------------------------------------------
+
+    def record_unit_disposition(
+        self,
+        *,
+        campaign_id: str,
+        unit_id: str,
+        dataset_id: str,
+        genome_id: str,
+        coverage_hash: str,
+        candidate_count: int,
+        disposition: str,
+        evidence_bundle_hash: str,
+        task_id: str | None = None,
+        reason_codes: list[str] | None = None,
+        strata: dict | None = None,
+        provenance: dict | None = None,
+        supersedes_disposition_id: str | None = None,
+        idempotency_key: str,
+        schema_version: int = 1,
+    ) -> str:
+        response = self._request(
+            "POST",
+            "/review/unit-dispositions",
+            json={
+                "agent_id": self.agent_id,
+                "campaign_id": campaign_id,
+                "unit_id": unit_id,
+                "dataset_id": dataset_id,
+                "genome_id": genome_id,
+                "coverage_hash": coverage_hash,
+                "candidate_count": candidate_count,
+                "disposition": disposition,
+                "evidence_bundle_hash": evidence_bundle_hash,
+                "task_id": task_id,
+                "reason_codes": reason_codes or [],
+                "strata": strata or {},
+                "provenance": provenance or {},
+                "supersedes_disposition_id": supersedes_disposition_id,
+                "idempotency_key": idempotency_key,
+                "schema_version": schema_version,
+            },
+            retry_mutation=True,
+        )
+        return str(response.json()["id"])
+
+    def list_unit_dispositions(self, **filters: Any) -> list[dict[str, Any]]:
+        return self._request(
+            "GET", "/review/unit-dispositions", params=filters
+        ).json()
+
+    def get_unit_disposition(self, disposition_id: str) -> dict[str, Any]:
+        return self._request(
+            "GET", f"/review/unit-dispositions/{disposition_id}"
+        ).json()
+
+    def create_candidate_occurrence(
+        self,
+        *,
+        campaign_id: str,
+        dataset_id: str,
+        unit_id: str,
+        genome_id: str,
+        candidate_type: str,
+        signature_schema: str,
+        signature: dict,
+        evidence: dict,
+        verification: list[dict],
+        subject_refs: dict,
+        task_id: str | None = None,
+        reason_codes: list[str] | None = None,
+        uncertainty: dict | None = None,
+        reduction_features: dict | None = None,
+        provenance: dict | None = None,
+        evidence_bundle_hash: str | None = None,
+        idempotency_key: str,
+        schema_version: int = 1,
+    ) -> str:
+        response = self._request(
+            "POST",
+            "/review/candidates",
+            json={
+                "agent_id": self.agent_id,
+                "campaign_id": campaign_id,
+                "dataset_id": dataset_id,
+                "unit_id": unit_id,
+                "genome_id": genome_id,
+                "candidate_type": candidate_type,
+                "signature_schema": signature_schema,
+                "signature": signature,
+                "evidence": evidence,
+                "verification": verification,
+                "subject_refs": subject_refs,
+                "task_id": task_id,
+                "reason_codes": reason_codes or [],
+                "uncertainty": uncertainty or {},
+                "reduction_features": reduction_features or {},
+                "provenance": provenance or {},
+                "evidence_bundle_hash": evidence_bundle_hash,
+                "idempotency_key": idempotency_key,
+                "schema_version": schema_version,
+            },
+            retry_mutation=True,
+        )
+        return str(response.json()["id"])
+
+    def list_candidate_occurrences(self, **filters: Any) -> list[dict[str, Any]]:
+        return self._request("GET", "/review/candidates", params=filters).json()
+
+    def get_candidate_occurrence(self, candidate_id: str) -> dict[str, Any]:
+        return self._request(
+            "GET", f"/review/candidates/{candidate_id}"
+        ).json()
+
+    def reduce_candidates(
+        self,
+        campaign_id: str,
+        *,
+        dataset_id: str | None = None,
+        candidate_type: str | None = None,
+        batch_size: int = 1_000,
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/review/reduce",
+            json={
+                "campaign_id": campaign_id,
+                "dataset_id": dataset_id,
+                "candidate_type": candidate_type,
+                "batch_size": batch_size,
+            },
+        ).json()
+
+    def list_candidate_clusters(self, **filters: Any) -> list[dict[str, Any]]:
+        return self._request("GET", "/review/clusters", params=filters).json()
+
+    def get_candidate_cluster(
+        self,
+        cluster_id: str,
+        *,
+        member_limit: int = 100,
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            f"/review/clusters/{cluster_id}",
+            params={"member_limit": member_limit},
+        ).json()
+
+    def list_candidate_cluster_members(
+        self,
+        cluster_id: str,
+        *,
+        after_candidate_id: str | None = None,
+        limit: int = 500,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {"limit": limit}
+        if after_candidate_id is not None:
+            params["after_candidate_id"] = after_candidate_id
+        return self._request(
+            "GET",
+            f"/review/clusters/{cluster_id}/members",
+            params=params,
+        ).json()
+
+    def link_cluster_finding(
+        self,
+        cluster_id: str,
+        finding_id: str,
+        *,
+        relation: str = "materializes",
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            f"/review/clusters/{cluster_id}/findings",
+            json={"finding_id": finding_id, "relation": relation},
+        ).json()
+
+    def list_cluster_findings(self, **filters: Any) -> list[dict[str, Any]]:
+        return self._request(
+            "GET", "/review/cluster-findings", params=filters
+        ).json()
+
+    def create_finding_review(
+        self,
+        *,
+        campaign_id: str,
+        dataset_id: str,
+        review_tier: str,
+        execution_profile: str,
+        provider: str,
+        model: str,
+        reasoning_effort: str,
+        prompt_hash: str,
+        rubric_version: str,
+        input_bundle_hash: str,
+        verdict: str,
+        confidence: float,
+        finding_id: str | None = None,
+        cluster_id: str | None = None,
+        unit_disposition_id: str | None = None,
+        task_id: str | None = None,
+        run_id: str | None = None,
+        reconstructed_observations: dict | None = None,
+        claim_assessment: dict | None = None,
+        verification_summary: dict | None = None,
+        discrepancies: list[dict] | None = None,
+        proposed_tasks: list[dict] | None = None,
+        blind_to_prior_scores: bool = True,
+        blind_to_other_reviews: bool = True,
+        parent_review_id: str | None = None,
+        idempotency_key: str,
+        schema_version: int = 1,
+    ) -> str:
+        response = self._request(
+            "POST",
+            "/review/reviews",
+            json={
+                "reviewer_agent_id": self.agent_id,
+                "campaign_id": campaign_id,
+                "dataset_id": dataset_id,
+                "review_tier": review_tier,
+                "execution_profile": execution_profile,
+                "provider": provider,
+                "model": model,
+                "reasoning_effort": reasoning_effort,
+                "prompt_hash": prompt_hash,
+                "rubric_version": rubric_version,
+                "input_bundle_hash": input_bundle_hash,
+                "verdict": verdict,
+                "confidence": confidence,
+                "finding_id": finding_id,
+                "cluster_id": cluster_id,
+                "unit_disposition_id": unit_disposition_id,
+                "task_id": task_id,
+                "run_id": run_id,
+                "reconstructed_observations": reconstructed_observations or {},
+                "claim_assessment": claim_assessment or {},
+                "verification_summary": verification_summary or {},
+                "discrepancies": discrepancies or [],
+                "proposed_tasks": proposed_tasks or [],
+                "blind_to_prior_scores": blind_to_prior_scores,
+                "blind_to_other_reviews": blind_to_other_reviews,
+                "parent_review_id": parent_review_id,
+                "idempotency_key": idempotency_key,
+                "schema_version": schema_version,
+            },
+            retry_mutation=True,
+        )
+        return str(response.json()["id"])
+
+    def list_finding_reviews(self, **filters: Any) -> list[dict[str, Any]]:
+        return self._request("GET", "/review/reviews", params=filters).json()
+
+    def get_finding_review(self, review_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/review/reviews/{review_id}").json()
+
+    def record_review_verification(
+        self,
+        review_id: str,
+        *,
+        claim_key: str,
+        engine: str,
+        specification: dict,
+        dataset_id: str,
+        expected: Any,
+        status: str,
+        actual: Any = None,
+        executed_ts: float | None = None,
+        code_commit: str | None = None,
+        artifact_id: str | None = None,
+        error: str | None = None,
+        supersedes_verification_id: str | None = None,
+        idempotency_key: str,
+    ) -> str:
+        response = self._request(
+            "POST",
+            f"/review/reviews/{review_id}/verifications",
+            json={
+                "agent_id": self.agent_id,
+                "claim_key": claim_key,
+                "engine": engine,
+                "specification": specification,
+                "dataset_id": dataset_id,
+                "expected": expected,
+                "status": status,
+                "actual": actual,
+                "executed_ts": executed_ts,
+                "code_commit": code_commit,
+                "artifact_id": artifact_id,
+                "error": error,
+                "supersedes_verification_id": supersedes_verification_id,
+                "idempotency_key": idempotency_key,
+            },
+            retry_mutation=True,
+        )
+        return str(response.json()["id"])
+
+    def list_review_verifications(
+        self, review_id: str
+    ) -> list[dict[str, Any]]:
+        return self._request(
+            "GET", f"/review/reviews/{review_id}/verifications"
+        ).json()
+
+    def create_promotion_decision(self, **payload: Any) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/review/decisions",
+            json=payload,
+            retry_mutation=bool(payload.get("idempotency_key")),
+        ).json()
+
+    def list_promotion_decisions(self, **filters: Any) -> list[dict[str, Any]]:
+        return self._request("GET", "/review/decisions", params=filters).json()
+
+    def get_promotion_decision(self, decision_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/review/decisions/{decision_id}").json()
+
+    def record_canonical_publication(self, **payload: Any) -> str:
+        response = self._request(
+            "POST",
+            "/review/publications",
+            json=payload,
+            retry_mutation=bool(payload.get("idempotency_key")),
+        )
+        return str(response.json()["id"])
+
+    def list_canonical_publications(self, **filters: Any) -> list[dict[str, Any]]:
+        return self._request(
+            "GET", "/review/publications", params=filters
+        ).json()
+
+    def tick_review_controller(
+        self,
+        campaign_id: str,
+        *,
+        policy: dict | None = None,
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/review/controller/tick",
+            json={"campaign_id": campaign_id, "policy": policy},
+        ).json()
+
+    def review_status(self, campaign_id: str) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            "/review/status",
+            params={"campaign_id": campaign_id},
         ).json()
 
     # ------------------------------------------------------------------

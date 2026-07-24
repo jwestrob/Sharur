@@ -1,4 +1,4 @@
-# Sharur Ops v4 — Storage and Coordination Contract
+# Sharur Ops v5 — Storage, Coordination, and Review Contract
 
 Sharur Ops is the durable control plane for multi-agent analyses. It records
 campaigns, identities, logical work, scientific findings, hypotheses,
@@ -72,7 +72,7 @@ adapters. They do not define task semantics or pipeline stage behavior.
 
 ## Schema lifecycle
 
-`OPS_SCHEMA_VERSION = 4`. `ensure_ops_schema()` performs an additive,
+`OPS_SCHEMA_VERSION = 5`. `ensure_ops_schema()` performs an additive,
 transactional migration and returns:
 
 - `True` when it applies a migration;
@@ -81,6 +81,11 @@ transactional migration and returns:
 A current-schema open performs schema reads and connection PRAGMAs only.
 Legacy JSON reference columns remain available for compatibility. New writes
 also populate normalized, foreign-key-backed relationship tables.
+
+Review-DAG output keys are task-scoped when `task_id` is present, preserving
+exactly-once logical output across lease recovery and worker reassignment.
+Task completion for scientific review and finding materialization validates
+the typed output rows before the terminal transition.
 
 ## Primary tables
 
@@ -149,6 +154,7 @@ The logical work queue. Important fields include:
 | `reserved_for` | Persistent reservation across retries |
 | `priority` | 0–3 |
 | `params` | Bounded task-specific JSON |
+| `execution_profile` | Indexed semantic execution profile for routing/backpressure |
 | `run_id`, `campaign_id` | Optional execution and analysis parents |
 | `attempt_count`, `max_attempts` | Bounded retry accounting |
 | `lease_seconds`, `lease_expires_ts` | Finite authority window |
@@ -190,6 +196,30 @@ under its new token and attempt number.
 
 Checkpoint rows update in place and survive task retry. Workers batch updates
 at scientifically safe recovery boundaries to control central write volume.
+
+### Review-DAG tables
+
+Ops v5 adds normalized scientific escalation state:
+
+| Table | Authority |
+|---|---|
+| `unit_dispositions` | Versioned terminal result for each scanned unit |
+| `candidate_occurrences` | Lossless typed observations and evidence bundles |
+| `candidate_clusters` | Immutable reducer versions and exact manifests |
+| `candidate_cluster_members` | Every occurrence with member/medoid/outlier/counterexample role |
+| `candidate_cluster_lineage` | Supersession, split, merge, and refinement edges |
+| `cluster_findings` | Materialization/support/counterexample links to findings |
+| `finding_reviews` | Exact reviewer/execution identity, assessment, and verdict |
+| `review_verifications` | Append-only executable claim-check attempts |
+| `promotion_decisions` | Versioned policy decisions and linked reviews/tasks |
+| `canonical_publications` | Canonical JSONL publication receipts |
+| `review_controller_state` | Durable event cursor per policy controller/campaign |
+
+Publication requires a matching `publish` decision, at least one verification
+per supporting review, and a latest `pass` result for every recorded
+claim/specification pair. Atlas campaigns also require exact closure across
+the planned unit count, completed scan tasks, and active ready dispositions.
+See `docs/review_workflow.md` for the end-to-end contract.
 
 ### `runs`, `run_stages`, and `run_events`
 
@@ -253,6 +283,9 @@ Recovery endpoints use the server clock. Direct `OpsStore` accepts an injected
 - Inline JSON/text default: 256 KiB.
 - List endpoints: bounded `limit`; time-ordered collections accept
   `before_ts`.
+- Candidate-cluster detail: exact aggregate counts plus at most 1,000 sampled
+  members; `/review/clusters/{cluster_id}/members` provides bounded cursor
+  traversal of the lossless membership table.
 - Event replay: bounded `after_id` cursor.
 - SQLite request pool: four connections by default.
 - Maintenance: task/run recovery every 15 seconds by default.

@@ -1,4 +1,4 @@
-# Sharur Ops v4 — Coordination Layer Specification
+# Sharur Ops v5 — Coordination and Scientific Review Specification
 
 ## Purpose
 
@@ -126,6 +126,56 @@ A campaign namespaces one coordinated analysis and links:
 
 Campaign filtering keeps concurrent analyses from competing in one logical
 queue while preserving one operational database.
+
+## Scientific review DAG
+
+Ops v5 adds a lossless candidate-to-publication graph:
+
+```text
+candidate_occurrences + unit_dispositions
+  -> candidate_clusters + version lineage
+  -> finding_reviews
+  -> review_verifications
+  -> promotion_decisions
+  -> cluster_findings
+  -> canonical_publications
+```
+
+`unit_dispositions` prove the outcome of every assigned scan unit, including
+units that yielded zero candidates. Audit corrections append a new version
+and supersede the prior active disposition.
+Atlas publication reconciles the planned unit count against completed scan
+tasks and active ready dispositions.
+
+`candidate_occurrences` preserve every typed observation with exact unit,
+genome, dataset, task, signature schema, evidence bundle, uncertainty,
+verification specification, subject references, and execution provenance.
+
+`candidate_clusters` are immutable versions. The default reducer groups only
+equal typed signature hashes, retains every member, identifies a deterministic
+medoid, and preserves explicit outlier/counterexample roles. Normalized
+lineage records represent supersession, splits, merges, and refinement.
+Supersession fences active tasks targeting the prior manifest, including
+canonical review work derived from it. Publish decisions and publication
+receipts recheck each materialized source cluster.
+
+`finding_reviews` target exactly one cluster, finding, or unit disposition.
+They record exact reviewer and execution identity, prompt/rubric/input hashes,
+blindness flags, reconstructed observations, discrepancies, proposed tasks,
+verdict, and confidence. A task-backed review must match the claimed task's
+target, tier, profile, provider, model, effort, and blindness contract.
+
+`review_verifications` are append-only numbered attempts. Publication gates
+evaluate the latest attempt for every claim. `promotion_decisions` record the
+versioned policy, source and target tiers, supporting reviews, derived tasks,
+audit selection, and rationale.
+
+`cluster_findings` preserves the transition from reduced evidence to a
+materialized scientific finding. `canonical_publications` record the strict
+canonical writer's URI, record ID, and content hash after a publish decision.
+
+The full operational workflow is documented in
+[`docs/review_workflow.md`](docs/review_workflow.md).
 
 ## Task authority protocol
 
@@ -271,12 +321,20 @@ Caller-stable idempotency keys cover:
 - hypotheses;
 - tasks;
 - runs;
-- coordinator-log entries.
+- coordinator-log entries;
+- unit dispositions and candidate occurrences;
+- candidate clusters, reviews, verification attempts, decisions, and
+  publication receipts.
 
 An exact retry returns the existing ID. Reusing a key with a different
 immutable payload returns a conflict. The client retries a mutation after a
 transport failure only when that mutation carries an idempotency key or a
 natural content identity.
+
+Scientific task outputs scope idempotency to `task_id + idempotency_key`.
+This identity survives lease recovery onto a different agent. Review tasks
+complete after one task-owned review exists; materialization tasks complete
+after one task-owned result finding carries its typed source-cluster link.
 
 Scientific references use normalized foreign-key tables:
 
@@ -286,7 +344,10 @@ Scientific references use normalized foreign-key tables:
 - `finding_links`;
 - `coordinator_log_findings`;
 - `coordinator_log_hypotheses`;
-- `finding_artifacts`.
+- `finding_artifacts`;
+- `candidate_cluster_members` and `candidate_cluster_lineage`;
+- `cluster_findings`;
+- `promotion_decision_reviews` and `promotion_decision_tasks`.
 
 Legacy JSON arrays remain readable and synchronized.
 
@@ -336,13 +397,13 @@ Application startup:
 
 1. acquires the owner lock;
 2. opens the first SQLite connection;
-3. applies additive schema migration v4 inside one transaction;
+3. applies additive schema migration v5 inside one transaction;
 4. opens the remaining pool connections;
 5. starts maintenance.
 
 Each store operation checks out one pool connection. `OpsStore` and
 `RunLedger` share that connection and lock, eliminating the former nested
-ledger connection and duplicate schema initialization. A current v4 schema
+ledger connection and duplicate schema initialization. A current v5 schema
 open produces zero schema writes.
 
 `PRAGMA foreign_keys=ON`, WAL, `synchronous=NORMAL`, a 15-second busy timeout,
@@ -369,10 +430,30 @@ and WAL autocheckpointing apply to every pool connection.
 | POST/GET | `/findings` | Create or list findings |
 | GET | `/findings/search/{text}` | FTS5-backed search with fallback |
 | GET | `/findings/{id}` | Fetch one finding |
+| POST | `/findings/{id}/links` | Record a typed relationship between findings |
 | POST | `/hypotheses` | Create an idempotent hypothesis |
 | GET/PATCH | `/hypotheses[/{id}]` | List or update hypotheses |
 | POST/GET | `/artifacts[/{id}]` | Register or fetch artifact metadata |
 | POST | `/findings/{id}/artifacts` | Attach an artifact |
+
+### Scientific review
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| POST/GET | `/review/unit-dispositions[/{id}]` | Append/version and inspect unit outcomes |
+| POST/GET | `/review/candidates[/{id}]` | Create and inspect typed occurrences |
+| POST/GET | `/review/clusters[/{id}]` | Create and inspect lossless clusters |
+| GET | `/review/clusters/{id}/members` | Page through the lossless cluster membership |
+| POST | `/review/clusters/{id}/lineage` | Link cluster versions/splits/merges |
+| POST | `/review/clusters/{id}/findings` | Link a cluster to a materialized finding |
+| GET | `/review/cluster-findings` | Inspect cluster/finding provenance |
+| POST/GET | `/review/reviews[/{id}]` | Append and inspect scientific reviews |
+| POST/GET | `/review/reviews/{id}/verifications` | Append and inspect executable verification attempts |
+| POST/GET | `/review/decisions[/{id}]` | Append and inspect promotion decisions |
+| POST/GET | `/review/publications` | Record or inspect canonical publication receipts |
+| POST | `/review/reduce` | Run exact typed reduction inside the sole DB owner |
+| POST | `/review/controller/tick` | Consume one durable routing batch |
+| GET | `/review/status` | Exact funnel, audit, verification, and queue metrics |
 
 ### Tasks and runs
 
@@ -493,6 +574,11 @@ Focused contracts cover:
 - exclusive HTTP ownership;
 - direct-process DuckDB budgets and shared query-service admission/resource budgets;
 - concurrent run-stage summary coherence.
+- typed candidate/disposition reconciliation and Atlas completion gates;
+- deterministic lossless reduction and cluster version lineage;
+- cross-provider/reviewer blind review routing and replay-safe controller cursors;
+- append-only verification revisions and fail-closed publication;
+- deterministic negative-control audits and review HTTP parity.
 
 Run:
 
@@ -501,5 +587,6 @@ python -m pytest \
   tests/test_ops_store.py \
   tests/test_ops_http.py \
   tests/test_ops_control_plane.py \
+  tests/test_review_dag.py \
   tests/test_duckdb_resource_budget.py
 ```

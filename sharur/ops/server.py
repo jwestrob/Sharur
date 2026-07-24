@@ -36,6 +36,10 @@ from sharur.ops.store import (
     LeaseFenceError,
     OpsStore,
 )
+from sharur.review.controller import ReviewController
+from sharur.review.metrics import review_campaign_metrics
+from sharur.review.models import ReviewPolicy, load_review_policy
+from sharur.review.reducer import ExactCandidateReducer
 
 
 DEFAULT_HOST = "127.0.0.1"
@@ -235,6 +239,187 @@ class FindingIn(StrictModel):
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=512)
     schema_version: int = Field(default=1, ge=1)
     validation_status: str = Field(default="unreviewed", max_length=128)
+
+
+class FindingLinkIn(StrictModel):
+    related_finding_id: str = Field(min_length=1, max_length=256)
+    relation: str = Field(min_length=1, max_length=256)
+
+
+class UnitDispositionIn(StrictModel):
+    agent_id: str | None = Field(default=None, min_length=1, max_length=256)
+    campaign_id: str
+    unit_id: str = Field(min_length=1, max_length=4_096)
+    dataset_id: str = Field(min_length=1, max_length=256)
+    genome_id: str = Field(min_length=1, max_length=4_096)
+    coverage_hash: str = Field(min_length=1, max_length=256)
+    candidate_count: int = Field(ge=0)
+    disposition: Literal["clear", "candidate", "incomplete", "failed"]
+    evidence_bundle_hash: str = Field(min_length=1, max_length=256)
+    task_id: str | None = None
+    reason_codes: list[str] = Field(default_factory=list, max_length=1_000)
+    strata: dict = Field(default_factory=dict)
+    provenance: dict = Field(default_factory=dict)
+    supersedes_disposition_id: str | None = None
+    idempotency_key: str = Field(min_length=1, max_length=512)
+    schema_version: int = Field(default=1, ge=1)
+
+
+class CandidateOccurrenceIn(StrictModel):
+    agent_id: str | None = Field(default=None, min_length=1, max_length=256)
+    campaign_id: str
+    dataset_id: str = Field(min_length=1, max_length=256)
+    unit_id: str = Field(min_length=1, max_length=4_096)
+    genome_id: str = Field(min_length=1, max_length=4_096)
+    candidate_type: str = Field(min_length=1, max_length=256)
+    signature_schema: str = Field(min_length=1, max_length=256)
+    signature: dict
+    evidence: dict
+    verification: list[dict] = Field(default_factory=list, max_length=10_000)
+    subject_refs: dict
+    task_id: str | None = None
+    reason_codes: list[str] = Field(default_factory=list, max_length=1_000)
+    uncertainty: dict = Field(default_factory=dict)
+    reduction_features: dict = Field(default_factory=dict)
+    provenance: dict = Field(default_factory=dict)
+    evidence_bundle_hash: str | None = Field(
+        default=None, min_length=1, max_length=256
+    )
+    idempotency_key: str = Field(min_length=1, max_length=512)
+    schema_version: int = Field(default=1, ge=1)
+
+
+class CandidateClusterIn(StrictModel):
+    campaign_id: str
+    dataset_id: str = Field(min_length=1, max_length=256)
+    candidate_type: str = Field(min_length=1, max_length=256)
+    signature_schema: str = Field(min_length=1, max_length=256)
+    member_ids: list[str] = Field(min_length=1, max_length=100_000)
+    reducer_name: str = Field(min_length=1, max_length=256)
+    reducer_version: str = Field(min_length=1, max_length=256)
+    reducer_config_hash: str = Field(min_length=1, max_length=256)
+    summary: dict
+    counts: dict
+    roles: dict[str, str] = Field(default_factory=dict)
+    logical_cluster_id: str | None = Field(default=None, max_length=512)
+    version: int = Field(default=1, ge=1)
+    idempotency_key: str = Field(min_length=1, max_length=512)
+    schema_version: int = Field(default=1, ge=1)
+
+
+class ClusterLineageIn(StrictModel):
+    child_cluster_id: str
+    relation: Literal["supersedes", "split_from", "merged_from", "refines"]
+
+
+class ClusterFindingIn(StrictModel):
+    finding_id: str
+    relation: Literal["materializes", "supports", "counterexample"] = "materializes"
+
+
+class FindingReviewIn(StrictModel):
+    reviewer_agent_id: str | None = Field(
+        default=None, min_length=1, max_length=256
+    )
+    campaign_id: str
+    dataset_id: str = Field(min_length=1, max_length=256)
+    review_tier: str = Field(min_length=1, max_length=256)
+    execution_profile: str = Field(min_length=1, max_length=256)
+    provider: str = Field(min_length=1, max_length=256)
+    model: str = Field(min_length=1, max_length=256)
+    reasoning_effort: str = Field(min_length=1, max_length=128)
+    prompt_hash: str = Field(min_length=1, max_length=256)
+    rubric_version: str = Field(min_length=1, max_length=256)
+    input_bundle_hash: str = Field(min_length=1, max_length=256)
+    verdict: Literal[
+        "promote", "hold", "needs_data", "reject", "duplicate", "split"
+    ]
+    confidence: float = Field(ge=0.0, le=1.0)
+    finding_id: str | None = None
+    cluster_id: str | None = None
+    unit_disposition_id: str | None = None
+    task_id: str | None = None
+    run_id: str | None = None
+    reconstructed_observations: dict = Field(default_factory=dict)
+    claim_assessment: dict = Field(default_factory=dict)
+    verification_summary: dict = Field(default_factory=dict)
+    discrepancies: list[dict] = Field(default_factory=list, max_length=10_000)
+    proposed_tasks: list[dict] = Field(default_factory=list, max_length=100)
+    blind_to_prior_scores: bool = True
+    blind_to_other_reviews: bool = True
+    parent_review_id: str | None = None
+    idempotency_key: str = Field(min_length=1, max_length=512)
+    schema_version: int = Field(default=1, ge=1)
+
+
+class ReviewVerificationIn(StrictModel):
+    agent_id: str | None = Field(default=None, min_length=1, max_length=256)
+    claim_key: str = Field(min_length=1, max_length=1_024)
+    engine: str = Field(min_length=1, max_length=256)
+    specification: dict
+    dataset_id: str = Field(min_length=1, max_length=256)
+    expected: Any
+    status: Literal["pending", "pass", "fail", "error", "skipped"]
+    actual: Any = None
+    executed_ts: float | None = None
+    code_commit: str | None = Field(default=None, max_length=256)
+    artifact_id: str | None = None
+    error: str | None = Field(default=None, max_length=16_384)
+    supersedes_verification_id: str | None = None
+    idempotency_key: str = Field(min_length=1, max_length=512)
+
+
+class PromotionDecisionIn(StrictModel):
+    campaign_id: str
+    decision: Literal[
+        "promote",
+        "hold",
+        "needs_data",
+        "reject",
+        "duplicate",
+        "split",
+        "merge",
+        "publish",
+        "reopen",
+    ]
+    source_tier: str = Field(min_length=1, max_length=256)
+    target_tier: str | None = Field(default=None, max_length=256)
+    policy_name: str = Field(min_length=1, max_length=256)
+    policy_version: str = Field(min_length=1, max_length=256)
+    policy_hash: str = Field(min_length=1, max_length=256)
+    rationale: str = Field(min_length=1, max_length=262_144)
+    finding_id: str | None = None
+    cluster_id: str | None = None
+    review_ids: list[str] = Field(default_factory=list, max_length=1_000)
+    created_task_ids: list[str] = Field(default_factory=list, max_length=1_000)
+    audit_sample: bool = False
+    audit_stratum: dict = Field(default_factory=dict)
+    idempotency_key: str = Field(min_length=1, max_length=512)
+    schema_version: int = Field(default=1, ge=1)
+
+
+class CanonicalPublicationIn(StrictModel):
+    campaign_id: str
+    finding_id: str
+    decision_id: str
+    dataset_id: str = Field(min_length=1, max_length=256)
+    canonical_uri: str = Field(min_length=1, max_length=16_384)
+    canonical_record_id: str = Field(min_length=1, max_length=4_096)
+    canonical_record_hash: str = Field(min_length=1, max_length=256)
+    metadata: dict = Field(default_factory=dict)
+    idempotency_key: str = Field(min_length=1, max_length=512)
+
+
+class ReviewReduceIn(StrictModel):
+    campaign_id: str
+    dataset_id: str | None = None
+    candidate_type: str | None = None
+    batch_size: int = Field(default=1_000, ge=1, le=10_000)
+
+
+class ReviewControllerTickIn(StrictModel):
+    campaign_id: str
+    policy: dict | None = None
 
 
 class ArtifactIn(StrictModel):
@@ -744,6 +929,461 @@ def get_finding(finding_id: str, request: Request):
     with _store(request) as store:
         try:
             return store.get_finding(finding_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/findings/{finding_id}/links", status_code=201)
+def link_findings(finding_id: str, link: FindingLinkIn, request: Request):
+    principal = _require(request, "worker", "coordinator", "operator")
+    with _store(request, agent_id=principal.agent_id) as store:
+        try:
+            store.link_findings(
+                finding_id,
+                link.related_finding_id,
+                relation=link.relation,
+            )
+        except ValueError as exc:
+            raise _conflict(exc) from exc
+    _notify(request, "finding", finding_id)
+    return {"finding_id": finding_id, **link.model_dump()}
+
+
+@router.post("/review/unit-dispositions", status_code=201)
+def create_unit_disposition(record: UnitDispositionIn, request: Request):
+    _require(request, "worker", "coordinator", "operator")
+    actor = _actor_id(request, record.agent_id)
+    with _store(request, agent_id=actor) as store:
+        try:
+            record_id = store.record_unit_disposition(
+                campaign_id=record.campaign_id,
+                unit_id=record.unit_id,
+                dataset_id=record.dataset_id,
+                genome_id=record.genome_id,
+                coverage_hash=record.coverage_hash,
+                candidate_count=record.candidate_count,
+                disposition=record.disposition,
+                evidence_bundle_hash=record.evidence_bundle_hash,
+                task_id=record.task_id,
+                reason_codes=record.reason_codes,
+                strata=record.strata,
+                provenance=record.provenance,
+                supersedes_disposition_id=record.supersedes_disposition_id,
+                idempotency_key=record.idempotency_key,
+                schema_version=record.schema_version,
+            )
+            result = store.get_unit_disposition(record_id)
+        except ValueError as exc:
+            raise _conflict(exc) from exc
+    _notify(request, "unit_disposition", record_id)
+    return result
+
+
+@router.get("/review/unit-dispositions")
+def list_unit_dispositions(
+    request: Request,
+    campaign_id: str,
+    disposition: str | None = None,
+    active_only: bool = True,
+    limit: int = Query(default=500, ge=1, le=1_000),
+):
+    with _store(request) as store:
+        return store.list_unit_dispositions(
+            campaign_id=campaign_id,
+            disposition=disposition,
+            active_only=active_only,
+            limit=limit,
+        )
+
+
+@router.get("/review/unit-dispositions/{disposition_id}")
+def get_unit_disposition(disposition_id: str, request: Request):
+    with _store(request) as store:
+        try:
+            return store.get_unit_disposition(disposition_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/review/candidates", status_code=201)
+def create_candidate_occurrence(candidate: CandidateOccurrenceIn, request: Request):
+    _require(request, "worker", "coordinator", "operator")
+    actor = _actor_id(request, candidate.agent_id)
+    with _store(request, agent_id=actor) as store:
+        try:
+            candidate_id = store.create_candidate_occurrence(
+                campaign_id=candidate.campaign_id,
+                dataset_id=candidate.dataset_id,
+                unit_id=candidate.unit_id,
+                genome_id=candidate.genome_id,
+                candidate_type=candidate.candidate_type,
+                signature_schema=candidate.signature_schema,
+                signature=candidate.signature,
+                evidence=candidate.evidence,
+                verification=candidate.verification,
+                subject_refs=candidate.subject_refs,
+                task_id=candidate.task_id,
+                reason_codes=candidate.reason_codes,
+                uncertainty=candidate.uncertainty,
+                reduction_features=candidate.reduction_features,
+                provenance=candidate.provenance,
+                evidence_bundle_hash=candidate.evidence_bundle_hash,
+                idempotency_key=candidate.idempotency_key,
+                schema_version=candidate.schema_version,
+            )
+            result = store.get_candidate_occurrence(candidate_id)
+        except ValueError as exc:
+            raise _conflict(exc) from exc
+    _notify(request, "candidate_occurrence", candidate_id)
+    return result
+
+
+@router.get("/review/candidates")
+def list_candidate_occurrences(
+    request: Request,
+    campaign_id: str,
+    candidate_type: str | None = None,
+    unclustered_only: bool = False,
+    limit: int = Query(default=500, ge=1, le=1_000),
+):
+    with _store(request) as store:
+        return store.list_candidate_occurrences(
+            campaign_id=campaign_id,
+            candidate_type=candidate_type,
+            unclustered_only=unclustered_only,
+            limit=limit,
+        )
+
+
+@router.get("/review/candidates/{candidate_id}")
+def get_candidate_occurrence(candidate_id: str, request: Request):
+    with _store(request) as store:
+        try:
+            return store.get_candidate_occurrence(candidate_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/review/clusters", status_code=201)
+def create_candidate_cluster(cluster: CandidateClusterIn, request: Request):
+    principal = _require(request, "coordinator", "operator")
+    with _store(request, agent_id=principal.agent_id) as store:
+        try:
+            cluster_id = store.create_candidate_cluster(**cluster.model_dump())
+            result = store.get_candidate_cluster(cluster_id)
+        except ValueError as exc:
+            raise _conflict(exc) from exc
+    _notify(request, "candidate_cluster", cluster_id)
+    return result
+
+
+@router.get("/review/clusters")
+def list_candidate_clusters(
+    request: Request,
+    campaign_id: str,
+    candidate_type: str | None = None,
+    status: str | None = "active",
+    limit: int = Query(default=500, ge=1, le=1_000),
+):
+    with _store(request) as store:
+        return store.list_candidate_clusters(
+            campaign_id=campaign_id,
+            candidate_type=candidate_type,
+            status=status,
+            limit=limit,
+        )
+
+
+@router.get("/review/clusters/{cluster_id}")
+def get_candidate_cluster(
+    cluster_id: str,
+    request: Request,
+    member_limit: int = Query(default=100, ge=1, le=1_000),
+):
+    with _store(request) as store:
+        try:
+            return store.get_candidate_cluster(
+                cluster_id,
+                member_limit=member_limit,
+            )
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+
+@router.get("/review/clusters/{cluster_id}/members")
+def list_candidate_cluster_members(
+    cluster_id: str,
+    request: Request,
+    after_candidate_id: str | None = None,
+    limit: int = Query(default=500, ge=1, le=1_000),
+):
+    with _store(request) as store:
+        try:
+            return store.list_candidate_cluster_members(
+                cluster_id,
+                after_candidate_id=after_candidate_id,
+                limit=limit,
+            )
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/review/clusters/{cluster_id}/lineage", status_code=201)
+def link_candidate_cluster(
+    cluster_id: str,
+    link: ClusterLineageIn,
+    request: Request,
+):
+    principal = _require(request, "coordinator", "operator")
+    with _store(request, agent_id=principal.agent_id) as store:
+        try:
+            if link.relation == "supersedes":
+                store.supersede_candidate_cluster(
+                    cluster_id,
+                    link.child_cluster_id,
+                )
+            else:
+                store.link_candidate_clusters(
+                    cluster_id,
+                    link.child_cluster_id,
+                    relation=link.relation,
+                )
+        except ValueError as exc:
+            raise _conflict(exc) from exc
+    _notify(request, "candidate_cluster", link.child_cluster_id)
+    return {
+        "parent_cluster_id": cluster_id,
+        "child_cluster_id": link.child_cluster_id,
+        "relation": link.relation,
+    }
+
+
+@router.post("/review/clusters/{cluster_id}/findings", status_code=201)
+def link_cluster_finding(
+    cluster_id: str,
+    link: ClusterFindingIn,
+    request: Request,
+):
+    principal = _require(request, "worker", "coordinator", "operator")
+    with _store(request, agent_id=principal.agent_id) as store:
+        try:
+            store.link_cluster_finding(
+                cluster_id,
+                link.finding_id,
+                relation=link.relation,
+            )
+        except ValueError as exc:
+            raise _conflict(exc) from exc
+    _notify(request, "finding", link.finding_id)
+    return {"cluster_id": cluster_id, **link.model_dump()}
+
+
+@router.get("/review/cluster-findings")
+def list_cluster_findings(
+    request: Request,
+    cluster_id: str | None = None,
+    finding_id: str | None = None,
+):
+    with _store(request) as store:
+        try:
+            return store.list_cluster_findings(
+                cluster_id=cluster_id,
+                finding_id=finding_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/review/reviews", status_code=201)
+def create_finding_review(review: FindingReviewIn, request: Request):
+    _require(request, "worker", "coordinator", "operator")
+    actor = _actor_id(request, review.reviewer_agent_id)
+    payload = review.model_dump(exclude={"reviewer_agent_id"})
+    with _store(request, agent_id=actor) as store:
+        try:
+            review_id = store.create_finding_review(**payload)
+            result = store.get_finding_review(review_id)
+        except ValueError as exc:
+            raise _conflict(exc) from exc
+    _notify(request, "finding_review", review_id)
+    return result
+
+
+@router.get("/review/reviews")
+def list_finding_reviews(
+    request: Request,
+    campaign_id: str,
+    finding_id: str | None = None,
+    cluster_id: str | None = None,
+    unit_disposition_id: str | None = None,
+    review_tier: str | None = None,
+    verdict: str | None = None,
+    limit: int = Query(default=500, ge=1, le=1_000),
+):
+    with _store(request) as store:
+        return store.list_finding_reviews(
+            campaign_id=campaign_id,
+            finding_id=finding_id,
+            cluster_id=cluster_id,
+            unit_disposition_id=unit_disposition_id,
+            review_tier=review_tier,
+            verdict=verdict,
+            limit=limit,
+        )
+
+
+@router.get("/review/reviews/{review_id}")
+def get_finding_review(review_id: str, request: Request):
+    with _store(request) as store:
+        try:
+            return store.get_finding_review(review_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/review/reviews/{review_id}/verifications", status_code=201)
+def create_review_verification(
+    review_id: str,
+    verification: ReviewVerificationIn,
+    request: Request,
+):
+    _require(request, "worker", "coordinator", "operator")
+    actor = _actor_id(request, verification.agent_id)
+    payload = verification.model_dump(exclude={"agent_id"})
+    with _store(request, agent_id=actor) as store:
+        try:
+            verification_id = store.record_review_verification(
+                review_id=review_id,
+                **payload,
+            )
+        except ValueError as exc:
+            raise _conflict(exc) from exc
+    _notify(request, "review_verification", verification_id)
+    return {"id": verification_id}
+
+
+@router.get("/review/reviews/{review_id}/verifications")
+def list_review_verifications(review_id: str, request: Request):
+    with _store(request) as store:
+        return store.list_review_verifications(review_id)
+
+
+@router.post("/review/decisions", status_code=201)
+def create_promotion_decision(decision: PromotionDecisionIn, request: Request):
+    principal = _require(request, "coordinator", "operator")
+    with _store(request, agent_id=principal.agent_id) as store:
+        try:
+            decision_id = store.create_promotion_decision(**decision.model_dump())
+            result = store.get_promotion_decision(decision_id)
+        except ValueError as exc:
+            raise _conflict(exc) from exc
+    _notify(request, "promotion_decision", decision_id)
+    return result
+
+
+@router.get("/review/decisions")
+def list_promotion_decisions(
+    request: Request,
+    campaign_id: str,
+    finding_id: str | None = None,
+    cluster_id: str | None = None,
+    decision: str | None = None,
+    limit: int = Query(default=500, ge=1, le=1_000),
+):
+    with _store(request) as store:
+        return store.list_promotion_decisions(
+            campaign_id=campaign_id,
+            finding_id=finding_id,
+            cluster_id=cluster_id,
+            decision=decision,
+            limit=limit,
+        )
+
+
+@router.get("/review/decisions/{decision_id}")
+def get_promotion_decision(decision_id: str, request: Request):
+    with _store(request) as store:
+        try:
+            return store.get_promotion_decision(decision_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/review/publications", status_code=201)
+def create_canonical_publication(
+    publication: CanonicalPublicationIn,
+    request: Request,
+):
+    principal = _require(request, "coordinator", "operator")
+    with _store(request, agent_id=principal.agent_id) as store:
+        try:
+            publication_id = store.record_canonical_publication(
+                **publication.model_dump()
+            )
+        except ValueError as exc:
+            raise _conflict(exc) from exc
+    _notify(request, "canonical_publication", publication_id)
+    return {"id": publication_id}
+
+
+@router.get("/review/publications")
+def list_canonical_publications(
+    request: Request,
+    campaign_id: str,
+    finding_id: str | None = None,
+    limit: int = Query(default=500, ge=1, le=1_000),
+):
+    with _store(request) as store:
+        return store.list_canonical_publications(
+            campaign_id=campaign_id,
+            finding_id=finding_id,
+            limit=limit,
+        )
+
+
+@router.post("/review/reduce")
+def reduce_candidates(reduction: ReviewReduceIn, request: Request):
+    principal = _require(request, "coordinator", "operator")
+    with _store(request, agent_id=principal.agent_id) as store:
+        try:
+            result = ExactCandidateReducer().reduce_campaign(
+                store,
+                reduction.campaign_id,
+                dataset_id=reduction.dataset_id,
+                candidate_type=reduction.candidate_type,
+                batch_size=reduction.batch_size,
+            )
+        except (KeyError, ValueError) as exc:
+            raise _conflict(exc) from exc
+    _notify(request, "candidate_reduction")
+    return result.to_dict()
+
+
+@router.post("/review/controller/tick")
+def tick_review_controller(tick: ReviewControllerTickIn, request: Request):
+    principal = _require(request, "coordinator", "operator")
+    try:
+        policy = (
+            ReviewPolicy.model_validate(tick.policy)
+            if tick.policy is not None
+            else load_review_policy()
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    with _store(request, agent_id=principal.agent_id) as store:
+        try:
+            result = ReviewController(store, policy).tick(tick.campaign_id)
+        except (KeyError, ValueError) as exc:
+            raise _conflict(exc) from exc
+    _notify(request, "review_controller")
+    return result.to_dict()
+
+
+@router.get("/review/status")
+def get_review_status(campaign_id: str, request: Request):
+    with _store(request) as store:
+        try:
+            return review_campaign_metrics(store, campaign_id)
         except KeyError as exc:
             raise HTTPException(404, str(exc)) from exc
 

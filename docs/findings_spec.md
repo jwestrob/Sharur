@@ -24,6 +24,35 @@ Boundary rules:
 - `sharur_ops.db` is operational state: run/stage history, leases, tasks, and multi-agent
   coordination. It is not the long-term scientific findings archive.
 
+### Candidate-to-canonical boundary
+
+Large Atlas campaigns stage scientific review in Ops v5 before canonical
+JSONL publication:
+
+```text
+typed occurrence -> reduced cluster -> reviews -> finding -> canonical review
+-> publish decision -> strict JSONL write -> publication receipt
+```
+
+A scanner candidate is an observed case for review. Scientific finding status
+begins after adjudicated materialization. Preserve its typed signature, exact
+subject references, source-derived observed evidence, caller-emitted names,
+uncertainty, and executable verification specifications through
+`/review/candidates`.
+
+The reducer preserves every occurrence and creates versioned exact-signature
+clusters. Reviewers append independent assessments and verification results.
+Successful adjudication materializes an Ops finding linked to its source
+cluster. Canonical review then authorizes the strict JSONL writer.
+
+The mutable-looking `findings.validation_status` field is producer metadata
+for compatibility. Review authority comes from append-only
+`finding_reviews`, `review_verifications`, `promotion_decisions`, and the
+final `canonical_publications` receipt.
+
+Read `docs/review_workflow.md` for this distributed workflow. Small local
+analyses may continue through draft spools and the strict writer directly.
+
 ---
 
 ## Lean Agent Write Contract

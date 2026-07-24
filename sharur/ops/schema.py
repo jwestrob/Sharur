@@ -1,8 +1,10 @@
 """Shared, migration-safe SQLite schema for Sharur operational state.
 
-Version 4 adds attempt-fenced, retry-persistent task checkpoints. The
-migration remains additive: legacy JSON columns stay readable while
-normalized relationships, campaigns, leases, and checkpoint state are
+Version 5 adds the scientific review DAG: typed candidate occurrences,
+versioned reducer clusters, unit dispositions, append-only reviews,
+executable verification records, promotion decisions, canonical publication
+receipts, and durable controller cursors.  The migration remains additive:
+legacy JSON columns stay readable while normalized relationships are
 authoritative for new writes.
 """
 
@@ -18,7 +20,7 @@ if TYPE_CHECKING:
     import sqlite3
 
 
-OPS_SCHEMA_VERSION = 4
+OPS_SCHEMA_VERSION = 5
 DEFAULT_LEASE_SECONDS = 900
 
 
@@ -110,6 +112,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     task_type TEXT NOT NULL,
     description TEXT NOT NULL,
     params TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(params)),
+    execution_profile TEXT,
     domain_hint TEXT,
     result_finding_ids TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(result_finding_ids)),
     run_id TEXT,
@@ -305,6 +308,283 @@ CREATE TABLE IF NOT EXISTS finding_artifacts (
     FOREIGN KEY(artifact_id) REFERENCES artifacts(id) ON DELETE RESTRICT
 );
 
+CREATE TABLE IF NOT EXISTS unit_dispositions (
+    id TEXT PRIMARY KEY,
+    campaign_id TEXT NOT NULL,
+    task_id TEXT,
+    unit_id TEXT NOT NULL,
+    dataset_id TEXT NOT NULL,
+    genome_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    ts REAL NOT NULL,
+    coverage_hash TEXT NOT NULL,
+    candidate_count INTEGER NOT NULL CHECK(candidate_count >= 0),
+    disposition TEXT NOT NULL
+        CHECK(disposition IN ('clear', 'candidate', 'incomplete', 'failed')),
+    reason_codes TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(reason_codes)),
+    strata TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(strata)),
+    evidence_bundle_hash TEXT NOT NULL,
+    provenance TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(provenance)),
+    idempotency_key TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+    supersedes_disposition_id TEXT,
+    record_status TEXT NOT NULL DEFAULT 'active'
+        CHECK(record_status IN ('active', 'superseded')),
+    schema_version INTEGER NOT NULL DEFAULT 1,
+    created_event_id INTEGER,
+    UNIQUE(campaign_id, unit_id, version),
+    UNIQUE(agent_id, idempotency_key),
+    FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE SET NULL,
+    FOREIGN KEY(supersedes_disposition_id)
+        REFERENCES unit_dispositions(id) ON DELETE RESTRICT
+);
+
+CREATE TABLE IF NOT EXISTS candidate_occurrences (
+    id TEXT PRIMARY KEY,
+    campaign_id TEXT NOT NULL,
+    task_id TEXT,
+    agent_id TEXT NOT NULL,
+    ts REAL NOT NULL,
+    dataset_id TEXT NOT NULL,
+    unit_id TEXT NOT NULL,
+    genome_id TEXT NOT NULL,
+    candidate_type TEXT NOT NULL,
+    signature_schema TEXT NOT NULL,
+    signature TEXT NOT NULL CHECK(json_valid(signature)),
+    signature_hash TEXT NOT NULL,
+    evidence TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(evidence)),
+    verification TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(verification)),
+    reason_codes TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(reason_codes)),
+    uncertainty TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(uncertainty)),
+    subject_refs TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(subject_refs)),
+    reduction_features TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(reduction_features)),
+    evidence_bundle_hash TEXT NOT NULL,
+    provenance TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(provenance)),
+    idempotency_key TEXT NOT NULL,
+    schema_version INTEGER NOT NULL DEFAULT 1,
+    created_event_id INTEGER,
+    UNIQUE(agent_id, idempotency_key),
+    FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS candidate_clusters (
+    id TEXT PRIMARY KEY,
+    logical_cluster_id TEXT NOT NULL,
+    version INTEGER NOT NULL CHECK(version >= 1),
+    campaign_id TEXT NOT NULL,
+    dataset_id TEXT NOT NULL,
+    candidate_type TEXT NOT NULL,
+    signature_schema TEXT NOT NULL,
+    reducer_name TEXT NOT NULL,
+    reducer_version TEXT NOT NULL,
+    reducer_config_hash TEXT NOT NULL,
+    member_manifest_hash TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(summary)),
+    counts TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(counts)),
+    created_by TEXT NOT NULL,
+    created_ts REAL NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active'
+        CHECK(status IN ('active', 'superseded', 'split', 'merged', 'retired')),
+    idempotency_key TEXT NOT NULL,
+    schema_version INTEGER NOT NULL DEFAULT 1,
+    created_event_id INTEGER,
+    UNIQUE(logical_cluster_id, version),
+    UNIQUE(created_by, idempotency_key)
+);
+
+CREATE TABLE IF NOT EXISTS candidate_cluster_members (
+    cluster_id TEXT NOT NULL,
+    candidate_id TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'member'
+        CHECK(role IN ('member', 'medoid', 'outlier', 'counterexample')),
+    PRIMARY KEY(cluster_id, candidate_id, role),
+    FOREIGN KEY(cluster_id) REFERENCES candidate_clusters(id) ON DELETE CASCADE,
+    FOREIGN KEY(candidate_id) REFERENCES candidate_occurrences(id) ON DELETE RESTRICT
+);
+
+CREATE TABLE IF NOT EXISTS candidate_cluster_lineage (
+    parent_cluster_id TEXT NOT NULL,
+    child_cluster_id TEXT NOT NULL,
+    relation TEXT NOT NULL
+        CHECK(relation IN ('supersedes', 'split_from', 'merged_from', 'refines')),
+    created_ts REAL NOT NULL,
+    created_by TEXT NOT NULL,
+    PRIMARY KEY(parent_cluster_id, child_cluster_id, relation),
+    CHECK(parent_cluster_id <> child_cluster_id),
+    FOREIGN KEY(parent_cluster_id) REFERENCES candidate_clusters(id) ON DELETE RESTRICT,
+    FOREIGN KEY(child_cluster_id) REFERENCES candidate_clusters(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS cluster_findings (
+    cluster_id TEXT NOT NULL,
+    finding_id TEXT NOT NULL,
+    relation TEXT NOT NULL
+        CHECK(relation IN ('materializes', 'supports', 'counterexample')),
+    created_ts REAL NOT NULL,
+    created_by TEXT NOT NULL,
+    PRIMARY KEY(cluster_id, finding_id, relation),
+    FOREIGN KEY(cluster_id) REFERENCES candidate_clusters(id) ON DELETE RESTRICT,
+    FOREIGN KEY(finding_id) REFERENCES findings(id) ON DELETE RESTRICT
+);
+
+CREATE TABLE IF NOT EXISTS finding_reviews (
+    id TEXT PRIMARY KEY,
+    campaign_id TEXT NOT NULL,
+    finding_id TEXT,
+    cluster_id TEXT,
+    unit_disposition_id TEXT,
+    reviewer_agent_id TEXT NOT NULL,
+    task_id TEXT,
+    run_id TEXT,
+    ts REAL NOT NULL,
+    review_tier TEXT NOT NULL,
+    execution_profile TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    reasoning_effort TEXT NOT NULL,
+    prompt_hash TEXT NOT NULL,
+    rubric_version TEXT NOT NULL,
+    input_bundle_hash TEXT NOT NULL,
+    dataset_id TEXT NOT NULL,
+    verdict TEXT NOT NULL
+        CHECK(verdict IN (
+            'promote', 'hold', 'needs_data', 'reject', 'duplicate', 'split'
+        )),
+    reconstructed_observations TEXT NOT NULL DEFAULT '{}'
+        CHECK(json_valid(reconstructed_observations)),
+    claim_assessment TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(claim_assessment)),
+    verification_summary TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(verification_summary)),
+    discrepancies TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(discrepancies)),
+    proposed_tasks TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(proposed_tasks)),
+    confidence REAL NOT NULL CHECK(confidence BETWEEN 0.0 AND 1.0),
+    blind_to_prior_scores INTEGER NOT NULL DEFAULT 1
+        CHECK(blind_to_prior_scores IN (0, 1)),
+    blind_to_other_reviews INTEGER NOT NULL DEFAULT 1
+        CHECK(blind_to_other_reviews IN (0, 1)),
+    parent_review_id TEXT,
+    idempotency_key TEXT NOT NULL,
+    schema_version INTEGER NOT NULL DEFAULT 1,
+    created_event_id INTEGER,
+    CHECK(
+        (finding_id IS NOT NULL)
+        + (cluster_id IS NOT NULL)
+        + (unit_disposition_id IS NOT NULL) = 1
+    ),
+    UNIQUE(reviewer_agent_id, idempotency_key),
+    FOREIGN KEY(finding_id) REFERENCES findings(id) ON DELETE RESTRICT,
+    FOREIGN KEY(cluster_id) REFERENCES candidate_clusters(id) ON DELETE RESTRICT,
+    FOREIGN KEY(unit_disposition_id)
+        REFERENCES unit_dispositions(id) ON DELETE RESTRICT,
+    FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE SET NULL,
+    FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE SET NULL,
+    FOREIGN KEY(parent_review_id) REFERENCES finding_reviews(id) ON DELETE RESTRICT
+);
+
+CREATE TABLE IF NOT EXISTS review_verifications (
+    id TEXT PRIMARY KEY,
+    review_id TEXT NOT NULL,
+    claim_key TEXT NOT NULL,
+    engine TEXT NOT NULL,
+    specification TEXT NOT NULL CHECK(json_valid(specification)),
+    dataset_id TEXT NOT NULL,
+    specification_hash TEXT NOT NULL,
+    expected TEXT NOT NULL CHECK(json_valid(expected)),
+    actual TEXT CHECK(actual IS NULL OR json_valid(actual)),
+    status TEXT NOT NULL
+        CHECK(status IN ('pending', 'pass', 'fail', 'error', 'skipped')),
+    attempt INTEGER NOT NULL DEFAULT 1 CHECK(attempt >= 1),
+    supersedes_verification_id TEXT,
+    executed_ts REAL,
+    code_commit TEXT,
+    artifact_id TEXT,
+    error TEXT,
+    created_by TEXT NOT NULL,
+    created_ts REAL NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    created_event_id INTEGER,
+    UNIQUE(review_id, claim_key, specification_hash, attempt),
+    UNIQUE(created_by, idempotency_key),
+    FOREIGN KEY(review_id) REFERENCES finding_reviews(id) ON DELETE CASCADE,
+    FOREIGN KEY(supersedes_verification_id)
+        REFERENCES review_verifications(id) ON DELETE RESTRICT,
+    FOREIGN KEY(artifact_id) REFERENCES artifacts(id) ON DELETE RESTRICT
+);
+
+CREATE TABLE IF NOT EXISTS promotion_decisions (
+    id TEXT PRIMARY KEY,
+    campaign_id TEXT NOT NULL,
+    finding_id TEXT,
+    cluster_id TEXT,
+    actor_agent_id TEXT NOT NULL,
+    ts REAL NOT NULL,
+    decision TEXT NOT NULL
+        CHECK(decision IN (
+            'promote', 'hold', 'needs_data', 'reject', 'duplicate',
+            'split', 'merge', 'publish', 'reopen'
+        )),
+    source_tier TEXT NOT NULL,
+    target_tier TEXT,
+    policy_name TEXT NOT NULL,
+    policy_version TEXT NOT NULL,
+    policy_hash TEXT NOT NULL,
+    rationale TEXT NOT NULL,
+    audit_sample INTEGER NOT NULL DEFAULT 0 CHECK(audit_sample IN (0, 1)),
+    audit_stratum TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(audit_stratum)),
+    idempotency_key TEXT NOT NULL,
+    schema_version INTEGER NOT NULL DEFAULT 1,
+    created_event_id INTEGER,
+    CHECK((finding_id IS NULL) <> (cluster_id IS NULL)),
+    UNIQUE(actor_agent_id, idempotency_key),
+    FOREIGN KEY(finding_id) REFERENCES findings(id) ON DELETE RESTRICT,
+    FOREIGN KEY(cluster_id) REFERENCES candidate_clusters(id) ON DELETE RESTRICT
+);
+
+CREATE TABLE IF NOT EXISTS promotion_decision_reviews (
+    decision_id TEXT NOT NULL,
+    review_id TEXT NOT NULL,
+    PRIMARY KEY(decision_id, review_id),
+    FOREIGN KEY(decision_id) REFERENCES promotion_decisions(id) ON DELETE CASCADE,
+    FOREIGN KEY(review_id) REFERENCES finding_reviews(id) ON DELETE RESTRICT
+);
+
+CREATE TABLE IF NOT EXISTS promotion_decision_tasks (
+    decision_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    relation TEXT NOT NULL DEFAULT 'created',
+    PRIMARY KEY(decision_id, task_id, relation),
+    FOREIGN KEY(decision_id) REFERENCES promotion_decisions(id) ON DELETE CASCADE,
+    FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE RESTRICT
+);
+
+CREATE TABLE IF NOT EXISTS canonical_publications (
+    id TEXT PRIMARY KEY,
+    campaign_id TEXT NOT NULL,
+    finding_id TEXT NOT NULL,
+    decision_id TEXT NOT NULL,
+    dataset_id TEXT NOT NULL,
+    canonical_uri TEXT NOT NULL,
+    canonical_record_id TEXT NOT NULL,
+    canonical_record_hash TEXT NOT NULL,
+    published_by TEXT NOT NULL,
+    published_ts REAL NOT NULL,
+    metadata TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(metadata)),
+    idempotency_key TEXT NOT NULL,
+    created_event_id INTEGER,
+    UNIQUE(canonical_uri, canonical_record_id),
+    UNIQUE(published_by, idempotency_key),
+    FOREIGN KEY(finding_id) REFERENCES findings(id) ON DELETE RESTRICT,
+    FOREIGN KEY(decision_id) REFERENCES promotion_decisions(id) ON DELETE RESTRICT
+);
+
+CREATE TABLE IF NOT EXISTS review_controller_state (
+    controller_id TEXT NOT NULL,
+    campaign_id TEXT NOT NULL,
+    policy_hash TEXT NOT NULL,
+    last_event_id INTEGER NOT NULL DEFAULT 0 CHECK(last_event_id >= 0),
+    updated_ts REAL NOT NULL,
+    PRIMARY KEY(controller_id, campaign_id)
+);
+
 CREATE TABLE IF NOT EXISTS ops_schema_meta (
     version INTEGER PRIMARY KEY,
     applied_ts REAL NOT NULL
@@ -351,6 +631,16 @@ CREATE INDEX IF NOT EXISTS idx_tasks_reserved_queue
     ON tasks(reserved_for, status, priority DESC, ts, id);
 CREATE INDEX IF NOT EXISTS idx_tasks_campaign
     ON tasks(campaign_id, status, priority DESC, ts, id);
+CREATE INDEX IF NOT EXISTS idx_tasks_campaign_type_status
+    ON tasks(campaign_id, task_type, status, id);
+CREATE INDEX IF NOT EXISTS idx_tasks_execution_profile
+    ON tasks(execution_profile, status, priority DESC, ts, id);
+CREATE INDEX IF NOT EXISTS idx_tasks_review_target
+    ON tasks(
+        json_extract(params, '$.target.kind'),
+        json_extract(params, '$.target.id'),
+        status
+    );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_idempotency
     ON tasks(idempotency_key) WHERE idempotency_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_task_dependencies_parent
@@ -388,6 +678,43 @@ CREATE INDEX IF NOT EXISTS idx_coordination_events_task
     ON coordination_events(task_id, id);
 CREATE INDEX IF NOT EXISTS idx_artifacts_campaign
     ON artifacts(campaign_id, created_ts DESC, id);
+CREATE INDEX IF NOT EXISTS idx_unit_dispositions_campaign
+    ON unit_dispositions(campaign_id, record_status, disposition, unit_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_unit_dispositions_task_idempotency
+    ON unit_dispositions(task_id, idempotency_key) WHERE task_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_candidates_unclustered
+    ON candidate_occurrences(campaign_id, candidate_type, signature_schema, signature_hash, id);
+CREATE INDEX IF NOT EXISTS idx_candidate_occurrences_unit
+    ON candidate_occurrences(campaign_id, unit_id, id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_candidate_occurrences_task_idempotency
+    ON candidate_occurrences(task_id, idempotency_key) WHERE task_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_candidate_clusters_campaign
+    ON candidate_clusters(campaign_id, status, candidate_type, created_ts, id);
+CREATE INDEX IF NOT EXISTS idx_candidate_cluster_members_candidate
+    ON candidate_cluster_members(candidate_id, cluster_id);
+CREATE INDEX IF NOT EXISTS idx_cluster_findings_finding
+    ON cluster_findings(finding_id, cluster_id);
+CREATE INDEX IF NOT EXISTS idx_finding_reviews_target_finding
+    ON finding_reviews(finding_id, review_tier, ts, id);
+CREATE INDEX IF NOT EXISTS idx_finding_reviews_target_cluster
+    ON finding_reviews(cluster_id, review_tier, ts, id);
+CREATE INDEX IF NOT EXISTS idx_finding_reviews_target_unit
+    ON finding_reviews(unit_disposition_id, review_tier, ts, id);
+CREATE INDEX IF NOT EXISTS idx_finding_reviews_campaign
+    ON finding_reviews(campaign_id, verdict, review_tier, ts, id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_finding_reviews_task
+    ON finding_reviews(task_id) WHERE task_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_review_verifications_review
+    ON review_verifications(review_id, status, claim_key);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_review_verification_attempt
+    ON review_verifications(review_id, claim_key, specification_hash, attempt);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_review_verification_supersession
+    ON review_verifications(supersedes_verification_id)
+    WHERE supersedes_verification_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_promotion_decisions_campaign
+    ON promotion_decisions(campaign_id, decision, ts, id);
+CREATE INDEX IF NOT EXISTS idx_publications_campaign
+    ON canonical_publications(campaign_id, published_ts, id);
 """
 
 
@@ -489,6 +816,7 @@ _MIGRATION_COLUMNS: dict[str, dict[str, str]] = {
         "created_event_id": "INTEGER",
     },
     "tasks": {
+        "execution_profile": "TEXT",
         "run_id": "TEXT",
         "idempotency_key": "TEXT",
         "dependency_ids": "TEXT NOT NULL DEFAULT '[]'",
@@ -696,6 +1024,14 @@ def ensure_ops_schema(conn: sqlite3.Connection) -> bool:
                     COALESCE(claimed_ts, ts) + lease_seconds
                 )
             WHERE status IN ('claimed', 'in_progress')
+            """
+        )
+        conn.execute(
+            """
+            UPDATE tasks
+            SET execution_profile = json_extract(params, '$.execution_profile')
+            WHERE execution_profile IS NULL
+              AND json_type(params, '$.execution_profile') = 'text'
             """
         )
 

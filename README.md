@@ -119,7 +119,18 @@ sharur-atlas enqueue --plan-dir data/my_dataset/atlas \
 ```
 
 Each logical task owns one genome, checkpoints ordered contig prefixes, and
-writes a coverage manifest verified by `sharur-atlas verify-coverage`.
+writes a coverage manifest plus typed candidates and one reconciled unit
+disposition. Reduce and route those records through the hierarchical review
+DAG:
+
+```bash
+sharur-review reduce --ops-url http://ops-host:8811 \
+  --campaign-id CAMPAIGN_ID
+sharur-review route --ops-url http://ops-host:8811 \
+  --campaign-id CAMPAIGN_ID --watch
+```
+
+See [`docs/review_workflow.md`](docs/review_workflow.md).
 
 ### Use the operators
 
