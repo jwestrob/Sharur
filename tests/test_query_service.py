@@ -165,8 +165,8 @@ def test_query_service_is_lazy_read_only_hardened_and_typed(tmp_path):
             "/v1/genomes/packet",
             json={
                 "genome_id": "bin1",
-                "max_contigs": 128,
-                "max_proteins": 500,
+                "max_contigs": 1_000,
+                "max_proteins": 1_000,
                 "max_model_payload_bytes": 524_288,
             },
         )
@@ -479,6 +479,7 @@ def test_query_client_generates_query_ids_and_escapes_entity_paths():
     assert session.calls[4][1] == "http://query:8812/v1/genomes/packet"
     assert session.calls[4][2]["json"]["genome_id"] == "genome"
     assert session.calls[4][2]["json"]["max_proteins"] == 500
+    assert "max_contigs" not in session.calls[4][2]["json"]
 
     with pytest.raises(ValueError, match="timeout"):
         SharurQuery(session=session, timeout=0, verify_connection=False)

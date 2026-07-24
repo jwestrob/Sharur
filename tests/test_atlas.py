@@ -95,8 +95,18 @@ def _coverage_frames(unit, contigs):
 
 def test_atlas_plan_is_deterministic_and_uses_actual_live_counts(tmp_path):
     database = _atlas_database(tmp_path)
-    first = build_atlas_plan(database, tmp_path / "first", threads=1)
-    second = build_atlas_plan(database, tmp_path / "second", threads=1)
+    first = build_atlas_plan(
+        database,
+        tmp_path / "first",
+        packet_model_payload_bytes=524_288,
+        threads=1,
+    )
+    second = build_atlas_plan(
+        database,
+        tmp_path / "second",
+        packet_model_payload_bytes=524_288,
+        threads=1,
+    )
     first_manifest, first_units = load_atlas_plan(tmp_path / "first")
     _second_manifest, second_units = load_atlas_plan(tmp_path / "second")
 
@@ -106,6 +116,40 @@ def test_atlas_plan_is_deterministic_and_uses_actual_live_counts(tmp_path):
     assert first_manifest["total_contigs"] == 3
     assert first_manifest["total_proteins"] == 3
     assert first_manifest["declared_contig_count_mismatches"] == 1
+    calibration = first_manifest["packet_calibration"]
+    assert calibration["model_calls_made"] == 0
+    assert calibration["sampled_genomes"] == 2
+    assert calibration["sample_genome_count_source"] == "ceil(sqrt(live bin count))"
+    assert calibration["sampled_proteins"] == 3
+    assert calibration["sampled_model_payload_bytes"] > 0
+    assert calibration["mean_model_payload_bytes_per_protein"] > 0
+    assert first_manifest["packet_limit_sources"] == {
+        "contigs": "payload-proportional schema ceiling",
+        "proteins": "payload-proportional schema ceiling",
+        "model_payload_bytes": "explicit model-facing target",
+    }
+    assert (
+        first_manifest["packet_protein_limit"]
+        == calibration["payload_proportional_protein_limit"]
+    )
+    assert (
+        first_manifest["packet_contig_limit"]
+        == calibration["payload_proportional_contig_limit"]
+    )
+    assert calibration["payload_proportional_protein_limit"] == (
+        first_manifest["packet_model_payload_bytes"]
+        // calibration["canonical_protein_record_floor_bytes"]
+    )
+    assert calibration["payload_proportional_contig_limit"] == (
+        first_manifest["packet_model_payload_bytes"]
+        // calibration["canonical_contig_segment_floor_bytes"]
+    )
+    assert (
+        first_manifest["model_invocation_projection"][
+            "at_calibrated_mean_density"
+        ]
+        > 0
+    )
     assert [unit["genome_id"] for unit in first_units] == [
         "genome_a",
         "genome_b",
@@ -116,9 +160,32 @@ def test_atlas_plan_is_deterministic_and_uses_actual_live_counts(tmp_path):
     assert first_units[0]["work_weight"] == 2 + 32 * 2
 
 
+def test_atlas_plan_preserves_explicit_count_overrides(tmp_path):
+    database = _atlas_database(tmp_path)
+    plan = build_atlas_plan(
+        database,
+        tmp_path / "plan",
+        packet_model_payload_bytes=524_288,
+        packet_contig_limit=37,
+        packet_protein_limit=41,
+        threads=1,
+    )
+
+    assert plan["packet_contig_limit"] == 37
+    assert plan["packet_protein_limit"] == 41
+    assert plan["packet_limit_sources"]["contigs"] == "explicit"
+    assert plan["packet_limit_sources"]["proteins"] == "explicit"
+    assert plan["packet_calibration"]["model_calls_made"] == 0
+
+
 def test_atlas_plan_fails_closed_when_unit_stream_changes(tmp_path):
     database = _atlas_database(tmp_path)
-    build_atlas_plan(database, tmp_path / "plan", threads=1)
+    build_atlas_plan(
+        database,
+        tmp_path / "plan",
+        packet_model_payload_bytes=524_288,
+        threads=1,
+    )
     units_path = tmp_path / "plan" / "units.jsonl"
     units_path.write_bytes(units_path.read_bytes() + b"\n")
 
@@ -135,7 +202,12 @@ def test_atlas_plan_requires_contig_navigation_index(tmp_path):
     write_dataset_seal(seal, tmp_path / "dataset.seal.json", force=True)
 
     with pytest.raises(RuntimeError, match="sharur migrate"):
-        build_atlas_plan(database, tmp_path / "plan", threads=1)
+        build_atlas_plan(
+            database,
+            tmp_path / "plan",
+            packet_model_payload_bytes=524_288,
+            threads=1,
+        )
 
 
 def test_atlas_packet_census_is_exact_bin_scoped_and_zero_model_call(tmp_path):
@@ -143,6 +215,7 @@ def test_atlas_packet_census_is_exact_bin_scoped_and_zero_model_call(tmp_path):
     build_atlas_plan(
         database,
         tmp_path / "plan",
+        packet_model_payload_bytes=524_288,
         packet_protein_limit=1,
         threads=1,
     )
@@ -214,6 +287,7 @@ def test_atlas_packet_census_blocks_query_result_overflow(tmp_path):
     build_atlas_plan(
         database,
         tmp_path / "plan",
+        packet_model_payload_bytes=524_288,
         query_result_limit_bytes=4_097,
         threads=1,
     )
@@ -228,7 +302,12 @@ def test_atlas_packet_census_blocks_query_result_overflow(tmp_path):
 
 def test_atlas_enqueue_requires_completed_packet_census(tmp_path):
     database = _atlas_database(tmp_path)
-    build_atlas_plan(database, tmp_path / "plan", threads=1)
+    build_atlas_plan(
+        database,
+        tmp_path / "plan",
+        packet_model_payload_bytes=524_288,
+        threads=1,
+    )
 
     with pytest.raises(ValueError, match="packet_census"):
         enqueue_atlas_plan(
@@ -240,7 +319,12 @@ def test_atlas_enqueue_requires_completed_packet_census(tmp_path):
 
 def test_atlas_coverage_verifies_every_owned_genome_and_exact_counts(tmp_path):
     database = _atlas_database(tmp_path)
-    build_atlas_plan(database, tmp_path / "plan", threads=1)
+    build_atlas_plan(
+        database,
+        tmp_path / "plan",
+        packet_model_payload_bytes=524_288,
+        threads=1,
+    )
     _manifest, units = load_atlas_plan(tmp_path / "plan")
     coverage = tmp_path / "plan" / "coverage"
 
@@ -286,7 +370,12 @@ def test_atlas_coverage_verifies_every_owned_genome_and_exact_counts(tmp_path):
 
 def test_atlas_coverage_reports_missing_and_incomplete_units(tmp_path):
     database = _atlas_database(tmp_path)
-    build_atlas_plan(database, tmp_path / "plan", threads=1)
+    build_atlas_plan(
+        database,
+        tmp_path / "plan",
+        packet_model_payload_bytes=524_288,
+        threads=1,
+    )
     _manifest, units = load_atlas_plan(tmp_path / "plan")
     first = units[0]
     write_genome_coverage_manifest(
@@ -322,7 +411,12 @@ def test_atlas_coverage_reports_missing_and_incomplete_units(tmp_path):
 
 def test_atlas_coverage_rejects_cross_bin_frame_receipt(tmp_path):
     database = _atlas_database(tmp_path)
-    build_atlas_plan(database, tmp_path / "plan", threads=1)
+    build_atlas_plan(
+        database,
+        tmp_path / "plan",
+        packet_model_payload_bytes=524_288,
+        threads=1,
+    )
     _manifest, units = load_atlas_plan(tmp_path / "plan")
     unit = units[1]
     contigs = [
@@ -359,7 +453,12 @@ class _FakeOps:
 
 def test_atlas_enqueue_creates_one_idempotent_genome_task(tmp_path):
     database = _atlas_database(tmp_path)
-    plan = build_atlas_plan(database, tmp_path / "plan", threads=1)
+    plan = build_atlas_plan(
+        database,
+        tmp_path / "plan",
+        packet_model_payload_bytes=524_288,
+        threads=1,
+    )
     census = build_atlas_packet_census(tmp_path / "plan", threads=1)
     ops = _FakeOps()
 

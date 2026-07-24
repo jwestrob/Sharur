@@ -159,23 +159,26 @@ class SharurQuery:
         genome_id: str,
         *,
         cursor: str | None = None,
-        max_contigs: int = 128,
-        max_proteins: int = 500,
+        max_contigs: int | None = None,
+        max_proteins: int | None = None,
         max_model_payload_bytes: int = 512 * 1024,
         all_annotations: bool = True,
     ) -> dict[str, Any]:
         """Return one adaptive packet containing data from one exact bin."""
+        payload: dict[str, Any] = {
+            "genome_id": genome_id,
+            "cursor": cursor,
+            "max_model_payload_bytes": max_model_payload_bytes,
+            "all_annotations": all_annotations,
+        }
+        if max_contigs is not None:
+            payload["max_contigs"] = max_contigs
+        if max_proteins is not None:
+            payload["max_proteins"] = max_proteins
         return self._request(
             "POST",
             "/v1/genomes/packet",
-            json={
-                "genome_id": genome_id,
-                "cursor": cursor,
-                "max_contigs": max_contigs,
-                "max_proteins": max_proteins,
-                "max_model_payload_bytes": max_model_payload_bytes,
-                "all_annotations": all_annotations,
-            },
+            json=payload,
         ).json()
 
     def get_protein(self, protein_id: str, *, verbosity: int = 1) -> dict[str, Any]:

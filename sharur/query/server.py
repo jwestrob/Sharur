@@ -37,8 +37,6 @@ from sharur.dataset_seal import DEFAULT_SEAL_NAME, DatasetSealError, verify_data
 from sharur.operators.base import SharurResult
 from sharur.operators.contigs import (
     DEFAULT_GENOME_PACKET_BYTES,
-    DEFAULT_GENOME_PACKET_CONTIGS,
-    DEFAULT_GENOME_PACKET_PROTEINS,
     MAX_GENOME_PACKET_BYTES,
     MAX_GENOME_PACKET_CONTIGS,
     MAX_GENOME_PACKET_PROTEINS,
@@ -139,13 +137,13 @@ class ContigPacketQuery(StrictModel):
 class GenomePacketQuery(StrictModel):
     genome_id: str = Field(min_length=1, max_length=1_024)
     cursor: str | None = Field(default=None, max_length=4_096)
-    max_contigs: int = Field(
-        default=DEFAULT_GENOME_PACKET_CONTIGS,
+    max_contigs: int | None = Field(
+        default=None,
         ge=1,
         le=MAX_GENOME_PACKET_CONTIGS,
     )
-    max_proteins: int = Field(
-        default=DEFAULT_GENOME_PACKET_PROTEINS,
+    max_proteins: int | None = Field(
+        default=None,
         ge=1,
         le=MAX_GENOME_PACKET_PROTEINS,
     )

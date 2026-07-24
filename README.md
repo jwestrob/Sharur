@@ -114,7 +114,7 @@ sharur seal --db data/my_dataset/sharur.duckdb --force
 
 sharur-atlas plan --db data/my_dataset/sharur.duckdb \
   --output-dir data/my_dataset/atlas \
-  --packet-contigs 128 --packet-proteins 500 --packet-bytes 524288
+  --packet-bytes 524288
 sharur-atlas packet-census --plan-dir data/my_dataset/atlas
 sharur-atlas verify-packet-census --plan-dir data/my_dataset/atlas --deep
 sharur-atlas enqueue --plan-dir data/my_dataset/atlas \
@@ -123,10 +123,12 @@ sharur-atlas enqueue --plan-dir data/my_dataset/atlas \
 
 Each logical task owns one genome. Every model packet contains data from that
 single bin, combines whole consecutive contigs when they fit, and splits only
-oversized contigs. Enqueue requires the zero-model-call invocation/payload
-census. Workers checkpoint packet cursors and write a coverage manifest plus
-typed candidates and one reconciled unit disposition. Reduce and route those
-records through the hierarchical review DAG:
+oversized contigs. The selected model-payload byte target determines the
+count ceilings; sampled real frames project invocation count. Enqueue requires
+the zero-model-call invocation/payload census. Workers checkpoint packet
+cursors and write a coverage manifest plus typed candidates and one reconciled
+unit disposition. Reduce and route those records through the hierarchical
+review DAG:
 
 ```bash
 sharur-review reduce --ops-url http://ops-host:8811 \

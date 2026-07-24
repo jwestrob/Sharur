@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -20,14 +21,13 @@ from sharur.dataset_seal import (
 )
 from sharur.ingest.input_integrity import write_json_atomic
 from sharur.operators.contigs import (
-    DEFAULT_GENOME_PACKET_BYTES,
-    DEFAULT_GENOME_PACKET_CONTIGS,
-    DEFAULT_GENOME_PACKET_PROTEINS,
     GENOME_PACKET_VERSION,
     genome_packet_packing_contract,
     get_genome_packet,
+    minimum_genome_packet_record_bytes,
 )
 from sharur.query.runtime import ReadOnlyDuckDBRuntime
+from sharur.storage.duckdb_store import DuckDBStore
 
 
 if TYPE_CHECKING:
@@ -36,15 +36,13 @@ if TYPE_CHECKING:
     from sharur.ops.client import SharurOps
 
 
-ATLAS_PLAN_SCHEMA = "atlas-plan/2.0"
+ATLAS_PLAN_SCHEMA = "atlas-plan/2.1"
 ATLAS_UNIT_SCHEMA = "atlas-unit/2.0"
 ATLAS_COVERAGE_SCHEMA = "atlas-coverage/2.0"
 ATLAS_REVIEW_OUTPUT_SCHEMA = "atlas-review-output/1.0"
 ATLAS_PACKET_CENSUS_SCHEMA = "atlas-packet-census/1.0"
 ATLAS_PACKET_CENSUS_UNIT_SCHEMA = "atlas-packet-census-unit/1.0"
-DEFAULT_PACKET_CONTIGS = DEFAULT_GENOME_PACKET_CONTIGS
-DEFAULT_PACKET_PROTEINS = DEFAULT_GENOME_PACKET_PROTEINS
-DEFAULT_PACKET_BYTES = DEFAULT_GENOME_PACKET_BYTES
+ATLAS_PACKET_CALIBRATION_SCHEMA = "atlas-packet-calibration/1.0"
 DEFAULT_CHECKPOINT_INTERVAL_FRAMES = 1
 DEFAULT_QUERY_RESULT_LIMIT_BYTES = 2 * 1024 * 1024
 QUERY_RESULT_ENVELOPE_RESERVE_BYTES = 4 * 1024
@@ -188,28 +186,259 @@ def _genome_counts(database: Path, *, threads: int) -> list[tuple[Any, ...]]:
         connection.close()
 
 
+def _select_packet_calibration_rows(
+    counts: list[tuple[Any, ...]],
+    *,
+    sample_genomes: int,
+) -> list[tuple[Any, ...]]:
+    """Select deterministic genome-size quantiles for payload calibration."""
+    if sample_genomes < 1:
+        raise ValueError("packet_calibration_genomes must be positive")
+    eligible = [
+        row
+        for row in counts
+        if int(row[2] or 0) > 0 or int(row[3] or 0) > 0
+    ]
+    ordered = sorted(
+        eligible,
+        key=lambda row: (int(row[3] or 0), int(row[2] or 0), str(row[0])),
+    )
+    if len(ordered) <= sample_genomes:
+        return ordered
+    if sample_genomes == 1:
+        return [ordered[len(ordered) // 2]]
+    indices = [
+        round(position * (len(ordered) - 1) / (sample_genomes - 1))
+        for position in range(sample_genomes)
+    ]
+    return [ordered[index] for index in dict.fromkeys(indices)]
+
+
+def _calibrate_packet_limits(
+    database: Path,
+    *,
+    dataset_id: str,
+    counts: list[tuple[Any, ...]],
+    packet_model_payload_bytes: int,
+    packet_all_annotations: bool,
+    sample_genomes: int,
+    sample_genome_source: str,
+    threads: int,
+) -> dict[str, Any]:
+    """Measure real serialized frames for a byte-defined packing contract."""
+    selected = _select_packet_calibration_rows(
+        counts,
+        sample_genomes=sample_genomes,
+    )
+    protein_frame_densities: list[int] = []
+    contig_frame_densities: list[int] = []
+    sampled_payload_bytes = 0
+    protein_bearing_payload_bytes = 0
+    sampled_proteins = 0
+    sampled_contig_segments = 0
+    target_exceeded_frames = 0
+    sampled_ids: list[str] = []
+    store = DuckDBStore(database, read_only=True, threads=threads)
+    store.dataset_id = dataset_id
+    try:
+        for row in selected:
+            genome_id = str(row[0])
+            sampled_ids.append(genome_id)
+            packet = get_genome_packet(
+                store,
+                genome_id,
+                max_contigs=None,
+                max_proteins=None,
+                max_model_payload_bytes=packet_model_payload_bytes,
+                all_annotations=packet_all_annotations,
+            ).raw
+            model_payload = packet.get("model_payload")
+            if not isinstance(model_payload, dict):
+                raise RuntimeError(
+                    f"Packet calibration received an invalid payload in {genome_id}"
+                )
+            contigs = model_payload.get("contigs")
+            if not isinstance(contigs, list):
+                raise RuntimeError(
+                    f"Packet calibration received invalid contigs in {genome_id}"
+                )
+            protein_count = sum(
+                len(contig.get("proteins", []))
+                for contig in contigs
+                if isinstance(contig, dict)
+            )
+            payload_bytes = packet.get("model_payload_bytes")
+            if (
+                isinstance(payload_bytes, bool)
+                or not isinstance(payload_bytes, int)
+                or payload_bytes < 0
+            ):
+                raise RuntimeError(
+                    f"Packet calibration received invalid bytes in {genome_id}"
+                )
+            sampled_payload_bytes += payload_bytes
+            sampled_contig_segments += len(contigs)
+            if contigs:
+                contig_frame_densities.append(
+                    math.ceil(payload_bytes / len(contigs))
+                )
+            if protein_count:
+                protein_bearing_payload_bytes += payload_bytes
+                sampled_proteins += protein_count
+                protein_frame_densities.append(
+                    math.ceil(payload_bytes / protein_count)
+                )
+            if packet.get("target_exceeded") is True:
+                target_exceeded_frames += 1
+    finally:
+        store.close()
+
+    if sampled_proteins:
+        mean_bytes_per_protein = (
+            protein_bearing_payload_bytes / sampled_proteins
+        )
+    else:
+        mean_bytes_per_protein = None
+    mean_bytes_per_contig_segment = (
+        sampled_payload_bytes / sampled_contig_segments
+        if sampled_contig_segments
+        else None
+    )
+    protein_density_distribution = _distribution(protein_frame_densities)
+    contig_density_distribution = _distribution(contig_frame_densities)
+    record_floors = minimum_genome_packet_record_bytes()
+    proportional_contract = genome_packet_packing_contract(
+        max_contigs=None,
+        max_proteins=None,
+        max_model_payload_bytes=packet_model_payload_bytes,
+        all_annotations=packet_all_annotations,
+    )
+    proportional_contig_limit = int(proportional_contract["max_contigs"])
+    proportional_protein_limit = int(proportional_contract["max_proteins"])
+    identity = {
+        "schema_version": ATLAS_PACKET_CALIBRATION_SCHEMA,
+        "selection": "genome protein-count quantiles",
+        "sample_genome_count_source": sample_genome_source,
+        "requested_genomes": sample_genomes,
+        "sampled_genomes": len(sampled_ids),
+        "sampled_genome_ids": sampled_ids,
+        "calibration_packet_contigs": proportional_contig_limit,
+        "calibration_packet_proteins": proportional_protein_limit,
+        "calibration_packet_bytes": packet_model_payload_bytes,
+        "sampled_nonempty_frames": len(contig_frame_densities),
+        "sampled_contig_segments": sampled_contig_segments,
+        "sampled_proteins": sampled_proteins,
+        "sampled_model_payload_bytes": sampled_payload_bytes,
+        "protein_bearing_model_payload_bytes": protein_bearing_payload_bytes,
+        "mean_model_payload_bytes_per_protein": (
+            round(mean_bytes_per_protein, 3)
+            if mean_bytes_per_protein is not None
+            else None
+        ),
+        "mean_model_payload_bytes_per_contig_segment": (
+            round(mean_bytes_per_contig_segment, 3)
+            if mean_bytes_per_contig_segment is not None
+            else None
+        ),
+        "frame_bytes_per_protein_distribution": protein_density_distribution,
+        "frame_bytes_per_contig_segment_distribution": (
+            contig_density_distribution
+        ),
+        "target_model_payload_bytes": packet_model_payload_bytes,
+        "all_annotations": packet_all_annotations,
+        "payload_proportional_protein_limit": proportional_protein_limit,
+        "protein_limit_derivation": (
+            "target_model_payload_bytes // "
+            f"{record_floors['protein']}-byte serialized schema floor"
+        ),
+        "payload_proportional_contig_limit": proportional_contig_limit,
+        "canonical_contig_segment_floor_bytes": record_floors["contig"],
+        "canonical_protein_record_floor_bytes": record_floors["protein"],
+        "contig_limit_derivation": (
+            "target_model_payload_bytes // "
+            f"{record_floors['contig']}-byte serialized schema floor"
+        ),
+        "target_exceeded_frames": target_exceeded_frames,
+        "model_calls_made": 0,
+    }
+    return {
+        **identity,
+        "calibration_sha256": _sha256(identity),
+    }
+
+
+def _project_model_invocations(
+    counts: list[tuple[Any, ...]],
+    *,
+    packet_contig_limit: int,
+    packet_protein_limit: int,
+    packet_model_payload_bytes: int,
+    bytes_per_protein: int | float | None,
+    bytes_per_contig_segment: int | float | None,
+) -> int:
+    """Project calls from count limits and measured payload densities."""
+    if bytes_per_protein is None or bytes_per_protein <= 0:
+        byte_limited_proteins = packet_protein_limit
+    else:
+        byte_limited_proteins = max(
+            1,
+            math.floor(packet_model_payload_bytes / bytes_per_protein),
+        )
+    effective_proteins = max(
+        1,
+        min(packet_protein_limit, byte_limited_proteins),
+    )
+    if bytes_per_contig_segment is None or bytes_per_contig_segment <= 0:
+        byte_limited_contigs = packet_contig_limit
+    else:
+        byte_limited_contigs = max(
+            1,
+            math.floor(
+                packet_model_payload_bytes / bytes_per_contig_segment
+            ),
+        )
+    effective_contigs = max(
+        1,
+        min(packet_contig_limit, byte_limited_contigs),
+    )
+    total = 0
+    for _bin_id, _declared, n_contigs, n_proteins in counts:
+        contig_calls = (
+            math.ceil(int(n_contigs) / effective_contigs)
+            if int(n_contigs)
+            else 0
+        )
+        protein_calls = (
+            math.ceil(int(n_proteins) / effective_proteins)
+            if int(n_proteins)
+            else 0
+        )
+        total += max(contig_calls, protein_calls)
+    return total
+
+
 def build_atlas_plan(
     db_path: str | Path,
     output_dir: str | Path,
     *,
+    packet_model_payload_bytes: int,
     seal_path: str | Path | None = None,
-    packet_contig_limit: int = DEFAULT_PACKET_CONTIGS,
-    packet_protein_limit: int = DEFAULT_PACKET_PROTEINS,
-    packet_model_payload_bytes: int = DEFAULT_PACKET_BYTES,
+    packet_contig_limit: int | None = None,
+    packet_protein_limit: int | None = None,
     packet_all_annotations: bool = True,
+    packet_calibration_genomes: int | None = None,
     checkpoint_interval_frames: int = DEFAULT_CHECKPOINT_INTERVAL_FRAMES,
     query_result_limit_bytes: int = DEFAULT_QUERY_RESULT_LIMIT_BYTES,
     threads: int = 4,
     verify_seal: bool = True,
 ) -> dict[str, Any]:
     """Build one stable genome-owned work unit per live database bin."""
-    packet_contract = genome_packet_packing_contract(
+    genome_packet_packing_contract(
         max_contigs=packet_contig_limit,
         max_proteins=packet_protein_limit,
         max_model_payload_bytes=packet_model_payload_bytes,
         all_annotations=packet_all_annotations,
     )
-    packet_contract_hash = _sha256(packet_contract)
     if checkpoint_interval_frames < 1:
         raise ValueError("checkpoint_interval_frames must be positive")
     if query_result_limit_bytes <= QUERY_RESULT_ENVELOPE_RESERVE_BYTES:
@@ -231,16 +460,108 @@ def build_atlas_plan(
         verify=verify_seal,
     )
     counts = _genome_counts(database, threads=threads)
+    resolved_calibration_genomes = (
+        int(packet_calibration_genomes)
+        if packet_calibration_genomes is not None
+        else max(1, math.ceil(math.sqrt(len(counts))))
+    )
+    packet_calibration = _calibrate_packet_limits(
+        database,
+        dataset_id=dataset_id,
+        counts=counts,
+        packet_model_payload_bytes=packet_model_payload_bytes,
+        packet_all_annotations=packet_all_annotations,
+        sample_genomes=resolved_calibration_genomes,
+        sample_genome_source=(
+            "explicit"
+            if packet_calibration_genomes is not None
+            else "ceil(sqrt(live bin count))"
+        ),
+        threads=threads,
+    )
+    resolved_contig_limit = (
+        int(packet_contig_limit)
+        if packet_contig_limit is not None
+        else int(packet_calibration["payload_proportional_contig_limit"])
+    )
+    resolved_protein_limit = (
+        int(packet_protein_limit)
+        if packet_protein_limit is not None
+        else int(packet_calibration["payload_proportional_protein_limit"])
+    )
+    packet_contract = genome_packet_packing_contract(
+        max_contigs=resolved_contig_limit,
+        max_proteins=resolved_protein_limit,
+        max_model_payload_bytes=packet_model_payload_bytes,
+        all_annotations=packet_all_annotations,
+    )
+    packet_contract_hash = _sha256(packet_contract)
+    protein_density = packet_calibration[
+        "frame_bytes_per_protein_distribution"
+    ]
+    contig_density = packet_calibration[
+        "frame_bytes_per_contig_segment_distribution"
+    ]
+    invocation_projection = {
+        "method": (
+            "per-bin count ceilings using calibrated serialized-payload "
+            "density; whole-contig boundary effects await exact census"
+        ),
+        "at_calibrated_mean_density": _project_model_invocations(
+            counts,
+            packet_contig_limit=resolved_contig_limit,
+            packet_protein_limit=resolved_protein_limit,
+            packet_model_payload_bytes=packet_model_payload_bytes,
+            bytes_per_protein=packet_calibration[
+                "mean_model_payload_bytes_per_protein"
+            ],
+            bytes_per_contig_segment=packet_calibration[
+                "mean_model_payload_bytes_per_contig_segment"
+            ],
+        ),
+        "at_calibrated_p50_frame_density": _project_model_invocations(
+            counts,
+            packet_contig_limit=resolved_contig_limit,
+            packet_protein_limit=resolved_protein_limit,
+            packet_model_payload_bytes=packet_model_payload_bytes,
+            bytes_per_protein=protein_density["p50"],
+            bytes_per_contig_segment=contig_density["p50"],
+        ),
+        "at_calibrated_p95_frame_density": _project_model_invocations(
+            counts,
+            packet_contig_limit=resolved_contig_limit,
+            packet_protein_limit=resolved_protein_limit,
+            packet_model_payload_bytes=packet_model_payload_bytes,
+            bytes_per_protein=protein_density["p95"],
+            bytes_per_contig_segment=contig_density["p95"],
+        ),
+        "exact_count_source": "sharur-atlas packet-census",
+    }
     plan_identity = {
         "schema_version": ATLAS_PLAN_SCHEMA,
         "dataset_id": dataset_id,
         "packet_version": GENOME_PACKET_VERSION,
         "packet_packing_contract": packet_contract,
         "packet_packing_contract_hash": packet_contract_hash,
-        "packet_contig_limit": packet_contig_limit,
-        "packet_protein_limit": packet_protein_limit,
+        "packet_contig_limit": resolved_contig_limit,
+        "packet_protein_limit": resolved_protein_limit,
         "packet_model_payload_bytes": packet_model_payload_bytes,
         "packet_all_annotations": packet_all_annotations,
+        "packet_limit_sources": {
+            "contigs": (
+                "explicit"
+                if packet_contig_limit is not None
+                else "payload-proportional schema ceiling"
+            ),
+            "proteins": (
+                "explicit"
+                if packet_protein_limit is not None
+                else "payload-proportional schema ceiling"
+            ),
+            "model_payload_bytes": "explicit model-facing target",
+        },
+        "packet_calibration": packet_calibration,
+        "model_invocation_projection": invocation_projection,
         "checkpoint_interval_frames": checkpoint_interval_frames,
         "query_result_limit_bytes": query_result_limit_bytes,
         "query_result_envelope_reserve_bytes": (
@@ -279,8 +600,8 @@ def build_atlas_plan(
                 "n_proteins": actual_proteins,
                 "packet_version": GENOME_PACKET_VERSION,
                 "packet_packing_contract_hash": packet_contract_hash,
-                "packet_contig_limit": packet_contig_limit,
-                "packet_protein_limit": packet_protein_limit,
+                "packet_contig_limit": resolved_contig_limit,
+                "packet_protein_limit": resolved_protein_limit,
                 "packet_model_payload_bytes": packet_model_payload_bytes,
                 "packet_all_annotations": packet_all_annotations,
                 "checkpoint_key": "atlas_progress",
@@ -1521,6 +1842,7 @@ def verify_atlas_coverage(
 
 __all__ = [
     "ATLAS_COVERAGE_SCHEMA",
+    "ATLAS_PACKET_CALIBRATION_SCHEMA",
     "ATLAS_PACKET_CENSUS_SCHEMA",
     "ATLAS_PACKET_CENSUS_UNIT_SCHEMA",
     "ATLAS_PLAN_SCHEMA",
@@ -1530,9 +1852,6 @@ __all__ = [
     "DEFAULT_CENSUS_MEMORY_LIMIT",
     "DEFAULT_CENSUS_WORKERS",
     "DEFAULT_CHECKPOINT_INTERVAL_FRAMES",
-    "DEFAULT_PACKET_BYTES",
-    "DEFAULT_PACKET_CONTIGS",
-    "DEFAULT_PACKET_PROTEINS",
     "DEFAULT_QUERY_RESULT_LIMIT_BYTES",
     "QUERY_RESULT_ENVELOPE_RESERVE_BYTES",
     "WORK_WEIGHT_FORMULA",

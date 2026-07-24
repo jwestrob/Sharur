@@ -21,14 +21,10 @@ if TYPE_CHECKING:
 
 
 PACKET_VERSION = "1.0"
-GENOME_PACKET_VERSION = "genome-packet/1.0"
+GENOME_PACKET_VERSION = "genome-packet/1.1"
 GENOME_MODEL_PAYLOAD_SCHEMA = "atlas-model-packet/1.0"
-GENOME_PACKET_PACKING_SCHEMA = "genome-packet-packing/1.0"
-DEFAULT_GENOME_PACKET_CONTIGS = 128
-DEFAULT_GENOME_PACKET_PROTEINS = 500
+GENOME_PACKET_PACKING_SCHEMA = "genome-packet-packing/1.1"
 DEFAULT_GENOME_PACKET_BYTES = 512 * 1024
-MAX_GENOME_PACKET_CONTIGS = 512
-MAX_GENOME_PACKET_PROTEINS = 500
 MAX_GENOME_PACKET_BYTES = 1_500_000
 _NULL_GENE_INDEX = 9_223_372_036_854_775_807
 
@@ -60,28 +56,103 @@ def _token_scenarios(payload_bytes: int) -> dict[str, int]:
     }
 
 
+def minimum_genome_packet_record_bytes() -> dict[str, int]:
+    """Return canonical schema floors for proportional request guardrails."""
+    protein = {
+        "protein_id": "",
+        "gene_index": 0,
+        "start": 0,
+        "end": 0,
+        "strand": "",
+        "length_aa": 0,
+        "gc_content": 0,
+        "observed_annotations": [],
+        "predicates": [],
+        "named_calls": [],
+        "loci": [],
+    }
+    contig = {
+        "bin_id": "",
+        "contig_id": "",
+        "length": 0,
+        "gc_content": 0,
+        "is_circular": False,
+        "taxonomy": "",
+        "total_protein_count": 0,
+        "protein_offset_start": 0,
+        "protein_offset_end": 0,
+        "segment_index": 0,
+        "complete": True,
+        "proteins": [],
+    }
+    return {
+        "protein": len(_canonical_bytes(protein)),
+        "contig": len(_canonical_bytes(contig)),
+    }
+
+
+_GENOME_PACKET_RECORD_FLOORS = minimum_genome_packet_record_bytes()
+DEFAULT_GENOME_PACKET_CONTIGS = (
+    DEFAULT_GENOME_PACKET_BYTES // _GENOME_PACKET_RECORD_FLOORS["contig"]
+)
+DEFAULT_GENOME_PACKET_PROTEINS = (
+    DEFAULT_GENOME_PACKET_BYTES // _GENOME_PACKET_RECORD_FLOORS["protein"]
+)
+MAX_GENOME_PACKET_CONTIGS = (
+    MAX_GENOME_PACKET_BYTES // _GENOME_PACKET_RECORD_FLOORS["contig"]
+)
+MAX_GENOME_PACKET_PROTEINS = (
+    MAX_GENOME_PACKET_BYTES // _GENOME_PACKET_RECORD_FLOORS["protein"]
+)
+
+
 def genome_packet_packing_contract(
     *,
-    max_contigs: int = DEFAULT_GENOME_PACKET_CONTIGS,
-    max_proteins: int = DEFAULT_GENOME_PACKET_PROTEINS,
+    max_contigs: int | None = None,
+    max_proteins: int | None = None,
     max_model_payload_bytes: int = DEFAULT_GENOME_PACKET_BYTES,
     all_annotations: bool = True,
 ) -> dict[str, Any]:
     """Build the immutable contract used to pack one bin's model packets."""
-    if max_contigs < 1 or max_contigs > MAX_GENOME_PACKET_CONTIGS:
-        raise ValueError(
-            f"max_contigs must be between 1 and {MAX_GENOME_PACKET_CONTIGS:,}"
-        )
-    if max_proteins < 1 or max_proteins > MAX_GENOME_PACKET_PROTEINS:
-        raise ValueError(
-            f"max_proteins must be between 1 and {MAX_GENOME_PACKET_PROTEINS:,}"
-        )
     if max_model_payload_bytes < 1_024:
         raise ValueError("max_model_payload_bytes must be at least 1,024")
     if max_model_payload_bytes > MAX_GENOME_PACKET_BYTES:
         raise ValueError(
             "max_model_payload_bytes must be at most "
             f"{MAX_GENOME_PACKET_BYTES:,}"
+        )
+    record_floors = dict(_GENOME_PACKET_RECORD_FLOORS)
+    proportional_contig_limit = max(
+        1,
+        max_model_payload_bytes // record_floors["contig"],
+    )
+    proportional_protein_limit = max(
+        1,
+        max_model_payload_bytes // record_floors["protein"],
+    )
+    resolved_contigs = (
+        proportional_contig_limit if max_contigs is None else max_contigs
+    )
+    resolved_proteins = (
+        proportional_protein_limit if max_proteins is None else max_proteins
+    )
+    if resolved_contigs < 1 or resolved_contigs > MAX_GENOME_PACKET_CONTIGS:
+        raise ValueError(
+            f"max_contigs must be between 1 and {MAX_GENOME_PACKET_CONTIGS:,}"
+        )
+    if resolved_proteins < 1 or resolved_proteins > MAX_GENOME_PACKET_PROTEINS:
+        raise ValueError(
+            f"max_proteins must be between 1 and {MAX_GENOME_PACKET_PROTEINS:,}"
+        )
+    if resolved_contigs > proportional_contig_limit:
+        raise ValueError(
+            "max_contigs exceeds the canonical payload-proportional safety "
+            f"limit of {proportional_contig_limit:,}"
+        )
+    if resolved_proteins > proportional_protein_limit:
+        raise ValueError(
+            "max_proteins exceeds the canonical payload-proportional safety "
+            f"limit of {proportional_protein_limit:,}"
         )
     return {
         "schema_version": GENOME_PACKET_PACKING_SCHEMA,
@@ -90,10 +161,14 @@ def genome_packet_packing_contract(
         "bin_isolation": "exact bins.bin_id",
         "contig_order": "contig_id",
         "protein_order": "gene_index NULLS LAST, start, protein_id",
-        "max_contigs": max_contigs,
-        "max_proteins": max_proteins,
+        "max_contigs": resolved_contigs,
+        "max_proteins": resolved_proteins,
         "max_model_payload_bytes": max_model_payload_bytes,
         "all_annotations": all_annotations,
+        "serialized_record_floor_bytes": record_floors,
+        "count_limit_rule": (
+            "floor(max_model_payload_bytes / canonical serialized record floor)"
+        ),
     }
 
 
@@ -673,8 +748,8 @@ def get_genome_packet(
     genome_id: str,
     *,
     cursor: str | None = None,
-    max_contigs: int = DEFAULT_GENOME_PACKET_CONTIGS,
-    max_proteins: int = DEFAULT_GENOME_PACKET_PROTEINS,
+    max_contigs: int | None = None,
+    max_proteins: int | None = None,
     max_model_payload_bytes: int = DEFAULT_GENOME_PACKET_BYTES,
     all_annotations: bool = True,
 ) -> SharurResult:
@@ -691,6 +766,8 @@ def get_genome_packet(
         max_model_payload_bytes=max_model_payload_bytes,
         all_annotations=all_annotations,
     )
+    max_contigs = int(packing["max_contigs"])
+    max_proteins = int(packing["max_proteins"])
     packing_hash = _sha256(packing)
     params = {
         "genome_id": genome_id,
@@ -1353,4 +1430,5 @@ __all__ = [
     "get_contig_packet",
     "get_genome_packet",
     "list_contigs",
+    "minimum_genome_packet_record_bytes",
 ]

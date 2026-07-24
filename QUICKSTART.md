@@ -248,8 +248,6 @@ sharur seal --db data/my_dataset/sharur.duckdb --force
 sharur-atlas plan \
   --db data/my_dataset/sharur.duckdb \
   --output-dir data/my_dataset/atlas \
-  --packet-contigs 128 \
-  --packet-proteins 500 \
   --packet-bytes 524288
 
 sharur-atlas packet-census \
@@ -267,11 +265,14 @@ sharur-atlas enqueue \
 
 Atlas packs consecutive records from exactly one bin per bounded,
 sequence-free model packet. Whole contigs stay together when they fit;
-oversized contigs resume by stable protein offset. The zero-model-call census
-must pass before enqueue, and per-genome coverage manifests prove every frame,
-contig segment, and protein total. Each scanner also emits typed candidate
-occurrences and one reconciled unit disposition. Reduce and route the
-resulting review DAG:
+oversized contigs resume by stable protein offset. The required byte target is
+the model-facing budget; count ceilings are derived exactly from that byte
+target and canonical serialized record floors. Real frames sampled
+deterministically across genome-size quantiles provide the preliminary call
+projection. The zero-model-call census must pass before enqueue, and
+per-genome coverage manifests prove every frame, contig segment, and protein
+total. Each scanner also emits typed candidate occurrences and one reconciled
+unit disposition. Reduce and route the resulting review DAG:
 
 ```bash
 sharur-review reduce --ops-url http://ops-host:8811 \

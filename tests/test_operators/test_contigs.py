@@ -7,6 +7,7 @@ import pytest
 from sharur.operators.contigs import (
     GENOME_PACKET_VERSION,
     PACKET_VERSION,
+    genome_packet_packing_contract,
     get_contig,
     get_contig_packet,
     get_genome_packet,
@@ -299,6 +300,36 @@ def test_genome_packet_cursor_is_bound_to_bin_and_packing_contract(store):
             max_contigs=10,
             max_proteins=2,
             max_model_payload_bytes=100_000,
+        )
+
+
+def test_genome_packet_count_guards_scale_with_payload_budget():
+    automatic = genome_packet_packing_contract(
+        max_model_payload_bytes=1_024,
+    )
+    floors = automatic["serialized_record_floor_bytes"]
+    assert automatic["max_contigs"] == 1_024 // floors["contig"]
+    assert automatic["max_proteins"] == 1_024 // floors["protein"]
+
+    contract = genome_packet_packing_contract(
+        max_contigs=4,
+        max_proteins=6,
+        max_model_payload_bytes=1_024,
+    )
+
+    assert contract["serialized_record_floor_bytes"]["contig"] > 0
+    assert contract["serialized_record_floor_bytes"]["protein"] > 0
+    with pytest.raises(ValueError, match="payload-proportional"):
+        genome_packet_packing_contract(
+            max_contigs=100,
+            max_proteins=6,
+            max_model_payload_bytes=1_024,
+        )
+    with pytest.raises(ValueError, match="payload-proportional"):
+        genome_packet_packing_contract(
+            max_contigs=4,
+            max_proteins=100,
+            max_model_payload_bytes=1_024,
         )
 
 

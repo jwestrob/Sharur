@@ -197,9 +197,18 @@ ID, exact `bins.bin_id`, and exact packing-contract hash. Each packet carries
 consecutive contig segments from that one bin in `contig_id`, then
 `gene_index NULLS LAST, start, protein_id` order. Whole contigs stay together
 when they fit a fresh packet; a contig continues by stable protein offset
-when its remaining payload exceeds the contract. Defaults are 128 contigs,
-500 proteins, and 512 KiB of canonical model payload. Serialized-byte,
-protein, and contig limits all apply.
+when its remaining payload exceeds the contract. Serialized-byte, protein,
+and contig limits all apply.
+
+For production Atlas plans, the operator selects the canonical model-payload
+byte budget from the executor's context budget. Protein and contig safety
+ceilings equal the byte budget divided by their canonical serialized
+record-floor sizes; exact serialized bytes therefore control packing. The
+planner measures real all-annotation frames from deterministic genome-size
+quantiles to project model-call counts. The calibration record and projection
+are pinned in `plan.json`; explicit count options remain available as
+diagnostic overrides. The exact packet census supersedes the projection
+before enqueue.
 
 Each model payload nests proteins under contigs bearing the requested bin ID.
 The operator also asserts the bin on every selected protein before

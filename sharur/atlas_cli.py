@@ -13,15 +13,16 @@ from sharur.atlas import (
     DEFAULT_CENSUS_MEMORY_LIMIT,
     DEFAULT_CENSUS_WORKERS,
     DEFAULT_CHECKPOINT_INTERVAL_FRAMES,
-    DEFAULT_PACKET_BYTES,
-    DEFAULT_PACKET_CONTIGS,
-    DEFAULT_PACKET_PROTEINS,
     DEFAULT_QUERY_RESULT_LIMIT_BYTES,
     build_atlas_packet_census,
     build_atlas_plan,
     enqueue_atlas_plan,
     verify_atlas_coverage,
     verify_atlas_packet_census,
+)
+from sharur.operators.contigs import (
+    MAX_GENOME_PACKET_CONTIGS,
+    MAX_GENOME_PACKET_PROTEINS,
 )
 from sharur.ops.client import SharurOps
 
@@ -37,26 +38,61 @@ app = typer.Typer(
 def plan_command(
     db: Annotated[Path, typer.Option("--db", exists=True, dir_okay=False)],
     output_dir: Annotated[Path, typer.Option("--output-dir")],
+    packet_bytes: Annotated[
+        int,
+        typer.Option(
+            "--packet-bytes",
+            min=1_024,
+            max=1_500_000,
+            help=(
+                "Required model-facing canonical payload budget; derive it "
+                "from the executor context budget."
+            ),
+        ),
+    ],
     seal: Annotated[
         Path | None,
         typer.Option("--seal", exists=True, dir_okay=False),
     ] = None,
     packet_contigs: Annotated[
-        int,
-        typer.Option("--packet-contigs", min=1, max=512),
-    ] = DEFAULT_PACKET_CONTIGS,
+        int | None,
+        typer.Option(
+            "--packet-contigs",
+            min=1,
+            max=MAX_GENOME_PACKET_CONTIGS,
+            help=(
+                "Diagnostic hard cap; omitted values use the byte-proportional "
+                "schema ceiling."
+            ),
+        ),
+    ] = None,
     packet_proteins: Annotated[
-        int,
-        typer.Option("--packet-proteins", min=1, max=500),
-    ] = DEFAULT_PACKET_PROTEINS,
-    packet_bytes: Annotated[
-        int,
-        typer.Option("--packet-bytes", min=1_024, max=1_500_000),
-    ] = DEFAULT_PACKET_BYTES,
+        int | None,
+        typer.Option(
+            "--packet-proteins",
+            min=1,
+            max=MAX_GENOME_PACKET_PROTEINS,
+            help=(
+                "Diagnostic hard cap; omitted values use the byte-proportional "
+                "schema ceiling."
+            ),
+        ),
+    ] = None,
     all_annotations: Annotated[
         bool,
         typer.Option("--all-annotations/--top-annotation-only"),
     ] = True,
+    calibration_genomes: Annotated[
+        int | None,
+        typer.Option(
+            "--calibration-genomes",
+            min=1,
+            help=(
+                "Explicit calibration size; omitted values use "
+                "ceil(sqrt(live bin count))."
+            ),
+        ),
+    ] = None,
     checkpoint_interval_frames: Annotated[
         int,
         typer.Option("--checkpoint-interval-frames", min=1),
@@ -80,6 +116,7 @@ def plan_command(
         packet_protein_limit=packet_proteins,
         packet_model_payload_bytes=packet_bytes,
         packet_all_annotations=all_annotations,
+        packet_calibration_genomes=calibration_genomes,
         checkpoint_interval_frames=checkpoint_interval_frames,
         query_result_limit_bytes=query_result_bytes,
         threads=threads,

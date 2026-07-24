@@ -72,8 +72,6 @@ sharur verify-seal data/DATASET/dataset.seal.json
 sharur-atlas plan \
   --db data/DATASET/sharur.duckdb \
   --output-dir data/DATASET/atlas \
-  --packet-contigs 128 \
-  --packet-proteins 500 \
   --packet-bytes 524288 \
   --query-result-bytes 2097152 \
   --checkpoint-interval-frames 1
@@ -101,6 +99,24 @@ atlas/
 `units.jsonl` contains exactly one deterministic unit per live `bins.bin_id`.
 Counts come from live `contigs` and `proteins` tables. Stored `bins.n_contigs`
 is retained only as a diagnostic comparison.
+
+`--packet-bytes` is the required model-facing choice. Derive it from the
+executor's input/context budget, including prompt and output reserves. The
+protein and contig ceilings are exact functions of that budget:
+`floor(packet bytes / canonical serialized record-floor bytes)`. They are
+safety ceilings; canonical serialized bytes control actual packing. The
+planner also serializes real all-annotation frames from deterministic genome
+size quantiles to estimate payload density and invocation count. The
+calibration size is `ceil(sqrt(live bin count))` unless an explicit diagnostic
+override is supplied. `plan.json` records the sample genomes, payload density
+distribution, calibration hash, resolved limits, and projected invocation
+counts at mean, median, and upper-tail density. Calibration makes zero model
+calls.
+
+`--packet-proteins` and `--packet-contigs` are explicit diagnostic overrides.
+Production plans normally omit them so the byte budget controls their values.
+The exact census remains authoritative because annotation-rich frames and
+whole-contig boundaries can differ from a sample projection.
 
 Before launching any model worker, enumerate the exact packet stream:
 
