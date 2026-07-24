@@ -138,6 +138,14 @@ def _pass_verification(
     )
 
 
+def test_default_policy_uses_sol_medium_for_deepening_and_clear_audits() -> None:
+    policy = load_review_policy()
+    for profile_name in ("finding_deepen", "audit_clear"):
+        profile = policy.profile(profile_name)
+        assert profile.model == "gpt-5.6-sol"
+        assert profile.reasoning_effort == "medium"
+
+
 def test_v4_database_migrates_additively_to_review_schema(tmp_path) -> None:
     path = tmp_path / "ops.db"
     ops = OpsStore(path, agent_id="seed")
