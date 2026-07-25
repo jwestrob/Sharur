@@ -2275,6 +2275,7 @@ class OpsStore(ReviewStoreMixin):
         task_ids: list[str] | None = None,
         only_transient: bool = False,
         extra_attempts: int = 5,
+        absolute_max_attempts: int = 20,
     ) -> dict[str, Any]:
         """Return attempt-exhausted tasks to the queue.
 
@@ -2291,9 +2292,19 @@ class OpsStore(ReviewStoreMixin):
         `only_transient` restricts the reset to failures whose recorded error
         looks like transport rather than a genuine defect, so a deterministically
         broken genome is not retried forever.
+
+        `absolute_max_attempts` is a hard ceiling that no sweep may raise. Its
+        absence is what let the Dormibacteria livelock run for an hour: a
+        deterministic bug surfaced as a 409 that *read* like transport, so every
+        sweep granted the task five more attempts and it reached attempt 34 of
+        35 while making no progress. A retry policy able to lift its own ceiling
+        cannot fail loudly, and a bug that never fails loudly is a bug nobody
+        sees. Past the ceiling a task stays `failed`, which is the signal.
         """
         if extra_attempts < 1:
             raise ValueError("extra_attempts must be positive")
+        if absolute_max_attempts < 1:
+            raise ValueError("absolute_max_attempts must be positive")
         clauses = ["status = 'failed'"]
         params: list[Any] = []
         if campaign_id is not None:
@@ -2311,6 +2322,11 @@ class OpsStore(ReviewStoreMixin):
             skipped: list[str] = []
             for row in rows:
                 if only_transient and not _looks_transient_error(row["last_error"]):
+                    skipped.append(row["id"])
+                    continue
+                if int(row["attempt_count"]) >= absolute_max_attempts:
+                    # Whatever the error text claims, a task this deep is not
+                    # failing on transport. Leave it failed so it is visible.
                     skipped.append(row["id"])
                     continue
                 self._conn.execute(

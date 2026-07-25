@@ -623,3 +623,62 @@ class TestTransientErrorClassifier:
         from sharur.ops.store import _looks_transient_error
 
         assert not _looks_transient_error(error)
+
+
+def _failed_task(tmp_path, *, attempt_count, error):
+    """A campaign task parked in `failed` with a given attempt history."""
+    coordinator = OpsStore(tmp_path / "ops" / "sharur_ops.db", agent_id="coordinator")
+    task_id = coordinator.create_task("survey", "Read a genome")
+    coordinator._conn.execute(
+        "UPDATE tasks SET status='failed', attempt_count=?, max_attempts=?, "
+        "last_error=? WHERE id=?",
+        (attempt_count, attempt_count, error, task_id),
+    )
+    coordinator._conn.commit()
+    return coordinator, task_id
+
+
+def test_sweep_refuses_to_raise_attempts_past_the_absolute_ceiling(tmp_path):
+    """A retry policy that can lift its own ceiling can never fail loudly.
+
+    Regression for the Dormibacteria livelock: a deterministic bug surfaced as
+    a 409 whose text read like transport, so every sweep granted five more
+    attempts and one task reached attempt 34 of 35 while completing nothing for
+    an hour. Past the ceiling the task must stay `failed` -- that is the signal
+    that the failure is not transport.
+    """
+    coordinator, task_id = _failed_task(
+        tmp_path, attempt_count=25, error="temporary failure in name resolution"
+    )
+    result = coordinator.reset_failed_tasks(only_transient=True)
+    assert task_id in result["skipped"]
+    assert task_id not in result["reset"]
+    row = coordinator._conn.execute(
+        "SELECT status, max_attempts FROM tasks WHERE id=?", (task_id,)
+    ).fetchone()
+    assert row["status"] == "failed"
+    assert row["max_attempts"] == 25, "ceiling must not be raised"
+
+
+def test_sweep_still_requeues_a_genuinely_transient_failure(tmp_path):
+    coordinator, task_id = _failed_task(
+        tmp_path, attempt_count=3, error="temporary failure in name resolution"
+    )
+    result = coordinator.reset_failed_tasks(only_transient=True)
+    assert task_id in result["reset"]
+    row = coordinator._conn.execute(
+        "SELECT status, max_attempts FROM tasks WHERE id=?", (task_id,)
+    ).fetchone()
+    assert row["status"] == "pending"
+    assert row["max_attempts"] == 8
+
+
+def test_absolute_ceiling_is_configurable_and_validated(tmp_path):
+    coordinator, task_id = _failed_task(
+        tmp_path, attempt_count=6, error="temporary failure in name resolution"
+    )
+    assert task_id in coordinator.reset_failed_tasks(
+        only_transient=True, absolute_max_attempts=10
+    )["reset"]
+    with pytest.raises(ValueError, match="absolute_max_attempts"):
+        coordinator.reset_failed_tasks(absolute_max_attempts=0)
