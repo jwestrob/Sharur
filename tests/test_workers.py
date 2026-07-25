@@ -181,7 +181,7 @@ class TestScanContract:
         required = SCAN_OUTPUT_SCHEMA["properties"]["candidates"]["items"]["required"]
         for field in (
             "candidate_type",
-            "signature_json",
+            "signature",
             "evidence_json",
             "subject_refs_json",
         ):
@@ -214,9 +214,11 @@ class TestScanContract:
         walk(SCAN_OUTPUT_SCHEMA)
 
     def test_free_form_fields_travel_as_strings(self):
+        """Evidence and refs stay free-form; only the reduction key is pinned."""
         props = SCAN_OUTPUT_SCHEMA["properties"]["candidates"]["items"]["properties"]
-        for field in ("signature_json", "evidence_json", "subject_refs_json"):
+        for field in ("evidence_json", "subject_refs_json"):
             assert props[field]["type"] == "string"
+        assert props["signature"]["type"] == "object"
 
     def test_prompt_carries_the_known_confounds(self):
         """Scanners meet these at corpus scale with no human in the loop."""
@@ -316,3 +318,136 @@ class TestJsonCarrierFields:
     def test_empty_returns_none(self):
         assert _parse_json_field("", "signature") is None
         assert _parse_json_field(None, "signature") is None
+
+
+class TestSignatureNormalisation:
+    """The signature is the exact reduction key and must be genome-invariant.
+
+    The first pilot run produced a 1.00x collapse ratio — 398 of 399 clusters
+    were singletons — because 91% of signatures carried `contig_id`. Identical
+    biology in two genomes therefore hashed differently and cross-genome
+    reduction was structurally impossible. Prompting alone cannot guarantee
+    this, so it is enforced here.
+    """
+
+    @pytest.mark.parametrize(
+        "key",
+        [
+            "contig_id",
+            "contig_ids",
+            "protein_ids",
+            "coordinates",
+            "gene_indices",
+            "gene_indexes",
+            "gene_index_start",
+            "locus_end",
+            "start",
+            "end",
+            "position",
+            "offset",
+        ],
+    )
+    def test_locator_keys_are_stripped(self, key):
+        from sharur.workers.atlas_scan import _split_signature
+
+        inv, loc = _split_signature({"accessions": ["A"], key: "whatever"}, "g1")
+        assert key not in inv
+        assert key in loc
+
+    def test_invariant_fields_survive(self):
+        from sharur.workers.atlas_scan import _split_signature
+
+        sig = {"accessions": ["CofC", "CofD"], "n_genes": 2, "call_type": "defense"}
+        inv, loc = _split_signature(sig, "g1")
+        assert inv == sig
+        assert loc == {}
+
+    def test_values_embedding_the_genome_id_are_stripped(self):
+        """Catches locator-ish values under a key the patterns do not match."""
+        from sharur.workers.atlas_scan import _split_signature
+
+        inv, loc = _split_signature(
+            {"accessions": ["A"], "note": "found in GCA_963850385.1"}, "GCA_963850385.1"
+        )
+        assert "note" not in inv
+        assert "note" in loc
+
+    def test_same_finding_in_two_genomes_collapses(self):
+        """The whole point: identical biology must produce one reduction key."""
+        from sharur.workers.atlas_scan import _canonical, _split_signature
+
+        a = {
+            "accessions": ["CofC", "CofD", "F420_ligase"],
+            "n_genes": 3,
+            "contig_id": "genome_a__c1",
+            "coordinates": [100, 900],
+        }
+        b = {
+            "accessions": ["CofC", "CofD", "F420_ligase"],
+            "n_genes": 3,
+            "contig_id": "genome_b__c7",
+            "coordinates": [50000, 50800],
+        }
+        ka, _ = _split_signature(a, "genome_a")
+        kb, _ = _split_signature(b, "genome_b")
+        assert _canonical(ka) == _canonical(kb)
+
+    def test_distinct_findings_still_separate(self):
+        from sharur.workers.atlas_scan import _canonical, _split_signature
+
+        a, _ = _split_signature({"accessions": ["CofC"], "n_genes": 1}, "g")
+        b, _ = _split_signature({"accessions": ["PRK"], "n_genes": 1}, "g")
+        assert _canonical(a) != _canonical(b)
+
+
+class TestCanonicalSignature:
+    """Schema drift is a second, independent reduction killer.
+
+    Stripping locators is not sufficient. Left free-form, the model invents a
+    different schema per finding — six competing shapes appeared across 37
+    signatures in the first pilot run (`accessions` vs `caller_accessions` vs
+    `defense_calls` vs `components` vs `profiles`) — so the same system in two
+    genomes still hashed differently. The reduction key is now a fixed
+    structure, canonicalised here.
+    """
+
+    def test_accession_order_does_not_matter(self):
+        from sharur.workers.atlas_scan import _canonical, _canonical_signature
+
+        a = _canonical_signature({"accessions": ["B", "A"], "n_genes": 2, "system": ""})
+        b = _canonical_signature({"accessions": ["A", "B"], "n_genes": 2, "system": ""})
+        assert _canonical(a) == _canonical(b)
+
+    def test_duplicate_accessions_collapse(self):
+        from sharur.workers.atlas_scan import _canonical_signature
+
+        sig = _canonical_signature(
+            {"accessions": ["MzaB", "MzaC", "MzaB"], "n_genes": 3, "system": "Gao_Mza"}
+        )
+        assert sig["accessions"] == ["MzaB", "MzaC"]
+
+    def test_shape_is_fixed_regardless_of_input(self):
+        from sharur.workers.atlas_scan import _canonical_signature
+
+        assert set(_canonical_signature({}).keys()) == {"accessions", "n_genes", "system"}
+
+    def test_missing_fields_get_stable_defaults(self):
+        from sharur.workers.atlas_scan import _canonical, _canonical_signature
+
+        a = _canonical_signature({"accessions": ["A"]})
+        b = _canonical_signature({"accessions": ["A"], "n_genes": 0, "system": ""})
+        assert _canonical(a) == _canonical(b)
+
+    def test_scalar_accession_is_tolerated(self):
+        from sharur.workers.atlas_scan import _canonical_signature
+
+        assert _canonical_signature({"accessions": "A"})["accessions"] == ["A"]
+
+    def test_signature_is_a_structured_schema_field_not_a_json_string(self):
+        """Only the reduction key needs pinning; evidence/refs stay free-form."""
+        props = SCAN_OUTPUT_SCHEMA["properties"]["candidates"]["items"]["properties"]
+        assert props["signature"]["type"] == "object"
+        assert props["signature"]["additionalProperties"] is False
+        assert set(props["signature"]["required"]) == {"accessions", "n_genes", "system"}
+        assert props["evidence_json"]["type"] == "string"
+        assert props["subject_refs_json"]["type"] == "string"

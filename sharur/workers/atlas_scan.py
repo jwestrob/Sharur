@@ -70,7 +70,7 @@ SCAN_OUTPUT_SCHEMA: dict[str, Any] = {
                 "additionalProperties": False,
                 "required": [
                     "candidate_type",
-                    "signature_json",
+                    "signature",
                     "evidence_json",
                     "subject_refs_json",
                     "reason_codes",
@@ -78,9 +78,32 @@ SCAN_OUTPUT_SCHEMA: dict[str, Any] = {
                 ],
                 "properties": {
                     "candidate_type": {"type": "string"},
-                    "signature_json": {
-                        "type": "string",
-                        "description": "JSON object of typed structured fields only — the exact reduction key",
+                    # The reduction key is the one field that must be
+                    # canonical, so it is a fixed structure rather than
+                    # free-form JSON. Left open, the model invents a different
+                    # schema per finding (`accessions` vs `caller_accessions`
+                    # vs `defense_calls` vs `components`), and the same system
+                    # in two genomes hashes differently — observed at 6
+                    # competing schemas across 37 signatures in the first run.
+                    "signature": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["accessions", "n_genes", "system"],
+                        "properties": {
+                            "accessions": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Every PFAM/KEGG/caller accession in the locus. Order is normalised worker-side.",
+                            },
+                            "n_genes": {
+                                "type": "integer",
+                                "description": "Number of genes in the locus",
+                            },
+                            "system": {
+                                "type": "string",
+                                "description": "Named system or pathway if one applies, else an empty string",
+                            },
+                        },
                     },
                     "evidence_json": {
                         "type": "string",
@@ -115,6 +138,76 @@ def _parse_json_field(raw: Any, field: str) -> dict[str, Any] | None:
         LOGGER.warning("candidate %s was not valid JSON; dropping candidate", field)
         return None
     return parsed if isinstance(parsed, dict) else None
+
+# Fields that locate a finding within one genome. They must never enter the
+# signature: the signature is the exact reduction key, so any genome-specific
+# value makes identical biology in two genomes hash differently and defeats
+# cross-genome reduction entirely.
+#
+# Observed in the first pilot run: `contig_id` appeared in 363 of 400
+# signatures and the collapse ratio was 1.00x — 398 of 399 clusters were
+# singletons. Prompting alone is not enough (models invent key names like
+# `gene_indexes`, `gene_index_start`, `locus_end`), so this is enforced by
+# pattern rather than by an exact blacklist, and locators are moved into
+# subject_refs where they belong.
+_LOCATOR_PATTERNS = (
+    "contig",
+    "protein_id",
+    "coordinate",
+    "position",
+    "offset",
+    "locus_start",
+    "locus_end",
+    "gene_index",
+    "gene_indices",
+    "gene_indexes",
+    "start",
+    "end",
+    "span",
+    "range",
+)
+
+
+def _is_locator(key: str) -> bool:
+    k = key.lower()
+    return any(pat in k for pat in _LOCATOR_PATTERNS)
+
+
+def _canonical_signature(sig: dict[str, Any]) -> dict[str, Any]:
+    """Put a signature into its canonical reduction form.
+
+    Canonical JSON sorts object keys but not array members, so ["A","B"] and
+    ["B","A"] would hash differently and describe the same locus. Accessions
+    are a set, not a sequence, so they are sorted and de-duplicated.
+    """
+    accessions = sig.get("accessions") or []
+    if not isinstance(accessions, list):
+        accessions = [accessions]
+    return {
+        "accessions": sorted({str(a) for a in accessions}),
+        "n_genes": int(sig.get("n_genes") or 0),
+        "system": str(sig.get("system") or ""),
+    }
+
+
+def _split_signature(
+    signature: dict[str, Any], genome_id: str
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Partition a model signature into (reduction key, locators).
+
+    Anything naming a position, or whose value embeds the genome id, is a
+    locator. What remains describes *what the finding is* — accession sets,
+    counts, typed classes — and reduces across genomes.
+    """
+    invariant: dict[str, Any] = {}
+    locators: dict[str, Any] = {}
+    for key, value in signature.items():
+        if _is_locator(key) or (genome_id and genome_id in _canonical(value)):
+            locators[key] = value
+        else:
+            invariant[key] = value
+    return invariant, locators
+
 
 SCAN_SYSTEM_PROMPT = """\
 You are an Atlas scanner reading one bounded frame of one microbial genome.
@@ -193,11 +286,14 @@ the string:
   candidate_type      short kebab-case class, e.g. "co-located-pathway",
                       "novel-gene-cluster", "multidomain-architecture",
                       "mobile-element-cargo", "defense-locus"
-  signature_json      stringified JSON object of typed structured fields ONLY
-                      (identifiers, accessions, counts, coordinates). This is
-                      the exact reduction key — two occurrences of the same
-                      finding must produce byte-identical signatures. No prose.
-                      e.g. "{\\"accessions\\":[\\"RuBisCO_large\\",\\"PRK\\"],\\"n_genes\\":4}"
+  signature_json      stringified JSON object describing WHAT THE FINDING IS,
+                      never where it is. Accession sets, counts, typed classes
+                      only. This is the exact reduction key: the SAME finding in
+                      a different genome must produce a BYTE-IDENTICAL
+                      signature, so it must contain no contig id, no
+                      coordinates, no gene indices, no protein ids and no
+                      genome name. Put those in subject_refs_json instead.
+                      e.g. "{\\"accessions\\":[\\"PRK\\",\\"RuBisCO_large\\",\\"RuBisCO_small\\"],\\"n_genes\\":3}"
   evidence_json       stringified JSON object holding your reasoning, the
                       supporting observations, and any UNVERIFIED hypotheses
   subject_refs_json   stringified JSON object, e.g.
@@ -572,9 +668,9 @@ class AtlasScanWorker:
         for item in run.record.get("candidates") or []:
             if not isinstance(item, dict):
                 continue
-            signature = _parse_json_field(
-                item.get("signature_json", item.get("signature")), "signature"
-            )
+            signature = item.get("signature")
+            if not isinstance(signature, dict):
+                signature = _parse_json_field(item.get("signature_json"), "signature")
             subject_refs = _parse_json_field(
                 item.get("subject_refs_json", item.get("subject_refs")), "subject_refs"
             )
@@ -585,6 +681,17 @@ class AtlasScanWorker:
                 LOGGER.warning("dropping malformed candidate on frame %s", raw.get("frame_index"))
                 continue
             ctype = str(item.get("candidate_type") or "unclassified")
+            genome_id = raw.get("bin_id") or ""
+            signature, locators = _split_signature(signature, genome_id)
+            signature = _canonical_signature(signature)
+            if not signature:
+                LOGGER.warning(
+                    "candidate on frame %s had no genome-invariant signature fields; dropping",
+                    raw.get("frame_index"),
+                )
+                continue
+            if locators:
+                subject_refs = {**subject_refs, "locators": locators}
             out.append(
                 {
                     "candidate_type": f"{CANDIDATE_TYPE_PREFIX}:{ctype}"[:256],
