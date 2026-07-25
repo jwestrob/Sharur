@@ -310,7 +310,15 @@ class ReadOnlyDuckDBRuntime:
                 ) from exc
             root: duckdb.DuckDBPyConnection | None = None
             try:
-                root = duckdb.connect(str(self.db_path), read_only=True)
+                # DuckDB eagerly spawns cpu_count-1 scheduler threads at import
+                # for the module default connection; cap it so a 224-core host
+                # does not carry ~223 idle threads in the query-server process.
+                duckdb.execute("SET threads TO 1")
+                root = duckdb.connect(
+                    str(self.db_path),
+                    read_only=True,
+                    config={"threads": self.threads},
+                )
                 root.execute("SET threads = ?", [self.threads])
                 root.execute("SET memory_limit = ?", [self.memory_limit])
                 root.execute("SET temp_directory = ?", [str(self.temp_directory)])
