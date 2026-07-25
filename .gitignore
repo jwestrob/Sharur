@@ -146,3 +146,11 @@ test_dataset/
 
 # Claude Code local settings (user-specific permissions)
 .claude/settings.local.json
+
+# Structure caches and scratch data — never belong in git.
+# 4,094 mmcif/*.cif (3.2 GB) were swept in by a `git add -A` in 9331fdb57,
+# taking .git to 42 GB. Data caches live on /groups, not in history.
+mmcif/
+*.cif
+.nfs*
+**/.nfs*
