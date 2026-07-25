@@ -477,6 +477,30 @@ def _is_conflict(exc: Exception) -> bool:
     return resp is not None and resp.status_code == 409
 
 
+def _conflict_detail(exc: Exception) -> str:
+    """Best-effort human text from a 409 body."""
+    resp = getattr(exc, "response", None)
+    if resp is None:
+        return str(exc)
+    try:
+        body = resp.json()
+    except Exception:  # noqa: BLE001 - body may not be JSON
+        return (resp.text or str(exc))[:300]
+    detail = body.get("detail", body) if isinstance(body, dict) else body
+    return str(detail)[:300]
+
+
+def _is_lease_failure(exc: Exception) -> bool:
+    """Distinguish a lost lease from a rejected record inside a 409.
+
+    The Ops service maps both `LeaseFenceError` and a plain validation
+    `ValueError` onto 409, so status alone cannot tell "your lease died" from
+    "this record is malformed". Only the former should abandon the genome.
+    """
+    text = _conflict_detail(exc).lower()
+    return "lease" in text or "fence" in text
+
+
 class AtlasScanWorker:
     def __init__(
         self,
@@ -740,8 +764,12 @@ class AtlasScanWorker:
                 # checkpoint payload bounded and the write volume linear. The
                 # server deduplicates on idempotency_key, so a resume that
                 # replays a frame is harmless.
-                self._submit_candidates(found, params, task_id, campaign_id)
-                candidates.extend(found)
+                # Extend with what the server actually accepted, not with what
+                # the model proposed: finalize cross-checks its candidate count
+                # against the persisted rows, so a skipped record must not be
+                # counted here.
+                stored = self._submit_candidates(found, params, task_id, campaign_id)
+                candidates.extend(stored)
                 LOGGER.info(
                     "  frame %s: %s contigs, %s bytes -> %s candidates",
                     receipt["frame_index"],
@@ -952,13 +980,28 @@ class AtlasScanWorker:
         params: dict[str, Any],
         task_id: str,
         campaign_id: str | None,
-    ) -> None:
+    ) -> list[dict[str, Any]]:
         """Write candidate occurrences under the live lease.
 
-        Called per frame. `idempotency_key` is derived from the task, the frame
-        and the canonical signature, so replaying a frame after a resume
-        collapses onto the same row rather than duplicating it.
+        Returns the candidates actually persisted, which the caller must use in
+        place of the input list so the finalize-time count matches the rows the
+        server holds.
+
+        The idempotency key is content-addressed over the whole record, not just
+        the signature. Keying on the signature alone was wrong once reduction
+        started working: the canonical signature deliberately drops locators so
+        that the same system in different genomes collapses, which also means
+        two *distinct* findings in one frame routinely share a signature while
+        differing in evidence. They then collided on one key, and the server --
+        which returns the existing id only on a byte-identical payload -- raised
+        a ValueError that surfaces as HTTP 409.
+
+        Content addressing makes the two cases disjoint: an identical replay
+        after a resume hashes to the same key and collapses, while any genuine
+        difference in evidence hashes elsewhere and inserts. A payload conflict
+        is then unreachable from this worker.
         """
+        persisted: list[dict[str, Any]] = []
         for cand in candidates:
             prov = cand.get("provenance") or {}
             try:
@@ -981,13 +1024,37 @@ class AtlasScanWorker:
                     idempotency_key=_stable_key(
                         task_id,
                         str(prov.get("frame_index", "")),
-                        _canonical(cand["signature"]),
+                        _canonical(
+                            {
+                                "candidate_type": cand["candidate_type"],
+                                "signature": cand["signature"],
+                                "evidence": cand["evidence"],
+                                "subject_refs": cand["subject_refs"],
+                                "reason_codes": cand["reason_codes"],
+                                "uncertainty": cand["uncertainty"],
+                                "reduction_features": cand.get("reduction_features") or {},
+                            }
+                        ),
                     ),
                 )
             except requests.HTTPError as exc:
-                if _is_conflict(exc):
+                if not _is_conflict(exc):
+                    raise
+                # 409 covers two unrelated conditions on this endpoint: a dead
+                # lease, and a rejected record. Treating both as lease loss
+                # abandoned the whole genome on a single bad candidate, and the
+                # task then cycled claim -> scan -> abandon until the sweep
+                # exhausted its attempts. Only a lease failure is fatal here.
+                if _is_lease_failure(exc):
                     raise LeaseLost(str(exc)) from exc
-                raise
+                LOGGER.warning(
+                    "candidate rejected on task %s (skipping, scan continues): %s",
+                    task_id,
+                    _conflict_detail(exc),
+                )
+                continue
+            persisted.append(cand)
+        return persisted
 
     def _heartbeat_and_checkpoint(
         self,

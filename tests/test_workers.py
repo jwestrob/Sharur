@@ -20,6 +20,8 @@ from sharur.workers.atlas_scan import (
     _assert_sequence_free,
     _canonical,
     _parse_json_field,
+    _conflict_detail,
+    _is_lease_failure,
     _stable_key,
 )
 
@@ -645,3 +647,100 @@ class TestUnboundedFramesWithStallDetection:
 
         assert hasattr(AtlasScanWorker, "_lease_keepalive")
         assert hasattr(AtlasScanWorker._lease_keepalive, "__wrapped__")
+
+
+class TestCandidateIdempotencyKey:
+    """The key must separate distinct records that share a collapsed signature.
+
+    Regression for the livelock that stalled the Dormibacteria pilot at 99/944.
+    Reduction deliberately strips locators from the signature so the same system
+    collapses across genomes; that also makes two unrelated findings in one
+    frame share a signature. Keying only on the signature made them collide,
+    the Ops service rejected the second with HTTP 409, and the worker read every
+    409 as a lost lease and abandoned the genome — forever, on every retry.
+    """
+
+    @staticmethod
+    def _key(cand, *, task="t1", frame="0"):
+        return _stable_key(
+            task,
+            frame,
+            _canonical(
+                {
+                    "candidate_type": cand["candidate_type"],
+                    "signature": cand["signature"],
+                    "evidence": cand["evidence"],
+                    "subject_refs": cand["subject_refs"],
+                    "reason_codes": cand["reason_codes"],
+                    "uncertainty": cand["uncertainty"],
+                    "reduction_features": cand.get("reduction_features") or {},
+                }
+            ),
+        )
+
+    @staticmethod
+    def _cand(**over):
+        base = {
+            "candidate_type": "atlas-scan:co-located-pathway",
+            "signature": {"system": "glycan-locus", "class": "co-located-pathway"},
+            "evidence": {"note": "six glycosyltransferases and a Wzy polymerase"},
+            "subject_refs": {"protein_ids": ["p1", "p2"]},
+            "reason_codes": ["colocated"],
+            "uncertainty": {},
+            "reduction_features": {},
+        }
+        base.update(over)
+        return base
+
+    def test_same_signature_different_evidence_gets_distinct_keys(self):
+        a = self._cand()
+        b = self._cand(
+            evidence={"note": "a separate locus on another contig"},
+            subject_refs={"protein_ids": ["p9", "p10"]},
+        )
+        assert a["signature"] == b["signature"], "precondition: signatures collapse"
+        assert self._key(a) != self._key(b)
+
+    def test_identical_replay_collapses_onto_one_key(self):
+        # A resume replays the frame; byte-identical output must be idempotent.
+        assert self._key(self._cand()) == self._key(self._cand())
+
+    def test_distinct_frames_stay_distinct(self):
+        c = self._cand()
+        assert self._key(c, frame="0") != self._key(c, frame="1")
+
+    def test_distinct_tasks_stay_distinct(self):
+        c = self._cand()
+        assert self._key(c, task="t1") != self._key(c, task="t2")
+
+
+class TestConflictDisambiguation:
+    """A 409 means either a dead lease or a rejected record. Only the first is fatal."""
+
+    @staticmethod
+    def _exc(detail):
+        import requests
+
+        resp = requests.Response()
+        resp.status_code = 409
+        resp._content = json.dumps({"detail": detail}).encode()
+        resp.headers["Content-Type"] = "application/json"
+        return requests.HTTPError(response=resp)
+
+    def test_lease_message_is_fatal(self):
+        exc = self._exc("Candidate task has no active lease owned by the submitting agent")
+        assert _is_lease_failure(exc) is True
+
+    def test_fence_message_is_fatal(self):
+        exc = self._exc("Task abc has no live attempt 3 lease owned by terra-scan-02")
+        assert _is_lease_failure(exc) is True
+
+    def test_record_rejection_is_not_fatal(self):
+        exc = self._exc(
+            "Candidate-occurrence idempotency key conflicts with an existing record"
+        )
+        assert _is_lease_failure(exc) is False
+
+    def test_detail_is_extracted_for_logging(self):
+        exc = self._exc("some rejection reason")
+        assert "some rejection reason" in _conflict_detail(exc)
