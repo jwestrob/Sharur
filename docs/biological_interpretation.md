@@ -2,6 +2,32 @@
 
 **Load this doc when:** Making biological claims, interpreting annotations, validating functional assignments, or writing about MAG-derived findings.
 
+## Known Annotation Confounds — CHECK THIS FIRST
+
+**Keyed by what you OBSERVE, not by what you set out to study.** You will usually
+meet these by running a query and getting rows back, with no prior reason to
+suspect a trap. Scan this table against your result set *before* interpreting it.
+Every row below has produced a wrong conclusion in a real session.
+
+| If you observe | The trap | Required check before any claim |
+|---|---|---|
+| `source='hyddb'` / `hyddb_subgroup` = `nife_group4`, `energy_conserving_hydrogenase`, `ech_hydrogenase`, `h2_evolving` | Group 4 catalytic-subunit HMM is homologous to respiratory **Complex I NuoD/NqoD**. Most hits are Complex I, not hydrogenase. | Co-annotation: count `Complex1_49kDa` (PF00346) + `Complex1_30kDa` (PF00329) vs `NiFeSe_Hases` on the *same* proteins. Full protocol: `.claude/skills/hydrogenase.md` |
+| `hyddb_subgroup` = `hyddb_needs_curation` | The caller itself is flagging low confidence. Often ~99% of hyddb rows in a taxon. | Report subgroup as OBSERVED/UNVERIFIED. Never emit a named hydrogenase class from a flagged row. |
+| `RuBisCO_large` / `RuBisCO_large_N` | Form IV RuBisCO-like proteins (RLP) do methionine salvage, not carbon fixation. Large subunit alone proves nothing. | Require **PRK** (PF00485 / KEGG K00855) in the same bin. `RuBisCO_small` further discriminates form I (L8S8) from form II/IV. |
+| `Ald_Xan_dh_C` (and molybdopterin oxidoreductase families) | Contains CoxL (form I CO dehydrogenase) **but also** xanthine dehydrogenase, aldehyde oxidoreductase, nicotinate dehydrogenase. | Never call CO oxidation from the family alone. Require the CoxL active-site motif (AYXCSFR) plus `coxM`/`coxS` co-localization. |
+| Any accession averaging **>10 hits/genome**, or a claimed function in **>50% of genomes** | You are looking at a fold/superfamily, not a function. | Co-annotation + ±8-gene neighborhood on 3–5 examples (protocol below). |
+| A trait "absent" because a name/description `LIKE` pattern returned zero | Naming artifact, not biology. `%glycogen%` misses the entire **GlgE** pathway (`Glyco_transf_5`, `GlgB_N`, `GlgP_C`, `GlgE_dom_N_S`, `CBM_48`). | Probe by accession family and pathway members, never by one English name. Report zeros only after ≥3 orthogonal patterns. |
+| Any absence in a MAG | Fragmentation, not biology. | Check contig count + completeness first. See MAG Interpretation below. |
+
+**Escalation rule:** an HMM row is an *observation*. A functional name requires the
+co-annotation and neighborhood checks. A pathway claim requires multiple markers
+co-localized. See "Claim escalation" below.
+
+**Adding to this table:** when a confound costs you a wrong conclusion, add the row
+here — keyed on the observable that misled you — and put the deep protocol in the
+relevant `.claude/skills/*.md`. A fact filed only under its topic will not be found
+by someone who does not yet know the topic applies.
+
 ## Context-First Analysis Protocol
 
 **The domain tells you the fold. The neighbors tell you the function.**

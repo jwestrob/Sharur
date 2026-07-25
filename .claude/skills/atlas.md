@@ -19,7 +19,12 @@ architecture for smaller datasets and future executor strategies.
 
 Read these before coordinating or executing Atlas:
 
-- `docs/biological_interpretation.md`
+- `docs/biological_interpretation.md` — **start with the confound registry at the
+  top.** Scan packets deliver raw `hyddb` / `pfam` / `kegg` rows straight to the
+  model, so scanners meet the known false-positive families (Group 4 NiFe vs
+  Complex I NuoD, RuBisCO without PRK, `Ald_Xan_dh_C` vs CoxL) at full corpus
+  scale with no human in the loop. A scanner that emits a named call from a
+  flagged or superfamily-level row poisons every downstream review tier.
 - `docs/subagent_guide.md`
 - `docs/query_service.md`
 - `agent_ops_spec.md`

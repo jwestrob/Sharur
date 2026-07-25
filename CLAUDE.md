@@ -145,6 +145,14 @@ Queries can be SQL, shell commands, or Python one-liners — whatever reproduces
 
 ### Database Queries
 
+**Before interpreting ANY annotation result set, scan the confound registry at the
+top of `docs/biological_interpretation.md`.** It is keyed on what you *observe*
+(`nife_group4`, `RuBisCO_large`, `Ald_Xan_dh_C`, `hyddb_needs_curation`, a zero from a
+name `LIKE`, any accession >10 hits/genome), not on what you set out to study — because
+you normally meet these traps without knowing the relevant skill file exists. Two of
+those rows each produced a confidently wrong conclusion in a real session before
+being caught in review.
+
 ```python
 # Column names: 'name' (not annotation_id), 'score' (not bitscore)
 # Always COUNT(DISTINCT protein_id) — repeat domains inflate COUNT(*)
