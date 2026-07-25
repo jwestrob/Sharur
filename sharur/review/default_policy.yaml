@@ -1,7 +1,7 @@
 schema_version: sharur-review-policy/1.0
 name: atlas-tiered-scientific-review
-version: "1"
-controller_id: sharur-review-controller
+version: "2"
+controller_id: sharur-review-controller-v2
 rubric_version: scientific-review/1.0
 
 profiles:
@@ -31,7 +31,7 @@ profiles:
       cpu_slots: 1
   independent_anthropic:
     provider: anthropic
-    model: claude-opus-4-6
+    model: claude-opus-5
     reasoning_effort: high
     capability: profile:independent_anthropic
     max_pending_tasks: 1000
@@ -55,7 +55,7 @@ profiles:
       cpu_slots: 1
   canonical_review:
     provider: anthropic
-    model: claude-opus-4-6
+    model: claude-opus-5
     reasoning_effort: high
     capability: profile:canonical_review
     max_pending_tasks: 500
@@ -71,7 +71,7 @@ profiles:
       cpu_slots: 1
   audit_reject:
     provider: anthropic
-    model: claude-opus-4-6
+    model: claude-opus-5
     reasoning_effort: high
     capability: profile:audit_reject
     max_pending_tasks: 500
