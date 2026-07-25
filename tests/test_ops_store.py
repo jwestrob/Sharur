@@ -498,3 +498,128 @@ def test_run_ledger_recovers_stage_after_hard_crash_heartbeat_gap(tmp_path):
         )
         is None
     )
+
+
+def _exhaust_task(tmp_path, *, error: str, max_attempts: int = 2):
+    """Drive a task to terminal `failed` by burning every attempt."""
+    coordinator = OpsStore(tmp_path / "ops" / "sharur_ops.db", agent_id="coordinator")
+    task_id = coordinator.create_task(
+        "atlas_genome_read", "read one genome", max_attempts=max_attempts
+    )
+    worker = OpsStore(coordinator.db_path, agent_id="worker")
+    for _ in range(max_attempts):
+        claimed = worker.claim_task(task_id)
+        worker.fail_task(
+            task_id,
+            error=error,
+            retryable=True,
+            lease_token=claimed["lease_token"],
+            attempt=claimed["lease_attempt"],
+        )
+    return coordinator, worker, task_id
+
+
+class TestResetFailedTasks:
+    """`failed` is otherwise terminal — nothing requeues an exhausted task.
+
+    On a cluster with endemic transport failures (intermittent DNS) that
+    permanently loses healthy work for reasons unrelated to the work itself.
+    """
+
+    def test_task_is_terminal_before_reset(self, tmp_path):
+        coordinator, worker, task_id = _exhaust_task(
+            tmp_path, error="transient transport: failed to lookup address information"
+        )
+        assert coordinator.get_task(task_id)["status"] == "failed"
+        assert worker.claim_next_task(task_types=["atlas_genome_read"]) is None
+
+    def test_reset_requeues_and_task_becomes_claimable(self, tmp_path):
+        coordinator, worker, task_id = _exhaust_task(
+            tmp_path, error="transient transport: failed to lookup address information"
+        )
+        result = coordinator.reset_failed_tasks()
+        assert result["reset"] == [task_id]
+        assert coordinator.get_task(task_id)["status"] == "pending"
+        assert worker.claim_next_task(task_types=["atlas_genome_read"]) is not None
+
+    def test_reset_raises_the_ceiling_and_preserves_attempt_history(self, tmp_path):
+        """attempt_count is the audit trail; raise the ceiling instead of zeroing it."""
+        coordinator, _, task_id = _exhaust_task(tmp_path, error="timed out", max_attempts=2)
+        before = coordinator.get_task(task_id)
+        coordinator.reset_failed_tasks(extra_attempts=5)
+        after = coordinator.get_task(task_id)
+        assert after["attempt_count"] == before["attempt_count"] == 2
+        assert after["max_attempts"] == before["max_attempts"] + 5
+
+    def test_only_transient_leaves_real_defects_alone(self, tmp_path):
+        """A deterministically broken genome must not be retried forever."""
+        coordinator, _, task_id = _exhaust_task(
+            tmp_path, error="ModelError: CLI exited 1: invalid model name"
+        )
+        result = coordinator.reset_failed_tasks(only_transient=True)
+        assert result["reset"] == []
+        assert result["skipped"] == [task_id]
+        assert coordinator.get_task(task_id)["status"] == "failed"
+
+    def test_only_transient_still_resets_transport_failures(self, tmp_path):
+        coordinator, _, task_id = _exhaust_task(
+            tmp_path, error="transient transport: failed to connect to websocket"
+        )
+        assert coordinator.reset_failed_tasks(only_transient=True)["reset"] == [task_id]
+
+    def test_reset_is_scoped_by_campaign(self, tmp_path):
+        coordinator = OpsStore(tmp_path / "ops" / "sharur_ops.db", agent_id="coordinator")
+        worker = OpsStore(coordinator.db_path, agent_id="worker")
+        ids, camps = {}, {}
+        for name in ("camp-a", "camp-b"):
+            camps[name] = coordinator.create_campaign(name, description=f"test {name}")
+            tid = coordinator.create_task(
+                "atlas_genome_read", "read", max_attempts=1, campaign_id=camps[name]
+            )
+            claimed = worker.claim_task(tid)
+            worker.fail_task(
+                tid,
+                error="timed out",
+                retryable=True,
+                lease_token=claimed["lease_token"],
+                attempt=claimed["lease_attempt"],
+            )
+            ids[name] = tid
+        result = coordinator.reset_failed_tasks(campaign_id=camps["camp-a"])
+        assert result["reset"] == [ids["camp-a"]]
+        assert coordinator.get_task(ids["camp-b"])["status"] == "failed"
+
+    def test_rejects_non_positive_extra_attempts(self, tmp_path):
+        coordinator = OpsStore(tmp_path / "ops" / "sharur_ops.db", agent_id="coordinator")
+        with pytest.raises(ValueError, match="extra_attempts must be positive"):
+            coordinator.reset_failed_tasks(extra_attempts=0)
+
+
+class TestTransientErrorClassifier:
+    @pytest.mark.parametrize(
+        "error",
+        [
+            "transient transport: failed to lookup address information",
+            "worker lease expired",
+            "connection reset by peer",
+            "Temporary failure in name resolution",
+            None,
+        ],
+    )
+    def test_transport_and_unknown_causes_are_retryable(self, error):
+        from sharur.ops.store import _looks_transient_error
+
+        assert _looks_transient_error(error)
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            "ModelError: CLI exited 1: invalid model name",
+            "packet for X carried sequence data",
+            "coverage incomplete for genome_a",
+        ],
+    )
+    def test_real_defects_are_not(self, error):
+        from sharur.ops.store import _looks_transient_error
+
+        assert not _looks_transient_error(error)

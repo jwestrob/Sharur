@@ -32,6 +32,12 @@ def atlas_scan(
     max_tasks: int | None = typer.Option(None, min=1, help="Exit after N completed genomes"),
     max_frames: int | None = typer.Option(None, min=1, help="Stop each genome after N frames (smoke tests)"),
     idle_sleep: float = typer.Option(5.0, help="Seconds to sleep when the queue is empty"),
+    sweep_failed: bool = typer.Option(
+        True,
+        "--sweep-failed/--no-sweep-failed",
+        help="When the queue drains, requeue attempt-exhausted tasks whose failure looks like transport",
+    ),
+    max_sweeps: int = typer.Option(20, min=0, help="Backstop on how many sweep rounds a worker performs"),
     dry_run: bool = typer.Option(
         False,
         "--dry-run",
@@ -64,6 +70,8 @@ def atlas_scan(
         lease_seconds=lease_seconds,
         model_timeout=model_timeout,
         max_frames=max_frames,
+        sweep_failed=sweep_failed,
+        max_sweeps=max_sweeps,
         dry_run=dry_run,
     )
     worker.install_signal_handlers()

@@ -87,6 +87,29 @@ _JSON_FIELDS = {
 _SENSITIVE_FIELDS = {"token_hash", "lease_token_hash"}
 
 
+_TRANSIENT_ERROR_MARKERS = (
+    "transient transport",
+    "failed to lookup address information",
+    "temporary failure in name resolution",
+    "failed to connect to websocket",
+    "connection reset",
+    "connection refused",
+    "network is unreachable",
+    "no route to host",
+    "timed out",
+    "timeout",
+    "worker lease expired",
+)
+
+
+def _looks_transient_error(error: str | None) -> bool:
+    """True when a recorded task error reads as transport, not a real defect."""
+    if not error:
+        return True  # no recorded cause: treat as infrastructure, allow a retry
+    blob = error.lower()
+    return any(marker in blob for marker in _TRANSIENT_ERROR_MARKERS)
+
+
 class LeaseFenceError(ValueError):
     """A worker presented a missing or stale task-attempt fencing token."""
 
@@ -2244,6 +2267,83 @@ class OpsStore(ReviewStoreMixin):
         result = _row_to_dict(updated)
         assert result is not None
         return result
+
+    def reset_failed_tasks(
+        self,
+        *,
+        campaign_id: str | None = None,
+        task_ids: list[str] | None = None,
+        only_transient: bool = False,
+        extra_attempts: int = 5,
+    ) -> dict[str, Any]:
+        """Return attempt-exhausted tasks to the queue.
+
+        `failed` is otherwise terminal: `_recover_expired_locked` only requeues
+        while `attempt_count < max_attempts`, so a task that exhausts its budget
+        can never be retried. On infrastructure where transport failures are
+        endemic (intermittent DNS, for example) that permanently loses healthy
+        work for reasons unrelated to the work itself.
+
+        Rather than zeroing `attempt_count`, this raises `max_attempts` by
+        `extra_attempts`, so the audit trail of how many times a task has been
+        tried is preserved and repeated sweeps remain visible.
+
+        `only_transient` restricts the reset to failures whose recorded error
+        looks like transport rather than a genuine defect, so a deterministically
+        broken genome is not retried forever.
+        """
+        if extra_attempts < 1:
+            raise ValueError("extra_attempts must be positive")
+        clauses = ["status = 'failed'"]
+        params: list[Any] = []
+        if campaign_id is not None:
+            clauses.append("campaign_id = ?")
+            params.append(campaign_id)
+        if task_ids:
+            clauses.append(f"id IN ({','.join('?' * len(task_ids))})")
+            params.extend(task_ids)
+        with self._lock, self._transaction():
+            rows = self._conn.execute(
+                f"SELECT * FROM tasks WHERE {' AND '.join(clauses)} ORDER BY id",
+                params,
+            ).fetchall()
+            reset: list[str] = []
+            skipped: list[str] = []
+            for row in rows:
+                if only_transient and not _looks_transient_error(row["last_error"]):
+                    skipped.append(row["id"])
+                    continue
+                self._conn.execute(
+                    """
+                    UPDATE tasks
+                    SET status = 'pending',
+                        assigned_to = reserved_for,
+                        completed_ts = NULL,
+                        lease_expires_ts = NULL,
+                        lease_token_hash = NULL,
+                        retry_after_ts = NULL,
+                        max_attempts = max_attempts + ?
+                    WHERE id = ?
+                    """,
+                    (extra_attempts, row["id"]),
+                )
+                reset.append(row["id"])
+                self._event_locked(
+                    "task_failure_reset",
+                    "task",
+                    row["id"],
+                    campaign_id=row["campaign_id"],
+                    run_id=row["run_id"],
+                    task_id=row["id"],
+                    payload={
+                        "attempt_count": row["attempt_count"],
+                        "previous_max_attempts": row["max_attempts"],
+                        "extra_attempts": extra_attempts,
+                        "last_error": (row["last_error"] or "")[:500],
+                    },
+                    actor_agent_id=self.agent_id,
+                )
+        return {"reset": reset, "skipped": skipped}
 
     def recover_expired_tasks(self, *, now: float | None = None) -> dict[str, list[str]]:
         with self._lock, self._transaction():

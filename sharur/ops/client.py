@@ -978,6 +978,25 @@ class SharurOps:
         self._lease_tokens.pop(task_id, None)
         return result
 
+    def reset_failed_tasks(
+        self,
+        *,
+        campaign_id: str | None = None,
+        task_ids: list[str] | None = None,
+        only_transient: bool = False,
+        extra_attempts: int = 5,
+    ) -> dict[str, Any]:
+        """Return attempt-exhausted tasks to the queue."""
+        body: dict[str, Any] = {
+            "only_transient": only_transient,
+            "extra_attempts": extra_attempts,
+        }
+        if campaign_id is not None:
+            body["campaign_id"] = campaign_id
+        if task_ids:
+            body["task_ids"] = task_ids
+        return self._request("POST", "/tasks/reset-failed", json=body).json()
+
     def recover_expired_tasks(self, now: float | None = None) -> dict[str, Any]:
         if now is not None:
             raise ValueError("HTTP recovery uses the server clock")

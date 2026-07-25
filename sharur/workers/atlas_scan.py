@@ -255,6 +255,8 @@ class AtlasScanWorker:
         model_timeout: int = 1800,
         max_frames: int | None = None,
         transient_retries: int = 4,
+        sweep_failed: bool = True,
+        max_sweeps: int = 20,
         dry_run: bool = False,
     ) -> None:
         self.agent_id = agent_id
@@ -264,6 +266,9 @@ class AtlasScanWorker:
         self.model_timeout = model_timeout
         self.max_frames = max_frames
         self.transient_retries = transient_retries
+        self.sweep_failed = sweep_failed
+        self.max_sweeps = max_sweeps
+        self._sweeps = 0
         self.dry_run = dry_run
 
         self.policy = load_review_policy(Path(policy_path) if policy_path else None)
@@ -326,6 +331,11 @@ class AtlasScanWorker:
                 continue
 
             if task is None:
+                # Queue looks drained. Before idling, go back for tasks that
+                # exhausted their attempts — on this cluster that is usually
+                # transport (intermittent DNS), not a defect in the genome.
+                if self._sweep_failed_tasks():
+                    continue
                 time.sleep(idle_sleep)
                 continue
 
@@ -364,6 +374,46 @@ class AtlasScanWorker:
                 LOGGER.exception("task %s failed", task.get("id"))
                 self._release(task, f"{type(exc).__name__}: {exc}", retry_delay=30)
         return done
+
+    def _sweep_failed_tasks(self) -> bool:
+        """Requeue attempt-exhausted tasks. Returns True if any were reset.
+
+        Only failures that read as transport are reset, so a genuinely broken
+        genome is not retried forever. Bounded by `max_sweeps` as a backstop.
+
+        Several workers may sweep at once; the underlying UPDATE is atomic and
+        filtered on `status = 'failed'`, so the loser of a race simply resets
+        nothing. A short jittered pause keeps them from thundering.
+        """
+        if not self.sweep_failed or self._sweeps >= self.max_sweeps:
+            return False
+        time.sleep(random.uniform(0, 3.0))
+        try:
+            result = self.ops.reset_failed_tasks(
+                campaign_id=self.campaign_id,
+                only_transient=True,
+            )
+        except requests.HTTPError as exc:
+            LOGGER.warning("failed-task sweep rejected: %s", exc)
+            return False
+        reset = result.get("reset") or []
+        skipped = result.get("skipped") or []
+        if not reset:
+            if skipped:
+                LOGGER.info(
+                    "sweep: %s failed task(s) left alone (non-transient errors)",
+                    len(skipped),
+                )
+            return False
+        self._sweeps += 1
+        LOGGER.info(
+            "sweep %s/%s: requeued %s attempt-exhausted task(s); %s left alone",
+            self._sweeps,
+            self.max_sweeps,
+            len(reset),
+            len(skipped),
+        )
+        return True
 
     def _release(self, task: dict[str, Any], error: str, *, retry_delay: int) -> None:
         try:

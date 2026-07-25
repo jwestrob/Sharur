@@ -1573,6 +1573,20 @@ def recover_tasks(request: Request):
     return result
 
 
+@router.post("/tasks/reset-failed")
+def reset_failed_tasks(payload: ResetFailedIn, request: Request):
+    principal = _require(request, "coordinator", "operator")
+    with _store(request, agent_id=principal.agent_id) as store:
+        result = store.reset_failed_tasks(
+            campaign_id=payload.campaign_id,
+            task_ids=payload.task_ids,
+            only_transient=payload.only_transient,
+            extra_attempts=payload.extra_attempts,
+        )
+    _notify(request, "task_recovery")
+    return result
+
+
 @router.patch("/tasks/{task_id}")
 def update_task(task_id: str, update: TaskUpdate, request: Request):
     _require(request, "worker", "coordinator", "operator")
