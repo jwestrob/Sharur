@@ -682,3 +682,20 @@ def test_absolute_ceiling_is_configurable_and_validated(tmp_path):
     )["reset"]
     with pytest.raises(ValueError, match="absolute_max_attempts"):
         coordinator.reset_failed_tasks(absolute_max_attempts=0)
+
+
+def test_ceiling_clamps_the_result_not_merely_the_entry(tmp_path):
+    """Gating entry is not enough -- the granted budget must also be clamped.
+
+    Reproduces the reported overflow: attempt_count=18 passes a ceiling of 20,
+    then extra_attempts=100 raises max_attempts to 118, so a "ceiling" of 20
+    silently authorises 118 attempts.
+    """
+    coordinator, task_id = _failed_task(
+        tmp_path, attempt_count=18, error="temporary failure in name resolution"
+    )
+    coordinator.reset_failed_tasks(only_transient=True, extra_attempts=100)
+    row = coordinator._conn.execute(
+        "SELECT max_attempts FROM tasks WHERE id=?", (task_id,)
+    ).fetchone()
+    assert row["max_attempts"] == 20, "granted budget must not exceed the ceiling"

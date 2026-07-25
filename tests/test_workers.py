@@ -669,11 +669,7 @@ class TestCandidateIdempotencyKey:
                 {
                     "candidate_type": cand["candidate_type"],
                     "signature": cand["signature"],
-                    "evidence": cand["evidence"],
                     "subject_refs": cand["subject_refs"],
-                    "reason_codes": cand["reason_codes"],
-                    "uncertainty": cand["uncertainty"],
-                    "reduction_features": cand.get("reduction_features") or {},
                 }
             ),
         )
@@ -692,7 +688,7 @@ class TestCandidateIdempotencyKey:
         base.update(over)
         return base
 
-    def test_same_signature_different_evidence_gets_distinct_keys(self):
+    def test_same_signature_different_locus_gets_distinct_keys(self):
         a = self._cand()
         b = self._cand(
             evidence={"note": "a separate locus on another contig"},
@@ -700,6 +696,22 @@ class TestCandidateIdempotencyKey:
         )
         assert a["signature"] == b["signature"], "precondition: signatures collapse"
         assert self._key(a) != self._key(b)
+
+    def test_reworded_evidence_for_the_same_locus_keeps_one_key(self):
+        """Replay after a resume rewrites prose; identity must not move.
+
+        Keying on evidence made a replayed frame insert a duplicate row, which
+        then inflated the persisted count that finalize must match -- so the
+        genome could never complete.
+        """
+        a = self._cand(evidence={"note": "six glycosyltransferases and a Wzy polymerase"})
+        b = self._cand(evidence={"note": "a Wzy-dependent locus with six GTs"})
+        assert self._key(a) == self._key(b)
+
+    def test_reason_code_drift_does_not_move_identity(self):
+        a = self._cand(reason_codes=["colocated"])
+        b = self._cand(reason_codes=["COLOCALIZED_CARBOHYDRATE_ENZYMES", "UNVERIFIED"])
+        assert self._key(a) == self._key(b)
 
     def test_identical_replay_collapses_onto_one_key(self):
         # A resume replays the frame; byte-identical output must be idempotent.
@@ -802,3 +814,45 @@ class TestCheckpointResumeGuard:
     def test_empty_checkpoint_is_not_a_discard(self, monkeypatch):
         cur, frames, _, _ = self._resume_with(monkeypatch, frames=[], cursor=None)
         assert cur is None and frames == []
+
+
+class TestCursorAlignmentGuard:
+    """Frame-list contiguity does not prove the cursor resumes where the list ends."""
+
+    @staticmethod
+    def _cursor(frame_index):
+        import base64
+
+        raw = json.dumps({"frame_index": frame_index, "after_contig_id": "c"}).encode()
+        return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+    def _resume_with(self, frames, cursor):
+        from sharur.workers.atlas_scan import AtlasScanWorker
+
+        worker = AtlasScanWorker.__new__(AtlasScanWorker)
+
+        class _Ops:
+            def get_task_checkpoint(self, task_id, key):
+                return {"cursor": cursor, "payload": {"frames": frames}}
+
+        worker.ops = _Ops()
+        return worker._resume("t1", "atlas_progress")
+
+    @staticmethod
+    def _frames(n):
+        return [
+            {"frame_id": f"genome-frame-{i:04d}", "frame_index": i} for i in range(n)
+        ]
+
+    def test_contiguous_list_with_lagging_cursor_is_discarded(self):
+        """Receipts 0..8 are contiguous while the cursor still points at 3."""
+        cur, frames, _, _ = self._resume_with(self._frames(9), self._cursor(3))
+        assert cur is None and frames == []
+
+    def test_aligned_cursor_resumes(self):
+        cur, frames, _, _ = self._resume_with(self._frames(9), self._cursor(9))
+        assert cur is not None and len(frames) == 9
+
+    def test_undecodable_cursor_is_not_treated_as_mismatch(self):
+        cur, frames, _, _ = self._resume_with(self._frames(3), "not-base64-at-all")
+        assert cur == "not-base64-at-all" and len(frames) == 3

@@ -1052,6 +1052,7 @@ def list_candidate_occurrences(
     request: Request,
     campaign_id: str,
     candidate_type: str | None = None,
+    task_id: str | None = None,
     unclustered_only: bool = False,
     limit: int = Query(default=500, ge=1, le=1_000),
 ):
@@ -1059,6 +1060,7 @@ def list_candidate_occurrences(
         return store.list_candidate_occurrences(
             campaign_id=campaign_id,
             candidate_type=candidate_type,
+            task_id=task_id,
             unclustered_only=unclustered_only,
             limit=limit,
         )

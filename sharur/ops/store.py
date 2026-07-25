@@ -2300,6 +2300,12 @@ class OpsStore(ReviewStoreMixin):
         35 while making no progress. A retry policy able to lift its own ceiling
         cannot fail loudly, and a bug that never fails loudly is a bug nobody
         sees. Past the ceiling a task stays `failed`, which is the signal.
+
+        The ceiling both gates entry *and* clamps the result. Gating alone was
+        not enough: a task at attempt 18 with `extra_attempts=100` passed the
+        gate and was granted `max_attempts=118`, so a "ceiling" of 20 silently
+        authorised 118 attempts. `MIN(max_attempts + extra, ceiling)` makes the
+        bound mean what it says.
         """
         if extra_attempts < 1:
             raise ValueError("extra_attempts must be positive")
@@ -2338,10 +2344,10 @@ class OpsStore(ReviewStoreMixin):
                         lease_expires_ts = NULL,
                         lease_token_hash = NULL,
                         retry_after_ts = NULL,
-                        max_attempts = max_attempts + ?
+                        max_attempts = MIN(max_attempts + ?, ?)
                     WHERE id = ?
                     """,
-                    (extra_attempts, row["id"]),
+                    (extra_attempts, absolute_max_attempts, row["id"]),
                 )
                 reset.append(row["id"])
                 self._event_locked(

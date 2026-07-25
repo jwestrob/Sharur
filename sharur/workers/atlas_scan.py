@@ -20,6 +20,7 @@ order the review-output contract requires.
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import hashlib
 import json
@@ -475,6 +476,24 @@ def _assert_sequence_free(payload: dict[str, Any], genome_id: str) -> None:
 def _is_conflict(exc: Exception) -> bool:
     resp = getattr(exc, "response", None)
     return resp is not None and resp.status_code == 409
+
+
+def _cursor_frame_index(cursor: str | None) -> int | None:
+    """The frame_index a genome-packet cursor resumes at, if it can be read.
+
+    The cursor is opaque to the worker by contract, so this is a best-effort
+    read used only to reject an inconsistent checkpoint. Returning None on any
+    decode failure keeps an unreadable cursor from being treated as a mismatch.
+    """
+    if not cursor:
+        return None
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")))
+    except Exception:  # noqa: BLE001 - opaque by contract
+        return None
+    value = payload.get("frame_index") if isinstance(payload, dict) else None
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 def _conflict_detail(exc: Exception) -> str:
@@ -958,15 +977,27 @@ class AtlasScanWorker:
             seen.add(fid)
         indices = [f.get("frame_index") for f in frames]
         contiguous = indices == list(range(len(frames)))
-        if frames and (cursor is None or duplicate is not None or not contiguous):
+
+        # Contiguity of the frame list is necessary but not sufficient: a list
+        # holding receipts 0..8 is perfectly contiguous while the cursor still
+        # points at frame 3, and resuming there re-walks 3..8 and duplicates
+        # them. The cursor carries its own frame_index, so assert the two agree
+        # on where the walk resumes rather than inferring it from the list.
+        cursor_frame = _cursor_frame_index(cursor)
+        aligned = cursor_frame is None or cursor_frame == len(frames)
+        if frames and (
+            cursor is None or duplicate is not None or not contiguous or not aligned
+        ):
             LOGGER.warning(
                 "discarding unusable checkpoint for %s (frames=%s, cursor=%s, "
-                "duplicate_frame=%s, contiguous=%s); rescanning from frame 0",
+                "duplicate_frame=%s, contiguous=%s, cursor_frame=%s); "
+                "rescanning from frame 0",
                 task_id,
                 len(frames),
                 "present" if cursor else "missing",
                 duplicate,
                 contiguous,
+                cursor_frame,
             )
             return None, [], [], {}
 
@@ -1011,6 +1042,41 @@ class AtlasScanWorker:
             stop.set()
             thread.join(timeout=5.0)
 
+    def _persisted_candidates(
+        self,
+        task_id: str,
+        campaign_id: str | None,
+        *,
+        fallback: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Candidate rows the store holds for this task.
+
+        Falls back to the in-memory list if the query is unavailable, so a
+        transport failure degrades to the old behaviour rather than recording a
+        zero count and marking a genome `clear` that is not.
+        """
+        if not campaign_id:
+            return fallback
+        try:
+            rows = self.ops.list_candidate_occurrences(
+                campaign_id=campaign_id, task_id=task_id, limit=1000
+            )
+        except Exception:  # noqa: BLE001 - fall back rather than mis-record
+            LOGGER.warning(
+                "could not read persisted candidates for %s; using in-memory count",
+                task_id,
+                exc_info=True,
+            )
+            return fallback
+        if len(rows) != len(fallback):
+            LOGGER.info(
+                "task %s: %s persisted candidates vs %s in memory (resumed attempt)",
+                task_id,
+                len(rows),
+                len(fallback),
+            )
+        return rows
+
     def _submit_candidates(
         self,
         candidates: list[dict[str, Any]],
@@ -1024,19 +1090,24 @@ class AtlasScanWorker:
         place of the input list so the finalize-time count matches the rows the
         server holds.
 
-        The idempotency key is content-addressed over the whole record, not just
-        the signature. Keying on the signature alone was wrong once reduction
-        started working: the canonical signature deliberately drops locators so
-        that the same system in different genomes collapses, which also means
-        two *distinct* findings in one frame routinely share a signature while
-        differing in evidence. They then collided on one key, and the server --
-        which returns the existing id only on a byte-identical payload -- raised
-        a ValueError that surfaces as HTTP 409.
+        The idempotency key is `(task, frame, candidate_type, signature,
+        subject_refs)` -- structure and validated identifiers only, never model
+        prose.
 
-        Content addressing makes the two cases disjoint: an identical replay
-        after a resume hashes to the same key and collapses, while any genuine
-        difference in evidence hashes elsewhere and inserts. A payload conflict
-        is then unreachable from this worker.
+        Two failure modes bound this key from opposite sides. Keying on the
+        signature alone collided: the canonical signature deliberately drops
+        locators so the same system collapses across genomes, so two *distinct*
+        findings in one frame routinely share a signature, and the second write
+        raised a ValueError surfacing as HTTP 409. But keying on the whole
+        record, evidence included, is just as wrong in the other direction --
+        evidence is free text the model rewrites on every call, so replaying a
+        frame after a resume produces a fresh key for the same locus and
+        inserts a duplicate. Duplicates then inflate the persisted count that
+        finalize must match, so the genome fails to complete.
+
+        subject_refs is the field that is both discriminating and stable: the
+        protein and contig ids of the locus. Distinct loci differ in it;
+        a replayed locus does not.
         """
         persisted: list[dict[str, Any]] = []
         for cand in candidates:
@@ -1065,11 +1136,13 @@ class AtlasScanWorker:
                             {
                                 "candidate_type": cand["candidate_type"],
                                 "signature": cand["signature"],
-                                "evidence": cand["evidence"],
+                                # subject_refs are validated identifiers -- the
+                                # protein and contig ids of the locus. They
+                                # distinguish two findings that share a
+                                # collapsed signature, which is what the key
+                                # must do, without depending on anything the
+                                # model writes freehand.
                                 "subject_refs": cand["subject_refs"],
-                                "reason_codes": cand["reason_codes"],
-                                "uncertainty": cand["uncertainty"],
-                                "reduction_features": cand.get("reduction_features") or {},
                             }
                         ),
                     ),
@@ -1158,8 +1231,18 @@ class AtlasScanWorker:
         )
 
         try:
-            # Candidates were submitted per frame; only the disposition remains.
-            disposition = "candidate" if candidates else "clear"
+            # Count what the store holds for this task, not what this process
+            # happens to remember. Candidates are submitted per frame and are
+            # deliberately absent from checkpoints (carrying them made write
+            # volume quadratic), so a resumed attempt starts with an empty
+            # in-memory list while the store still holds every row the earlier
+            # attempts persisted. complete_task requires the disposition count
+            # to equal the persisted rows exactly, so counting in-memory made
+            # any interrupted genome permanently uncompletable -- it would fail
+            # at finalize on every retry, forever.
+            persisted = self._persisted_candidates(task_id, campaign_id, fallback=candidates)
+
+            disposition = "candidate" if persisted else "clear"
             if status != "complete":
                 disposition = "incomplete"
 
@@ -1169,10 +1252,12 @@ class AtlasScanWorker:
                 dataset_id=dataset_id,
                 genome_id=genome_id,
                 coverage_hash=coverage_hash,
-                candidate_count=len(candidates),
+                candidate_count=len(persisted),
                 disposition=disposition,
                 evidence_bundle_hash=hashlib.sha256(
-                    _canonical([c["signature"] for c in candidates]).encode("utf-8")
+                    _canonical(sorted(_canonical(c["signature"]) for c in persisted)).encode(
+                        "utf-8"
+                    )
                 ).hexdigest(),
                 task_id=task_id,
                 provenance={

@@ -664,6 +664,7 @@ class ReviewStoreMixin:
         *,
         campaign_id: str,
         candidate_type: str | None = None,
+        task_id: str | None = None,
         unclustered_only: bool = False,
         limit: int = 1_000,
     ) -> list[dict[str, Any]]:
@@ -676,6 +677,12 @@ class ReviewStoreMixin:
         if candidate_type is not None:
             sql += " AND c.candidate_type = ?"
             params.append(candidate_type)
+        if task_id is not None:
+            # Lets a worker count exactly the rows it has persisted for its own
+            # task, which is what makes finalize resume-safe: the in-memory
+            # candidate list resets to empty on resume, the store does not.
+            sql += " AND c.task_id = ?"
+            params.append(task_id)
         if unclustered_only:
             sql += " AND m.candidate_id IS NULL"
         sql += " ORDER BY c.ts, c.id LIMIT ?"
