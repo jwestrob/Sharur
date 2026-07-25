@@ -744,3 +744,61 @@ class TestConflictDisambiguation:
     def test_detail_is_extracted_for_logging(self):
         exc = self._exc("some rejection reason")
         assert "some rejection reason" in _conflict_detail(exc)
+
+
+class TestCheckpointResumeGuard:
+    """A checkpoint whose frame list disagrees with its cursor must be discarded.
+
+    Regression for genomes that died at finalize with "Coverage repeats
+    frame_id". The frame list is restored and appended to on every attempt but
+    only reaches the store on a successful checkpoint write, so an attempt that
+    walked frames and then died left the persisted cursor behind the persisted
+    list. The next resume re-walked frames the list already held, appended them
+    a second time, and the manifest builder rejected the duplicate -- after the
+    genome had been paid for in full. Observed live: "resuming from frame 9"
+    followed by frames 3, 4, 5.
+    """
+
+    @staticmethod
+    def _frames(n, *, start=0):
+        return [{"frame_id": f"genome-frame-{i:04d}", "frame_index": i} for i in range(start, start + n)]
+
+    def _resume_with(self, monkeypatch, *, frames, cursor):
+        from sharur.workers.atlas_scan import AtlasScanWorker
+
+        worker = AtlasScanWorker.__new__(AtlasScanWorker)
+
+        class _Ops:
+            def get_task_checkpoint(self, task_id, key):
+                return {"cursor": cursor, "payload": {"frames": frames}}
+
+        worker.ops = _Ops()
+        return worker._resume("t1", "atlas_progress")
+
+    def test_healthy_checkpoint_resumes(self, monkeypatch):
+        cur, frames, cands, state = self._resume_with(
+            monkeypatch, frames=self._frames(3), cursor="abc"
+        )
+        assert cur == "abc" and len(frames) == 3
+
+    def test_duplicate_frame_id_discards(self, monkeypatch):
+        bad = self._frames(3) + [{"frame_id": "genome-frame-0000", "frame_index": 3}]
+        cur, frames, _, _ = self._resume_with(monkeypatch, frames=bad, cursor="abc")
+        assert cur is None and frames == []
+
+    def test_missing_cursor_with_frames_discards(self, monkeypatch):
+        cur, frames, _, _ = self._resume_with(
+            monkeypatch, frames=self._frames(3), cursor=None
+        )
+        assert cur is None and frames == []
+
+    def test_non_contiguous_indices_discard(self, monkeypatch):
+        # The live failure: list claims 9 frames, cursor sits at frame 3.
+        cur, frames, _, _ = self._resume_with(
+            monkeypatch, frames=self._frames(3, start=6), cursor="abc"
+        )
+        assert cur is None and frames == []
+
+    def test_empty_checkpoint_is_not_a_discard(self, monkeypatch):
+        cur, frames, _, _ = self._resume_with(monkeypatch, frames=[], cursor=None)
+        assert cur is None and frames == []

@@ -934,9 +934,46 @@ class AtlasScanWorker:
             raise
         payload = ck.get("payload") or {}
         frames = payload.get("frames") or []
-        LOGGER.info("resuming task %s from frame %s", task_id, len(frames))
+        cursor = ck.get("cursor")
+
+        # A checkpoint is only resumable if its frame list and its cursor agree.
+        # They can diverge: the frame list is restored and appended to on every
+        # attempt, but it only reaches the store when a checkpoint write lands.
+        # An attempt that walked frames and then died before writing leaves the
+        # persisted cursor behind the persisted list, so the next resume
+        # re-walks frames the list already holds and appends them a second time.
+        # The manifest builder rejects the duplicate frame_id and the genome
+        # dies at finalize -- after paying for every frame.
+        #
+        # Detect it rather than inherit it. A checkpoint that cannot be trusted
+        # is discarded and the genome restarts from frame 0, which costs one
+        # genome of rescan and is always correct; carrying it forward is neither.
+        seen: set[Any] = set()
+        duplicate: Any = None
+        for frame in frames:
+            fid = frame.get("frame_id")
+            if fid in seen:
+                duplicate = fid
+                break
+            seen.add(fid)
+        indices = [f.get("frame_index") for f in frames]
+        contiguous = indices == list(range(len(frames)))
+        if frames and (cursor is None or duplicate is not None or not contiguous):
+            LOGGER.warning(
+                "discarding unusable checkpoint for %s (frames=%s, cursor=%s, "
+                "duplicate_frame=%s, contiguous=%s); rescanning from frame 0",
+                task_id,
+                len(frames),
+                "present" if cursor else "missing",
+                duplicate,
+                contiguous,
+            )
+            return None, [], [], {}
+
+        if frames:
+            LOGGER.info("resuming task %s from frame %s", task_id, len(frames))
         return (
-            ck.get("cursor"),
+            cursor,
             frames,
             payload.get("candidates") or [],
             payload.get("contig_state") or {},
