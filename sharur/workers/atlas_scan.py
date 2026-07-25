@@ -490,7 +490,7 @@ class AtlasScanWorker:
         ops_token: str | None = None,
         query_token: str | None = None,
         lease_seconds: int = 2400,
-        model_timeout: int = 1800,
+        model_timeout: int = 900,  # max silence, not max runtime
         max_frames: int | None = None,
         transient_retries: int = 4,
         sweep_failed: bool = True,
@@ -503,12 +503,10 @@ class AtlasScanWorker:
         self.lease_seconds = lease_seconds
         self.model_timeout = model_timeout
         self.max_frames = max_frames
-        if lease_seconds <= model_timeout:
-            raise SystemExit(
-                f"lease_seconds ({lease_seconds}) must exceed model_timeout "
-                f"({model_timeout}); otherwise a slow frame outlives its own lease "
-                "and the task is reclaimed mid-call"
-            )
+        # `model_timeout` is a STALL timeout, not a runtime cap, so there is no
+        # longer a duration for the lease to have to exceed. The background
+        # keepalive renews the lease every lease_seconds/3 for as long as the
+        # call runs, which is what makes an unbounded frame safe.
         self.transient_retries = transient_retries
         self.sweep_failed = sweep_failed
         self.max_sweeps = max_sweeps

@@ -30,10 +30,16 @@ def atlas_scan(
     lease_seconds: int = typer.Option(
         2400,
         min=60,
-        help="Lease duration per claim. Must exceed --model-timeout: a frame that "
-             "outlives its lease gets reclaimed mid-call.",
+        help="Lease duration per claim. A background keepalive renews it every third "
+             "of this interval, so a long frame cannot outlive its lease.",
     ),
-    model_timeout: int = typer.Option(1800, min=60, help="Per-frame model timeout (seconds)"),
+    stall_timeout: int = typer.Option(
+        900,
+        min=60,
+        help="Max SILENCE tolerated from the model CLI before it is treated as a "
+             "stalled connection. There is no total runtime cap: a call that keeps "
+             "emitting events runs as long as it needs.",
+    ),
     max_tasks: int | None = typer.Option(None, min=1, help="Exit after N completed genomes"),
     max_frames: int | None = typer.Option(None, min=1, help="Stop each genome after N frames (smoke tests)"),
     idle_sleep: float = typer.Option(5.0, help="Seconds to sleep when the queue is empty"),
@@ -73,7 +79,7 @@ def atlas_scan(
         ops_token=os.environ.get("SHARUR_OPS_TOKEN"),
         query_token=os.environ.get("SHARUR_QUERY_TOKEN"),
         lease_seconds=lease_seconds,
-        model_timeout=model_timeout,
+        model_timeout=stall_timeout,
         max_frames=max_frames,
         sweep_failed=sweep_failed,
         max_sweeps=max_sweeps,

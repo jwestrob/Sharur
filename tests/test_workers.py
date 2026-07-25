@@ -590,43 +590,55 @@ class TestBaseTypeAndSubtype:
         }
 
 
-class TestLeaseOutlivesTheModelCall:
-    """A frame must not outlive its own lease.
+class TestUnboundedFramesWithStallDetection:
+    """A working call runs as long as it wants; a silent one is killed.
 
-    Observed live: lease_seconds=900 against model_timeout=1800 meant a slow
-    high-effort frame was still running when its lease expired. The coordinator
-    reclaimed the task mid-call, another worker resumed it, and the original
-    returned to a dead fence — a livelock that ran to attempt 10+ because the
-    failed-task sweep kept raising max_attempts and hid it.
+    A hard wall-clock cap discards a hard genome's work for being slow, which
+    is the wrong failure to optimise for. `codex exec --json` streams events
+    throughout, so silence — not duration — is what indicates a dead call.
     """
 
-    def _worker(self, **kw):
-        from sharur.workers.atlas_scan import AtlasScanWorker
+    def test_an_active_process_outlives_the_stall_window(self):
+        import time
 
-        defaults = dict(
-            ops_url="http://127.0.0.1:1",
-            query_url="http://127.0.0.1:2",
-            agent_id="t",
-            profile="atlas_scan",
+        from sharur.workers.model_cli import _run
+
+        started = time.monotonic()
+        code, out, _ = _run(
+            ["bash", "-c", "for i in 1 2 3 4; do echo tick; sleep 1; done"], "", 2
         )
-        defaults.update(kw)
-        return AtlasScanWorker(**defaults)
+        assert code == 0
+        assert time.monotonic() - started > 2, "should not have been killed at the stall window"
+        assert out.count("tick") == 4
 
-    def test_rejects_a_lease_shorter_than_the_model_timeout(self):
-        with pytest.raises(SystemExit, match="must exceed model_timeout"):
-            self._worker(lease_seconds=900, model_timeout=1800)
+    def test_a_silent_process_is_killed(self):
+        from sharur.workers.model_cli import _run
 
-    def test_rejects_equal_values(self):
-        with pytest.raises(SystemExit, match="must exceed model_timeout"):
-            self._worker(lease_seconds=1800, model_timeout=1800)
+        code, _, err = _run(["bash", "-c", "sleep 30"], "", 2)
+        assert code != 0
+        assert "stalled connection" in err
 
-    def test_default_lease_outlives_the_default_timeout(self):
-        import inspect
+    def test_a_stall_is_classified_transient_not_a_defect(self):
+        """So it retries in place rather than consuming a task attempt."""
+        from sharur.workers.model_cli import _looks_transient
 
-        from sharur.workers.atlas_scan import AtlasScanWorker
+        assert _looks_transient(
+            "[sharur] terminated after 900s with no output; "
+            "treating as a stalled connection",
+            "",
+        )
 
-        sig = inspect.signature(AtlasScanWorker.__init__).parameters
-        assert sig["lease_seconds"].default > sig["model_timeout"].default
+    def test_stdout_and_stderr_are_both_captured(self):
+        from sharur.workers.model_cli import _run
+
+        code, out, err = _run(["bash", "-c", "echo O; echo E >&2"], "", 10)
+        assert code == 0 and "O" in out and "E" in err
+
+    def test_stdin_reaches_the_process(self):
+        from sharur.workers.model_cli import _run
+
+        code, out, _ = _run(["cat"], "payload-here", 10)
+        assert code == 0 and "payload-here" in out
 
     def test_keepalive_exists_and_is_a_context_manager(self):
         from sharur.workers.atlas_scan import AtlasScanWorker

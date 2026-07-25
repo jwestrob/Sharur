@@ -13,12 +13,15 @@ from the Atlas packet count (one packet should be ~one inference turn).
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
 import shutil
 import subprocess
 import tempfile
+import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -104,6 +107,7 @@ _TRANSIENT_MARKERS = (
     "timeout",
     "eof while parsing",
     "stream closed",
+    "no output; treating as a stalled connection",
 )
 
 
@@ -167,15 +171,81 @@ def _extract_json(text: str) -> dict[str, Any]:
 
 
 def _run(argv: list[str], stdin_text: str, timeout: int) -> tuple[int, str, str]:
-    proc = subprocess.run(
+    """Run a model CLI, bounded by SILENCE rather than by total duration.
+
+    A hard wall-clock cap is the wrong instrument here: a hard genome at high
+    effort can legitimately think for a long time, and killing it discards
+    everything it has done. What actually indicates a dead call is the absence
+    of progress, and `codex exec --json` streams JSONL events throughout, so
+    output activity is a direct liveness signal.
+
+    `timeout` is therefore interpreted as a STALL timeout — the maximum silence
+    tolerated between writes — not a total runtime limit. A call producing
+    output runs as long as it likes.
+    """
+    proc = subprocess.Popen(
         argv,
-        input=stdin_text,
-        capture_output=True,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        timeout=timeout,
+        bufsize=1,
         env=os.environ.copy(),
     )
-    return proc.returncode, proc.stdout, proc.stderr
+
+    out_chunks: list[str] = []
+    err_chunks: list[str] = []
+    last_activity = [time.monotonic()]
+    lock = threading.Lock()
+
+    def pump(stream, sink: list[str]) -> None:
+        try:
+            for line in iter(stream.readline, ""):
+                with lock:
+                    sink.append(line)
+                    last_activity[0] = time.monotonic()
+        finally:
+            with contextlib.suppress(Exception):
+                stream.close()
+
+    threads = [
+        threading.Thread(target=pump, args=(proc.stdout, out_chunks), daemon=True),
+        threading.Thread(target=pump, args=(proc.stderr, err_chunks), daemon=True),
+    ]
+    for t in threads:
+        t.start()
+
+    try:
+        proc.stdin.write(stdin_text)
+        proc.stdin.close()
+    except BrokenPipeError:
+        pass
+
+    stalled = False
+    while proc.poll() is None:
+        with lock:
+            silent_for = time.monotonic() - last_activity[0]
+        if silent_for > timeout:
+            stalled = True
+            proc.terminate()
+            try:
+                proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            break
+        time.sleep(2.0)
+
+    for t in threads:
+        t.join(timeout=10.0)
+    code = proc.poll()
+    stdout, stderr = "".join(out_chunks), "".join(err_chunks)
+    if stalled:
+        stderr += (
+            f"\n[sharur] terminated after {timeout}s with no output; "
+            "treating as a stalled connection"
+        )
+        return (code if code is not None else 1), stdout, stderr
+    return (code if code is not None else 0), stdout, stderr
 
 
 def run_openai(
