@@ -389,6 +389,31 @@ defence-associated locus ONLY when the CONTEXT is the finding — the system sit
 inside a mobile element, carries unusual cargo, or is adjacent to
 uncharacterised genes suggesting an extension — and say so explicitly.
 
+READ `evidence_level` BEFORE TRUSTING A DEFENCE-LOOKING ACCESSION. Accessions
+like `Gabija__GajB_2`, `Pycsar__AG_cyclase` or `Wadjet__JetA_II` are
+DefenseFinder PROFILE HITS, and each carries one of:
+
+  caller_profile_assembled    — this protein is inside a system DefenseFinder
+                                actually called. It also appears in
+                                `named_calls`. KNOWN. Do not report it.
+  caller_profile_unassembled  — DefenseFinder saw this profile hit and did NOT
+                                assemble a system from it. It is a FRAGMENT.
+
+An unassembled hit is NOT a defence system, and two or three of them side by
+side are NOT a defence island — the caller already evaluated exactly that
+evidence and declined. In this dataset 94% of defence profile hits are
+unassembled, so treating them as systems manufactures thousands of findings
+that are already-rejected calls wearing a new label. Do not launder them by
+filing them under a different `system` (mobile-element cargo, stress-response)
+or as a `*-cargo` subtype: relabelling a known or rejected call is the same
+error as reporting it.
+
+The genuinely reportable case is the inverse, and it is rare: a locus with the
+ARCHITECTURE of a defence system — clear operon structure, a plausible
+sensor/effector pair, cognate immunity — where DefenseFinder produced NO named
+call at all. That is a candidate novel system and the one thing the caller
+cannot find by construction. Say explicitly that no named call covers it.
+
 DO NOT report a single annotated gene with no informative neighbourhood, or
 core machinery whose only claim is that it exists (ribosome, ATP synthase,
 Complex I, chaperones, the dcw/cell-division cluster, lone transporters or

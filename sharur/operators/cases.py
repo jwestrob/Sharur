@@ -684,6 +684,53 @@ def structured_projection_sources(store: DuckDBStore) -> list[str]:
     return _structured_projection_sources(store, catalog)
 
 
+def _mark_caller_profile_evidence(
+    observed: dict[str, list[dict[str, Any]]],
+    named_calls: dict[str, list[dict[str, Any]]],
+    projection_sources: Sequence[str],
+) -> None:
+    """Tag observed annotations that are purpose-built-caller profile hits.
+
+    Only the *assembled* projection (e.g. ``defensefinder_system``) sits behind
+    the provenance boundary. The caller's raw per-profile hits (``defensefinder``)
+    stay in ``observed_annotations``, where they are formally indistinguishable
+    from a PFAM domain -- same shape, same fields, just a different `source`.
+
+    That asymmetry is a trap for a reading agent. In the Dormibacteria pilot,
+    32,853 proteins carried a raw DefenseFinder profile hit while only 1,879 sat
+    inside an assembled system: **94.3% are fragments the caller looked at and
+    declined to call.** An agent shown `Gabija__GajB_2` beside `Gabija__GajB_3`
+    with no marker reasonably concludes "Gabija system here" and reports it as a
+    discovery -- reproducing, at scale, calls the caller already rejected.
+
+    Marking each hit `assembled` / `unassembled` makes the distinction legible
+    without hiding anything: an unassembled hit is still real and occasionally
+    interesting (a genuinely novel or decayed system), but it is evidence of a
+    *fragment*, not of a system, and must not be promoted to one.
+    """
+    profile_sources = {
+        source[: -len("_system")]
+        for source in projection_sources
+        if source.endswith("_system")
+    }
+    if not profile_sources:
+        return
+    for protein_id, annotations in observed.items():
+        assembled = {
+            str(call.get("system_source", "")).removesuffix("_system")
+            for call in named_calls.get(protein_id, [])
+        }
+        for annotation in annotations:
+            source = str(annotation.get("source", ""))
+            if source not in profile_sources:
+                continue
+            annotation["evidence_level"] = (
+                "caller_profile_assembled"
+                if source in assembled
+                else "caller_profile_unassembled"
+            )
+
+
 def load_context_evidence(
     store: DuckDBStore,
     protein_ids: Sequence[str],
@@ -722,6 +769,11 @@ def load_context_evidence(
         ]
         for protein_id, calls in named_calls.items()
     }
+    _mark_caller_profile_evidence(
+        result["observed_annotations"],
+        result["named_calls"],
+        result["projection_sources"],
+    )
 
     if "locus_proteins" not in catalog or "loci" not in catalog:
         return result

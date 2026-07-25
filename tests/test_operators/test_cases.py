@@ -196,3 +196,55 @@ def test_compare_context_rejects_ambiguous_or_invalid_python_arguments(
             foreground_ids=["target_plus"],
             background_ids=["target_plus"],
         )
+
+
+class TestCallerProfileEvidenceLevel:
+    """Raw caller profile hits must be distinguishable from observed domains.
+
+    Only the assembled projection (`defensefinder_system`) sits behind the
+    provenance boundary; the caller's raw per-profile hits stay in
+    observed_annotations with the same shape as a PFAM domain. In the
+    Dormibacteria pilot 32,853 proteins carried a DefenseFinder profile hit
+    while only 1,879 sat inside an assembled system -- 94.3% were fragments the
+    caller explicitly declined to call. Unmarked, a reading agent re-reports
+    them as discoveries.
+    """
+
+    @staticmethod
+    def _mark(observed, named_calls, projection_sources=("defensefinder_system",)):
+        from sharur.operators.cases import _mark_caller_profile_evidence
+
+        _mark_caller_profile_evidence(observed, named_calls, list(projection_sources))
+        return observed
+
+    def test_unassembled_profile_hit_is_marked(self):
+        observed = {"p1": [{"source": "defensefinder", "accession": "Gabija__GajB_2"}]}
+        out = self._mark(observed, {})
+        assert out["p1"][0]["evidence_level"] == "caller_profile_unassembled"
+
+    def test_assembled_profile_hit_is_marked(self):
+        observed = {"p1": [{"source": "defensefinder", "accession": "Wadjet__JetA_II"}]}
+        named = {"p1": [{"system_source": "defensefinder_system", "call_type": "Wadjet_II"}]}
+        out = self._mark(observed, named)
+        assert out["p1"][0]["evidence_level"] == "caller_profile_assembled"
+
+    def test_pfam_domains_are_left_alone(self):
+        observed = {"p1": [{"source": "pfam", "accession": "PF00485"}]}
+        out = self._mark(observed, {})
+        assert "evidence_level" not in out["p1"][0]
+
+    def test_no_projection_sources_is_a_noop(self):
+        observed = {"p1": [{"source": "defensefinder", "accession": "Gabija__GajB_2"}]}
+        out = self._mark(observed, {}, projection_sources=())
+        assert "evidence_level" not in out["p1"][0]
+
+    def test_mixed_protein_marks_only_the_caller_hit(self):
+        observed = {
+            "p1": [
+                {"source": "pfam", "accession": "PF00004"},
+                {"source": "defensefinder", "accession": "Pycsar__AG_cyclase"},
+            ]
+        }
+        out = self._mark(observed, {})
+        assert "evidence_level" not in out["p1"][0]
+        assert out["p1"][1]["evidence_level"] == "caller_profile_unassembled"
