@@ -19,6 +19,7 @@ from sharur.workers.atlas_scan import (
     SCAN_SYSTEM_PROMPT,
     _assert_sequence_free,
     _canonical,
+    _parse_json_field,
     _stable_key,
 )
 
@@ -70,6 +71,50 @@ class TestRateLimitClassification:
 
     def test_checks_stdout_too(self):
         assert model_cli._looks_rate_limited("", "quota exhausted")
+
+
+class TestTransientClassification:
+    """A DNS blip must not consume a task attempt.
+
+    Biotite resolves against external nameservers with `options timeout:2
+    attempts:3`, so lookups fail intermittently under load. Observed in a live
+    scan: `failed to lookup address information: Try again,
+    url: wss://chatgpt.com/backend-api/codex/responses`.
+    """
+
+    @pytest.mark.parametrize(
+        "stderr",
+        [
+            "failed to lookup address information: Try again",
+            "failed to connect to websocket: IO error",
+            "Temporary failure in name resolution",
+            "connection reset by peer",
+            "network is unreachable",
+        ],
+    )
+    def test_detects_transport_failures(self, stderr):
+        assert model_cli._looks_transient(stderr, "")
+
+    def test_ignores_genuine_model_errors(self):
+        assert not model_cli._looks_transient("invalid model name", "")
+
+    def test_transient_raises_its_own_class(self):
+        with pytest.raises(model_cli.ModelTransient):
+            model_cli._classify_failure(1, "failed to lookup address information", "")
+
+    def test_rate_limit_wins_over_transient(self):
+        """A 429 can also mention a timeout; the two are handled differently."""
+        with pytest.raises(model_cli.ModelRateLimited):
+            model_cli._classify_failure(1, "429 rate limit; connection timed out", "")
+
+    def test_unclassified_failure_is_a_model_error(self):
+        with pytest.raises(model_cli.ModelError, match="exited 1"):
+            model_cli._classify_failure(1, "some novel breakage", "")
+
+    def test_transient_is_not_a_model_error_subclass(self):
+        """Otherwise the generic handler would swallow it and burn an attempt."""
+        assert not issubclass(model_cli.ModelTransient, model_cli.ModelError)
+        assert not issubclass(model_cli.ModelRateLimited, model_cli.ModelError)
 
 
 class TestSequenceGuard:
@@ -134,11 +179,44 @@ class TestScanContract:
 
     def test_schema_requires_reduction_fields(self):
         required = SCAN_OUTPUT_SCHEMA["properties"]["candidates"]["items"]["required"]
-        for field in ("candidate_type", "signature", "evidence", "subject_refs"):
+        for field in (
+            "candidate_type",
+            "signature_json",
+            "evidence_json",
+            "subject_refs_json",
+        ):
             assert field in required
 
     def test_schema_is_json_serialisable(self):
         json.dumps(SCAN_OUTPUT_SCHEMA)
+
+    def test_schema_is_openai_strict_compliant(self):
+        """OpenAI strict mode rejects open objects and optional properties.
+
+        A live scan failed with `invalid_json_schema` because signature/
+        evidence/subject_refs were declared as free-form objects. Walk the
+        whole schema so that cannot regress silently.
+        """
+
+        def walk(node, path="root"):
+            if not isinstance(node, dict):
+                return
+            if node.get("type") == "object":
+                assert node.get("additionalProperties") is False, f"{path} is not closed"
+                assert set(node.get("required", [])) == set(node.get("properties", {})), (
+                    f"{path}: every property must be required under strict mode"
+                )
+                for key, child in node.get("properties", {}).items():
+                    walk(child, f"{path}.{key}")
+            if node.get("type") == "array":
+                walk(node.get("items", {}), f"{path}[]")
+
+        walk(SCAN_OUTPUT_SCHEMA)
+
+    def test_free_form_fields_travel_as_strings(self):
+        props = SCAN_OUTPUT_SCHEMA["properties"]["candidates"]["items"]["properties"]
+        for field in ("signature_json", "evidence_json", "subject_refs_json"):
+            assert props[field]["type"] == "string"
 
     def test_prompt_carries_the_known_confounds(self):
         """Scanners meet these at corpus scale with no human in the loop."""
@@ -217,3 +295,24 @@ class TestProviderRegistry:
                 payload_text="{}",
                 output_schema={},
             )
+
+
+class TestJsonCarrierFields:
+    """signature/evidence/subject_refs arrive as JSON strings under strict mode."""
+
+    def test_parses_a_json_string(self):
+        assert _parse_json_field('{"a": 1}', "signature") == {"a": 1}
+
+    def test_passes_a_dict_through(self):
+        """The Anthropic driver is not schema-constrained and may send a dict."""
+        assert _parse_json_field({"a": 1}, "signature") == {"a": 1}
+
+    def test_malformed_json_returns_none(self):
+        assert _parse_json_field("{not json", "signature") is None
+
+    def test_non_object_json_returns_none(self):
+        assert _parse_json_field("[1,2,3]", "signature") is None
+
+    def test_empty_returns_none(self):
+        assert _parse_json_field("", "signature") is None
+        assert _parse_json_field(None, "signature") is None

@@ -35,7 +35,13 @@ from sharur.atlas import frame_coverage_receipt, write_genome_coverage_manifest
 from sharur.ops.client import SharurOps
 from sharur.query.client import SharurQuery
 from sharur.review.models import load_review_policy
-from sharur.workers.model_cli import ModelError, ModelRateLimited, ModelRun, run_profile
+from sharur.workers.model_cli import (
+    ModelError,
+    ModelRateLimited,
+    ModelRun,
+    ModelTransient,
+    run_profile,
+)
 
 LOGGER = logging.getLogger("sharur.workers.atlas_scan")
 
@@ -43,12 +49,19 @@ TASK_TYPE = "atlas_genome_read"
 CANDIDATE_TYPE_PREFIX = "atlas-scan"
 SIGNATURE_SCHEMA = "atlas-scan-signature/1.0"
 
-# What the model is allowed to emit. Enforced server-side as a schema for the
-# OpenAI driver; stated in-prompt for the Anthropic driver.
+# What the model is allowed to emit.
+#
+# OpenAI strict structured outputs requires every object to set
+# `additionalProperties: false` AND to list every property in `required` —
+# free-form objects are rejected outright with `invalid_json_schema`. The
+# signature/evidence/subject_refs fields are inherently open-ended (the model
+# chooses the typed fields that describe a finding), so they travel as JSON
+# **strings** and are parsed worker-side. That keeps a hard guarantee on the
+# outer shape while leaving the inner content free.
 SCAN_OUTPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["candidates"],
+    "required": ["candidates", "notes"],
     "properties": {
         "candidates": {
             "type": "array",
@@ -57,23 +70,51 @@ SCAN_OUTPUT_SCHEMA: dict[str, Any] = {
                 "additionalProperties": False,
                 "required": [
                     "candidate_type",
-                    "signature",
-                    "evidence",
-                    "subject_refs",
+                    "signature_json",
+                    "evidence_json",
+                    "subject_refs_json",
+                    "reason_codes",
+                    "confidence",
                 ],
                 "properties": {
                     "candidate_type": {"type": "string"},
-                    "signature": {"type": "object"},
-                    "evidence": {"type": "object"},
-                    "subject_refs": {"type": "object"},
+                    "signature_json": {
+                        "type": "string",
+                        "description": "JSON object of typed structured fields only — the exact reduction key",
+                    },
+                    "evidence_json": {
+                        "type": "string",
+                        "description": "JSON object holding reasoning and supporting observations",
+                    },
+                    "subject_refs_json": {
+                        "type": "string",
+                        "description": 'JSON object, e.g. {"protein_ids": [...], "contig_ids": [...]}',
+                    },
                     "reason_codes": {"type": "array", "items": {"type": "string"}},
-                    "uncertainty": {"type": "object"},
+                    "confidence": {
+                        "type": "string",
+                        "enum": ["low", "medium", "high"],
+                    },
                 },
             },
         },
         "notes": {"type": "string"},
     },
 }
+
+
+def _parse_json_field(raw: Any, field: str) -> dict[str, Any] | None:
+    """Parse one of the JSON-string carrier fields into a dict."""
+    if isinstance(raw, dict):
+        return raw  # tolerated: the Anthropic path is not schema-constrained
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        LOGGER.warning("candidate %s was not valid JSON; dropping candidate", field)
+        return None
+    return parsed if isinstance(parsed, dict) else None
 
 SCAN_SYSTEM_PROMPT = """\
 You are an Atlas scanner reading one bounded frame of one microbial genome.
@@ -118,19 +159,26 @@ SCIENTIFIC CONTRACT — these are hard rules:
 
 OUTPUT
 
-Return one JSON object with a "candidates" array. Each candidate needs:
-  candidate_type   short kebab-case class, e.g. "co-located-pathway",
-                   "novel-gene-cluster", "multidomain-architecture",
-                   "mobile-element-cargo", "defense-locus"
-  signature        typed structured fields ONLY (identifiers, accessions,
-                   counts, coordinates). This is the exact reduction key —
-                   two occurrences of the same finding must produce byte-
-                   identical signatures. No prose, no free text.
-  evidence         your reasoning, the observations supporting it, and any
-                   UNVERIFIED hypotheses
-  subject_refs     {"protein_ids": [...], "contig_ids": [...]}
-  reason_codes     optional short tags
-  uncertainty      optional {"confidence": "low|medium|high", "caveats": [...]}
+Return one JSON object with a "candidates" array and a "notes" string. Three
+fields carry a JSON **object encoded as a string** — write valid JSON inside
+the string:
+
+  candidate_type      short kebab-case class, e.g. "co-located-pathway",
+                      "novel-gene-cluster", "multidomain-architecture",
+                      "mobile-element-cargo", "defense-locus"
+  signature_json      stringified JSON object of typed structured fields ONLY
+                      (identifiers, accessions, counts, coordinates). This is
+                      the exact reduction key — two occurrences of the same
+                      finding must produce byte-identical signatures. No prose.
+                      e.g. "{\\"accessions\\":[\\"RuBisCO_large\\",\\"PRK\\"],\\"n_genes\\":4}"
+  evidence_json       stringified JSON object holding your reasoning, the
+                      supporting observations, and any UNVERIFIED hypotheses
+  subject_refs_json   stringified JSON object, e.g.
+                      "{\\"protein_ids\\":[\\"p1\\"],\\"contig_ids\\":[\\"c1\\"]}"
+  reason_codes        array of short tags (may be empty)
+  confidence          one of "low", "medium", "high"
+
+All six fields are required on every candidate. "notes" may be an empty string.
 
 An empty candidates array is a valid and common answer. Most frames are
 housekeeping. Report nothing rather than inflating a routine frame.
@@ -179,6 +227,7 @@ class AtlasScanWorker:
         lease_seconds: int = 900,
         model_timeout: int = 1800,
         max_frames: int | None = None,
+        transient_retries: int = 4,
         dry_run: bool = False,
     ) -> None:
         self.agent_id = agent_id
@@ -187,6 +236,7 @@ class AtlasScanWorker:
         self.lease_seconds = lease_seconds
         self.model_timeout = model_timeout
         self.max_frames = max_frames
+        self.transient_retries = transient_retries
         self.dry_run = dry_run
 
         self.policy = load_review_policy(Path(policy_path) if policy_path else None)
@@ -258,6 +308,17 @@ class AtlasScanWorker:
                 rate_limit_backoff = 0.0
             except LeaseLost:
                 LOGGER.warning("lease lost on task %s; abandoning", task.get("id"))
+            except ModelTransient as exc:
+                # Exhausted in-process retries: the network is genuinely down.
+                # Release for retry and wait rather than spinning on claims.
+                LOGGER.warning(
+                    "transport still failing after %s retries; releasing %s and sleeping 120s: %s",
+                    self.transient_retries,
+                    task.get("id"),
+                    str(exc)[:200],
+                )
+                self._release(task, f"transient transport: {exc}", retry_delay=120)
+                time.sleep(120)
             except ModelRateLimited as exc:
                 # The subscription window is exhausted. This is the steady
                 # state, not an error: hold nothing, release the task for
@@ -391,23 +452,59 @@ class AtlasScanWorker:
         if self.dry_run:
             return []
 
-        run: ModelRun = run_profile(
-            provider=self.profile.provider,
-            model=self.profile.model,
-            reasoning_effort=self.profile.reasoning_effort,
-            system_prompt=SCAN_SYSTEM_PROMPT,
-            payload_text=_canonical(payload),
-            output_schema=SCAN_OUTPUT_SCHEMA,
-            timeout=self.model_timeout,
-        )
+        # Transient transport failures (DNS, socket resets) are retried in
+        # place. Releasing the task instead would consume an attempt, and at
+        # the default max_attempts=5 a handful of DNS blips would permanently
+        # kill a genome that has nothing wrong with it.
+        last: Exception | None = None
+        run: ModelRun | None = None
+        for attempt in range(self.transient_retries + 1):
+            try:
+                run = run_profile(
+                    provider=self.profile.provider,
+                    model=self.profile.model,
+                    reasoning_effort=self.profile.reasoning_effort,
+                    system_prompt=SCAN_SYSTEM_PROMPT,
+                    payload_text=_canonical(payload),
+                    output_schema=SCAN_OUTPUT_SCHEMA,
+                    timeout=self.model_timeout,
+                )
+                break
+            except ModelTransient as exc:
+                last = exc
+                if attempt >= self.transient_retries:
+                    break
+                delay = min(2.0 * (2**attempt), 60.0) + random.uniform(0, 2.0)
+                LOGGER.warning(
+                    "transient transport failure on frame %s (attempt %s/%s): %s; retrying in %.0fs",
+                    raw.get("frame_index"),
+                    attempt + 1,
+                    self.transient_retries,
+                    str(exc)[:200],
+                    delay,
+                )
+                self._keepalive(task_id)
+                time.sleep(delay)
+        if run is None:
+            raise ModelTransient(
+                f"transport failed {self.transient_retries + 1}x on frame "
+                f"{raw.get('frame_index')}: {last}"
+            )
 
         out: list[dict[str, Any]] = []
         for item in run.record.get("candidates") or []:
             if not isinstance(item, dict):
                 continue
-            signature = item.get("signature")
-            subject_refs = item.get("subject_refs")
-            if not isinstance(signature, dict) or not isinstance(subject_refs, dict):
+            signature = _parse_json_field(
+                item.get("signature_json", item.get("signature")), "signature"
+            )
+            subject_refs = _parse_json_field(
+                item.get("subject_refs_json", item.get("subject_refs")), "subject_refs"
+            )
+            evidence = _parse_json_field(
+                item.get("evidence_json", item.get("evidence")), "evidence"
+            ) or {}
+            if signature is None or subject_refs is None:
                 LOGGER.warning("dropping malformed candidate on frame %s", raw.get("frame_index"))
                 continue
             ctype = str(item.get("candidate_type") or "unclassified")
@@ -416,10 +513,14 @@ class AtlasScanWorker:
                     "candidate_type": f"{CANDIDATE_TYPE_PREFIX}:{ctype}"[:256],
                     "signature_schema": SIGNATURE_SCHEMA,
                     "signature": signature,
-                    "evidence": item.get("evidence") or {},
+                    "evidence": evidence,
                     "subject_refs": subject_refs,
                     "reason_codes": list(item.get("reason_codes") or []),
-                    "uncertainty": item.get("uncertainty") or {},
+                    "uncertainty": (
+                        {"confidence": item["confidence"]}
+                        if item.get("confidence")
+                        else {}
+                    ),
                     # Step 8 — provenance travels with the record.
                     "provenance": {
                         "frame_id": raw.get("frame_id"),
@@ -435,6 +536,19 @@ class AtlasScanWorker:
                 }
             )
         return out
+
+    def _keepalive(self, task_id: str) -> None:
+        """Refresh the lease during a retry backoff.
+
+        Without this a long transport outage would let the lease expire mid
+        genome, the coordinator would reclaim the task, and our eventual write
+        would 409 against a dead fence.
+        """
+        try:
+            self.ops.heartbeat_task(task_id, lease_seconds=self.lease_seconds)
+        except requests.HTTPError as exc:
+            if _is_conflict(exc):
+                raise LeaseLost(str(exc)) from exc
 
     # -------------------------------------------------------- fence operations
 
