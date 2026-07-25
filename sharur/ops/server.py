@@ -495,6 +495,15 @@ class LeaseHeartbeatIn(StrictModel):
     lease_seconds: int | None = Field(default=None, ge=1)
 
 
+class ResetFailedIn(StrictModel):
+    """Return attempt-exhausted tasks to the queue."""
+
+    campaign_id: str | None = None
+    task_ids: list[str] | None = None
+    only_transient: bool = False
+    extra_attempts: int = Field(default=5, ge=1, le=100)
+
+
 class TaskUpdate(StrictModel):
     status: Literal["in_progress", "complete", "failed"]
     agent_id: str | None = Field(default=None, min_length=1, max_length=256)
