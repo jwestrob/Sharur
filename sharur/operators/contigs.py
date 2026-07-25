@@ -1148,17 +1148,50 @@ def get_genome_packet(
                 "proteins": [record for record, _position in records[:prefix]],
             }
 
-        def candidate_bytes(candidate_contigs: list[dict[str, Any]]) -> int:
-            return len(
-                _canonical_bytes(
-                    _genome_model_payload(
-                        dataset_id=_dataset_id(store),
-                        genome=genome,
-                        frame_index=frame_index,
-                        contigs=candidate_contigs,
-                    )
+        # Frame size is computed incrementally rather than by re-serialising the
+        # whole accumulated frame once per contig considered.
+        #
+        # Canonical JSON (sort_keys, separators=(",", ":")) is compositional, so
+        #   len(payload with contigs=[c1..cn])
+        #     == len(payload with contigs=[]) + sum(len(ci)) + (n - 1)
+        # where the (n - 1) accounts for the separating commas. This is
+        # byte-identical to the previous full re-serialisation — verified in
+        # tests/test_operators/test_contigs.py — so it changes no packing
+        # decision and no packing-contract hash.
+        #
+        # The previous form was O(n^2) in contigs per frame and GIL-bound, which
+        # dominated the offline packet census: ~1.79M contig-serialisations for a
+        # 1890-contig frame versus 1890 here.
+        _frame_envelope_bytes = len(
+            _canonical_bytes(
+                _genome_model_payload(
+                    dataset_id=_dataset_id(store),
+                    genome=genome,
+                    frame_index=frame_index,
+                    contigs=[],
                 )
             )
+        )
+        _accumulated_contig_bytes = [0]
+
+        def candidate_bytes_with(segment: dict[str, Any]) -> int:
+            """Serialised size of the frame if `segment` were appended."""
+            count = len(frame_contigs) + 1
+            return (
+                _frame_envelope_bytes
+                + _accumulated_contig_bytes[0]
+                + len(_canonical_bytes(segment))
+                + (count - 1)
+            )
+
+        def append_segment(segment: dict[str, Any]) -> None:
+            """Append to the frame and keep the running byte total in step.
+
+            Appending only through here is what guarantees the accumulator can
+            never drift from `frame_contigs`.
+            """
+            frame_contigs.append(segment)
+            _accumulated_contig_bytes[0] += len(_canonical_bytes(segment))
 
         for contig_row in contig_rows:
             contig_id = str(contig_row[0])
@@ -1182,10 +1215,12 @@ def get_genome_packet(
                     start_offset=0,
                     segment_index=0,
                 )
-                candidate = [*frame_contigs, full_segment]
-                if candidate_bytes(candidate) > max_model_payload_bytes and frame_contigs:
+                if (
+                    candidate_bytes_with(full_segment) > max_model_payload_bytes
+                    and frame_contigs
+                ):
                     break
-                frame_contigs.append(full_segment)
+                append_segment(full_segment)
                 state_after_contig = contig_id
                 state_current_contig = None
                 state_position = None
@@ -1205,18 +1240,13 @@ def get_genome_packet(
                 if whole_loaded
                 else None
             )
-            full_candidate = (
-                [*frame_contigs, full_segment]
-                if full_segment is not None
-                else None
-            )
             full_fits = (
-                full_candidate is not None
+                full_segment is not None
                 and frame_proteins + remaining_on_contig <= max_proteins
-                and candidate_bytes(full_candidate) <= max_model_payload_bytes
+                and candidate_bytes_with(full_segment) <= max_model_payload_bytes
             )
             if full_fits:
-                frame_contigs.append(full_segment)
+                append_segment(full_segment)
                 frame_proteins += remaining_on_contig
                 state_after_contig = contig_id
                 state_current_contig = None
@@ -1268,7 +1298,7 @@ def get_genome_packet(
                     start_offset=start_offset,
                     segment_index=segment_index,
                 )
-                if candidate_bytes([*frame_contigs, segment]) <= max_model_payload_bytes:
+                if candidate_bytes_with(segment) <= max_model_payload_bytes:
                     best = middle
                     low = middle + 1
                 else:
@@ -1284,7 +1314,7 @@ def get_genome_packet(
                 start_offset=start_offset,
                 segment_index=segment_index,
             )
-            frame_contigs.append(segment)
+            append_segment(segment)
             frame_proteins += best
             state_completed_proteins += best
             state_consumed = start_offset + best

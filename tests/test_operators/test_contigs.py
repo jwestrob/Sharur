@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from sharur.operators import contigs as contigs_module
 from sharur.operators.contigs import (
     GENOME_PACKET_VERSION,
     PACKET_VERSION,
@@ -343,3 +344,89 @@ def test_missing_genome_or_contig_returns_typed_empty_result(store):
     assert missing_contig.raw["complete"] is True
     assert missing_genome_packet.status == "empty"
     assert missing_genome_packet.raw["complete"] is True
+
+
+class TestIncrementalFrameByteAccounting:
+    """Frame size is a running sum, not a full re-serialisation per contig.
+
+    The packing loop used to re-serialise the entire accumulated frame once per
+    contig considered, which is O(n^2) in contigs per frame and GIL-bound (the
+    C JSON encoder holds the GIL). That dominated the offline packet census.
+
+    The replacement relies on canonical JSON being compositional. If that
+    identity ever breaks, frames pack differently, the packing-contract hash
+    changes, and every existing plan and census is silently invalidated — so it
+    is asserted directly here rather than only end-to-end.
+    """
+
+    @staticmethod
+    def _payload(contigs):
+        return {
+            "schema_version": "atlas-model-packet/1.0",
+            "packet_version": "genome-packet/1.1",
+            "dataset_id": "d" * 64,
+            "bin_id": "genome_a",
+            "frame_index": 3,
+            "genome": {"bin_id": "genome_a", "taxonomy": "d__Bacteria;p__Chloroflexota"},
+            "contigs": contigs,
+        }
+
+    @staticmethod
+    def _contig(index, n_proteins):
+        return {
+            "bin_id": "genome_a",
+            "contig_id": f"contig_{index}",
+            "length": 40000 + index,
+            "gc_content": 0.5512,
+            "is_circular": False,
+            "taxonomy": None,
+            "total_protein_count": n_proteins,
+            "protein_offset_start": 0,
+            "protein_offset_end": n_proteins,
+            "segment_index": 0,
+            "complete": True,
+            "proteins": [
+                {
+                    "protein_id": f"contig_{index}_p{j}",
+                    "gene_index": j,
+                    "start": j * 900,
+                    "end": j * 900 + 720,
+                    "strand": "+" if j % 2 else "-",
+                    "length_aa": 240,
+                    "gc_content": 0.53,
+                    "observed_annotations": [
+                        {"accession": "PF00466", "name": "Ribosomal_L10", "evalue": 1e-30}
+                    ],
+                    "predicates": ["ribosomal"],
+                    "named_calls": [],
+                    "loci": [],
+                }
+                for j in range(n_proteins)
+            ],
+        }
+
+    def _incremental(self, contigs):
+        envelope = len(contigs_module._canonical_bytes(self._payload([])))
+        return (
+            envelope
+            + sum(len(contigs_module._canonical_bytes(c)) for c in contigs)
+            + (len(contigs) - 1 if contigs else 0)
+        )
+
+    @pytest.mark.parametrize("n_contigs", [1, 2, 3, 17, 64, 250])
+    def test_running_sum_equals_full_serialisation(self, n_contigs):
+        contigs = [self._contig(i, (i % 7) + 1) for i in range(n_contigs)]
+        full = len(contigs_module._canonical_bytes(self._payload(contigs)))
+        assert self._incremental(contigs) == full
+
+    def test_holds_for_an_empty_frame(self):
+        empty = len(contigs_module._canonical_bytes(self._payload([])))
+        assert self._incremental([]) == empty
+
+    def test_holds_with_unicode_and_nulls(self):
+        """default=str and non-ASCII must not break the composition."""
+        contigs = [self._contig(0, 2), self._contig(1, 2)]
+        contigs[0]["taxonomy"] = "d__Bacteria;p__Chloroflexota;s__Ca. Dormibacter µ"
+        contigs[1]["gc_content"] = None
+        full = len(contigs_module._canonical_bytes(self._payload(contigs)))
+        assert self._incremental(contigs) == full
