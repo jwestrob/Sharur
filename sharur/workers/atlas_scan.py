@@ -20,11 +20,13 @@ order the review-output contract requires.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
 import random
 import signal
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -487,7 +489,7 @@ class AtlasScanWorker:
         campaign_id: str | None = None,
         ops_token: str | None = None,
         query_token: str | None = None,
-        lease_seconds: int = 900,
+        lease_seconds: int = 2400,
         model_timeout: int = 1800,
         max_frames: int | None = None,
         transient_retries: int = 4,
@@ -501,6 +503,12 @@ class AtlasScanWorker:
         self.lease_seconds = lease_seconds
         self.model_timeout = model_timeout
         self.max_frames = max_frames
+        if lease_seconds <= model_timeout:
+            raise SystemExit(
+                f"lease_seconds ({lease_seconds}) must exceed model_timeout "
+                f"({model_timeout}); otherwise a slow frame outlives its own lease "
+                "and the task is reclaimed mid-call"
+            )
         self.transient_retries = transient_retries
         self.sweep_failed = sweep_failed
         self.max_sweeps = max_sweeps
@@ -782,15 +790,16 @@ class AtlasScanWorker:
         run: ModelRun | None = None
         for attempt in range(self.transient_retries + 1):
             try:
-                run = run_profile(
-                    provider=self.profile.provider,
-                    model=self.profile.model,
-                    reasoning_effort=self.profile.reasoning_effort,
-                    system_prompt=SCAN_SYSTEM_PROMPT,
-                    payload_text=_canonical(payload),
-                    output_schema=SCAN_OUTPUT_SCHEMA,
-                    timeout=self.model_timeout,
-                )
+                with self._lease_keepalive(task_id):
+                    run = run_profile(
+                        provider=self.profile.provider,
+                        model=self.profile.model,
+                        reasoning_effort=self.profile.reasoning_effort,
+                        system_prompt=SCAN_SYSTEM_PROMPT,
+                        payload_text=_canonical(payload),
+                        output_schema=SCAN_OUTPUT_SCHEMA,
+                        timeout=self.model_timeout,
+                    )
                 break
             except ModelTransient as exc:
                 last = exc
@@ -906,6 +915,38 @@ class AtlasScanWorker:
             payload.get("candidates") or [],
             payload.get("contig_state") or {},
         )
+
+    @contextlib.contextmanager
+    def _lease_keepalive(self, task_id: str):
+        """Heartbeat in the background for the duration of a model call.
+
+        A frame is a single blocking subprocess that can run for many minutes
+        at high effort, while the lease is a wall-clock deadline. With
+        lease_seconds=900 against model_timeout=1800, a slow frame outlived its
+        own lease: the coordinator reclaimed the task mid-call, another worker
+        picked it up, and the original returned to a dead fence. Observed as a
+        livelock — claim, resume, lose lease, repeat, to attempt 10 and beyond,
+        with the failed-task sweep raising max_attempts and hiding it.
+
+        Heartbeating on a timer decouples lease renewal from frame duration.
+        """
+        stop = threading.Event()
+
+        def beat() -> None:
+            while not stop.wait(self.lease_seconds / 3.0):
+                try:
+                    self.ops.heartbeat_task(task_id, lease_seconds=self.lease_seconds)
+                except Exception:  # noqa: BLE001 - a lost lease surfaces on the next fenced write
+                    LOGGER.debug("keepalive heartbeat failed for %s", task_id, exc_info=True)
+                    return
+
+        thread = threading.Thread(target=beat, name=f"keepalive-{task_id[:8]}", daemon=True)
+        thread.start()
+        try:
+            yield
+        finally:
+            stop.set()
+            thread.join(timeout=5.0)
 
     def _submit_candidates(
         self,

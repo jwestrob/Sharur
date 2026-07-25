@@ -588,3 +588,48 @@ class TestBaseTypeAndSubtype:
             "system",
             "subtype",
         }
+
+
+class TestLeaseOutlivesTheModelCall:
+    """A frame must not outlive its own lease.
+
+    Observed live: lease_seconds=900 against model_timeout=1800 meant a slow
+    high-effort frame was still running when its lease expired. The coordinator
+    reclaimed the task mid-call, another worker resumed it, and the original
+    returned to a dead fence — a livelock that ran to attempt 10+ because the
+    failed-task sweep kept raising max_attempts and hid it.
+    """
+
+    def _worker(self, **kw):
+        from sharur.workers.atlas_scan import AtlasScanWorker
+
+        defaults = dict(
+            ops_url="http://127.0.0.1:1",
+            query_url="http://127.0.0.1:2",
+            agent_id="t",
+            profile="atlas_scan",
+        )
+        defaults.update(kw)
+        return AtlasScanWorker(**defaults)
+
+    def test_rejects_a_lease_shorter_than_the_model_timeout(self):
+        with pytest.raises(SystemExit, match="must exceed model_timeout"):
+            self._worker(lease_seconds=900, model_timeout=1800)
+
+    def test_rejects_equal_values(self):
+        with pytest.raises(SystemExit, match="must exceed model_timeout"):
+            self._worker(lease_seconds=1800, model_timeout=1800)
+
+    def test_default_lease_outlives_the_default_timeout(self):
+        import inspect
+
+        from sharur.workers.atlas_scan import AtlasScanWorker
+
+        sig = inspect.signature(AtlasScanWorker.__init__).parameters
+        assert sig["lease_seconds"].default > sig["model_timeout"].default
+
+    def test_keepalive_exists_and_is_a_context_manager(self):
+        from sharur.workers.atlas_scan import AtlasScanWorker
+
+        assert hasattr(AtlasScanWorker, "_lease_keepalive")
+        assert hasattr(AtlasScanWorker._lease_keepalive, "__wrapped__")

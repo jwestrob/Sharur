@@ -27,7 +27,12 @@ def atlas_scan(
     profile: str = typer.Option("atlas_scan", help="Execution profile from the review policy"),
     campaign_id: str | None = typer.Option(None, help="Restrict claims to one campaign"),
     policy: str | None = typer.Option(None, help="Path to a review policy YAML (default: packaged)"),
-    lease_seconds: int = typer.Option(900, min=60, help="Lease duration requested per claim"),
+    lease_seconds: int = typer.Option(
+        2400,
+        min=60,
+        help="Lease duration per claim. Must exceed --model-timeout: a frame that "
+             "outlives its lease gets reclaimed mid-call.",
+    ),
     model_timeout: int = typer.Option(1800, min=60, help="Per-frame model timeout (seconds)"),
     max_tasks: int | None = typer.Option(None, min=1, help="Exit after N completed genomes"),
     max_frames: int | None = typer.Option(None, min=1, help="Stop each genome after N frames (smoke tests)"),
