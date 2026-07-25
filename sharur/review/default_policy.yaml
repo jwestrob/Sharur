@@ -1,14 +1,14 @@
 schema_version: sharur-review-policy/1.0
 name: atlas-tiered-scientific-review
-version: "2"
-controller_id: sharur-review-controller-v2
+version: "3"
+controller_id: sharur-review-controller-v3
 rubric_version: scientific-review/1.0
 
 profiles:
   atlas_scan:
     provider: openai
     model: gpt-5.6-terra
-    reasoning_effort: medium
+    reasoning_effort: high
     capability: profile:atlas_scan
     max_pending_tasks: 50000
     resource_request:

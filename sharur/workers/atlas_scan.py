@@ -173,21 +173,65 @@ def _is_locator(key: str) -> bool:
     return any(pat in k for pat in _LOCATOR_PATTERNS)
 
 
-def _canonical_signature(sig: dict[str, Any]) -> dict[str, Any]:
-    """Put a signature into its canonical reduction form.
+# System labels drift ("surface-polysaccharide-biosynthesis" /
+# "surface-polysaccharide" / "surface-polysaccharide-locus" are one thing), so
+# the name is normalised before it becomes part of the key.
+_SYSTEM_NOISE = (
+    "-locus", "_locus", " locus",
+    "-biosynthesis", "_biosynthesis", " biosynthesis",
+    "-cluster", "_cluster", " cluster",
+    "-system", "_system", " system",
+    "-operon", "_operon", " operon",
+)
 
-    Canonical JSON sorts object keys but not array members, so ["A","B"] and
-    ["B","A"] would hash differently and describe the same locus. Accessions
-    are a set, not a sequence, so they are sorted and de-duplicated.
+
+def _normalise_system(name: str) -> str:
+    out = (name or "").strip().lower().replace("_", "-").replace(" ", "-")
+    changed = True
+    while changed:
+        changed = False
+        for suffix in _SYSTEM_NOISE:
+            token = suffix.strip().replace("_", "-").replace(" ", "-")
+            if token and out.endswith(token) and len(out) > len(token):
+                out = out[: -len(token)].rstrip("-")
+                changed = True
+    return out
+
+
+def _canonical_signature(
+    sig: dict[str, Any], candidate_type: str
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Split a model signature into (reduction key, reduction features).
+
+    The key must be the *coarse identity* of a finding, not its exact gene
+    complement. Two genuine Gabija systems differ by a domain or two, so an
+    exact match on the full accession set never collides: measured on live
+    output, sharing fell from 16% of clusters at five accessions to 2% at ten,
+    giving a 1.12x collapse ratio with 94% singletons.
+
+    The named system, by contrast, repeats strongly (Gabija x23, Mokosh type I
+    x20, Hachiman x12 across nineteen genomes), so it is the right granularity.
+    The accession set is preserved in `reduction_features`, where the reducer
+    and reviewers can see the per-occurrence variation without it fragmenting
+    the key.
+
+    Occurrences with no named system fall back to the accession set, since a
+    coarse key of "unnamed" would wrongly merge unrelated findings.
     """
     accessions = sig.get("accessions") or []
     if not isinstance(accessions, list):
         accessions = [accessions]
-    return {
-        "accessions": sorted({str(a) for a in accessions}),
-        "n_genes": int(sig.get("n_genes") or 0),
-        "system": str(sig.get("system") or ""),
-    }
+    accessions = sorted({str(a) for a in accessions})
+    n_genes = int(sig.get("n_genes") or 0)
+    system = _normalise_system(str(sig.get("system") or ""))
+    cls = candidate_type.replace(CANDIDATE_TYPE_PREFIX + ":", "")
+
+    if system:
+        key = {"system": system, "class": cls}
+    else:
+        key = {"system": "", "class": cls, "accessions": accessions}
+    features = {"accessions": accessions, "n_genes": n_genes}
+    return key, features
 
 
 def _split_signature(
@@ -220,36 +264,59 @@ and loci. There are no biological sequences and you must never ask for them.
 Your job is to report NOTABLE architecture as typed candidate occurrences. Do
 not summarize the genome.
 
-Report substantive findings; skip routine housekeeping. Each candidate costs
-downstream review, so precision matters — but a real locus you decline to
-report is lost, so do not suppress genuine biology to keep counts low.
+YOUR OUTPUT IS AN INDEX, NOT AN ANALYSIS. Findings are grouped downstream by
+the `system` label you assign, and a human triages the groups — "there are ten
+of this BGC class" — then decides which deserve a closer look. So:
 
-Report:
-  - a complete pathway whose components are CO-LOCATED (adjacent or near
-    adjacent, same strand) — not merely present somewhere in the frame
-  - a system that is unexpected FOR THIS LINEAGE
-  - a locus of co-directional uncharacterized proteins flanked by something
-    informative
-  - a mobile element carrying identifiable cargo
-  - a defense or antiviral system (from named_calls, or from a coherent set of
-    defense-family annotations on adjacent genes)
-  - specialised or secondary metabolism: cofactor biosynthesis, terpenoid and
-    hopanoid synthesis, glycan and surface-polysaccharide loci
+MARK LIBERALLY. A marked-but-ordinary locus costs one glance. A missed one is
+lost for the whole campaign. Do not suppress a borderline call.
 
-DO NOT report, no matter how many domains they carry:
-  - central or intermediary metabolism (glycolysis, TCA, pentose phosphate,
-    amino-acid/nucleotide/cofactor biosynthesis) — e.g. carbamoyl-phosphate
-    synthetase, acetyl-CoA carboxylase, fatty-acid synthase
-  - ribosomal proteins, tRNA synthetases, chaperones, proteases
-  - respiratory complexes (Complex I, ATP synthase, cytochrome oxidases)
-  - transporters, two-component systems, or transcriptional regulators on
-    their own
-  - any large multidomain enzyme that is simply the normal architecture of a
-    universal enzyme
-  - a single annotated gene with no informative neighborhood
+LABEL PRECISELY. The `system` label is the single most important thing you
+emit: it is both the grouping key and the unit of triage. A vague label buries
+distinct biology in one undifferentiated pile.
 
-A multidomain architecture is only notable if the DOMAIN COMBINATION itself is
-unusual — not because the protein is long or has several domains.
+Reach for the most SPECIFIC module that fits. For example, do not write
+"surface-polysaccharide locus" when the evidence distinguishes:
+  - polysaccharide-utilisation locus (PUL)  — substrate acquisition: a
+    SusC/SusD-like transporter pair, degradative CAZymes, a local regulator
+  - capsule / EPS biosynthesis             — surface polymer, Wzy/Wzx/Wzt export
+  - o-antigen                              — LPS repeat unit assembly
+  - protein-glycosylation                  — targets protein, not surface polymer
+These share glycosyltransferases and are four different biological stories.
+
+A useful (not exhaustive) vocabulary to reach for:
+  pul, capsule-eps, o-antigen, protein-glycosylation,
+  bgc-nrps, bgc-pks, bgc-ripp, bgc-terpene, bgc-hybrid,
+  hydrogenase-system, co-dehydrogenase, carbon-fixation-cbb,
+  secretion-t2ss/t3ss/t4ss/t6ss/t7ss, conjugative-element, prophage,
+  crispr-cas, defense-island, gas-vesicle, flagellar, chemotaxis,
+  cell-wall-modification, storage-granule, microcompartment
+
+If the evidence genuinely does not resolve which module it is, DO NOT fall back
+to the vague parent. Prefix the label `ambiguous-` (e.g. `ambiguous-glycan`) or
+`novel-` when it fits no known module, and say in `evidence` exactly which
+discriminating feature was missing. An honest `ambiguous-` label is far more
+useful than a confident vague one — it tells the reader the locus is real and
+the assignment is open.
+
+Naming a module is a CLAIM, and a claim can be wrong. That is intended. A
+finding that cannot be wrong ("these genes are glycosyltransferases, therefore
+a glycosyltransferase locus") restates the input and says nothing. State what
+the module IS and what it DOES.
+
+DO NOT RE-INVENTORY WHAT A PURPOSE-BUILT CALLER ALREADY PRODUCED. Defence and
+antiviral systems are already called by DefenseFinder, with gene membership,
+and they reach you in `named_calls`. Never emit a candidate whose content is
+"this genome has a Gabija/Mokosh/Hachiman/RM/CBASS system" — that is known, and
+better established than anything inferable from adjacent PFAM domains. Report a
+defence-associated locus ONLY when the CONTEXT is the finding — the system sits
+inside a mobile element, carries unusual cargo, or is adjacent to
+uncharacterised genes suggesting an extension — and say so explicitly.
+
+DO NOT report a single annotated gene with no informative neighbourhood, or
+core machinery whose only claim is that it exists (ribosome, ATP synthase,
+Complex I, chaperones, the dcw/cell-division cluster, lone transporters or
+two-component systems).
 
 SCIENTIFIC CONTRACT — these are hard rules:
 
@@ -683,7 +750,7 @@ class AtlasScanWorker:
             ctype = str(item.get("candidate_type") or "unclassified")
             genome_id = raw.get("bin_id") or ""
             signature, locators = _split_signature(signature, genome_id)
-            signature = _canonical_signature(signature)
+            signature, reduction_features = _canonical_signature(signature, ctype)
             if not signature:
                 LOGGER.warning(
                     "candidate on frame %s had no genome-invariant signature fields; dropping",
@@ -706,6 +773,7 @@ class AtlasScanWorker:
                         else {}
                     ),
                     # Step 8 — provenance travels with the record.
+                    "reduction_features": reduction_features,
                     "provenance": {
                         "frame_id": raw.get("frame_id"),
                         "frame_index": raw.get("frame_index"),
@@ -834,6 +902,7 @@ class AtlasScanWorker:
                     task_id=task_id,
                     reason_codes=cand["reason_codes"],
                     uncertainty=cand["uncertainty"],
+                    reduction_features=cand.get("reduction_features") or {},
                     provenance=cand["provenance"],
                     idempotency_key=_stable_key(
                         task_id, str(idx), _canonical(cand["signature"])

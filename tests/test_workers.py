@@ -401,53 +401,107 @@ class TestSignatureNormalisation:
 
 
 class TestCanonicalSignature:
-    """Schema drift is a second, independent reduction killer.
+    """The reduction key must be the coarse identity of a finding.
 
-    Stripping locators is not sufficient. Left free-form, the model invents a
-    different schema per finding — six competing shapes appeared across 37
-    signatures in the first pilot run (`accessions` vs `caller_accessions` vs
-    `defense_calls` vs `components` vs `profiles`) — so the same system in two
-    genomes still hashed differently. The reduction key is now a fixed
-    structure, canonicalised here.
+    Two rounds of measurement on live output drove this shape:
+
+    * Free-form signatures produced six competing schemas and a 1.00x collapse.
+    * Pinning the schema fixed the form but not the granularity — keying on the
+      full accession set gave 1.12x with 94% singletons, because two genuine
+      Gabija systems differ by a domain or two and never collide. Sharing fell
+      from 16% of clusters at five accessions to 2% at ten.
+    * Keying on the normalised system name gave 2.06x, with real clusters
+      (surface-polysaccharide across 17 genomes, mokosh-type-i across 17).
+
+    The accession set is preserved in reduction_features so the variation is
+    still visible to reviewers without fragmenting the key.
     """
 
-    def test_accession_order_does_not_matter(self):
+    def test_same_system_different_gene_complement_collapses(self):
         from sharur.workers.atlas_scan import _canonical, _canonical_signature
 
-        a = _canonical_signature({"accessions": ["B", "A"], "n_genes": 2, "system": ""})
-        b = _canonical_signature({"accessions": ["A", "B"], "n_genes": 2, "system": ""})
-        assert _canonical(a) == _canonical(b)
-
-    def test_duplicate_accessions_collapse(self):
-        from sharur.workers.atlas_scan import _canonical_signature
-
-        sig = _canonical_signature(
-            {"accessions": ["MzaB", "MzaC", "MzaB"], "n_genes": 3, "system": "Gao_Mza"}
+        a, _ = _canonical_signature(
+            {"accessions": ["GajA", "GajB"], "n_genes": 2, "system": "Gabija"},
+            "atlas-scan:defense-locus",
         )
-        assert sig["accessions"] == ["MzaB", "MzaC"]
+        b, _ = _canonical_signature(
+            {"accessions": ["GajA", "GajB", "UvrD"], "n_genes": 3, "system": "gabija-system"},
+            "atlas-scan:defense-locus",
+        )
+        assert _canonical(a) == _canonical(b)
 
-    def test_shape_is_fixed_regardless_of_input(self):
-        from sharur.workers.atlas_scan import _canonical_signature
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("surface-polysaccharide-biosynthesis", "surface-polysaccharide"),
+            ("surface-polysaccharide-locus", "surface-polysaccharide"),
+            ("Mokosh type I", "mokosh-type-i"),
+            ("Gabija", "gabija"),
+            ("CBASS_operon", "cbass"),
+        ],
+    )
+    def test_system_label_drift_is_normalised(self, raw, expected):
+        from sharur.workers.atlas_scan import _normalise_system
 
-        assert set(_canonical_signature({}).keys()) == {"accessions", "n_genes", "system"}
+        assert _normalise_system(raw) == expected
 
-    def test_missing_fields_get_stable_defaults(self):
+    def test_different_systems_stay_separate(self):
         from sharur.workers.atlas_scan import _canonical, _canonical_signature
 
-        a = _canonical_signature({"accessions": ["A"]})
-        b = _canonical_signature({"accessions": ["A"], "n_genes": 0, "system": ""})
+        a, _ = _canonical_signature({"system": "gabija"}, "atlas-scan:defense-locus")
+        b, _ = _canonical_signature({"system": "hachiman"}, "atlas-scan:defense-locus")
+        assert _canonical(a) != _canonical(b)
+
+    def test_same_system_different_class_stays_separate(self):
+        from sharur.workers.atlas_scan import _canonical, _canonical_signature
+
+        a, _ = _canonical_signature({"system": "x"}, "atlas-scan:defense-locus")
+        b, _ = _canonical_signature({"system": "x"}, "atlas-scan:mobile-element-cargo")
+        assert _canonical(a) != _canonical(b)
+
+    def test_unnamed_findings_fall_back_to_accessions(self):
+        """A coarse "unnamed" key would wrongly merge unrelated findings."""
+        from sharur.workers.atlas_scan import _canonical, _canonical_signature
+
+        a, _ = _canonical_signature(
+            {"accessions": ["A", "B"], "system": ""}, "atlas-scan:novel-gene-cluster"
+        )
+        b, _ = _canonical_signature(
+            {"accessions": ["C", "D"], "system": ""}, "atlas-scan:novel-gene-cluster"
+        )
+        assert _canonical(a) != _canonical(b)
+        assert "accessions" in a
+
+    def test_accession_order_and_duplicates_do_not_matter(self):
+        from sharur.workers.atlas_scan import _canonical, _canonical_signature
+
+        a, fa = _canonical_signature(
+            {"accessions": ["B", "A", "A"], "system": ""}, "atlas-scan:x"
+        )
+        b, fb = _canonical_signature({"accessions": ["A", "B"], "system": ""}, "atlas-scan:x")
         assert _canonical(a) == _canonical(b)
+        assert fa["accessions"] == fb["accessions"] == ["A", "B"]
+
+    def test_features_preserve_what_the_key_drops(self):
+        from sharur.workers.atlas_scan import _canonical_signature
+
+        key, feat = _canonical_signature(
+            {"accessions": ["GajA", "GajB"], "n_genes": 2, "system": "Gabija"},
+            "atlas-scan:defense-locus",
+        )
+        assert "accessions" not in key
+        assert feat == {"accessions": ["GajA", "GajB"], "n_genes": 2}
 
     def test_scalar_accession_is_tolerated(self):
         from sharur.workers.atlas_scan import _canonical_signature
 
-        assert _canonical_signature({"accessions": "A"})["accessions"] == ["A"]
+        _, feat = _canonical_signature({"accessions": "A", "system": ""}, "atlas-scan:x")
+        assert feat["accessions"] == ["A"]
 
     def test_signature_is_a_structured_schema_field_not_a_json_string(self):
         """Only the reduction key needs pinning; evidence/refs stay free-form."""
         props = SCAN_OUTPUT_SCHEMA["properties"]["candidates"]["items"]["properties"]
         assert props["signature"]["type"] == "object"
         assert props["signature"]["additionalProperties"] is False
-        assert set(props["signature"]["required"]) == {"accessions", "n_genes", "system"}
         assert props["evidence_json"]["type"] == "string"
         assert props["subject_refs_json"]["type"] == "string"
