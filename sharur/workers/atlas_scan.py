@@ -125,11 +125,38 @@ strand, length_aa, gc_content, observed_annotations, predicates, named_calls,
 and loci. There are no biological sequences and you must never ask for them.
 
 Your job is to report NOTABLE architecture as typed candidate occurrences. Do
-not summarize the genome. Do not report routine housekeeping. Emit a candidate
-only when the neighborhood shows something worth a reviewer's time: an unusual
-gene cluster, a complete pathway whose parts are co-located, an unexpected
-system in this lineage, a striking multi-domain architecture, or a locus of
-co-directional uncharacterized proteins flanked by something informative.
+not summarize the genome.
+
+Report substantive findings; skip routine housekeeping. Each candidate costs
+downstream review, so precision matters — but a real locus you decline to
+report is lost, so do not suppress genuine biology to keep counts low.
+
+Report:
+  - a complete pathway whose components are CO-LOCATED (adjacent or near
+    adjacent, same strand) — not merely present somewhere in the frame
+  - a system that is unexpected FOR THIS LINEAGE
+  - a locus of co-directional uncharacterized proteins flanked by something
+    informative
+  - a mobile element carrying identifiable cargo
+  - a defense or antiviral system (from named_calls, or from a coherent set of
+    defense-family annotations on adjacent genes)
+  - specialised or secondary metabolism: cofactor biosynthesis, terpenoid and
+    hopanoid synthesis, glycan and surface-polysaccharide loci
+
+DO NOT report, no matter how many domains they carry:
+  - central or intermediary metabolism (glycolysis, TCA, pentose phosphate,
+    amino-acid/nucleotide/cofactor biosynthesis) — e.g. carbamoyl-phosphate
+    synthetase, acetyl-CoA carboxylase, fatty-acid synthase
+  - ribosomal proteins, tRNA synthetases, chaperones, proteases
+  - respiratory complexes (Complex I, ATP synthase, cytochrome oxidases)
+  - transporters, two-component systems, or transcriptional regulators on
+    their own
+  - any large multidomain enzyme that is simply the normal architecture of a
+    universal enzyme
+  - a single annotated gene with no informative neighborhood
+
+A multidomain architecture is only notable if the DOMAIN COMBINATION itself is
+unusual — not because the protein is long or has several domains.
 
 SCIENTIFIC CONTRACT — these are hard rules:
 
