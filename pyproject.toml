@@ -112,6 +112,7 @@ sharur-ops = "sharur.ops_cli:main"
 sharur-query = "sharur.query_cli:main"
 sharur-atlas = "sharur.atlas_cli:main"
 sharur-review = "sharur.review_cli:main"
+sharur-worker = "sharur.workers_cli:main"
 
 [build-system]
 requires = ["hatchling"]
