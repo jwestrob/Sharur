@@ -515,7 +515,12 @@ class AtlasScanWorker:
             )
         self.profile = self.policy.profiles[profile]
 
-        self.ops = SharurOps(ops_url, agent_id=agent_id, api_token=ops_token)
+        # Checkpoint writes serialise through one SQLite writer, so a busy
+        # fleet can queue past the 30 s client default and kill workers with
+        # ReadTimeout mid-genome.
+        self.ops = SharurOps(
+            ops_url, agent_id=agent_id, api_token=ops_token, timeout=(5.0, 180.0)
+        )
         self.query = SharurQuery(query_url, api_token=query_token)
         self._stop = False
 
@@ -725,6 +730,11 @@ class AtlasScanWorker:
                     state["complete"] = bool(seg.get("complete")) or state["complete"]
 
                 found = self._scan_frame(raw, payload, params, task_id)
+                # Submit immediately rather than accumulating: keeps the
+                # checkpoint payload bounded and the write volume linear. The
+                # server deduplicates on idempotency_key, so a resume that
+                # replays a frame is harmless.
+                self._submit_candidates(found, params, task_id, campaign_id)
                 candidates.extend(found)
                 LOGGER.info(
                     "  frame %s: %s contigs, %s bytes -> %s candidates",
@@ -744,7 +754,6 @@ class AtlasScanWorker:
                     checkpoint_key,
                     cursor,
                     frames,
-                    candidates,
                     contig_state,
                 )
             if complete or cursor is None:
@@ -898,26 +907,73 @@ class AtlasScanWorker:
             payload.get("contig_state") or {},
         )
 
+    def _submit_candidates(
+        self,
+        candidates: list[dict[str, Any]],
+        params: dict[str, Any],
+        task_id: str,
+        campaign_id: str | None,
+    ) -> None:
+        """Write candidate occurrences under the live lease.
+
+        Called per frame. `idempotency_key` is derived from the task, the frame
+        and the canonical signature, so replaying a frame after a resume
+        collapses onto the same row rather than duplicating it.
+        """
+        for cand in candidates:
+            prov = cand.get("provenance") or {}
+            try:
+                self.ops.create_candidate_occurrence(
+                    campaign_id=campaign_id,
+                    dataset_id=params["dataset_id"],
+                    unit_id=params["unit_id"],
+                    genome_id=params["genome_id"],
+                    candidate_type=cand["candidate_type"],
+                    signature_schema=cand["signature_schema"],
+                    signature=cand["signature"],
+                    evidence=cand["evidence"],
+                    verification=[],
+                    subject_refs=cand["subject_refs"],
+                    task_id=task_id,
+                    reason_codes=cand["reason_codes"],
+                    uncertainty=cand["uncertainty"],
+                    reduction_features=cand.get("reduction_features") or {},
+                    provenance=prov,
+                    idempotency_key=_stable_key(
+                        task_id,
+                        str(prov.get("frame_index", "")),
+                        _canonical(cand["signature"]),
+                    ),
+                )
+            except requests.HTTPError as exc:
+                if _is_conflict(exc):
+                    raise LeaseLost(str(exc)) from exc
+                raise
+
     def _heartbeat_and_checkpoint(
         self,
         task_id: str,
         checkpoint_key: str,
         cursor: str | None,
         frames: list[dict],
-        candidates: list[dict],
         contig_state: dict[str, dict],
     ) -> None:
+        """Refresh the lease and persist resume state.
+
+        Candidates are deliberately NOT carried here. The payload is rewritten
+        on every checkpoint, so accumulating them made write volume quadratic
+        in frame count: payloads reached 255 KB and, with eight workers against
+        one SQLite writer, queued past the client read timeout and killed
+        workers mid-genome. Candidates are submitted as they are found instead,
+        deduplicated server-side by idempotency key.
+        """
         try:
             self.ops.heartbeat_task(task_id, lease_seconds=self.lease_seconds)
             self.ops.put_task_checkpoint(
                 task_id,
                 checkpoint_key,
                 cursor=cursor,
-                payload={
-                    "frames": frames,
-                    "candidates": candidates,
-                    "contig_state": contig_state,
-                },
+                payload={"frames": frames, "contig_state": contig_state},
             )
         except requests.HTTPError as exc:
             if _is_conflict(exc):
@@ -959,29 +1015,7 @@ class AtlasScanWorker:
         )
 
         try:
-            # Ordering is mandated: every candidate, then exactly one disposition.
-            for idx, cand in enumerate(candidates):
-                self.ops.create_candidate_occurrence(
-                    campaign_id=campaign_id,
-                    dataset_id=dataset_id,
-                    unit_id=unit_id,
-                    genome_id=genome_id,
-                    candidate_type=cand["candidate_type"],
-                    signature_schema=cand["signature_schema"],
-                    signature=cand["signature"],
-                    evidence=cand["evidence"],
-                    verification=[],
-                    subject_refs=cand["subject_refs"],
-                    task_id=task_id,
-                    reason_codes=cand["reason_codes"],
-                    uncertainty=cand["uncertainty"],
-                    reduction_features=cand.get("reduction_features") or {},
-                    provenance=cand["provenance"],
-                    idempotency_key=_stable_key(
-                        task_id, str(idx), _canonical(cand["signature"])
-                    ),
-                )
-
+            # Candidates were submitted per frame; only the disposition remains.
             disposition = "candidate" if candidates else "clear"
             if status != "complete":
                 disposition = "incomplete"
