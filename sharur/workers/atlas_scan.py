@@ -88,7 +88,7 @@ SCAN_OUTPUT_SCHEMA: dict[str, Any] = {
                     "signature": {
                         "type": "object",
                         "additionalProperties": False,
-                        "required": ["accessions", "n_genes", "system"],
+                        "required": ["accessions", "n_genes", "system", "subtype"],
                         "properties": {
                             "accessions": {
                                 "type": "array",
@@ -101,7 +101,19 @@ SCAN_OUTPUT_SCHEMA: dict[str, Any] = {
                             },
                             "system": {
                                 "type": "string",
-                                "description": "Named system or pathway if one applies, else an empty string",
+                                "description": (
+                                    "COARSE module type — the grouping key. Use the broad "
+                                    "category, e.g. glycan-locus, defense-island, "
+                                    "secretion-system, bgc. Never compound it with detail."
+                                ),
+                            },
+                            "subtype": {
+                                "type": "string",
+                                "description": (
+                                    "OPTIONAL refinement of `system`, e.g. pul, capsule-eps, "
+                                    "t2ss, nrps, cbass-cargo. Empty string when the evidence "
+                                    "does not resolve it — that is a normal, useful answer."
+                                ),
                             },
                         },
                     },
@@ -176,6 +188,33 @@ def _is_locator(key: str) -> bool:
 # System labels drift ("surface-polysaccharide-biosynthesis" /
 # "surface-polysaccharide" / "surface-polysaccharide-locus" are one thing), so
 # the name is normalised before it becomes part of the key.
+# Coarse module types. These are the grouping keys a human triages — "there are
+# ten glycan loci" — so the list is deliberately short. Refinement goes in
+# `subtype`, which never enters the reduction key.
+_BASE_MODULE_TYPES = frozenset(
+    {
+        "glycan-locus",
+        "defense-island",
+        "secretion-system",
+        "bgc",
+        "mobile-element",
+        "prophage",
+        "crispr-cas",
+        "hydrogenase-system",
+        "co-dehydrogenase",
+        "formate-dehydrogenase",
+        "carbon-fixation",
+        "cofactor-biosynthesis",
+        "storage-granule",
+        "microcompartment",
+        "cell-wall-modification",
+        "surface-adhesion",
+        "motility",
+        "natural-competence",
+        "stress-response",
+    }
+)
+
 _SYSTEM_NOISE = (
     "-locus", "_locus", " locus",
     "-biosynthesis", "_biosynthesis", " biosynthesis",
@@ -186,14 +225,28 @@ _SYSTEM_NOISE = (
 
 
 def _normalise_system(name: str) -> str:
+    """Fold label drift, without damaging a canonical base type.
+
+    Suffix stripping exists to collapse drift like
+    "surface-polysaccharide-biosynthesis" onto "surface-polysaccharide". But
+    several base types legitimately end in one of those tokens (glycan-locus,
+    defense-island, secretion-system), so an exact base-type match short
+    circuits the stripping — otherwise `glycan-locus` degrades to `glycan` and
+    stops matching the vocabulary the demotion logic checks against.
+    """
     out = (name or "").strip().lower().replace("_", "-").replace(" ", "-")
+    if out in _BASE_MODULE_TYPES:
+        return out
     changed = True
     while changed:
         changed = False
         for suffix in _SYSTEM_NOISE:
             token = suffix.strip().replace("_", "-").replace(" ", "-")
             if token and out.endswith(token) and len(out) > len(token):
-                out = out[: -len(token)].rstrip("-")
+                candidate = out[: -len(token)].rstrip("-")
+                if candidate in _BASE_MODULE_TYPES:
+                    return candidate
+                out = candidate
                 changed = True
     return out
 
@@ -224,13 +277,27 @@ def _canonical_signature(
     accessions = sorted({str(a) for a in accessions})
     n_genes = int(sig.get("n_genes") or 0)
     system = _normalise_system(str(sig.get("system") or ""))
+    subtype = _normalise_system(str(sig.get("subtype") or ""))
     cls = candidate_type.replace(CANDIDATE_TYPE_PREFIX + ":", "")
+
+    # A compound label fragments the very groups it should form: emitted
+    # free-form, five defence findings arrived as five singleton labels
+    # (defense-island-cbass-pmt-cargo, -mokosh-signaling-array, ...) instead of
+    # one group of eight. Detail after the base type is demoted to `subtype`.
+    if system.count("-") >= 2 and not system.startswith("novel"):
+        head, _, tail = system.partition("-")
+        second, _, rest = tail.partition("-")
+        base = f"{head}-{second}"
+        if base in _BASE_MODULE_TYPES:
+            system, subtype = base, subtype or f"{rest}"
+        elif head in _BASE_MODULE_TYPES:
+            system, subtype = head, subtype or tail
 
     if system:
         key = {"system": system, "class": cls}
     else:
         key = {"system": "", "class": cls, "accessions": accessions}
-    features = {"accessions": accessions, "n_genes": n_genes}
+    features = {"accessions": accessions, "n_genes": n_genes, "subtype": subtype}
     return key, features
 
 
@@ -275,29 +342,35 @@ LABEL PRECISELY. The `system` label is the single most important thing you
 emit: it is both the grouping key and the unit of triage. A vague label buries
 distinct biology in one undifferentiated pile.
 
-Reach for the most SPECIFIC module that fits. For example, do not write
-"surface-polysaccharide locus" when the evidence distinguishes:
-  - polysaccharide-utilisation locus (PUL)  — substrate acquisition: a
-    SusC/SusD-like transporter pair, degradative CAZymes, a local regulator
-  - capsule / EPS biosynthesis             — surface polymer, Wzy/Wzx/Wzt export
-  - o-antigen                              — LPS repeat unit assembly
-  - protein-glycosylation                  — targets protein, not surface polymer
-These share glycosyltransferases and are four different biological stories.
+Assign a COARSE `system` and, when the evidence supports it, a `subtype`.
 
-A useful (not exhaustive) vocabulary to reach for:
-  pul, capsule-eps, o-antigen, protein-glycosylation,
-  bgc-nrps, bgc-pks, bgc-ripp, bgc-terpene, bgc-hybrid,
-  hydrogenase-system, co-dehydrogenase, carbon-fixation-cbb,
-  secretion-t2ss/t3ss/t4ss/t6ss/t7ss, conjugative-element, prophage,
-  crispr-cas, defense-island, gas-vesicle, flagellar, chemotaxis,
-  cell-wall-modification, storage-granule, microcompartment
+`system` is the grouping key. Keep it broad and never compound it with detail:
 
-If the evidence genuinely does not resolve which module it is, DO NOT fall back
-to the vague parent. Prefix the label `ambiguous-` (e.g. `ambiguous-glycan`) or
-`novel-` when it fits no known module, and say in `evidence` exactly which
-discriminating feature was missing. An honest `ambiguous-` label is far more
-useful than a confident vague one — it tells the reader the locus is real and
-the assignment is open.
+  glycan-locus, defense-island, secretion-system, bgc, mobile-element,
+  prophage, crispr-cas, hydrogenase-system, co-dehydrogenase,
+  formate-dehydrogenase, carbon-fixation, cofactor-biosynthesis,
+  storage-granule, microcompartment, cell-wall-modification,
+  surface-adhesion, motility, natural-competence, stress-response
+
+`subtype` refines it, and is OPTIONAL:
+
+  glycan-locus     -> pul | capsule-eps | o-antigen | protein-glycosylation
+  secretion-system -> t2ss | t3ss | t4ss | t6ss | t7ss
+  bgc              -> nrps | pks | ripp | terpene | hybrid
+  defense-island   -> whatever the cargo or architecture is, e.g. cbass-cargo
+  carbon-fixation  -> cbb | wood-ljungdahl | 3hp
+
+**Leave `subtype` empty when the evidence does not resolve it.** A glycan locus
+you cannot assign to PUL versus capsule is still a real, reportable glycan
+locus — record it as `system: glycan-locus`, `subtype: ""`, and say in
+`evidence` which discriminating feature was missing (a SusC/SusD-like pair, a
+Wzy/Wzx export system, and so on). An empty subtype is a normal and useful
+answer; it groups cleanly and can be revisited. Do NOT guess a subtype to avoid
+leaving it blank, and do NOT invent a compound `system` to smuggle detail into
+the key.
+
+Use `novel-<something>` as the `system` only when the locus fits no category
+above at all.
 
 Naming a module is a CLAIM, and a claim can be wrong. That is intended. A
 finding that cannot be wrong ("these genes are glycosyltransferases, therefore

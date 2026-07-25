@@ -490,7 +490,9 @@ class TestCanonicalSignature:
             "atlas-scan:defense-locus",
         )
         assert "accessions" not in key
-        assert feat == {"accessions": ["GajA", "GajB"], "n_genes": 2}
+        assert feat["accessions"] == ["GajA", "GajB"]
+        assert feat["n_genes"] == 2
+        assert "subtype" in feat
 
     def test_scalar_accession_is_tolerated(self):
         from sharur.workers.atlas_scan import _canonical_signature
@@ -505,3 +507,84 @@ class TestCanonicalSignature:
         assert props["signature"]["additionalProperties"] is False
         assert props["evidence_json"]["type"] == "string"
         assert props["subject_refs_json"]["type"] == "string"
+
+
+
+class TestBaseTypeAndSubtype:
+    """`system` groups; `subtype` refines. Only `system` enters the key.
+
+    Free-form labels fragmented the groups they should form: five defence
+    findings on live output arrived as five singleton labels
+    (defense-island-cbass-pmt-cargo, -mokosh-signaling-array, ...) rather than
+    one group of eight, costing ~25% of achievable collapse. Detail past the
+    base type is demoted to `subtype`, which rides in reduction_features.
+    """
+
+    @pytest.mark.parametrize(
+        "emitted,system,subtype",
+        [
+            ("defense-island-cbass-pmt-cargo", "defense-island", "cbass-pmt-cargo"),
+            ("secretion-system-t2ss", "secretion-system", "t2ss"),
+            ("glycan-locus", "glycan-locus", ""),
+            ("defense-island", "defense-island", ""),
+        ],
+    )
+    def test_compound_labels_are_demoted(self, emitted, system, subtype):
+        from sharur.workers.atlas_scan import _canonical_signature
+
+        key, feat = _canonical_signature({"system": emitted}, "atlas-scan:x")
+        assert key["system"] == system
+        assert feat["subtype"] == subtype
+
+    def test_variants_of_one_module_share_a_key(self):
+        """The whole point: eight defence islands must form one group."""
+        from sharur.workers.atlas_scan import _canonical, _canonical_signature
+
+        a, _ = _canonical_signature(
+            {"system": "defense-island-cbass-pmt-cargo"}, "atlas-scan:defense-locus"
+        )
+        b, _ = _canonical_signature(
+            {"system": "defense-island-mokosh-signaling-array"}, "atlas-scan:defense-locus"
+        )
+        assert _canonical(a) == _canonical(b)
+
+    def test_subtype_never_enters_the_key(self):
+        from sharur.workers.atlas_scan import _canonical, _canonical_signature
+
+        a, _ = _canonical_signature(
+            {"system": "glycan-locus", "subtype": "pul"}, "atlas-scan:x"
+        )
+        b, _ = _canonical_signature(
+            {"system": "glycan-locus", "subtype": "capsule-eps"}, "atlas-scan:x"
+        )
+        assert _canonical(a) == _canonical(b)
+
+    def test_subtype_is_preserved_as_a_feature(self):
+        from sharur.workers.atlas_scan import _canonical_signature
+
+        _, feat = _canonical_signature(
+            {"system": "glycan-locus", "subtype": "PUL"}, "atlas-scan:x"
+        )
+        assert feat["subtype"] == "pul"
+
+    def test_base_types_survive_drift_stripping(self):
+        """`-locus`/`-system`/`-island` are drift tokens AND real base types."""
+        from sharur.workers.atlas_scan import _BASE_MODULE_TYPES, _normalise_system
+
+        for base in _BASE_MODULE_TYPES:
+            assert _normalise_system(base) == base, base
+
+    def test_novel_labels_are_left_intact(self):
+        from sharur.workers.atlas_scan import _canonical_signature
+
+        key, _ = _canonical_signature({"system": "novel-weird-thing"}, "atlas-scan:x")
+        assert key["system"] == "novel-weird-thing"
+
+    def test_schema_requires_both_fields(self):
+        props = SCAN_OUTPUT_SCHEMA["properties"]["candidates"]["items"]["properties"]
+        assert set(props["signature"]["required"]) == {
+            "accessions",
+            "n_genes",
+            "system",
+            "subtype",
+        }
