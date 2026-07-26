@@ -498,6 +498,52 @@ class LeaseLost(RuntimeError):
     """Another attempt owns this task; abandon it immediately."""
 
 
+class CheckpointRejected(RuntimeError):
+    """The store refused the checkpoint payload itself, not the lease.
+
+    Distinct from LeaseLost because the recovery is different: a lost lease
+    means someone else owns the work, while a rejected payload means this
+    attempt will fail identically on every retry until the payload shrinks.
+    """
+
+
+def _spill_path(params: dict[str, Any], task_id: str) -> Path | None:
+    """Where bulk resume state for one task lives, beside the coverage manifest.
+
+    Returns None when the task carries no manifest path, in which case the
+    caller keeps the old inline behaviour.
+    """
+    manifest = params.get("coverage_manifest")
+    if not manifest:
+        return None
+    return Path(manifest).parent.parent / "spill" / f"{task_id}.json"
+
+
+def _write_spill(path: Path, frames: list[dict], contig_state: dict[str, dict]) -> None:
+    """Persist resume state atomically.
+
+    Written via a temp file and replaced, so a crash mid-write leaves the
+    previous good state rather than a truncated file that would fail to parse
+    on resume.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps({"frames": frames, "contig_state": contig_state}))
+    tmp.replace(path)
+
+
+def _read_spill(path: str | Path) -> tuple[list[dict], dict[str, dict]]:
+    """Load resume state. Any failure reads as 'no usable state'."""
+    try:
+        data = json.loads(Path(path).read_text())
+    except Exception:  # noqa: BLE001 - missing or corrupt spill is recoverable
+        LOGGER.warning("could not read spill %s; rescanning from frame 0", path)
+        return [], {}
+    if not isinstance(data, dict):
+        return [], {}
+    return data.get("frames") or [], data.get("contig_state") or {}
+
+
 def _stable_key(*parts: str) -> str:
     return hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()[:32]
 
@@ -773,7 +819,9 @@ class AtlasScanWorker:
 
         LOGGER.info("task %s genome %s (%s proteins)", task_id, genome_id, params.get("n_proteins"))
 
-        cursor, frames, candidates, contig_state = self._resume(task_id, checkpoint_key)
+        cursor, frames, candidates, contig_state = self._resume(
+            task_id, checkpoint_key, params
+        )
 
         frame_index = len(frames)
         while True:
@@ -851,6 +899,7 @@ class AtlasScanWorker:
                     cursor,
                     frames,
                     contig_state,
+                    params,
                 )
             if complete or cursor is None:
                 break
@@ -984,7 +1033,7 @@ class AtlasScanWorker:
     # -------------------------------------------------------- fence operations
 
     def _resume(
-        self, task_id: str, checkpoint_key: str
+        self, task_id: str, checkpoint_key: str, params: dict[str, Any] | None = None
     ) -> tuple[str | None, list[dict], list[dict], dict[str, dict]]:
         """Step 5 (read side) — resume mid-genome across attempts."""
         try:
@@ -995,8 +1044,26 @@ class AtlasScanWorker:
                 return None, [], [], {}
             raise
         payload = ck.get("payload") or {}
-        frames = payload.get("frames") or []
         cursor = ck.get("cursor")
+        frames = payload.get("frames") or []
+        contig_state_in = payload.get("contig_state") or {}
+        spill = payload.get("spill")
+        if spill:
+            frames, contig_state_in = _read_spill(spill)
+            # The spill file and the checkpoint are written separately, so a
+            # crash between them can desynchronise the two. n_frames is the
+            # authority; a mismatch means the pair cannot be trusted and the
+            # existing guard below discards it.
+            expected = payload.get("n_frames")
+            if isinstance(expected, int) and expected != len(frames):
+                LOGGER.warning(
+                    "spill for %s holds %s frames but the checkpoint claims %s; "
+                    "discarding",
+                    task_id,
+                    len(frames),
+                    expected,
+                )
+                return None, [], [], {}
 
         # A checkpoint is only resumable if its frame list and its cursor agree.
         # They can diverge: the frame list is restored and appended to on every
@@ -1046,12 +1113,7 @@ class AtlasScanWorker:
 
         if frames:
             LOGGER.info("resuming task %s from frame %s", task_id, len(frames))
-        return (
-            cursor,
-            frames,
-            payload.get("candidates") or [],
-            payload.get("contig_state") or {},
-        )
+        return cursor, frames, payload.get("candidates") or [], contig_state_in
 
     @contextlib.contextmanager
     def _lease_keepalive(self, task_id: str):
@@ -1216,6 +1278,7 @@ class AtlasScanWorker:
         cursor: str | None,
         frames: list[dict],
         contig_state: dict[str, dict],
+        params: dict[str, Any],
     ) -> None:
         """Refresh the lease and persist resume state.
 
@@ -1228,16 +1291,38 @@ class AtlasScanWorker:
         """
         try:
             self.ops.heartbeat_task(task_id, lease_seconds=self.lease_seconds)
+            # Frames and contig_state both grow with contig count, and the store
+            # caps inline JSON at 256 KB. A fragmented assembly (215 contigs per
+            # frame) crossed that at frame 4, so the checkpoint was refused and
+            # the genome could never finish. Bulk resume state spills to a file
+            # beside the coverage manifest; the checkpoint keeps only the cursor
+            # and a count, which is O(1) in genome size.
+            spill = _spill_path(params, task_id)
+            payload: dict[str, Any] = {"n_frames": len(frames)}
+            if spill is not None:
+                _write_spill(spill, frames, contig_state)
+                payload["spill"] = str(spill)
+            else:  # no manifest path configured; fall back to inline
+                payload["frames"] = frames
+                payload["contig_state"] = contig_state
             self.ops.put_task_checkpoint(
                 task_id,
                 checkpoint_key,
                 cursor=cursor,
-                payload={"frames": frames, "contig_state": contig_state},
+                payload=payload,
             )
         except requests.HTTPError as exc:
-            if _is_conflict(exc):
+            if not _is_conflict(exc):
+                raise
+            # Same trap as candidate submission: this endpoint maps both a dead
+            # lease and a rejected payload onto 409. Reporting a payload
+            # rejection as lease loss sent the genome back to the queue to fail
+            # identically forever -- observed on a 215-contigs-per-frame
+            # assembly whose checkpoint crossed the 256 KB inline JSON limit at
+            # frame 4.
+            if _is_lease_failure(exc):
                 raise LeaseLost(str(exc)) from exc
-            raise
+            raise CheckpointRejected(_conflict_detail(exc)) from exc
 
     # ---------------------------------------------------------------- finalize
 

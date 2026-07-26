@@ -14,6 +14,7 @@ import json
 import pytest
 
 from sharur.workers import model_cli
+from pathlib import Path
 from sharur.workers.atlas_scan import (
     SCAN_OUTPUT_SCHEMA,
     SCAN_SYSTEM_PROMPT,
@@ -899,3 +900,54 @@ class TestAnthropicStreamParsing:
         })
         _, body = model_cli._parse_anthropic_stream(stream)
         assert json.loads(body) == {"candidates": []}
+
+
+class TestCheckpointSpill:
+    """Bulk resume state must not ride inline in the checkpoint payload.
+
+    The store caps inline JSON at 256 KB. Frames and contig_state both grow
+    with contig count, so a fragmented assembly (215 contigs per frame) crossed
+    the cap at frame 4: the checkpoint was refused with a 409 that the worker
+    read as lease loss, and the genome failed identically on every retry.
+    """
+
+    def test_spill_roundtrip(self, tmp_path):
+        from sharur.workers.atlas_scan import _read_spill, _write_spill
+
+        frames = [{"frame_id": f"f{i}", "frame_index": i} for i in range(5)]
+        state = {"c1": {"contig_id": "c1", "protein_count": 7}}
+        p = tmp_path / "spill" / "t1.json"
+        _write_spill(p, frames, state)
+        got_frames, got_state = _read_spill(p)
+        assert got_frames == frames and got_state == state
+
+    def test_missing_spill_reads_as_empty(self, tmp_path):
+        from sharur.workers.atlas_scan import _read_spill
+
+        assert _read_spill(tmp_path / "absent.json") == ([], {})
+
+    def test_corrupt_spill_reads_as_empty(self, tmp_path):
+        from sharur.workers.atlas_scan import _read_spill
+
+        p = tmp_path / "bad.json"
+        p.write_text("{truncated")
+        assert _read_spill(p) == ([], {})
+
+    def test_write_is_atomic_leaving_no_temp(self, tmp_path):
+        from sharur.workers.atlas_scan import _write_spill
+
+        p = tmp_path / "t.json"
+        _write_spill(p, [], {})
+        assert p.exists()
+        assert not list(tmp_path.glob("*.tmp"))
+
+    def test_path_is_none_without_manifest(self):
+        from sharur.workers.atlas_scan import _spill_path
+
+        assert _spill_path({}, "t1") is None
+
+    def test_path_sits_beside_the_manifest_tree(self):
+        from sharur.workers.atlas_scan import _spill_path
+
+        p = _spill_path({"coverage_manifest": "/data/atlas/coverage/x.json"}, "t9")
+        assert p == Path("/data/atlas/spill/t9.json")
