@@ -332,6 +332,39 @@ def run_openai(
     )
 
 
+def _parse_anthropic_stream(stdout: str) -> tuple[dict[str, Any], str]:
+    """Extract (usage, result text) from a `--output-format stream-json` run.
+
+    The stream is JSONL; the terminal `result` event carries both. Falls back to
+    treating the whole of stdout as the body, so a format change degrades to
+    lenient parsing rather than losing the answer outright.
+    """
+    usage: dict[str, Any] = {}
+    body: str | None = None
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line or not line.startswith("{"):
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        if event.get("type") == "result":
+            if isinstance(event.get("usage"), dict):
+                usage = event["usage"]
+            if isinstance(event.get("result"), str):
+                body = event["result"]
+            # An error result must not be mistaken for an empty answer.
+            if event.get("is_error") and event.get("subtype") not in (None, "success"):
+                raise ModelError(
+                    f"claude turn failed: {event.get('subtype')} "
+                    f"{str(event.get('result'))[:300]}"
+                )
+    return usage, body if body is not None else stdout
+
+
 def run_anthropic(
     *,
     model: str,
@@ -341,11 +374,26 @@ def run_anthropic(
     output_schema: dict[str, Any],
     timeout: int = 1800,
 ) -> ModelRun:
-    """Drive the `claude` CLI headlessly (`-p`, JSON output).
+    """Drive the `claude` CLI headlessly (`-p`, streaming JSON output).
 
     The CLI has no `--output-schema`, so the schema is stated in the prompt and
-    the response is parsed leniently. Reasoning effort is not a CLI flag either;
-    it is recorded for provenance so the task record still reflects the policy.
+    the response is parsed leniently.
+
+    Three things this driver previously got wrong, all of which made the
+    provenance record disagree with what actually ran:
+
+    * **Effort was recorded but never applied.** `--effort` does exist and takes
+      exactly the policy vocabulary (low/medium/high/xhigh/max). Recording the
+      requested effort while not passing it meant the task record asserted a
+      setting the run never used -- worse than not recording it at all.
+    * **The silence timeout was really a wall-clock timeout.** `--output-format
+      json` emits a single blob at the end, so a healthy long call looks
+      identical to a hung one and gets killed at the stall deadline. Streaming
+      makes silence mean silence.
+    * **The packet-only boundary leaked.** Project settings, MCP servers and
+      tools were all live, so the model could read the filesystem instead of
+      only the frozen packet it was handed. That silently violates the input
+      contract every other part of this pipeline enforces.
     """
     claude = shutil.which("claude")
     if claude is None:
@@ -364,8 +412,21 @@ def run_anthropic(
         "-p",
         "--model",
         model,
+        "--effort",
+        reasoning_effort,
+        # Stream so the stall detector measures silence rather than duration.
         "--output-format",
-        "json",
+        "stream-json",
+        "--include-partial-messages",
+        "--verbose",
+        # Packet-only boundary: no tools, no MCP servers, no user/project/local
+        # settings. The model must reason from the packet it was handed and
+        # nothing else, which is the same contract the OpenAI path enforces.
+        "--tools",
+        "",
+        "--strict-mcp-config",
+        "--setting-sources",
+        "",
         "--permission-mode",
         "plan",
     ]
@@ -374,17 +435,7 @@ def run_anthropic(
     if code != 0:
         _classify_failure(code, stderr, stdout)
 
-    usage: dict[str, Any] = {}
-    body = stdout
-    try:
-        envelope = json.loads(stdout)
-        if isinstance(envelope, dict):
-            usage = envelope.get("usage") or {}
-            if isinstance(envelope.get("result"), str):
-                body = envelope["result"]
-    except json.JSONDecodeError:
-        pass
-
+    usage, body = _parse_anthropic_stream(stdout)
     record = _extract_json(body)
     result_text = json.dumps(record, sort_keys=True, separators=(",", ":"))
     return ModelRun(

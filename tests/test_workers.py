@@ -856,3 +856,46 @@ class TestCursorAlignmentGuard:
     def test_undecodable_cursor_is_not_treated_as_mismatch(self):
         cur, frames, _, _ = self._resume_with(self._frames(3), "not-base64-at-all")
         assert cur == "not-base64-at-all" and len(frames) == 3
+
+
+class TestAnthropicStreamParsing:
+    """The driver must read the terminal `result` event, not guess at stdout."""
+
+    def test_extracts_result_and_usage(self):
+        stream = "\n".join([
+            json.dumps({"type": "system", "subtype": "init"}),
+            json.dumps({"type": "stream_event", "event": {"type": "content_block_delta"}}),
+            json.dumps({
+                "type": "result",
+                "subtype": "success",
+                "is_error": False,
+                "result": '{"candidates": [], "notes": "ok"}',
+                "usage": {"input_tokens": 10, "output_tokens": 3},
+            }),
+        ])
+        usage, body = model_cli._parse_anthropic_stream(stream)
+        assert usage["input_tokens"] == 10
+        assert json.loads(body)["notes"] == "ok"
+
+    def test_error_result_raises_rather_than_returning_empty(self):
+        stream = json.dumps({
+            "type": "result",
+            "subtype": "error_during_execution",
+            "is_error": True,
+            "result": "tool use blocked",
+        })
+        with pytest.raises(model_cli.ModelError, match="turn failed"):
+            model_cli._parse_anthropic_stream(stream)
+
+    def test_falls_back_to_raw_stdout_when_no_result_event(self):
+        usage, body = model_cli._parse_anthropic_stream('{"candidates": []}')
+        assert usage == {}
+        assert json.loads(body) == {"candidates": []}
+
+    def test_ignores_non_json_noise(self):
+        stream = "warning: something\n" + json.dumps({
+            "type": "result", "subtype": "success", "is_error": False,
+            "result": '{"candidates": []}', "usage": {},
+        })
+        _, body = model_cli._parse_anthropic_stream(stream)
+        assert json.loads(body) == {"candidates": []}

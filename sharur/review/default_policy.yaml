@@ -1,14 +1,18 @@
 schema_version: sharur-review-policy/1.0
 name: atlas-tiered-scientific-review
-version: "3"
-controller_id: sharur-review-controller-v3
+version: "4"
+controller_id: sharur-review-controller-v4
 rubric_version: scientific-review/1.0
 
 profiles:
   atlas_scan:
     provider: openai
     model: gpt-5.6-terra
-    reasoning_effort: high
+    # medium, not high. A three-frame calibration put high at 189 s/frame
+    # against 36 s at medium -- 5.25x -- while BOTH settings recovered the same
+    # answer key. At Chloroflexota scale (~29k genomes, 8 workers) that is ~50
+    # days versus ~9.5 for no measured gain in recall.
+    reasoning_effort: medium
     capability: profile:atlas_scan
     max_pending_tasks: 50000
     resource_request:
