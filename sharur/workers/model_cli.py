@@ -16,6 +16,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import re
 import os
 import shutil
 import subprocess
@@ -81,17 +82,28 @@ def _sha256(text: str) -> str:
 _RATE_LIMIT_MARKERS = (
     "rate limit",
     "rate_limit",
-    "429",
     "quota",
     "usage limit",
     "too many requests",
     "resource_exhausted",
 )
 
+# `429` needs context. As a bare substring it matched any occurrence anywhere in
+# a verbose CLI stderr -- request ids, token counts, byte offsets, URLs -- and
+# rate-limit classification runs BEFORE transient, so one incidental "429" turned
+# a DNS blip into a rate-limit backoff. That backoff doubles and persists across
+# tasks (60s -> 1800s), so on a host where DNS failures are endemic a worker
+# could idle for half an hour over a network hiccup it should have retried in
+# seconds. Observed once in the Dormibacteria pilot: a websocket DNS failure
+# logged as "rate limited".
+_HTTP_429 = re.compile(r"(?:status|code|http|error)\D{0,12}\b429\b|\b429\b\s*(?:too many|rate)")
+
 
 def _looks_rate_limited(stderr: str, stdout: str) -> bool:
     blob = f"{stderr}\n{stdout}".lower()
-    return any(marker in blob for marker in _RATE_LIMIT_MARKERS)
+    if any(marker in blob for marker in _RATE_LIMIT_MARKERS):
+        return True
+    return _HTTP_429.search(blob) is not None
 
 
 _TRANSIENT_MARKERS = (

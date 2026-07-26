@@ -951,3 +951,45 @@ class TestCheckpointSpill:
 
         p = _spill_path({"coverage_manifest": "/data/atlas/coverage/x.json"}, "t9")
         assert p == Path("/data/atlas/spill/t9.json")
+
+
+class TestRateLimitPrecision:
+    """`429` as a bare substring turned DNS blips into rate-limit backoffs.
+
+    Rate-limit classification runs before transient, and the resulting backoff
+    doubles and persists across tasks (60s -> 1800s). On a host where DNS
+    failures are endemic, one incidental "429" in a verbose stderr -- a request
+    id, a token count, a byte offset -- could idle a worker for half an hour
+    over a hiccup it should have retried in seconds.
+    """
+
+    @pytest.mark.parametrize(
+        "blob",
+        [
+            "req_id=a429f2 failed to lookup address information: Try again",
+            "tokens_used=4290\nconnection reset by peer",
+            "wrote 1429 bytes then the stream closed",
+        ],
+    )
+    def test_incidental_429_is_not_a_rate_limit(self, blob):
+        assert model_cli._looks_rate_limited(blob, "") is False
+        assert model_cli._looks_transient(blob, "") is True
+
+    @pytest.mark.parametrize(
+        "blob",
+        [
+            "HTTP status 429 returned by endpoint",
+            "429 too many requests",
+            "error code: 429",
+            "Error: rate limit exceeded",
+            "you have hit your usage limit",
+            "RESOURCE_EXHAUSTED",
+        ],
+    )
+    def test_genuine_rate_limits_still_classify(self, blob):
+        assert model_cli._looks_rate_limited(blob, "") is True
+
+    def test_dns_failure_raises_transient_not_rate_limited(self):
+        blob = "req_id=a429f2 failed to connect to websocket: failed to lookup address information"
+        with pytest.raises(model_cli.ModelTransient):
+            model_cli._classify_failure(1, blob, "")
