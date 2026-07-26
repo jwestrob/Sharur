@@ -40,6 +40,7 @@ from sharur.query.client import SharurQuery
 from sharur.review.models import load_review_policy
 from sharur.workers.model_cli import (
     ModelError,
+    ModelQuotaExhausted,
     ModelRateLimited,
     ModelRun,
     ModelTransient,
@@ -735,6 +736,22 @@ class AtlasScanWorker:
                 )
                 self._release(task, f"transient transport: {exc}", retry_delay=120)
                 time.sleep(120)
+            except ModelQuotaExhausted as exc:
+                # Backing off cannot help: the window is spent until a named
+                # future time. Release the task and STOP. Spinning here means
+                # every worker wakes every 30 minutes for days to be refused
+                # again, holding leases and burning attempts for nothing.
+                LOGGER.error(
+                    "usage limit reached%s -- releasing %s and stopping this worker. "
+                    "Progress is preserved; restart the fleet once the window "
+                    "resets or more credits are purchased. Provider said: %s",
+                    f" (resets {exc.reset_at})" if exc.reset_at else "",
+                    task.get("id"),
+                    str(exc)[:300],
+                )
+                self._release(task, f"usage limit: {exc}", retry_delay=300)
+                self._stop = True
+                break
             except ModelRateLimited as exc:
                 # The subscription window is exhausted. This is the steady
                 # state, not an error: hold nothing, release the task for

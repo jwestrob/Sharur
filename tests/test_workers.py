@@ -993,3 +993,43 @@ class TestRateLimitPrecision:
         blob = "req_id=a429f2 failed to connect to websocket: failed to lookup address information"
         with pytest.raises(model_cli.ModelTransient):
             model_cli._classify_failure(1, blob, "")
+
+
+class TestQuotaExhaustion:
+    """A spent window is not a throttle; backing off cannot help.
+
+    The Dormibacteria pilot hit "You've hit your usage limit ... try again at
+    Aug 1st" six days out. The rate-limit backoff caps at 1800s, so eight
+    workers would have woken every 30 minutes for six days to be refused again,
+    holding leases and burning attempts. The worker must stop instead.
+    """
+
+    REAL = (
+        '{"type":"error","message":"You\'ve hit your usage limit. Visit '
+        "https://chatgpt.com/codex/settings/usage to purchase more credits or "
+        'try again at Aug 1st, 2026 12:25 PM."}'
+    )
+
+    def test_real_provider_message_raises_quota_exhausted(self):
+        with pytest.raises(model_cli.ModelQuotaExhausted) as caught:
+            model_cli._classify_failure(1, "", self.REAL)
+        assert caught.value.reset_at == "Aug 1st, 2026 12:25 PM"
+
+    def test_quota_exhausted_is_a_rate_limit_subclass(self):
+        """Existing handlers that do not care about the distinction still catch it."""
+        with pytest.raises(model_cli.ModelRateLimited):
+            model_cli._classify_failure(1, "", self.REAL)
+
+    def test_soft_throttle_is_not_exhaustion(self):
+        with pytest.raises(model_cli.ModelRateLimited) as caught:
+            model_cli._classify_failure(1, "HTTP status 429 too many requests", "")
+        assert not isinstance(caught.value, model_cli.ModelQuotaExhausted)
+
+    def test_message_recovered_from_stdout_when_stderr_empty(self):
+        with pytest.raises(model_cli.ModelQuotaExhausted, match="usage limit"):
+            model_cli._classify_failure(1, "", self.REAL)
+
+    def test_exhaustion_without_a_reset_time_still_stops(self):
+        with pytest.raises(model_cli.ModelQuotaExhausted) as caught:
+            model_cli._classify_failure(1, "", '{"message":"quota exceeded"}')
+        assert caught.value.reset_at is None

@@ -36,6 +36,59 @@ class ModelRateLimited(RuntimeError):
     """Provider refused the call for quota/rate reasons. Retry after backoff."""
 
 
+class ModelQuotaExhausted(ModelRateLimited):
+    """The subscription window is spent and names a far-future reset.
+
+    Distinct from a throttle because backing off cannot help. The Dormibacteria
+    pilot hit "You've hit your usage limit ... try again at Aug 1st" six days
+    out; the backoff caps at 1800s, so eight workers would have spun for six
+    days, each waking every half hour to be refused again, holding leases and
+    burning attempts for nothing.
+
+    A subclass so existing `except ModelRateLimited` handlers still catch it if
+    a caller does not care about the distinction.
+    """
+
+    def __init__(self, message: str, reset_at: str | None = None) -> None:
+        super().__init__(message)
+        self.reset_at = reset_at
+
+
+# "try again at <when>" is the provider telling us the window is spent rather
+# than that we are being throttled. Capture it so the worker can say when to
+# come back instead of rediscovering the wall every 30 minutes.
+_QUOTA_RESET = re.compile(
+    r"(?:try again (?:at|after)|resets? (?:at|on))\s+([^\".]{4,60})", re.IGNORECASE
+)
+_QUOTA_MARKERS = ("usage limit", "purchase more credits", "quota exceeded")
+
+
+def _quota_message(blob: str) -> str | None:
+    """The provider's own sentence, when stderr is empty and it is in stdout."""
+    for line in blob.splitlines():
+        if any(marker in line.lower() for marker in _QUOTA_MARKERS):
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                return line.strip()[:300]
+            if isinstance(event, dict):
+                msg = event.get("message")
+                if isinstance(msg, str):
+                    return msg[:300]
+                err = event.get("error")
+                if isinstance(err, dict) and isinstance(err.get("message"), str):
+                    return err["message"][:300]
+    return None
+
+
+def _quota_exhausted(blob: str) -> tuple[bool, str | None]:
+    lowered = blob.lower()
+    if not any(marker in lowered for marker in _QUOTA_MARKERS):
+        return False, None
+    match = _QUOTA_RESET.search(blob)
+    return True, (match.group(1).strip() if match else None)
+
+
 class ModelTransient(RuntimeError):
     """Transient transport failure (DNS, socket, timeout).
 
@@ -135,6 +188,11 @@ def _classify_failure(code: int, stderr: str, stdout: str) -> None:
     Order matters: a rate limit can also mention a timeout, and the caller
     handles the two very differently (release-and-back-off vs retry in place).
     """
+    blob = f"{stderr}\n{stdout}"
+    exhausted, reset_at = _quota_exhausted(blob)
+    if exhausted:
+        detail = stderr.strip()[-500:] or _quota_message(blob) or "usage limit reached"
+        raise ModelQuotaExhausted(detail, reset_at=reset_at)
     if _looks_rate_limited(stderr, stdout):
         raise ModelRateLimited(stderr.strip()[-500:] or "provider reported a rate limit")
     if _looks_transient(stderr, stdout):
