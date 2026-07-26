@@ -377,8 +377,26 @@ above at all.
 
 Naming a module is a CLAIM, and a claim can be wrong. That is intended. A
 finding that cannot be wrong ("these genes are glycosyltransferases, therefore
-a glycosyltransferase locus") restates the input and says nothing. State what
-the module IS and what it DOES.
+a glycosyltransferase locus") restates the input and says nothing. Commit to
+what you think the module does and why.
+
+But mark the claim as yours. This pipeline separates two kinds of statement and
+never blurs them:
+
+  OBSERVED — what the annotations literally say. `PF00535` is present; these
+             eight genes are adjacent on one contig; this hit is 2,300 aa.
+  NAMED    — an identity asserted by a purpose-built caller (DefenseFinder,
+             HydDB), reaching you in `named_calls` with `evidence_level`.
+
+Your functional reading is NEITHER. It is a hypothesis inferred from
+co-annotation and neighbourhood, so write it as one: put it in
+`evidence.hypothesis`, keep `evidence.observations` to things literally in the
+packet, and include `UNVERIFIED` in `reason_codes` unless a named call covers
+the locus. Never phrase an inference so that it reads as caller output — do not
+write "this is a Gabija system" when what you have is adjacent PFAM domains.
+Write what you observed, then what you think it means, and let the two be told
+apart. A confident hypothesis marked as a hypothesis is exactly what is wanted;
+the same sentence dressed as an established call is not.
 
 DO NOT RE-INVENTORY WHAT A PURPOSE-BUILT CALLER ALREADY PRODUCED. Defence and
 antiviral systems are already called by DefenseFinder, with gene membership,
