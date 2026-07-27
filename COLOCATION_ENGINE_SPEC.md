@@ -453,22 +453,23 @@ Matching the reference exactly here means reproducing an arbitrary ordering.
 The deterministic rule is the better one to keep; the divergence should be
 documented rather than engineered away.
 
-**2. Whether the clustering gap is per-pair or per-contig.**
+**2. One reference call is unexplained by the reference's own rule.**
 
-The reference computes the allowed gap for each adjacent pair from the two
-genes' own `inter_gene_max_space`, resolved through `gene_ref` so an
-exchangeable inherits its parent's spacing, and takes the **minimum** of the two
-when both are defined — not the maximum. Only when neither defines one does the
-model-level value apply.
+The gap rule itself is reproduced exactly: the allowed gap for an adjacent pair
+comes from each gene's own `inter_gene_max_space`, resolved so an exchangeable
+inherits its parent's spacing, taking the **minimum** when both are defined —
+not the maximum — and falling back to the model value only when neither defines
+one. Verified against the reference implementation line for line.
 
-This engine passes a single gap for a whole contig. That agrees with the
-reference for every model whose genes declare no override, which is most of
-them, and diverges for models where some genes widen or narrow their own
-spacing. Moving to a per-pair threshold is the higher-fidelity choice.
+Despite that, a system has been observed reported by the reference as a single
+locus while spanning more intervening genes than any applicable override allows,
+with no loner, `multi_loci` or `multi_system` declared and no intervening hit to
+bridge the gap. Applying the shared rule to that case yields two clusters, which
+is what this engine produces. The divergence is therefore not a defect in the
+reimplementation; it is behaviour in the reference that its own clustering
+function does not account for, and it belongs upstream rather than in a local
+workaround.
 
-Note that the per-pair rule does not explain every reference call: a system has
-been observed reported as a single locus while spanning more intervening genes
-than the widest applicable override permits, with no loner, `multi_loci` or
-`multi_system` declared and no intervening hit to bridge it. That is
-unexplained by the reference's own clustering function and is worth an upstream
-question rather than a local workaround.
+Do not "fix" this by loosening clustering to match. That would trade a correct,
+explainable rule for agreement with an unexplained one, and would silently widen
+every other model's clusters too.
