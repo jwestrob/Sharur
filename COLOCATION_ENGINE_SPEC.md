@@ -26,7 +26,10 @@ Each system is defined by an XML file:
 <model inter_gene_max_space="5"        <!-- max gene-index gap between consecutive system genes -->
        min_mandatory_genes_required="2" <!-- minimum mandatory genes present -->
        min_genes_required="3"           <!-- minimum total genes (mandatory + accessory) -->
-       multi_loci="False"              <!-- can genes span multiple contigs? -->
+       multi_loci="False"              <!-- may a system be built from several separate
+                                            loci on ONE replicon? NOT "across contigs":
+                                            a replicon is a single contig, and a system
+                                            may never span two. -->
        vers="2.0">
 
   <gene name="System__GeneA" presence="mandatory"/>
@@ -405,3 +408,25 @@ has evolved past this design doc in the following ways:
 **Still outstanding:** the Testing section's unit/regression suite is not yet built — there
 are no `tests/` covering `colocation.py`. This overlaps the CLAUDE.md TODO ("Co-location
 engine regression test — run on Susan genomes and DPANN, compare against MacSyFinder").
+
+## Concordance with the reference implementation
+
+The engine is only worth having if it agrees with MacSyFinder, and agreement is
+measured, not assumed. `scripts/check_colocation_concordance.py` compares the two
+on `(genome_id, system_type, frozenset(protein_ids))`.
+
+Two rules make the comparison meaningful:
+
+- **Compare identity, not counts.** Two implementations can report the same
+  number of systems while disagreeing about which proteins are in them.
+- **Both sides must consume the same hits.** If the engine's input annotations
+  came from a different search than the reference run, a mismatch measures
+  search settings rather than co-location logic. Profiles outside Pfam generally
+  carry no GA/TC/NC cutoffs, so a scan left on defaults will not reproduce the
+  reference thresholds; take them from the reference output and set them
+  explicitly.
+
+Validate against the single-locus model set first. It exercises clustering and
+quorum without `multi_loci`, `loner` or per-gene spacing overrides, so a failure
+there is unambiguous. Only then move to model sets using those features, where
+the reference's own behaviour is subtle.

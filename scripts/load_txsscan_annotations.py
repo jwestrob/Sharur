@@ -38,9 +38,13 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 SOURCE = "txsscan"
+# The reference tool's header line names twelve columns but its data rows carry
+# eleven: `gene_system` is declared and never emitted. Parse to the arity that is
+# actually written, not to the arity that is advertised, and derive the system
+# from the gene name prefix instead.
 COLUMNS = [
     "hit_id", "replicon_name", "position_hit", "hit_sequence_length",
-    "gene_name", "gene_system", "i_eval", "score",
+    "gene_name", "i_eval", "score",
     "profile_coverage", "sequence_coverage", "begin", "end",
 ]
 
@@ -64,10 +68,12 @@ def parse_extract(path: Path) -> tuple[list[dict], dict]:
             elif "coverage threshold" in low:
                 thresholds["coverage"] = line.split("=")[-1].strip()
             continue
-        parts = line.split()
+        parts = line.split("\t") if "\t" in line else line.split()
         if len(parts) < len(COLUMNS):
             continue
         rec = dict(zip(COLUMNS, parts[: len(COLUMNS)]))
+        # `gene_name` is `<System>_<gene>`; the system prefix is the model family.
+        rec["gene_system"] = rec["gene_name"].split("_", 1)[0]
         rows.append(rec)
     return rows, thresholds
 
@@ -120,17 +126,16 @@ def load_into_db(data_dir: Path, frames: list[Path]) -> dict:
     con = duckdb.connect(str(db_path))
     cols = [r[0] for r in con.execute("DESCRIBE annotations").fetchall()]
     con.execute("DELETE FROM annotations WHERE source = ?", [SOURCE])
-    con.register("incoming", df)
-    # annotation_id may be generated; insert only the columns that exist.
     shared = [c for c in keep if c in cols]
     if "annotation_id" in cols:
-        con.execute(
-            f"""INSERT INTO annotations (annotation_id, {','.join(shared)})
-                SELECT 'txsscan_' || CAST(row_number() OVER () AS VARCHAR),
-                       {','.join(shared)} FROM incoming"""
-        )
-    else:
-        con.execute(f"INSERT INTO annotations ({','.join(shared)}) SELECT {','.join(shared)} FROM incoming")
+        # annotation_id is a plain INTEGER with no sequence, so ids are assigned
+        # here from the current maximum rather than by the database.
+        start = con.execute("SELECT COALESCE(MAX(annotation_id), 0) FROM annotations").fetchone()[0]
+        df = df.reset_index(drop=True)
+        df["annotation_id"] = range(start + 1, start + 1 + len(df))
+        shared = ["annotation_id", *shared]
+    con.register("incoming", df)
+    con.execute(f"INSERT INTO annotations ({','.join(shared)}) SELECT {','.join(shared)} FROM incoming")
     n = con.execute("SELECT COUNT(*) FROM annotations WHERE source = ?", [SOURCE]).fetchone()[0]
     prot = con.execute(
         "SELECT COUNT(DISTINCT protein_id) FROM annotations WHERE source = ?", [SOURCE]
