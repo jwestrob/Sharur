@@ -252,6 +252,54 @@ def verify_coverage_command(
         raise typer.Exit(code=1)
 
 
+@app.command("triage")
+def triage_command(
+    ops_db: Annotated[Path, typer.Option("--ops-db", exists=True, dir_okay=False)],
+    top: Annotated[int, typer.Option("--top", help="Groups to display")] = 25,
+    evidence: Annotated[
+        int, typer.Option("--evidence", help="Evidence snippets per cluster")
+    ] = 0,
+    min_genomes: Annotated[
+        int, typer.Option("--min-genomes", help="Drop groups below this genome count")
+    ] = 2,
+    system: Annotated[str | None, typer.Option("--system", help="Restrict to one system")] = None,
+    json_out: Annotated[Path | None, typer.Option("--json-out")] = None,
+) -> None:
+    """Reduce a candidate set to a short digest, with no model calls.
+
+    Census removal, nested-cluster folding, confound flagging and interest
+    ranking are all deterministic. Read the digest directly, or hand it to a
+    model for the one step that needs judgement -- reading the evidence prose.
+    Feeding raw occurrences to a model instead pays per token to recompute what
+    a query already knows.
+    """
+    from sharur.atlas_triage import build_digest, load_occurrences, render
+
+    digest = build_digest(
+        load_occurrences(ops_db), min_genomes=min_genomes, system=system
+    )
+    typer.echo(render(digest, top=top, evidence=evidence))
+    if json_out is not None:
+        payload = {
+            k: v for k, v in digest.items() if k != "entries"
+        } | {
+            "entries": [
+                {
+                    "system": e["system"],
+                    "subtype": e["subtype"],
+                    "accessions": list(e["accessions"]),
+                    "occurrences": e["occurrences"],
+                    "genomes": e["genomes"],
+                    "prevalence": round(e["prevalence"], 5),
+                    "confounds": e["confounds"],
+                    "is_census": e["is_census"],
+                }
+                for e in digest["entries"][:top]
+            ]
+        }
+        json_out.write_text(json.dumps(payload, indent=2, sort_keys=True))
+
+
 def main() -> None:
     app()
 
