@@ -54,7 +54,7 @@ def find_genome_faas(data_dir: Path) -> list[Path]:
 
 
 def run_defensefinder_on_genome(
-    faa_path: Path, output_dir: Path, workers: int = 8
+    faa_path: Path, output_dir: Path, workers: int = 8, db_type: str = "gembase"
 ) -> tuple[pd.DataFrame, pd.DataFrame] | None:
     """Run defense-finder on a single genome FAA, return (systems_df, genes_df)."""
     genome_name = faa_path.stem
@@ -69,7 +69,7 @@ def run_defensefinder_on_genome(
         "-o", str(genome_out),
         "-w", str(workers),
         "--preserve-raw",
-        "--db-type", "ordered_replicon",
+        "--db-type", db_type,
     ]
 
     result = subprocess.run(
@@ -298,6 +298,17 @@ def main():
     parser.add_argument("data_dir", type=Path, help="Dataset directory (e.g., data/susan_genomes/)")
     parser.add_argument("--workers", type=int, default=8, help="Number of HMM search workers")
     parser.add_argument("--keep-raw", action="store_true", help="Keep raw defense-finder output")
+    parser.add_argument(
+        "--db-type",
+        default="gembase",
+        choices=["gembase", "ordered_replicon", "unordered"],
+        help=(
+            "gembase scopes each contig as its own replicon and is correct for MAGs. "
+            "ordered_replicon declares a whole bin one replicon; that is only safe for "
+            "model sets that are strictly single-locus, and silently permits "
+            "cross-contig assembly for any model allowing multiple loci."
+        ),
+    )
     args = parser.parse_args()
 
     data_dir = args.data_dir
@@ -316,7 +327,9 @@ def main():
         genome_name = faa_path.stem
         logger.info(f"\n[{i}/{total_genomes}] Processing {genome_name}...")
 
-        result = run_defensefinder_on_genome(faa_path, df_output_dir, workers=args.workers)
+        result = run_defensefinder_on_genome(
+            faa_path, df_output_dir, workers=args.workers, db_type=args.db_type
+        )
         if result is None:
             continue
 
