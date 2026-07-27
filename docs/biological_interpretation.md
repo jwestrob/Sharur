@@ -18,6 +18,7 @@ Every row below has produced a wrong conclusion in a real session.
 | Any accession averaging **>10 hits/genome**, or a claimed function in **>50% of genomes** | You are looking at a fold/superfamily, not a function. | Co-annotation + ±8-gene neighborhood on 3–5 examples (protocol below). |
 | A trait "absent" because a name/description `LIKE` pattern returned zero | Naming artifact, not biology. `%glycogen%` misses the entire **GlgE** pathway (`Glyco_transf_5`, `GlgB_N`, `GlgP_C`, `GlgE_dom_N_S`, `CBM_48`). | Probe by accession family and pathway members, never by one English name. Report zeros only after ≥3 orthogonal patterns. |
 | Any absence in a MAG | Fragmentation, not biology. | Check contig count + completeness first. See MAG Interpretation below. |
+| Genes on **different contigs** of the same bin described as one system / operon / locus / cluster | A bin is a statistical grouping, not a chromosome. Two contigs may be different organisms, strain variants, or a misbin. Co-membership in a bin is **not** evidence of co-localization. | Every gene in the call must share one `contig_id`. If they do not, it is co-occurrence *in a bin* and must be labelled as such. See "Co-localization requires one contig" below. |
 
 **Escalation rule:** an HMM row is an *observation*. A functional name requires the
 co-annotation and neighborhood checks. A pathway claim requires multiple markers
@@ -78,6 +79,37 @@ print(f"{result[0]} = {result[1]}")  # PF04055 = Radical_SAM
 ```
 
 ## MAG Interpretation
+
+### Co-localization requires one contig
+
+A bin is a statistical grouping of contigs, not a chromosome. Contigs in one bin
+may belong to different organisms, to strain variants, or to a misbin. Physical
+adjacency is observable only *within* a contig.
+
+> **A system, operon, locus, cluster, cassette or island may only be called from
+> genes that share one `contig_id`.** Genes on different contigs of the same bin
+> are co-occurrence in a bin — a weaker and different claim — and must be written
+> that way, never as a locus.
+
+Components split across contigs are equally consistent with one fragmented
+system, two partial systems, or one system plus contamination. Nothing in the
+data distinguishes them, so the linkage must be reported as unresolved.
+
+Consequences for how work is set up:
+
+- **Any co-localization caller must be scoped per contig, not per bin.** Tools
+  that accept a whole genome as one ordered replicon will assemble systems
+  across contig boundaries, especially under models that permit a system to be
+  built from separate loci. Give the tool the contig as the unit of adjacency.
+- **Any agent reading a multi-contig packet must be told** that adjacency in the
+  packet is not adjacency in the genome.
+- **Filter cross-contig calls as an assertion, not as the remedy.** Dropping them
+  after a caller has chosen its best solution cannot undo a spurious assembly
+  having outcompeted a correct one.
+
+The cost of the rule is that a real system split by assembly fragmentation goes
+uncalled. That is the correct trade: an unobservable linkage must not be
+asserted. Report component-level evidence separately from system-level calls.
 
 **Cardinal Rule: Absence of evidence ≠ evidence of absence**
 

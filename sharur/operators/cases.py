@@ -696,12 +696,12 @@ def _mark_caller_profile_evidence(
     stay in ``observed_annotations``, where they are formally indistinguishable
     from a PFAM domain -- same shape, same fields, just a different `source`.
 
-    That asymmetry is a trap for a reading agent. In the Dormibacteria pilot,
-    32,853 proteins carried a raw DefenseFinder profile hit while only 1,879 sat
-    inside an assembled system: **94.3% are fragments the caller looked at and
-    declined to call.** An agent shown `Gabija__GajB_2` beside `Gabija__GajB_3`
-    with no marker reasonably concludes "Gabija system here" and reports it as a
-    discovery -- reproducing, at scale, calls the caller already rejected.
+    That asymmetry is a trap for a reading agent. Raw profile hits vastly
+    outnumber the proteins inside assembled systems, so most of them are
+    fragments the caller looked at and declined to call. An agent shown two
+    same-family profile hits side by side, with no marker distinguishing them
+    from a PFAM domain, reasonably concludes a system is present and reports it
+    as a discovery -- reproducing, at scale, calls the caller already rejected.
 
     Marking each hit `assembled` / `unassembled` makes the distinction legible
     without hiding anything: an unassembled hit is still real and occasionally

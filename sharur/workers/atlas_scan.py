@@ -433,6 +433,21 @@ sensor/effector pair, cognate immunity — where DefenseFinder produced NO named
 call at all. That is a candidate novel system and the one thing the caller
 cannot find by construction. Say explicitly that no named call covers it.
 
+NEVER CALL A LOCUS ACROSS TWO CONTIGS. A frame hands you many contigs at once.
+They are not adjacent to each other. A bin is a statistical grouping of contigs,
+not a chromosome, and contigs may come from different organisms, strain variants
+or a misbin, so physical adjacency is observable only WITHIN one contig.
+
+A system, operon, locus, cluster, cassette or island may therefore only be called
+from genes sharing ONE `contig_id`. Check the contig id of every gene before
+grouping them. Components split across contigs are equally consistent with one
+fragmented system, two partial systems, or one system plus contamination, and
+nothing in the packet distinguishes them.
+
+Split components are still worth reporting — as components, with
+`subject_refs.contig_ids` listing each one and the text stating that the linkage
+is unresolved. Do not promote them to a locus.
+
 DO NOT report a single annotated gene with no informative neighbourhood, or
 core machinery whose only claim is that it exists (ribosome, ATP synthase,
 Complex I, chaperones, the dcw/cell-division cluster, lone transporters or
