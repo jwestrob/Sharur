@@ -430,3 +430,45 @@ Validate against the single-locus model set first. It exercises clustering and
 quorum without `multi_loci`, `loner` or per-gene spacing overrides, so a failure
 there is unambiguous. Only then move to model sets using those features, where
 the reference's own behaviour is subtle.
+
+### Known divergences and where they come from
+
+Two implementation choices account for every observed difference from the
+reference. Both are defensible; neither is obviously wrong; both change results.
+
+**1. When to collapse competing profile hits on one protein.**
+
+The reference keeps one best hit per protein position, sorting by score
+descending and taking the first. Python's sort is stable, so when two profiles
+tie on score the winner is whichever was processed first — an ordering that
+follows profile iteration, not evidence. This engine breaks the same tie
+deterministically on e-value.
+
+The consequence appears wherever a short, promiscuous protein hits several
+related profiles within a fraction of a bit. Whichever profile wins decides
+which system the protein can join, so a tie decided differently removes a gene
+from one system and offers it to another.
+
+Matching the reference exactly here means reproducing an arbitrary ordering.
+The deterministic rule is the better one to keep; the divergence should be
+documented rather than engineered away.
+
+**2. Whether the clustering gap is per-pair or per-contig.**
+
+The reference computes the allowed gap for each adjacent pair from the two
+genes' own `inter_gene_max_space`, resolved through `gene_ref` so an
+exchangeable inherits its parent's spacing, and takes the **minimum** of the two
+when both are defined — not the maximum. Only when neither defines one does the
+model-level value apply.
+
+This engine passes a single gap for a whole contig. That agrees with the
+reference for every model whose genes declare no override, which is most of
+them, and diverges for models where some genes widen or narrow their own
+spacing. Moving to a per-pair threshold is the higher-fidelity choice.
+
+Note that the per-pair rule does not explain every reference call: a system has
+been observed reported as a single locus while spanning more intervening genes
+than the widest applicable override permits, with no loner, `multi_loci` or
+`multi_system` declared and no intervening hit to bridge it. That is
+unexplained by the reference's own clustering function and is worth an upstream
+question rather than a local workaround.
