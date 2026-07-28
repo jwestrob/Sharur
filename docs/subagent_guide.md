@@ -49,6 +49,30 @@ Use the Read tool to load any doc when you need its protocol. Don't guess — lo
   below. Run database writers sequentially. Use separate output files or the
   locked findings writer for report records.
 
+### Passing confounds to a sub-agent
+
+Quote a confound with its trigger condition. Never paraphrase one into a general
+rule.
+
+Every row in the confound table is keyed on an observable — the accession,
+source or pattern that puts you at risk. Strip that key and the rule applies
+wherever a word matches, which produces two failures at once: the check fires on
+data it cannot inform, and the sub-agent reports having "passed" it, which reads
+as rigour while being noise. A rule that cannot fail on the data in front of it
+is worse than no rule, because it launders an unexamined claim.
+
+```
+BAD   "Only credit hydrogenase with NiFeSe_Hases."
+GOOD  "hyddb group 4 / energy_conserving / ech_hydrogenase: the group-4
+       catalytic subunit is homologous to Complex I NuoD, so most hits are
+       Complex I. Require NiFeSe_Hases on the same protein to credit a group-4
+       hydrogenase. This does not apply to other groups."
+```
+
+The general form: **when you observe X, the trap is Y, so require Z — and state
+where it does not apply.** If a sub-agent reports clearing a confound, check
+that the trigger was present at all.
+
 ## Coordinated Worker Protocol
 
 Use the Ops HTTP service for distributed agents. One service process owns
