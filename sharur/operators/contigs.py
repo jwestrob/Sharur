@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 
 PACKET_VERSION = "1.0"
-GENOME_PACKET_VERSION = "genome-packet/2.0"
+GENOME_PACKET_VERSION = "genome-packet/2.1"
 GENOME_MODEL_PAYLOAD_SCHEMA = "atlas-model-packet/1.0"
 GENOME_PACKET_PACKING_SCHEMA = "genome-packet-packing/1.1"
 DEFAULT_GENOME_PACKET_BYTES = 512 * 1024
@@ -730,6 +730,21 @@ def _compact_protein_row(protein: dict[str, Any]) -> list[Any]:
     ]
 
 
+def _compact_contig(contig: dict[str, Any]) -> dict[str, Any]:
+    """The exact on-the-wire form of one contig segment.
+
+    Packing decisions must be made against this, not against the pre-compaction
+    segment: billing the frame for the verbose form makes the packer believe it
+    is full at roughly a quarter of the real payload, which multiplies frames
+    per genome and cancels the encoding saving outright.
+    """
+    return {
+        "bin_id": contig.get("bin_id"),
+        "contig_id": contig.get("contig_id"),
+        "proteins": [_compact_protein_row(p) for p in contig.get("proteins") or []],
+    }
+
+
 def _genome_model_payload(
     *,
     dataset_id: str | None,
@@ -737,16 +752,9 @@ def _genome_model_payload(
     frame_index: int,
     contigs: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    compact_contigs = [
-        {
-            # bin_id is retained per contig: the packet census uses it as a
-            # mixed-bin guard, and at one field per contig it costs nothing.
-            "bin_id": contig.get("bin_id"),
-            "contig_id": contig.get("contig_id"),
-            "proteins": [_compact_protein_row(p) for p in contig.get("proteins") or []],
-        }
-        for contig in contigs
-    ]
+    # bin_id is retained per contig: the packet census uses it as a mixed-bin
+    # guard, and at one field per contig it costs nothing.
+    compact_contigs = [_compact_contig(contig) for contig in contigs]
     return {
         "schema_version": GENOME_MODEL_PAYLOAD_SCHEMA,
         "packet_version": GENOME_PACKET_VERSION,
@@ -1236,7 +1244,7 @@ def get_genome_packet(
             return (
                 _frame_envelope_bytes
                 + _accumulated_contig_bytes[0]
-                + len(_canonical_bytes(segment))
+                + len(_canonical_bytes(_compact_contig(segment)))
                 + (count - 1)
             )
 
@@ -1247,7 +1255,7 @@ def get_genome_packet(
             never drift from `frame_contigs`.
             """
             frame_contigs.append(segment)
-            _accumulated_contig_bytes[0] += len(_canonical_bytes(segment))
+            _accumulated_contig_bytes[0] += len(_canonical_bytes(_compact_contig(segment)))
 
         for contig_row in contig_rows:
             contig_id = str(contig_row[0])
