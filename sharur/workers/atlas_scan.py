@@ -479,6 +479,18 @@ SCIENTIFIC CONTRACT — these are hard rules:
      further discriminates form I.
    - Ald_Xan_dh_C contains CoxL but also xanthine dehydrogenase and aldehyde
      oxidoreductase. Never call CO oxidation from the family alone.
+   - T2SSE / T2SSF are shared between the type-II secretion system and the
+     type-IV filament superfamily and do not discriminate. A T2SS requires an
+     outer-membrane secretin (GspD / Secretin / K02453). Without one, a locus
+     carrying Tad, TadE, TadB, TadC, K12510, K12511, K12513, RcpC or Flp is a
+     Tad/Flp pilus, not a T2SS. In a monoderm this matters twice over, since
+     there is no outer membrane for a secretin to sit in.
+   - FTHFS + MTHFR is the folate methyl branch, which is common in organisms
+     that are not acetogens. Wood-Ljungdahl requires acetyl-CoA synthase
+     (AcsB / CdhC / K14138). Without it, report a C1/folate module, not WL.
+   - Hcp or PAAR alone is not a type-VI secretion system; that needs TssB and
+     TssC. A contractile-injection locus without them is an eCIS, a tailocin
+     or a prophage tail.
    - Any accession appearing at >10 hits per genome describes a fold, not a
      function.
 3. Phrase domain-compatible interpretations as hypotheses and mark them
