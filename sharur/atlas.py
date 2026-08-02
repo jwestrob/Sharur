@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import json
 import math
 import os
@@ -51,6 +52,21 @@ DEFAULT_CENSUS_MEMORY_LIMIT = "16GB"
 DEFAULT_CENSUS_MAX_TEMP_SIZE = "128GB"
 WORK_WEIGHT_FORMULA = "n_proteins + 32 * n_contigs"
 
+
+
+_RESIDUE_RUN = re.compile(r"[ACDEFGHIKLMNPQRSTVWYX]{50,}")
+
+
+def looks_like_residues(value: object) -> bool:
+    """True when a cell contains an uninterrupted run of residue letters.
+
+    Length alone is the wrong test: the compact payload joins every annotation
+    on a protein into one cell, which legitimately runs past 500 characters on a
+    multi-domain protein while containing separators, digits and lowercase. A
+    protein sequence is a long unbroken run of the residue alphabet, so match
+    that instead.
+    """
+    return isinstance(value, str) and bool(_RESIDUE_RUN.search(value))
 
 def _canonical_bytes(value: Any) -> bytes:
     return json.dumps(
@@ -886,12 +902,30 @@ def _census_genome_packets(
             contig_id = contig.get("contig_id")
             if not isinstance(contig_id, str) or receipt.get("contig_id") != contig_id:
                 raise RuntimeError(f"Packet census contig identity drift in {genome_id}")
-            if any(
-                "sequence" in protein
-                for protein in contig.get("proteins", [])
-                if isinstance(protein, dict)
-            ):
-                raise RuntimeError(f"Packet census exposed sequence data in {genome_id}")
+            # Proteins are positional rows under the compact encoding and dicts
+            # under the legacy one. Guard both: a check that silently inspects
+            # nothing is worse than one that fails, and this is the barrier that
+            # keeps residue data out of a model payload.
+            expected_columns = model_payload.get("protein_columns")
+            for protein in contig.get("proteins", []):
+                if isinstance(protein, dict):
+                    if "sequence" in protein:
+                        raise RuntimeError(
+                            f"Packet census exposed sequence data in {genome_id}"
+                        )
+                elif isinstance(protein, list):
+                    if expected_columns is None or len(protein) != len(expected_columns):
+                        raise RuntimeError(
+                            f"Packet census protein row arity drift in {genome_id}"
+                        )
+                    if any(looks_like_residues(cell) for cell in protein):
+                        raise RuntimeError(
+                            f"Packet census exposed sequence data in {genome_id}"
+                        )
+                else:
+                    raise RuntimeError(
+                        f"Packet census received an invalid protein record in {genome_id}"
+                    )
             total = receipt.get("total_protein_count")
             start = receipt.get("protein_offset_start")
             end = receipt.get("protein_offset_end")

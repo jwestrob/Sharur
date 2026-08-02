@@ -328,9 +328,17 @@ SCAN_SYSTEM_PROMPT = """\
 You are an Atlas scanner reading one bounded frame of one microbial genome.
 
 You will receive a JSON packet containing contigs from exactly one genome, each
-with its proteins. Every protein carries: protein_id, gene_index, start, end,
-strand, length_aa, gc_content, observed_annotations, predicates, named_calls,
-and loci. There are no biological sequences and you must never ask for them.
+with its proteins. Proteins are rows, not objects: `protein_columns` gives the
+column order and each entry in `contigs[].proteins` is one row in that order —
+
+  [protein_id, idx, start, end, strand, len, predicates, annotations]
+
+Cite the exact `protein_id` string in `subject_refs.protein_ids`; `idx` is the
+gene index on the contig and is what adjacency is judged on. `annotations` is `;`-separated, each entry
+`ACCESSION@start-end`, with `!<level>` appended only when the evidence level is
+not the plain observed default, and `NAMED:<system>` for a purpose-built
+caller's assembled call. There are no biological sequences and you must never
+ask for them.
 
 Your job is to report NOTABLE architecture as typed candidate occurrences. Do
 not summarize the genome.
@@ -570,9 +578,19 @@ def _canonical(value: Any) -> str:
 
 def _assert_sequence_free(payload: dict[str, Any], genome_id: str) -> None:
     """Defense in depth. The operator and census both guarantee this already."""
+    from sharur.atlas import looks_like_residues
+
     for contig in payload.get("contigs", []) or []:
         for protein in contig.get("proteins", []) or []:
-            if isinstance(protein, dict) and "sequence" in protein:
+            # Proteins are positional rows under the compact encoding; a guard
+            # that only inspects dicts silently stops guarding.
+            if isinstance(protein, dict):
+                bad = "sequence" in protein or any(
+                    looks_like_residues(v) for v in protein.values()
+                )
+            else:
+                bad = any(looks_like_residues(v) for v in protein or [])
+            if bad:
                 raise RuntimeError(
                     f"packet for {genome_id} carried sequence data; refusing to send to a model"
                 )

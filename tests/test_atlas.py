@@ -259,9 +259,13 @@ def test_atlas_packet_census_blocks_target_exceeding_singleton(tmp_path):
         INSERT INTO annotations(
             annotation_id, protein_id, source, accession, name, description,
             evalue, score
-        ) VALUES (1, 'a_p1', 'pfam', 'PF-LARGE', 'large_record', ?, 1e-20, 80)
+        ) VALUES (1, 'a_p1', 'pfam', ?, 'large_record', '', 1e-20, 80)
         """,
-        ["x" * 5_000],
+        # The oversize must sit in a field the model payload actually carries.
+        # `description` is emitted by no source in practice (empty in 4.79M of
+        # 4.88M rows) and the compact encoding drops it, so planting the bulk
+        # there would exercise nothing.
+        ["PF-LARGE-" + "9" * 5_000],  # non-residue filler: this test is about size, not sequence detection
     )
     store.close()
     seal = build_dataset_seal(database, max_hash_bytes=0)

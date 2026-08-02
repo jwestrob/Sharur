@@ -192,8 +192,11 @@ def test_genome_packet_combines_contigs_and_never_crosses_bins(store):
         "contig_002",
     ]
     assert {contig["bin_id"] for contig in payload["contigs"]} == {"bin_001"}
+    # Proteins are positional rows under the compact encoding; resolve the
+    # column by name so this stays correct if the column order changes.
+    pid_col = payload["protein_columns"].index("protein_id")
     protein_ids = [
-        protein["protein_id"]
+        protein[pid_col]
         for contig in payload["contigs"]
         for protein in contig["proteins"]
     ]
@@ -231,8 +234,9 @@ def test_genome_packet_splits_only_oversized_contig_with_contiguous_receipts(sto
         )
         frame_count += 1
         receipts.extend(result.raw["coverage_receipts"])
+        pid_col = result.raw["model_payload"]["protein_columns"].index("protein_id")
         protein_ids.extend(
-            protein["protein_id"]
+            protein[pid_col]
             for contig in result.raw["model_payload"]["contigs"]
             for protein in contig["proteins"]
         )

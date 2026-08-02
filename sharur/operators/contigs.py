@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 
 PACKET_VERSION = "1.0"
-GENOME_PACKET_VERSION = "genome-packet/1.1"
+GENOME_PACKET_VERSION = "genome-packet/2.0"
 GENOME_MODEL_PAYLOAD_SCHEMA = "atlas-model-packet/1.0"
 GENOME_PACKET_PACKING_SCHEMA = "genome-packet-packing/1.1"
 DEFAULT_GENOME_PACKET_BYTES = 512 * 1024
@@ -685,6 +685,51 @@ def get_contig_packet(
         )
 
 
+PROTEIN_COLUMNS = ["protein_id", "idx", "start", "end", "strand", "len", "predicates", "annotations"]
+
+
+def _compact_protein_row(protein: dict[str, Any]) -> list[Any]:
+    """One protein as a positional row.
+
+    A dict per protein repeats every key name once per record. At ~480 proteins
+    a frame that is 16% of the payload, paid for information the column header
+    already carries. Redundancy inside each record costs more again: the
+    annotation objects repeat the parent `protein_id`, duplicate `accession`
+    into `name`, carry empty `description`, and serialise scores at float64
+    precision that no consumer reads.
+
+    Everything the scan prompt refers to is preserved. `evidence_level` is
+    emitted only when it is not the `observed` default, which keeps the
+    purpose-built-caller boundary visible while dropping it from the ~98% of
+    annotations where it says nothing.
+    """
+    annotations: list[str] = []
+    for ann in protein.get("observed_annotations") or []:
+        text = str(ann.get("accession") or "")
+        if ann.get("start_aa") is not None:
+            text += f"@{ann['start_aa']}-{ann['end_aa']}"
+        level = ann.get("evidence_level")
+        if level and level != "observed":
+            text += f"!{level}"
+        annotations.append(text)
+    for call in protein.get("named_calls") or []:
+        annotations.append(f"NAMED:{call.get('call_type')}")
+    for locus in protein.get("loci") or []:
+        annotations.append(f"LOCUS:{locus.get('locus_type')}")
+    # `unannotated` restates an empty annotation list, which is already visible.
+    predicates = [p for p in (protein.get("predicates") or []) if p != "unannotated"]
+    return [
+        protein.get("protein_id"),
+        protein.get("gene_index"),
+        protein.get("start"),
+        protein.get("end"),
+        protein.get("strand"),
+        protein.get("length_aa"),
+        ",".join(predicates),
+        ";".join(annotations),
+    ]
+
+
 def _genome_model_payload(
     *,
     dataset_id: str | None,
@@ -692,6 +737,16 @@ def _genome_model_payload(
     frame_index: int,
     contigs: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    compact_contigs = [
+        {
+            # bin_id is retained per contig: the packet census uses it as a
+            # mixed-bin guard, and at one field per contig it costs nothing.
+            "bin_id": contig.get("bin_id"),
+            "contig_id": contig.get("contig_id"),
+            "proteins": [_compact_protein_row(p) for p in contig.get("proteins") or []],
+        }
+        for contig in contigs
+    ]
     return {
         "schema_version": GENOME_MODEL_PAYLOAD_SCHEMA,
         "packet_version": GENOME_PACKET_VERSION,
@@ -699,7 +754,8 @@ def _genome_model_payload(
         "bin_id": genome["bin_id"],
         "frame_index": frame_index,
         "genome": genome,
-        "contigs": contigs,
+        "protein_columns": PROTEIN_COLUMNS,
+        "contigs": compact_contigs,
     }
 
 
