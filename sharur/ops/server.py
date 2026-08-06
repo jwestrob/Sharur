@@ -161,6 +161,13 @@ class OpsRuntime:
     owner_lock: SQLiteServerLock | None = None
     maintenance_task: asyncio.Task[None] | None = None
     last_backup_ts: float = 0.0
+    # Cached at startup so liveness never needs a pooled connection. The schema
+    # version cannot change under a running server, so reading it per request
+    # bought nothing and cost everything: /health blocked on pool.acquire(),
+    # which meant the health check reported "down" precisely when the pool was
+    # saturated -- i.e. when the service was busy but perfectly healthy.
+    schema_version: int | None = None
+    started_ts: float = field(default_factory=time.time)
     state_lock: threading.Lock = field(default_factory=threading.Lock)
     request_count: int = 0
     request_error_count: int = 0
@@ -287,6 +294,11 @@ class CandidateOccurrenceIn(StrictModel):
     )
     idempotency_key: str = Field(min_length=1, max_length=512)
     schema_version: int = Field(default=1, ge=1)
+
+
+class CandidateOccurrenceBatchIn(StrictModel):
+    agent_id: str | None = Field(default=None, min_length=1, max_length=256)
+    candidates: list[CandidateOccurrenceIn] = Field(min_length=1, max_length=1_000)
 
 
 class CandidateClusterIn(StrictModel):
@@ -1045,6 +1057,50 @@ def create_candidate_occurrence(candidate: CandidateOccurrenceIn, request: Reque
             raise _conflict(exc) from exc
     _notify(request, "candidate_occurrence", candidate_id)
     return result
+
+
+@router.post("/review/candidates/batch", status_code=201)
+def create_candidate_occurrences(batch: CandidateOccurrenceBatchIn, request: Request):
+    """Insert a genome's candidates under one write transaction.
+
+    One request replacing ~19 collapses both the HTTP round trips and, more
+    importantly, ~19 `BEGIN IMMEDIATE` acquisitions of SQLite's single global
+    write lock into one.
+    """
+    _require(request, "worker", "coordinator", "operator")
+    actor = _actor_id(request, batch.agent_id or batch.candidates[0].agent_id)
+    payload = [
+        {
+            "campaign_id": c.campaign_id,
+            "dataset_id": c.dataset_id,
+            "unit_id": c.unit_id,
+            "genome_id": c.genome_id,
+            "candidate_type": c.candidate_type,
+            "signature_schema": c.signature_schema,
+            "signature": c.signature,
+            "evidence": c.evidence,
+            "verification": c.verification,
+            "subject_refs": c.subject_refs,
+            "task_id": c.task_id,
+            "reason_codes": c.reason_codes,
+            "uncertainty": c.uncertainty,
+            "reduction_features": c.reduction_features,
+            "provenance": c.provenance,
+            "evidence_bundle_hash": c.evidence_bundle_hash,
+            "idempotency_key": c.idempotency_key,
+            "schema_version": c.schema_version,
+        }
+        for c in batch.candidates
+    ]
+    with _store(request, agent_id=actor) as store:
+        try:
+            candidate_ids = store.create_candidate_occurrences(payload)
+            results = [store.get_candidate_occurrence(cid) for cid in candidate_ids]
+        except ValueError as exc:
+            raise _conflict(exc) from exc
+    for candidate_id in candidate_ids:
+        _notify(request, "candidate_occurrence", candidate_id)
+    return results
 
 
 @router.get("/review/candidates")
@@ -2218,15 +2274,48 @@ def whoami(request: Request):
 
 @router.get("/health")
 def health(request: Request):
+    """Liveness. Answers from memory and MUST NOT acquire a pooled connection.
+
+    A health check that contends for the resource it reports on cannot
+    distinguish "saturated" from "dead" -- it fails exactly when the service is
+    busiest, which is when an operator most needs a truthful answer. Pool
+    saturation is therefore reported as *data* (`pool`, `saturated`) rather
+    than expressed by hanging. Use /ready for a check that proves the database
+    is actually reachable.
+    """
+    runtime = _runtime(request)
+    pool_stats = runtime.pool.stats() if runtime.pool is not None else None
+    saturated = bool(
+        pool_stats
+        and pool_stats.get("checked_out", 0) >= pool_stats.get("size", 0) > 0
+    )
+    return {
+        "status": "ok",
+        "db": str(runtime.db_path),
+        "schema_version": runtime.schema_version,
+        "auth_required": runtime.api_token is not None,
+        "sqlite_owner": "single-http-server",
+        "pool": pool_stats,
+        "saturated": saturated,
+        "uptime_seconds": time.time() - runtime.started_ts,
+        "ts": time.time(),
+    }
+
+
+@router.get("/ready")
+def ready(request: Request):
+    """Readiness: proves the database is reachable by actually touching it.
+
+    This one MAY block on the pool -- that is the point of it. Callers that
+    need "can this serve work right now" ask here; callers that need "is this
+    process alive" ask /health and always get an answer.
+    """
     runtime = _runtime(request)
     with _store(request) as store:
         database = store.stats()["database"]
     return {
-        "status": "ok",
-        "db": str(runtime.db_path),
+        "status": "ready",
         "schema_version": database["schema_version"],
-        "auth_required": runtime.api_token is not None,
-        "sqlite_owner": "single-http-server",
         "pool": runtime.pool.stats() if runtime.pool is not None else None,
         "ts": time.time(),
     }
@@ -2359,6 +2448,20 @@ def create_app(
                 runtime.db_path,
                 size=runtime.pool_size,
             )
+            # Read the schema version once, while nothing is contending, so
+            # /health can answer from memory for the rest of the process life.
+            _probe = runtime.pool.acquire()
+            try:
+                _store_probe = OpsStore(
+                    runtime.db_path,
+                    agent_id="server",
+                    connection=_probe,
+                    initialize=False,
+                )
+                with _store_probe as probe:
+                    runtime.schema_version = probe.stats()["database"]["schema_version"]
+            finally:
+                runtime.pool.release(_probe)
             runtime.maintenance_task = asyncio.create_task(
                 _maintenance_loop(runtime),
                 name="sharur-ops-maintenance",

@@ -559,3 +559,33 @@ def test_only_one_http_server_can_own_a_database(tmp_path: Path) -> None:
         match="Direct SQLite access is unavailable",
     ):
         OpsStore(db_path)
+
+
+def test_health_answers_without_a_pooled_connection(tmp_path: Path) -> None:
+    """Liveness must not contend for the pool it reports on.
+
+    Regression: /health called _store() -> pool.acquire(), so when the pool
+    saturated under load the health check blocked until the acquire timeout and
+    an operator could not tell "busy" from "dead". A healthy run was aborted on
+    exactly that false signal. Draining the pool must not stop /health from
+    answering, and saturation must be reported as data instead.
+    """
+    app = create_app(db_path=tmp_path / "health" / "ops.db", api_token=None)
+    with TestClient(app) as client:
+        pool = app.state.ops_runtime.pool
+        size = pool.stats()["size"]
+        held = [pool.acquire() for _ in range(size)]
+        try:
+            assert pool.stats()["checked_out"] == size
+            response = client.get("/health")
+            assert response.status_code == 200
+            body = response.json()
+            assert body["status"] == "ok"
+            assert body["saturated"] is True
+            assert body["schema_version"] is not None
+        finally:
+            for connection in held:
+                pool.release(connection)
+
+        assert client.get("/health").json()["saturated"] is False
+        assert client.get("/ready").status_code == 200
