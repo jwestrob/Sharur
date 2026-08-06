@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 
 PACKET_VERSION = "1.0"
-GENOME_PACKET_VERSION = "genome-packet/2.1"
+GENOME_PACKET_VERSION = "genome-packet/2.2"
 GENOME_MODEL_PAYLOAD_SCHEMA = "atlas-model-packet/1.0"
 GENOME_PACKET_PACKING_SCHEMA = "genome-packet-packing/1.1"
 DEFAULT_GENOME_PACKET_BYTES = 512 * 1024
@@ -688,6 +688,37 @@ def get_contig_packet(
 PROTEIN_COLUMNS = ["protein_id", "idx", "start", "end", "strand", "len", "predicates", "annotations"]
 
 
+# Sources whose `name`/`description` carry information the accession does not.
+# Measured over 11.4M annotation rows: for pfam, kegg, defensefinder and hyddb,
+# `name` equals `accession` and `description` is empty in 100% of rows, so
+# dropping them is lossless. These three are the exceptions:
+#   hyddb_subgroup       accession is a coarse bucket ("nife_group1") while the
+#                        description carries the actual call ("HydDB DIAMOND:
+#                        [NiFe] Group_1f"). Dropping it destroyed subgroup
+#                        resolution -- 1d vs 1f vs 4g -- and left every scan
+#                        candidate unable to assign a hydrogenase class.
+#   defensefinder_system name != accession AND the description carries the
+#                        system instance id, so multi-protein system membership
+#                        was unrecoverable from the row.
+#   txsscan              description carries the system name.
+# Cost: 48,671 of 11.4M rows (0.43%) in the Limnocylindria corpus.
+_DETAILED_ANNOTATION_SOURCES = frozenset(
+    {"hyddb_subgroup", "defensefinder_system", "txsscan"}
+)
+
+
+def _annotation_detail(ann: dict[str, Any]) -> str:
+    """Non-redundant free text for the few sources that carry any."""
+    if str(ann.get("source") or "") not in _DETAILED_ANNOTATION_SOURCES:
+        return ""
+    accession = str(ann.get("accession") or "")
+    description = str(ann.get("description") or "").strip()
+    if description:
+        return description
+    name = str(ann.get("name") or "").strip()
+    return name if name and name != accession else ""
+
+
 def _compact_protein_row(protein: dict[str, Any]) -> list[Any]:
     """One protein as a positional row.
 
@@ -711,6 +742,9 @@ def _compact_protein_row(protein: dict[str, Any]) -> list[Any]:
         level = ann.get("evidence_level")
         if level and level != "observed":
             text += f"!{level}"
+        detail = _annotation_detail(ann)
+        if detail:
+            text += f"={detail}"
         annotations.append(text)
     for call in protein.get("named_calls") or []:
         annotations.append(f"NAMED:{call.get('call_type')}")
