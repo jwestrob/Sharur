@@ -455,6 +455,31 @@ class SharurOps:
         )
         return str(response.json()["id"])
 
+    def create_candidate_occurrences(
+        self, candidates: list[dict[str, Any]]
+    ) -> list[str]:
+        """Submit many candidates in one request and one write transaction.
+
+        Retryable as a mutation because every item carries an idempotency key,
+        so replaying the batch re-inserts nothing that already landed.
+        """
+        if not candidates:
+            return []
+        payload = [dict(item) for item in candidates]
+        for item in payload:
+            item.setdefault("agent_id", self.agent_id)
+            item.setdefault("reason_codes", [])
+            item.setdefault("uncertainty", {})
+            item.setdefault("reduction_features", {})
+            item.setdefault("provenance", {})
+        response = self._request(
+            "POST",
+            "/review/candidates/batch",
+            json={"agent_id": self.agent_id, "candidates": payload},
+            retry_mutation=True,
+        )
+        return [str(row["id"]) for row in response.json()]
+
     def list_candidate_occurrences(self, **filters: Any) -> list[dict[str, Any]]:
         return self._request("GET", "/review/candidates", params=filters).json()
 

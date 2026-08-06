@@ -1305,3 +1305,64 @@ def test_deterministic_audit_sampling_and_http_review_surface(tmp_path) -> None:
             "related_finding_id": finding_ids[1],
             "relation": "supports",
         }
+
+
+def test_batch_candidates_share_one_write_transaction(tmp_path):
+    """A genome's candidates must cost ONE write lock acquisition, not N.
+
+    Submitting ~19 candidates per genome individually meant ~19 BEGIN IMMEDIATE
+    acquisitions of SQLite's single global write lock, which under an 8-worker
+    fleet drove write-lock waits to 122 seconds and starved the connection pool
+    until requests failed with 500s. `transaction_wait_observer` fires once per
+    immediate transaction, so it counts exactly what we are trying to reduce.
+    """
+    immediate: list[float] = []
+    ops = OpsStore(
+        tmp_path / "ops" / "sharur_ops.db",
+        agent_id="worker",
+        transaction_wait_observer=immediate.append,
+    )
+    campaign_id = _campaign(ops)
+
+    def payload(n: int) -> list[dict]:
+        return [
+            {
+                "campaign_id": campaign_id,
+                "dataset_id": "dataset:sealed",
+                "unit_id": f"g{n}",
+                "genome_id": f"g{n}",
+                "candidate_type": "architecture",
+                "signature_schema": "architecture/v1",
+                "signature": {"domains": ["A", f"B{i}"]},
+                "evidence": {"protein_id": f"g{n}_p{i}"},
+                "verification": [],
+                "subject_refs": {"genome_id": f"g{n}", "protein_id": f"g{n}_p{i}"},
+                "reduction_features": {"strata": {"phylum": "P"}},
+                "idempotency_key": f"candidate:g{n}:{i}",
+            }
+            for i in range(19)
+        ]
+
+    # one-at-a-time: one write transaction each
+    immediate.clear()
+    for item in payload(1):
+        ops.create_candidate_occurrence(**item)
+    individual = len(immediate)
+
+    # batched: one write transaction for all of them
+    immediate.clear()
+    ids = ops.create_candidate_occurrences(payload(2))
+    batched = len(immediate)
+
+    assert len(ids) == 19
+    assert individual == 19, f"expected one txn per candidate, got {individual}"
+    assert batched == 1, f"batch must take the write lock once, took {batched}"
+
+    # identical rows land either way
+    assert len(ops.list_candidate_occurrences(campaign_id=campaign_id)) == 38
+
+    # and the batch stays idempotent on replay
+    immediate.clear()
+    again = ops.create_candidate_occurrences(payload(2))
+    assert again == ids, "replayed batch must return the original ids"
+    assert len(ops.list_candidate_occurrences(campaign_id=campaign_id)) == 38

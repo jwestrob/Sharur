@@ -695,6 +695,9 @@ class AtlasScanWorker:
         )
         self.query = SharurQuery(query_url, api_token=query_token)
         self._stop = False
+        # Last explicit lease renewal, so per-frame heartbeats can be skipped
+        # while the lease is nowhere near expiry.
+        self._last_heartbeat_ts = 0.0
 
     # ---------------------------------------------------------------- lifecycle
 
@@ -738,7 +741,12 @@ class AtlasScanWorker:
                     task_types=[TASK_TYPE],
                     lease_seconds=self.lease_seconds,
                 )
-            except requests.HTTPError as exc:
+            except requests.RequestException as exc:
+                # RequestException, not HTTPError: a reset connection or read
+                # timeout against Ops is transport, and ConnectionError is a
+                # sibling of HTTPError rather than a subclass. Catching only
+                # HTTPError here let a single reset at claim kill the worker
+                # outright while the queue was still full.
                 LOGGER.warning("claim failed: %s", exc)
                 time.sleep(idle_sleep)
                 continue
@@ -816,13 +824,21 @@ class AtlasScanWorker:
         """
         if not self.sweep_failed or self._sweeps >= self.max_sweeps:
             return False
+        # Count the ATTEMPT, not the success. Incrementing only when a sweep
+        # actually requeued something left no-op sweeps unbounded: an idle
+        # worker re-swept on every poll forever, and each sweep takes the
+        # global SQLite write lock via BEGIN IMMEDIATE whether or not it has
+        # anything to reset. Eight idle workers turned that into a write-lock
+        # storm (848 calls, 122 s lock waits) that starved the workers doing
+        # real work. max_sweeps is a bound on sweeping, not on productivity.
+        self._sweeps += 1
         time.sleep(random.uniform(0, 3.0))
         try:
             result = self.ops.reset_failed_tasks(
                 campaign_id=self.campaign_id,
                 only_transient=True,
             )
-        except requests.HTTPError as exc:
+        except requests.RequestException as exc:
             LOGGER.warning("failed-task sweep rejected: %s", exc)
             return False
         reset = result.get("reset") or []
@@ -834,7 +850,6 @@ class AtlasScanWorker:
                     len(skipped),
                 )
             return False
-        self._sweeps += 1
         LOGGER.info(
             "sweep %s/%s: requeued %s attempt-exhausted task(s); %s left alone",
             self._sweeps,
@@ -866,6 +881,17 @@ class AtlasScanWorker:
         campaign_id = task.get("campaign_id") or self.campaign_id
         checkpoint_key = params.get("checkpoint_key", "atlas_progress")
         checkpoint_interval = int(params.get("checkpoint_interval_frames", 1) or 1)
+
+        # Reset the heartbeat gate PER TASK, not per worker. `_lease_keepalive`
+        # covers only the model subprocess, so between frames the per-frame
+        # heartbeat is the sole lease renewal. Tracking last-beat on the worker
+        # meant a genome claimed shortly after another genome's beat inherited
+        # a spent timer and ran up to lease_seconds/3 with no renewal of its
+        # own lease. Zeroing here guarantees every genome beats on its first
+        # frame and then at most once per lease_seconds/3 thereafter -- one
+        # beat per genome instead of one per frame, without giving up the
+        # margin that keeps a slow genome from being reclaimed mid-scan.
+        self._last_heartbeat_ts = 0.0
 
         LOGGER.info("task %s genome %s (%s proteins)", task_id, genome_id, params.get("n_proteins"))
 
@@ -1265,43 +1291,77 @@ class AtlasScanWorker:
         a replayed locus does not.
         """
         persisted: list[dict[str, Any]] = []
+        pending: list[tuple[dict[str, Any], dict[str, Any]]] = []
         for cand in candidates:
             prov = cand.get("provenance") or {}
-            try:
-                self.ops.create_candidate_occurrence(
-                    campaign_id=campaign_id,
-                    dataset_id=params["dataset_id"],
-                    unit_id=params["unit_id"],
-                    genome_id=params["genome_id"],
-                    candidate_type=cand["candidate_type"],
-                    signature_schema=cand["signature_schema"],
-                    signature=cand["signature"],
-                    evidence=cand["evidence"],
-                    verification=[],
-                    subject_refs=cand["subject_refs"],
-                    task_id=task_id,
-                    reason_codes=cand["reason_codes"],
-                    uncertainty=cand["uncertainty"],
-                    reduction_features=cand.get("reduction_features") or {},
-                    provenance=prov,
-                    idempotency_key=_stable_key(
-                        task_id,
-                        str(prov.get("frame_index", "")),
-                        _canonical(
-                            {
-                                "candidate_type": cand["candidate_type"],
-                                "signature": cand["signature"],
-                                # subject_refs are validated identifiers -- the
-                                # protein and contig ids of the locus. They
-                                # distinguish two findings that share a
-                                # collapsed signature, which is what the key
-                                # must do, without depending on anything the
-                                # model writes freehand.
-                                "subject_refs": cand["subject_refs"],
-                            }
+            pending.append(
+                (
+                    cand,
+                    dict(
+                        campaign_id=campaign_id,
+                        dataset_id=params["dataset_id"],
+                        unit_id=params["unit_id"],
+                        genome_id=params["genome_id"],
+                        candidate_type=cand["candidate_type"],
+                        signature_schema=cand["signature_schema"],
+                        signature=cand["signature"],
+                        evidence=cand["evidence"],
+                        verification=[],
+                        subject_refs=cand["subject_refs"],
+                        task_id=task_id,
+                        reason_codes=cand["reason_codes"],
+                        uncertainty=cand["uncertainty"],
+                        reduction_features=cand.get("reduction_features") or {},
+                        provenance=prov,
+                        idempotency_key=_stable_key(
+                            task_id,
+                            str(prov.get("frame_index", "")),
+                            _canonical(
+                                {
+                                    "candidate_type": cand["candidate_type"],
+                                    "signature": cand["signature"],
+                                    # subject_refs are validated identifiers --
+                                    # the protein and contig ids of the locus.
+                                    # They distinguish two findings that share a
+                                    # collapsed signature, which is what the key
+                                    # must do, without depending on anything the
+                                    # model writes freehand.
+                                    "subject_refs": cand["subject_refs"],
+                                }
+                            ),
                         ),
                     ),
                 )
+            )
+        if not pending:
+            return []
+
+        # Fast path: one request, one write transaction for the whole frame.
+        # Submitting these individually was the single largest source of write
+        # traffic (~19 per genome, each taking SQLite's global write lock).
+        try:
+            self.ops.create_candidate_occurrences([kw for _, kw in pending])
+        except requests.HTTPError as exc:
+            if not _is_conflict(exc):
+                raise
+            if _is_lease_failure(exc):
+                raise LeaseLost(str(exc)) from exc
+            # The batch is atomic, so ONE rejected record rolls back its
+            # siblings. Fall back to per-candidate submission so the offender
+            # can be isolated and skipped -- preserving the property that a
+            # single bad candidate never costs the whole genome.
+            LOGGER.warning(
+                "batched candidate submission rejected on task %s; "
+                "retrying individually to isolate it: %s",
+                task_id,
+                _conflict_detail(exc),
+            )
+        else:
+            return [cand for cand, _ in pending]
+
+        for cand, kwargs in pending:
+            try:
+                self.ops.create_candidate_occurrence(**kwargs)
             except requests.HTTPError as exc:
                 if not _is_conflict(exc):
                     raise
@@ -1340,7 +1400,17 @@ class AtlasScanWorker:
         deduplicated server-side by idempotency key.
         """
         try:
-            self.ops.heartbeat_task(task_id, lease_seconds=self.lease_seconds)
+            # Beat only when the lease is actually approaching expiry. A
+            # background keepalive thread already renews every lease_seconds/3,
+            # and lease_seconds is 2400 against a ~150s genome, so beating once
+            # per frame renewed a lease that could not expire -- pure write
+            # traffic against SQLite's single global write lock. The elapsed
+            # check keeps the protection for a genuinely stalled frame while
+            # removing the redundant beats from the common path.
+            now = time.time()
+            if now - self._last_heartbeat_ts >= self.lease_seconds / 3.0:
+                self.ops.heartbeat_task(task_id, lease_seconds=self.lease_seconds)
+                self._last_heartbeat_ts = now
             # Frames and contig_state both grow with contig count, and the store
             # caps inline JSON at 256 KB. A fragmented assembly (215 contigs per
             # frame) crossed that at frame 4, so the checkpoint was refused and

@@ -2319,6 +2319,20 @@ class OpsStore(ReviewStoreMixin):
         if task_ids:
             clauses.append(f"id IN ({','.join('?' * len(task_ids))})")
             params.extend(task_ids)
+        # Probe outside the write transaction. BEGIN IMMEDIATE takes the global
+        # SQLite write lock the moment it is issued, so an unconditional
+        # transaction here made every *no-op* sweep serialise against real work
+        # -- the dominant source of write-lock contention under a polling fleet.
+        # Racing a row in between probe and transaction is harmless: sweeps are
+        # periodic and idempotent, so a task that appears in the gap is picked
+        # up by the next sweep instead of this one.
+        with self._lock:
+            has_work = self._conn.execute(
+                f"SELECT 1 FROM tasks WHERE {' AND '.join(clauses)} LIMIT 1",
+                params,
+            ).fetchone()
+        if has_work is None:
+            return {"reset": [], "skipped": []}
         with self._lock, self._transaction():
             rows = self._conn.execute(
                 f"SELECT * FROM tasks WHERE {' AND '.join(clauses)} ORDER BY id",

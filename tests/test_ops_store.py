@@ -699,3 +699,43 @@ def test_ceiling_clamps_the_result_not_merely_the_entry(tmp_path):
         "SELECT max_attempts FROM tasks WHERE id=?", (task_id,)
     ).fetchone()
     assert row["max_attempts"] == 20, "granted budget must not exceed the ceiling"
+
+
+def test_noop_sweep_does_not_take_the_write_lock(tmp_path):
+    """A sweep with nothing to reset must not serialise against real work.
+
+    `BEGIN IMMEDIATE` takes the global SQLite write lock the instant it is
+    issued, so an unconditional transaction here made every no-op sweep
+    contend with the workers doing actual work. Under a polling fleet that
+    was the dominant source of write-lock contention: eight idle workers
+    produced 848 no-op sweeps and drove write-lock waits to 122 s, which
+    starved the connection pool until requests failed with 500s.
+
+    `transaction_wait_observer` fires only for immediate transactions, so it
+    doubles as a probe for "did this path take the write lock".
+    """
+    immediate_transactions: list[float] = []
+    coordinator = OpsStore(
+        tmp_path / "ops" / "sharur_ops.db",
+        agent_id="coordinator",
+        transaction_wait_observer=immediate_transactions.append,
+    )
+
+    # Nothing has failed, so there is nothing to requeue.
+    result = coordinator.reset_failed_tasks(only_transient=True)
+
+    assert result == {"reset": [], "skipped": []}
+    assert immediate_transactions == [], (
+        "a sweep with no failed tasks must not open a write transaction"
+    )
+
+    # A sweep that does have work must still take the lock and requeue.
+    task_id = coordinator.create_task("survey", "Inspect a dataset")
+    coordinator.claim_task(task_id)
+    coordinator.fail_task(task_id, error="Connection reset by peer", retryable=False)
+    immediate_transactions.clear()
+
+    result = coordinator.reset_failed_tasks(only_transient=True)
+
+    assert result["reset"] == [task_id]
+    assert immediate_transactions, "a productive sweep must open a write transaction"

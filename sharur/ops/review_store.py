@@ -477,6 +477,83 @@ class ReviewStoreMixin:
         idempotency_key: str,
         schema_version: int = 1,
     ) -> str:
+        prepared = self._prepare_candidate_occurrence(
+            campaign_id=campaign_id,
+            dataset_id=dataset_id,
+            unit_id=unit_id,
+            genome_id=genome_id,
+            candidate_type=candidate_type,
+            signature_schema=signature_schema,
+            signature=signature,
+            evidence=evidence,
+            verification=verification,
+            subject_refs=subject_refs,
+            task_id=task_id,
+            reason_codes=reason_codes,
+            uncertainty=uncertainty,
+            reduction_features=reduction_features,
+            provenance=provenance,
+            evidence_bundle_hash=evidence_bundle_hash,
+            idempotency_key=idempotency_key,
+            schema_version=schema_version,
+        )
+        with self._lock, self._transaction():
+            return self._create_candidate_occurrence_locked(prepared)
+
+    def create_candidate_occurrences(
+        self, candidates: list[dict[str, Any]]
+    ) -> list[str]:
+        """Insert many candidates under ONE write transaction.
+
+        A scan emits ~19 candidates per genome. Submitted individually that was
+        ~19 `BEGIN IMMEDIATE` transactions, each taking SQLite's single global
+        write lock, plus ~19 HTTP round trips -- the dominant term in a measured
+        ~108 write transactions per genome, which is what drove write-lock waits
+        to 122s and starved the connection pool under an 8-worker fleet.
+
+        Per-candidate semantics are unchanged: each item is prepared and applied
+        by exactly the same code path as the single-item call, so idempotency
+        keys, lease-ownership checks and conflict detection behave identically.
+        The one deliberate difference is atomicity -- the batch is all-or-nothing,
+        so a rejected item rolls back its siblings. That is safe to retry
+        wholesale precisely because every item carries an idempotency key:
+        replaying the batch re-inserts nothing that already landed.
+        """
+        prepared = [self._prepare_candidate_occurrence(**item) for item in candidates]
+        if not prepared:
+            return []
+        with self._lock, self._transaction():
+            return [
+                self._create_candidate_occurrence_locked(item) for item in prepared
+            ]
+
+    def _prepare_candidate_occurrence(
+        self,
+        *,
+        campaign_id: str,
+        dataset_id: str,
+        unit_id: str,
+        genome_id: str,
+        candidate_type: str,
+        signature_schema: str,
+        signature: dict[str, Any],
+        evidence: dict[str, Any],
+        verification: list[dict[str, Any]],
+        subject_refs: dict[str, Any],
+        task_id: str | None = None,
+        reason_codes: list[str] | None = None,
+        uncertainty: dict[str, Any] | None = None,
+        reduction_features: dict[str, Any] | None = None,
+        provenance: dict[str, Any] | None = None,
+        evidence_bundle_hash: str | None = None,
+        idempotency_key: str,
+        schema_version: int = 1,
+    ) -> dict[str, Any]:
+        """Validate and canonicalise one candidate OUTSIDE any transaction.
+
+        Hashing and JSON canonicalisation are pure CPU work; doing them while
+        holding the global write lock would serialise every worker behind them.
+        """
         candidate_type = _nonempty(candidate_type, "candidate_type")
         signature_schema = _nonempty(signature_schema, "signature_schema")
         dataset_id = _nonempty(dataset_id, "dataset_id")
@@ -527,127 +604,161 @@ class ReviewStoreMixin:
                 "provenance": provenance or {},
             }
         )
-        with self._lock, self._transaction():
-            self._validate_campaign_locked(campaign_id)
-            task = (
-                self._review_output_task_locked(
-                    task_id,
-                    campaign_id=campaign_id,
-                    dataset_id=dataset_id,
-                    unit_id=unit_id,
-                    genome_id=genome_id,
-                )
-                if task_id is not None
-                else None
-            )
-            if task_id is not None:
-                existing = self._conn.execute(
-                    """
-                    SELECT * FROM candidate_occurrences
-                    WHERE task_id = ? AND idempotency_key = ?
-                    """,
-                    (task_id, idempotency_key),
-                ).fetchone()
-            else:
-                existing = self._conn.execute(
-                    """
-                    SELECT * FROM candidate_occurrences
-                    WHERE task_id IS NULL
-                      AND agent_id = ? AND idempotency_key = ?
-                    """,
-                    (self.agent_id, idempotency_key),
-                ).fetchone()
-            existing_id = _idempotent_id(
-                existing,
-                {
-                    "campaign_id": campaign_id,
-                    "task_id": task_id,
-                    "dataset_id": dataset_id,
-                    "unit_id": unit_id,
-                    "genome_id": genome_id,
-                    "candidate_type": candidate_type,
-                    "signature_schema": signature_schema,
-                    "signature": signature_json,
-                    "signature_hash": signature_hash,
-                    "evidence": fields["evidence"],
-                    "verification": fields["verification"],
-                    "reason_codes": fields["reason_codes"],
-                    "uncertainty": fields["uncertainty"],
-                    "subject_refs": fields["subject_refs"],
-                    "reduction_features": fields["reduction_features"],
-                    "evidence_bundle_hash": bundle_hash,
-                    "provenance": fields["provenance"],
-                    "schema_version": schema_version,
-                },
-                record_type="Candidate-occurrence",
-            )
-            if existing_id is not None:
-                return existing_id
-            if task is not None and (
-                task["assigned_to"] != self.agent_id
-                or task["status"] not in {"claimed", "in_progress"}
-                or float(task["lease_expires_ts"] or 0) <= time.time()
-            ):
-                raise ValueError(
-                    "Candidate task has no active lease owned by the "
-                    "submitting agent"
-                )
-            candidate_id = str(uuid.uuid4())
-            self._conn.execute(
-                """
-                INSERT INTO candidate_occurrences(
-                    id, campaign_id, task_id, agent_id, ts, dataset_id, unit_id,
-                    genome_id,
-                    candidate_type, signature_schema, signature, signature_hash,
-                    evidence, verification, reason_codes, uncertainty, subject_refs,
-                    reduction_features, evidence_bundle_hash, provenance,
-                    idempotency_key, schema_version
-                ) VALUES (
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-                )
-                """,
-                (
-                    candidate_id,
-                    campaign_id,
-                    task_id,
-                    self.agent_id,
-                    time.time(),
-                    dataset_id,
-                    unit_id,
-                    genome_id,
-                    candidate_type,
-                    signature_schema,
-                    signature_json,
-                    signature_hash,
-                    fields["evidence"],
-                    fields["verification"],
-                    fields["reason_codes"],
-                    fields["uncertainty"],
-                    fields["subject_refs"],
-                    fields["reduction_features"],
-                    bundle_hash,
-                    fields["provenance"],
-                    idempotency_key,
-                    schema_version,
-                ),
-            )
-            event_id = self._event_locked(
-                "candidate_occurrence_created",
-                "candidate_occurrence",
-                candidate_id,
+        return {
+            "campaign_id": campaign_id,
+            "task_id": task_id,
+            "dataset_id": dataset_id,
+            "unit_id": unit_id,
+            "genome_id": genome_id,
+            "candidate_type": candidate_type,
+            "signature_schema": signature_schema,
+            "signature": signature,
+            "signature_json": signature_json,
+            "signature_hash": signature_hash,
+            "fields": fields,
+            "bundle_hash": bundle_hash,
+            "idempotency_key": idempotency_key,
+            "schema_version": schema_version,
+        }
+
+    def _create_candidate_occurrence_locked(self, p: dict[str, Any]) -> str:
+        """Apply ONE prepared candidate. Caller must already hold the lock and
+        an open write transaction, so a batch can share a single one."""
+        campaign_id = p["campaign_id"]
+        task_id = p["task_id"]
+        dataset_id = p["dataset_id"]
+        unit_id = p["unit_id"]
+        genome_id = p["genome_id"]
+        candidate_type = p["candidate_type"]
+        signature_schema = p["signature_schema"]
+        signature = p["signature"]
+        signature_json = p["signature_json"]
+        signature_hash = p["signature_hash"]
+        fields = p["fields"]
+        bundle_hash = p["bundle_hash"]
+        idempotency_key = p["idempotency_key"]
+        schema_version = p["schema_version"]
+        self._validate_campaign_locked(campaign_id)
+        task = (
+            self._review_output_task_locked(
+                task_id,
                 campaign_id=campaign_id,
-                task_id=task_id,
-                payload={
-                    "candidate_type": candidate_type,
-                    "signature_schema": signature_schema,
-                    "signature_hash": signature_hash,
-                },
+                dataset_id=dataset_id,
+                unit_id=unit_id,
+                genome_id=genome_id,
             )
-            self._conn.execute(
-                "UPDATE candidate_occurrences SET created_event_id = ? WHERE id = ?",
-                (event_id, candidate_id),
+            if task_id is not None
+            else None
+        )
+        if task_id is not None:
+            existing = self._conn.execute(
+                """
+                SELECT * FROM candidate_occurrences
+                WHERE task_id = ? AND idempotency_key = ?
+                """,
+                (task_id, idempotency_key),
+            ).fetchone()
+        else:
+            existing = self._conn.execute(
+                """
+                SELECT * FROM candidate_occurrences
+                WHERE task_id IS NULL
+                  AND agent_id = ? AND idempotency_key = ?
+                """,
+                (self.agent_id, idempotency_key),
+            ).fetchone()
+        existing_id = _idempotent_id(
+            existing,
+            {
+                "campaign_id": campaign_id,
+                "task_id": task_id,
+                "dataset_id": dataset_id,
+                "unit_id": unit_id,
+                "genome_id": genome_id,
+                "candidate_type": candidate_type,
+                "signature_schema": signature_schema,
+                "signature": signature_json,
+                "signature_hash": signature_hash,
+                "evidence": fields["evidence"],
+                "verification": fields["verification"],
+                "reason_codes": fields["reason_codes"],
+                "uncertainty": fields["uncertainty"],
+                "subject_refs": fields["subject_refs"],
+                "reduction_features": fields["reduction_features"],
+                "evidence_bundle_hash": bundle_hash,
+                "provenance": fields["provenance"],
+                "schema_version": schema_version,
+            },
+            record_type="Candidate-occurrence",
+        )
+        if existing_id is not None:
+            return existing_id
+        if task is not None and (
+            task["assigned_to"] != self.agent_id
+            or task["status"] not in {"claimed", "in_progress"}
+            or float(task["lease_expires_ts"] or 0) <= time.time()
+        ):
+            raise ValueError(
+                "Candidate task has no active lease owned by the "
+                "submitting agent"
             )
-            return candidate_id
+        candidate_id = str(uuid.uuid4())
+        self._conn.execute(
+            """
+            INSERT INTO candidate_occurrences(
+                id, campaign_id, task_id, agent_id, ts, dataset_id, unit_id,
+                genome_id,
+                candidate_type, signature_schema, signature, signature_hash,
+                evidence, verification, reason_codes, uncertainty, subject_refs,
+                reduction_features, evidence_bundle_hash, provenance,
+                idempotency_key, schema_version
+            ) VALUES (
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            )
+            """,
+            (
+                candidate_id,
+                campaign_id,
+                task_id,
+                self.agent_id,
+                time.time(),
+                dataset_id,
+                unit_id,
+                genome_id,
+                candidate_type,
+                signature_schema,
+                signature_json,
+                signature_hash,
+                fields["evidence"],
+                fields["verification"],
+                fields["reason_codes"],
+                fields["uncertainty"],
+                fields["subject_refs"],
+                fields["reduction_features"],
+                bundle_hash,
+                fields["provenance"],
+                idempotency_key,
+                schema_version,
+            ),
+        )
+        event_id = self._event_locked(
+            "candidate_occurrence_created",
+            "candidate_occurrence",
+            candidate_id,
+            campaign_id=campaign_id,
+            task_id=task_id,
+            payload={
+                "candidate_type": candidate_type,
+                "signature_schema": signature_schema,
+                "signature_hash": signature_hash,
+            },
+        )
+        self._conn.execute(
+            "UPDATE candidate_occurrences SET created_event_id = ? WHERE id = ?",
+            (event_id, candidate_id),
+        )
+        return candidate_id
+        return candidate_id
 
     def get_candidate_occurrence(self, candidate_id: str) -> dict[str, Any]:
         with self._lock:
