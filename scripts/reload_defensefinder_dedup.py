@@ -10,7 +10,7 @@ This script:
 5. Regenerates predicates for proteins that had defensefinder annotations
 
 Usage:
-    python scripts/reload_defensefinder_dedup.py data/susan_genomes/
+    python scripts/reload_defensefinder_dedup.py data/DATASET/
 """
 
 from __future__ import annotations

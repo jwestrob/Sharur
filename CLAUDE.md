@@ -114,23 +114,23 @@ paths rather than sequence strings.
 
 **Every specific number in a finding — in the title, description, evidence, or any other text field — must have a verification query.** This applies to counts, accessions, IDs, taxonomies, sizes, breakdowns — any concrete datum. The write-up phase is where fabrication happens; treat it as a verification step, not a summarization step.
 
-**This includes decompositions.** If a finding says "9 genomes carry X, including 3 from phylum A and 4 from phylum B", that's three verification queries — one for the total AND one for each breakdown. Agents reliably verify headline totals but fabricate the per-genome, per-phylum, and per-category breakdowns in prose. If you can't verify a breakdown number, don't include it.
+**This includes decompositions.** If a finding says "N genomes carry X, including A from phylum P and B from phylum Q", that's three verification queries — one for the total AND one for each breakdown. Agents reliably verify headline totals but fabricate the per-genome, per-phylum, and per-category breakdowns in prose. If you can't verify a breakdown number, don't include it.
 
 Findings must include a `verification` field — a list of claim/query/expected triples:
 
 ```jsonl
 {
-  "id": "E200",
+  "id": "FINDING_ID",
   "verification": [
     {
-      "claim": "9 genomes carry LANC_like",
-      "query": "SELECT COUNT(DISTINCT p.bin_id) FROM annotations a JOIN proteins p ON a.protein_id = p.protein_id WHERE a.source = 'pfam' AND a.name = 'LANC_like'",
-      "expected": 9
+      "claim": "N genomes carry PFAM_DOMAIN",
+      "query": "SELECT COUNT(DISTINCT p.bin_id) FROM annotations a JOIN proteins p ON a.protein_id = p.protein_id WHERE a.source = 'pfam' AND a.name = 'PFAM_DOMAIN'",
+      "expected": N
     },
     {
-      "claim": "3 of those are Nanobdellota",
-      "query": "SELECT COUNT(DISTINCT p.bin_id) FROM annotations a JOIN proteins p ON a.protein_id = p.protein_id WHERE a.source = 'pfam' AND a.name = 'LANC_like' AND p.taxonomy LIKE '%Nanobdellota%'",
-      "expected": 3
+      "claim": "A of those belong to phylum P",
+      "query": "SELECT COUNT(DISTINCT p.bin_id) FROM annotations a JOIN proteins p ON a.protein_id = p.protein_id WHERE a.source = 'pfam' AND a.name = 'PFAM_DOMAIN' AND p.taxonomy LIKE '%PHYLUM_P%'",
+      "expected": A
     },
     {
       "claim": "The exact protein belongs to the cited run-scoped ELSA cluster",
@@ -269,4 +269,4 @@ data/{dataset_name}/
 - [ ] **Bake ambiguity-class validation deeper into `/survey`** — discover live caller
       resources, run appropriate co-annotation/context checks, and dispatch specialists
       without priming agents with expected named errors
-- [ ] **Co-location engine (`sharur/colocation.py`) regression test** — run on Susan genomes and DPANN, compare against MacSyFinder output. Spec: `docs/COLOCATION_ENGINE_SPEC.md`
+- [ ] **Co-location engine (`sharur/colocation.py`) regression test** — run on two or more ingested datasets and compare against MacSyFinder output. Spec: `docs/COLOCATION_ENGINE_SPEC.md`

@@ -7,7 +7,7 @@ protein positions and HMM hits directly from DuckDB and scopes every call to a
 single ``(genome_id, contig_id)`` replicon.
 
 Usage:
-    python scripts/validate_defense_systems.py data/susan_genomes
+    python scripts/validate_defense_systems.py data/DATASET
 """
 
 from __future__ import annotations

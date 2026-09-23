@@ -259,7 +259,7 @@ hmmsearch --domE 1e-5 --noali --domtblout /tmp/giant_domains.tsv \
 
 ### Worked example: TPR solenoid recovery
 
-A 3572 aa protein in the susan_genomes dataset had zero standard PFAM hits. Running `hmmsearch --domE 1e-5` revealed 18+ TPR repeats spanning the entire sequence, identifying it as a solenoid scaffold protein. Without the E-value recovery, this protein would have been reported as "unannotated."
+A 3572 aa protein in one ingested dataset had zero standard PFAM hits. Running `hmmsearch --domE 1e-5` revealed 18+ TPR repeats spanning the entire sequence, identifying it as a solenoid scaffold protein. Without the E-value recovery, this protein would have been reported as "unannotated."
 
 ---
 

@@ -25,7 +25,7 @@ SUPERFAMILY_DEFENSE = {
 }
 
 
-def read_genome(genome, short_name, db_path="data/susan_genomes/sharur.duckdb"):
+def read_genome(genome, short_name, db_path="data/DATASET/sharur.duckdb"):
     from sharur.operators import Sharur
     b = Sharur(db_path, read_only=True)
 
@@ -479,5 +479,5 @@ def read_genome(genome, short_name, db_path="data/susan_genomes/sharur.duckdb"):
 if __name__ == "__main__":
     genome = sys.argv[1]
     short_name = sys.argv[2]
-    db_path = sys.argv[3] if len(sys.argv) > 3 else "data/susan_genomes/sharur.duckdb"
+    db_path = sys.argv[3] if len(sys.argv) > 3 else "data/DATASET/sharur.duckdb"
     read_genome(genome, short_name, db_path=db_path)

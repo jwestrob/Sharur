@@ -357,7 +357,7 @@ In-process DuckDB approach:
 1. **Unit tests**: Parse known XML models, verify gene specs
 2. **Cluster tests**: Known hit positions → expected clusters
 3. **Validation tests**: Known clusters + models → expected system hits
-4. **Integration test**: Run on Susan genomes (14 MAGs), compare output to MacSyFinder results
+4. **Integration test**: Run on a small curated dataset, compare output to MacSyFinder results
 5. **Regression test**: Run on DPANN, compare system counts to MacSyFinder output
 
 ### Risks / Edge Cases
@@ -407,7 +407,7 @@ has evolved past this design doc in the following ways:
 
 **Still outstanding:** the Testing section's unit/regression suite is not yet built — there
 are no `tests/` covering `colocation.py`. This overlaps the CLAUDE.md TODO ("Co-location
-engine regression test — run on Susan genomes and DPANN, compare against MacSyFinder").
+engine regression test — run on two or more ingested datasets, compare against MacSyFinder").
 
 ## Concordance with the reference implementation
 

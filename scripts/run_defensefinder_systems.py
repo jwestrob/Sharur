@@ -12,7 +12,7 @@ This eliminates superfamily false positives (e.g., standalone Mokosh kinases,
 scattered RM MTase Rossmann folds) by requiring co-localization of system components.
 
 Usage:
-    python scripts/run_defensefinder_systems.py data/susan_genomes/ [--workers 8]
+    python scripts/run_defensefinder_systems.py data/DATASET/ [--workers 8]
 """
 
 from __future__ import annotations
@@ -295,7 +295,7 @@ def integrate_results(
 
 def main():
     parser = argparse.ArgumentParser(description="Run DefenseFinder system-level validation")
-    parser.add_argument("data_dir", type=Path, help="Dataset directory (e.g., data/susan_genomes/)")
+    parser.add_argument("data_dir", type=Path, help="Dataset directory (e.g., data/DATASET/)")
     parser.add_argument("--workers", type=int, default=8, help="Number of HMM search workers")
     parser.add_argument("--keep-raw", action="store_true", help="Keep raw defense-finder output")
     parser.add_argument(
