@@ -24,7 +24,7 @@ Detailed guides live in `docs/` and `.claude/skills/`. **Read the relevant doc b
 | Working with V2 predicate system | `docs/predicates_v2.md` |
 | Validating hydrogenases | `.claude/skills/hydrogenase.md` |
 | Querying ELSA synteny results | `.claude/skills/synteny.md` |
-| Coordinating multi-agent runs | `agent_ops_spec.md`, `sharur/ops/` |
+| Coordinating multi-agent runs | `docs/agent_ops_spec.md`, `sharur/ops/` |
 | Running hierarchical candidate review | `docs/review_workflow.md`, `sharur/review/` |
 | Serving one large DuckDB to many agents | `docs/query_service.md`, `sharur/query/` |
 | Writing structured findings | `docs/findings_spec.md` |
@@ -35,7 +35,7 @@ Detailed guides live in `docs/` and `.claude/skills/`. **Read the relevant doc b
 | Document | Purpose |
 |----------|---------|
 | `QUICKSTART.md` | **NEW DATASET INGESTION (START HERE; use `sharur-ingest`)** |
-| `DATA_ORGANIZATION.md` | Data directory structure, archival procedures |
+| `docs/DATA_ORGANIZATION.md` | Data directory structure, archival procedures |
 | `src/ingest/README.md` | Manual ingestion pipeline stages (00-07) |
 | `.claude/skills/_validation_protocols.md` | Shared validation protocols for all analysis skills |
 
@@ -93,7 +93,7 @@ large coordinated campaign through one query-service owner instead of opening
 one large DuckDB connection per agent. Serialize canonical DuckDB writes in a
 maintenance window, then seal and restage the updated database.
 
-Read `docs/query_service.md`, `agent_ops_spec.md`, and
+Read `docs/query_service.md`, `docs/agent_ops_spec.md`, and
 `docs/subagent_guide.md` before launching a distributed campaign.
 
 ## Core Rules (always apply)
@@ -215,7 +215,7 @@ report/draft files remain independently writable.
 | `sharur/core/hypothesis_registry.py` | Persistent hypothesis store |
 | `sharur/ops/server.py` | Multi-agent coordination server (FastAPI + SQLite) |
 | `sharur/ops/client.py` | Agent client for ops server |
-| `agent_ops_spec.md` | Full ops coordination layer spec |
+| `docs/agent_ops_spec.md` | Full ops coordination layer spec |
 
 ## Pipeline Notes
 
@@ -269,4 +269,4 @@ data/{dataset_name}/
 - [ ] **Bake ambiguity-class validation deeper into `/survey`** — discover live caller
       resources, run appropriate co-annotation/context checks, and dispatch specialists
       without priming agents with expected named errors
-- [ ] **Co-location engine (`sharur/colocation.py`) regression test** — run on Susan genomes and DPANN, compare against MacSyFinder output. Spec: `COLOCATION_ENGINE_SPEC.md`
+- [ ] **Co-location engine (`sharur/colocation.py`) regression test** — run on Susan genomes and DPANN, compare against MacSyFinder output. Spec: `docs/COLOCATION_ENGINE_SPEC.md`

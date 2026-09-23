@@ -345,4 +345,4 @@ Use this only when the standard assembly-based pipeline is impossible. It:
 
 - Full manual stage reference: `src/ingest/README.md`
 - Tool-specific details: `docs/tools_reference.md`
-- Dataset layout and archival conventions: `DATA_ORGANIZATION.md`
+- Dataset layout and archival conventions: `docs/DATA_ORGANIZATION.md`

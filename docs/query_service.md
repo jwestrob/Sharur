@@ -51,7 +51,7 @@ and query-service restart afterward. Staged deployments also refresh their
 replica.
 
 Launch Sharur Ops and register agent identities as described in
-[`agent_ops_spec.md`](../agent_ops_spec.md). Then launch the analytical service:
+[`agent_ops_spec.md`](agent_ops_spec.md). Then launch the analytical service:
 
 ```bash
 export SHARUR_OPS_URL=http://ops-host:8811

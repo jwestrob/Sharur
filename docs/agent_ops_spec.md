@@ -33,7 +33,7 @@ Sharur Ops coordinates logical work. Compute launchers execute that work.
 - Pipeline stage algorithms and scheduler packing remain independent.
 
 The analytical data-plane contract lives in
-[`docs/query_service.md`](docs/query_service.md). Sharur Ops resolves agent
+[`docs/query_service.md`](query_service.md). Sharur Ops resolves agent
 identity through `/auth/whoami`; the query service consumes that endpoint and
 keeps SQLite ownership inside the Ops HTTP process.
 
@@ -175,7 +175,7 @@ materialized scientific finding. `canonical_publications` record the strict
 canonical writer's URI, record ID, and content hash after a publish decision.
 
 The full operational workflow is documented in
-[`docs/review_workflow.md`](docs/review_workflow.md).
+[`docs/review_workflow.md`](review_workflow.md).
 
 ## Task authority protocol
 

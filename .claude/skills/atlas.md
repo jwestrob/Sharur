@@ -27,7 +27,7 @@ Read these before coordinating or executing Atlas:
   flagged or superfamily-level row poisons every downstream review tier.
 - `docs/subagent_guide.md`
 - `docs/query_service.md`
-- `agent_ops_spec.md`
+- `docs/agent_ops_spec.md`
 - `docs/review_workflow.md`
 - `.claude/skills/_validation_protocols.md`
 

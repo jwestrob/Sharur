@@ -318,14 +318,14 @@ pytest tests/ --override-ini addopts=""
 | [`QUICKSTART.md`](QUICKSTART.md) | Primary `sharur-ingest` workflow for new datasets |
 | [`src/ingest/README.md`](src/ingest/README.md) | Manual stage-by-stage ingest reference |
 | [`QUICK_REFERENCE.md`](QUICK_REFERENCE.md) | SQL patterns and operator cheatsheet |
-| [`DATA_ORGANIZATION.md`](DATA_ORGANIZATION.md) | Data directory conventions |
+| [`docs/DATA_ORGANIZATION.md`](docs/DATA_ORGANIZATION.md) | Data directory conventions |
 | [`docs/predicates_v2.md`](docs/predicates_v2.md) | Predicate V2 semantic-atom system |
 | [`docs/tools_reference.md`](docs/tools_reference.md) | Astra, ELSA, ESM3, Foldseek, V2 atoms |
 | [`docs/findings_spec.md`](docs/findings_spec.md) | Canonical schema for structured, verifiable findings |
 | [`docs/biological_interpretation.md`](docs/biological_interpretation.md) | Annotation provenance and claim discipline |
 | [`docs/analysis_workflow.md`](docs/analysis_workflow.md) | Full 5-phase analysis pipeline |
 | [`docs/manuscript_guide.md`](docs/manuscript_guide.md) | Manuscript and report compilation |
-| [`agent_ops_spec.md`](agent_ops_spec.md) | Multi-agent coordination layer (`sharur/ops/`) |
+| [`docs/agent_ops_spec.md`](docs/agent_ops_spec.md) | Multi-agent coordination layer (`sharur/ops/`) |
 
 ## Citation
 
