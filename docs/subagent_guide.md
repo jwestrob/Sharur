@@ -193,6 +193,22 @@ Every promotion review appends executable verification results before the
 controller advances it. Use `sharur-review status` for queue and funnel
 metrics and `sharur-review trace` for a bounded provenance reconstruction.
 
+The packaged executor serves one review profile per process:
+
+```bash
+sharur-worker scientific-review \
+  --ops-url http://ops-host:8811 \
+  --db data/DATASET/sharur.duckdb \
+  --agent-id independent-openai-01 \
+  --profile independent_openai \
+  --campaign-id CAMPAIGN_ID
+```
+
+It reconstructs a bounded target record from Ops, includes live caller and
+schema capabilities from the sealed dataset, executes the reviewer's checks
+through the local read-only verifier, and appends the review plus verification
+records under the claimed lease.
+
 See [`query_service.md`](query_service.md) for launch commands, endpoint
 contracts, resource arithmetic, and access-path selection.
 

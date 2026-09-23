@@ -239,9 +239,27 @@ The controller pins its policy hash on first use. A policy revision uses a new
 `controller_id`, which creates an explicit versioned replay over historical
 events and keeps decisions from different policies distinguishable.
 
-The controller creates logical tasks only. A Codex headless worker, Claude
-agent pool, or another executor registers the corresponding
-`profile:<name>` capability and claims matching work.
+The controller creates logical tasks. Sharur packages the corresponding model
+executor as `sharur-worker scientific-review`. Run one worker process per
+execution profile, for example:
+
+```bash
+sharur-worker scientific-review \
+  --ops-url http://ops-host:8811 \
+  --db data/DATASET/sharur.duckdb \
+  --agent-id deepen-openai-01 \
+  --profile finding_deepen \
+  --campaign-id CAMPAIGN_ID
+```
+
+The worker validates the frozen policy and execution identity, verifies the
+dataset seal, discovers the live caller resources and table schema, and gives
+the resolved model a bounded sequence-free target record. The model returns a
+claim assessment plus executable checks. Sharur validates and runs each check
+through the read-only DuckDB verifier, records expected and observed results,
+and converts a decisive verdict to `hold` when a check fails or errors. A
+replacement attempt resumes a committed review and fills any missing
+verification records before task completion.
 
 ## Finding materialization and publication
 

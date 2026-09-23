@@ -16,8 +16,8 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
-import re
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -32,7 +32,7 @@ class ModelError(RuntimeError):
     """Model invocation failed in a way that is not a rate limit."""
 
 
-class ModelRateLimited(RuntimeError):
+class ModelRateLimited(RuntimeError):  # noqa: N818 - describes provider state
     """Provider refused the call for quota/rate reasons. Retry after backoff."""
 
 
@@ -89,7 +89,7 @@ def _quota_exhausted(blob: str) -> tuple[bool, str | None]:
     return True, (match.group(1).strip() if match else None)
 
 
-class ModelTransient(RuntimeError):
+class ModelTransient(RuntimeError):  # noqa: N818 - describes provider state
     """Transient transport failure (DNS, socket, timeout).
 
     Distinct from :class:`ModelError` because it must NOT consume a task
@@ -325,6 +325,7 @@ def run_openai(
     system_prompt: str,
     payload_text: str,
     output_schema: dict[str, Any],
+    payload_label: str = "GENOME PACKET (JSON)",
     timeout: int = 1800,
 ) -> ModelRun:
     """Drive `codex exec` headlessly, stdin-fed, with a forced output schema."""
@@ -332,7 +333,7 @@ def run_openai(
     if codex is None:
         raise ModelError("codex CLI not found on PATH")
 
-    prompt = f"{system_prompt}\n\n=== GENOME PACKET (JSON) ===\n{payload_text}\n"
+    prompt = f"{system_prompt}\n\n=== {payload_label} ===\n{payload_text}\n"
 
     with tempfile.TemporaryDirectory(prefix="sharur-scan-") as tmp:
         schema_path = Path(tmp) / "schema.json"
@@ -362,8 +363,8 @@ def run_openai(
     usage: dict[str, Any] = {}
     message_text: str | None = None
     turn_error: str | None = None
-    for line in stdout.splitlines():
-        line = line.strip()
+    for raw_line in stdout.splitlines():
+        line = raw_line.strip()
         if not line.startswith("{"):
             continue
         try:
@@ -411,8 +412,8 @@ def _parse_anthropic_stream(stdout: str) -> tuple[dict[str, Any], str]:
     """
     usage: dict[str, Any] = {}
     body: str | None = None
-    for line in stdout.splitlines():
-        line = line.strip()
+    for raw_line in stdout.splitlines():
+        line = raw_line.strip()
         if not line or not line.startswith("{"):
             continue
         try:
@@ -442,6 +443,7 @@ def run_anthropic(
     system_prompt: str,
     payload_text: str,
     output_schema: dict[str, Any],
+    payload_label: str = "GENOME PACKET (JSON)",
     timeout: int = 1800,
 ) -> ModelRun:
     """Drive the `claude` CLI headlessly (`-p`, streaming JSON output).
@@ -474,7 +476,7 @@ def run_anthropic(
         f"{system_prompt}\n\n"
         "Respond with a single JSON object and no other text. It must validate "
         f"against this JSON Schema:\n{schema_text}\n\n"
-        f"=== GENOME PACKET (JSON) ===\n{payload_text}\n"
+        f"=== {payload_label} ===\n{payload_text}\n"
     )
 
     argv = [
@@ -533,6 +535,7 @@ def run_profile(
     system_prompt: str,
     payload_text: str,
     output_schema: dict[str, Any],
+    payload_label: str = "GENOME PACKET (JSON)",
     timeout: int = 1800,
 ) -> ModelRun:
     driver = PROVIDERS.get(provider)
@@ -544,5 +547,6 @@ def run_profile(
         system_prompt=system_prompt,
         payload_text=payload_text,
         output_schema=output_schema,
+        payload_label=payload_label,
         timeout=timeout,
     )

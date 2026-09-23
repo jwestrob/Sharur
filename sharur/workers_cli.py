@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path  # noqa: TC003 - Typer resolves this annotation at runtime
 
 import typer
+
 
 app = typer.Typer(help="Sharur model-worker executors", no_args_is_help=True)
 
@@ -14,8 +16,8 @@ app = typer.Typer(help="Sharur model-worker executors", no_args_is_help=True)
 def _root() -> None:
     """Sharur worker executors.
 
-    A callback keeps subcommands explicit even while only one exists, so
-    `atlas-scan` stays a stable invocation as review-tier workers are added.
+    Explicit subcommands keep Atlas scanning and scientific review as separate
+    execution contracts while sharing one installed entry point.
     """
 
 
@@ -67,7 +69,7 @@ def atlas_scan(
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
     )
 
-    from sharur.workers.atlas_scan import AtlasScanWorker
+    from sharur.workers.atlas_scan import AtlasScanWorker  # noqa: PLC0415
 
     worker = AtlasScanWorker(
         ops_url=ops_url,
@@ -84,6 +86,93 @@ def atlas_scan(
         sweep_failed=sweep_failed,
         max_sweeps=max_sweeps,
         dry_run=dry_run,
+    )
+    worker.install_signal_handlers()
+    done = worker.run_forever(idle_sleep=idle_sleep, max_tasks=max_tasks)
+    typer.echo(f"completed {done} task(s)")
+
+
+@app.command("scientific-review")
+def scientific_review(
+    db: Path = typer.Option(
+        ...,
+        "--db",
+        "-d",
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help="Sealed Sharur DuckDB used for executable review checks",
+    ),
+    ops_url: str = typer.Option("http://127.0.0.1:8811", help="Sharur Ops base URL"),
+    agent_id: str = typer.Option(..., help="Distinct reviewer identity"),
+    profile: str = typer.Option(
+        ...,
+        help="Scientific-review execution profile from the review policy",
+    ),
+    campaign_id: str | None = typer.Option(None, help="Restrict claims to one campaign"),
+    policy: str | None = typer.Option(
+        None,
+        help="Path to a review policy YAML (default: packaged)",
+    ),
+    seal: Path | None = typer.Option(
+        None,
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help="Dataset seal (default: dataset.seal.json beside --db)",
+    ),
+    lease_seconds: int = typer.Option(
+        1800,
+        min=60,
+        help="Lease duration; a background keepalive renews it during model and query work",
+    ),
+    stall_timeout: int = typer.Option(
+        900,
+        min=60,
+        help="Maximum model-CLI silence before treating the connection as stalled",
+    ),
+    max_members: int = typer.Option(
+        24,
+        min=1,
+        help="Maximum candidate occurrences sampled into one review input",
+    ),
+    max_input_bytes: int = typer.Option(
+        512 * 1024,
+        min=16_384,
+        help="Hard byte bound for the canonical model input",
+    ),
+    verification_threads: int = typer.Option(
+        1,
+        min=1,
+        help="DuckDB threads used by each executable check",
+    ),
+    max_tasks: int | None = typer.Option(None, min=1, help="Exit after N completed reviews"),
+    idle_sleep: float = typer.Option(5.0, min=0.1, help="Seconds to wait on an empty queue"),
+    verbose: bool = typer.Option(False, "-v", "--verbose"),
+) -> None:
+    """Claim review-tier tasks, run their checks, and append verified reviews."""
+
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.INFO,
+        format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
+    )
+
+    from sharur.workers.scientific_review import ScientificReviewWorker  # noqa: PLC0415
+
+    worker = ScientificReviewWorker(
+        ops_url=ops_url,
+        db_path=db,
+        agent_id=agent_id,
+        profile=profile,
+        policy_path=policy,
+        campaign_id=campaign_id,
+        ops_token=os.environ.get("SHARUR_OPS_TOKEN"),
+        seal_path=seal,
+        lease_seconds=lease_seconds,
+        model_timeout=stall_timeout,
+        max_members=max_members,
+        max_input_bytes=max_input_bytes,
+        verification_threads=verification_threads,
     )
     worker.install_signal_handlers()
     done = worker.run_forever(idle_sleep=idle_sleep, max_tasks=max_tasks)
