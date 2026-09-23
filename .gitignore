@@ -140,6 +140,9 @@ temp/
 *.backup
 *.backup_*
 
+# Local preprint drafting and rendered artifacts
+docs/preprint/
+
 # Test fixtures (large genome files)
 dummy_dataset/
 test_dataset/
