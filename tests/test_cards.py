@@ -45,13 +45,15 @@ def test_expanded_predicates_show_the_mapped_child_and_chain(store):
     result = why(store, "p1", "nucleotide_binding")
     mapping = next(p["mapping"] for p in result["paths"] if p["source_db"] == "pfam")
     assert mapping["kind"] == "expanded"
-    assert mapping["chain"][0] == mapping["via"] and mapping["chain"][-1] == "nucleotide_binding"
+    assert mapping["chain"][0] == mapping["via"]
+    assert mapping["chain"][-1] == "nucleotide_binding"
     assert "via" in why_markdown(result)
 
 
 def test_absent_predicates_are_reported(store):
     result = why(store, "p1", "hydrogenase")
-    assert not result["present"] and result["paths"] == []
+    assert not result["present"]
+    assert result["paths"] == []
     assert "Not present" in why_markdown(result)
 
 
@@ -73,7 +75,8 @@ def test_card_summarizes_context_evidence_and_provenance(store):
     assert c["neighborhood"][0]["top_annotation"] == "pfam:adh_short"
     assert c["map_status"]["state"] == "current"
     markdown = card_markdown(c)
-    assert "## Neighborhood" in markdown and ">> +0" in markdown
+    assert "## Neighborhood" in markdown
+    assert ">> +0" in markdown
 
 
 def test_cards_and_explanations_carry_no_sequence(store):

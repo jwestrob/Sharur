@@ -15,7 +15,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from sharur.operators.predicates_v2 import get_atoms, get_semantic_state
+from sharur.predicates.mappings import kegg_map
+from sharur.predicates.mappings.pfam_map import PFAM_EVIDENCE
+from sharur.predicates.pfam_identity import normalize_pfam_accession
+from sharur.predicates.provenance import map_status
 from sharur.predicates.vocabulary import PREDICATE_BY_ID, get_hierarchy
+from sharur.predicates_v2.composites import explain_composites
 
 
 COMPUTED_SOURCES = {
@@ -42,14 +48,9 @@ def _tables(store) -> set[str]:
 def _map_evidence(source_db: str, accession: str) -> dict[str, str] | None:
     """Per-pair evidence of the Pfam or KEGG map entry an annotation maps through."""
     if source_db == "pfam":
-        from sharur.predicates.mappings.pfam_map import PFAM_EVIDENCE
-        from sharur.predicates.pfam_identity import normalize_pfam_accession
-
         return PFAM_EVIDENCE.get(normalize_pfam_accession(accession))
     if source_db in ("kegg", "kofam"):
-        from sharur.predicates.mappings.kegg_map import KEGG_EVIDENCE
-
-        return KEGG_EVIDENCE.get(accession)
+        return kegg_map.KEGG_EVIDENCE.get(accession)
     return None
 
 
@@ -62,11 +63,8 @@ def mapping_evidence(source_db: str, accession: str, predicate: str) -> dict[str
         return {"kind": "system_call", "evidence": f"validated system call ({source_db})"}
     if source_db == "hyddb_subgroup":
         return {"kind": "classification", "evidence": "HydDB nearest-reference classification (see classification)"}
-    if source_db in ("kegg", "kofam"):
-        from sharur.predicates.mappings.kegg_map import kegg_map_available
-
-        if not kegg_map_available():
-            return {"kind": "rule", "evidence": "no local KEGG map; KEGG-stated EC numbers only (run `sharur setup-kegg`)"}
+    if source_db in ("kegg", "kofam") and not kegg_map.kegg_map_available():
+        return {"kind": "rule", "evidence": "no local KEGG map; KEGG-stated EC numbers only (run `sharur setup-kegg`)"}
     if source_db in ("pfam", "kegg", "kofam"):
         evidence = _map_evidence(source_db, accession)
         if evidence is None:
@@ -108,8 +106,6 @@ def _hydrogenase_row(store, protein_id: str, tables: set[str]) -> dict[str, Any]
 
 
 def _map_status(store) -> dict[str, Any]:
-    from sharur.predicates.provenance import map_status
-
     status = map_status(store)
     labels = {"pfam_map_sha256": "Pfam map", "kegg_map_sha256": "KEGG map", "kegg_rules_sha256": "KEGG rules",
               "vocabulary_sha256": "vocabulary", "v2_config_sha256": "V2 config"}
@@ -124,8 +120,6 @@ def _map_status(store) -> dict[str, Any]:
 
 def why(store, protein_id: str, predicate: str) -> dict[str, Any]:
     """Every evidence path from this protein's annotations to ``predicate``."""
-    from sharur.operators.predicates_v2 import get_atoms, get_semantic_state
-
     tables = _tables(store)
     result: dict[str, Any] = {
         "protein_id": protein_id,
@@ -160,8 +154,6 @@ def why(store, protein_id: str, predicate: str) -> dict[str, Any]:
             result["classification"] = _hydrogenase_row(store, protein_id, tables)
     state = get_semantic_state(store, protein_id) if "semantic_state" in tables else None
     if state is not None and predicate in state.composite_predicates:
-        from sharur.predicates_v2.composites import explain_composites
-
         result["composite"] = explain_composites(get_atoms(store, protein_id), topology=state.topology,
                                                  only=[predicate]).get(predicate)
     result["present"] = bool(result["paths"] or result["composite"])
@@ -225,8 +217,6 @@ def _best_evidence(atoms, predicate: str) -> str:
 
 def card(store, protein_id: str, window: int = 5, max_per_source: int = 8) -> dict[str, Any]:
     """A bounded summary of one protein (no sequences)."""
-    from sharur.operators.predicates_v2 import get_atoms, get_semantic_state
-
     tables = _tables(store)
     rows = store.execute(
         "SELECT protein_id, contig_id, bin_id, start, end_coord, strand, gene_index, sequence_length, gc_content "
@@ -261,7 +251,7 @@ def card(store, protein_id: str, window: int = 5, max_per_source: int = 8) -> di
             values = state_dict.get(facet) or []
             values = values if isinstance(values, list) else list(values)
             predicates[facet] = {p: _best_evidence(atoms, p) for p in sorted(values)}
-        predicates["composites"] = {p: "composite" for p in sorted(state.composite_predicates)}
+        predicates["composites"] = dict.fromkeys(sorted(state.composite_predicates), "composite")
 
     systems = []
     if "system_proteins" in tables:
