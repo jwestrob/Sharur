@@ -1236,6 +1236,18 @@ class Sharur:
 
         return get_atoms(self.store, protein_id)
 
+    def why(self, protein_id: str, predicate: str) -> dict:
+        """Every evidence path from a protein's annotations to one predicate."""
+        from sharur.operators.cards import why
+
+        return why(self.store, protein_id, predicate)
+
+    def card(self, protein_id: str, window: int = 5) -> dict:
+        """A bounded summary of one protein: context, annotations, evidence-backed predicates."""
+        from sharur.operators.cards import card
+
+        return card(self.store, protein_id, window=window)
+
     def explain(self, protein_id: str) -> dict:
         """Explain one protein using the active predicate tables."""
         from sharur.operators.predicates_v2 import explain

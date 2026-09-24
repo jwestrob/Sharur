@@ -684,6 +684,17 @@ To promote or demote a specific accession:
    - Or add an accession override in `relation_overrides.yaml`
 4. Re-run V2 to verify the accession is no longer unresolved
 
+## Explaining predicates
+
+`b.why(protein_id, predicate)` (CLI `sharur why`) lists every evidence path: the
+annotation hit behind each atom, the map evidence string for that (accession,
+predicate) pair (`go:`, `text:`, `enzyme:`, `swissprot:`, `ec:`, `brite:`,
+`module:`, `hyddb:`), and for predicates reached by hierarchy expansion the mapped
+child predicate and its is-a chain. Atoms that the current maps no longer support
+are marked `unsupported`. `b.card(protein_id)` (CLI `sharur card`) gives a bounded
+summary with each predicate's best evidence, classifications, validated system
+membership, a neighborhood strip and the map status. Neither returns sequences.
+
 ## Map provenance
 
 Every generation (full or subset) appends a row to `predicate_provenance` (schema

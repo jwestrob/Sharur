@@ -1218,6 +1218,40 @@ def doctor(
         raise typer.Exit(code=1)
 
 
+@app.command(name="card")
+def protein_card(
+    protein_id: str = typer.Argument(..., help="Protein ID"),
+    db: str = typer.Option(DEFAULT_DB, "--db", "-d", help="Path to DuckDB database"),
+    window: int = typer.Option(5, "--window", "-w", help="Neighbors on each side."),
+    output_format: BriefFormat = typer.Option(BriefFormat.markdown, "--format", "-f", help="markdown or json"),
+):
+    """Summarize one protein: context, annotations, evidence-backed predicates (no sequences)."""
+    from sharur.operators.cards import card, card_markdown
+    from sharur.storage.duckdb_store import DuckDBStore
+
+    with DuckDBStore(db, read_only=True) as store:
+        result = card(store, protein_id, window=window)
+    typer.echo(json.dumps(result, indent=2, default=str) if output_format == BriefFormat.json
+               else card_markdown(result))
+
+
+@app.command(name="why")
+def why_predicate(
+    protein_id: str = typer.Argument(..., help="Protein ID"),
+    predicate: str = typer.Argument(..., help="Predicate ID, e.g. nad_binding"),
+    db: str = typer.Option(DEFAULT_DB, "--db", "-d", help="Path to DuckDB database"),
+    output_format: BriefFormat = typer.Option(BriefFormat.markdown, "--format", "-f", help="markdown or json"),
+):
+    """Explain why a protein carries a predicate: annotation hits, map evidence, expansion chain."""
+    from sharur.operators.cards import why, why_markdown
+    from sharur.storage.duckdb_store import DuckDBStore
+
+    with DuckDBStore(db, read_only=True) as store:
+        result = why(store, protein_id, predicate)
+    typer.echo(json.dumps(result, indent=2, default=str) if output_format == BriefFormat.json
+               else why_markdown(result))
+
+
 @app.command(name="setup-kegg")
 def setup_kegg(
     directory: Optional[Path] = typer.Option(
