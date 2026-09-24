@@ -337,10 +337,6 @@ class TestKeggMapping:
 
     def test_high_volume_residual_kofam_mappings(self):
         """Common DPANN residual KOFAM definitions should map directly."""
-        preds = get_predicates_for_kegg("K07477", "GA")
-        assert "dna_binding" in preds
-        assert "rna_binding" in preds
-
         preds = get_predicates_for_kegg("K14623", "GA")
         assert "dna_repair" in preds
         assert "sos_response" in preds
@@ -351,7 +347,6 @@ class TestKeggMapping:
 
         preds = get_predicates_for_kegg("K03699", "GA")
         assert "metal_transporter" in preds
-        assert "metal_homeostasis" in preds
 
         preds = get_predicates_for_kegg("K07463", "GA")
         assert "exonuclease" in preds

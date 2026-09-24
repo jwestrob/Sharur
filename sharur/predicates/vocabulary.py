@@ -70,7 +70,6 @@ ENZYME_PREDICATES = [
     PredicateVocab("peptidase", "Peptidase", "Peptide hydrolase", "enzyme", "hydrolase"),
     PredicateVocab("nuclease", "Nuclease", "Nucleic acid hydrolase", "enzyme", "hydrolase"),
     PredicateVocab("dnase", "DNase", "DNA hydrolase", "enzyme", "nuclease"),
-    PredicateVocab("rnase", "RNase", "RNA hydrolase", "enzyme", "nuclease"),
     PredicateVocab("lipase", "Lipase", "Lipid ester hydrolase", "enzyme", "hydrolase"),
     PredicateVocab("esterase", "Esterase", "Ester bond hydrolase", "enzyme", "hydrolase"),
     PredicateVocab("glycosidase", "Glycosidase", "Glycosidic bond hydrolase", "enzyme", "hydrolase"),
@@ -283,7 +282,6 @@ METABOLISM_PREDICATES = [
     # Hydrogen metabolism
     PredicateVocab("hydrogen_metabolism", "Hydrogen metabolism", "H2 production/consumption", "metabolism"),
     PredicateVocab("hydrogenase", "Hydrogenase", "H2 oxidation/production enzyme", "metabolism", "hydrogen_metabolism"),
-    PredicateVocab("hyddb_annotated", "HydDB annotated", "Annotated by HydDB HMMs", "metabolism", "hydrogenase"),
 
     # Hydrogenase classification follows Søndergaard et al. 2016 (HydDB, Table 1).
     # Structural membership (type -> group) forms the hierarchy. Functional traits
@@ -604,7 +602,6 @@ MOBILE_PREDICATES = [
     # Conjugation
     PredicateVocab("conjugation", "Conjugation", "Conjugative transfer", "mobile"),
     PredicateVocab("relaxase", "Relaxase", "Conjugative relaxase", "mobile", "conjugation"),
-    PredicateVocab("type_iv_secretion", "Type IV secretion", "T4SS component", "mobile", "conjugation"),
 
     # Secretion systems - gene-level component tags
     PredicateVocab("secretion_system", "Secretion system", "Protein secretion apparatus", "mobile"),
@@ -711,6 +708,8 @@ ANNOTATION_PREDICATES = [
     PredicateVocab("hyddb_annotated", "HydDB annotated", "Has HydDB hydrogenase classification", "annotation"),
     PredicateVocab("hyddb_needs_curation", "HydDB needs curation", "HydDB assignment lacks the catalytic-domain Pfam for its type", "annotation"),
     PredicateVocab("hyddb_class_conflict", "HydDB class conflict", "Discovery HMM class disagrees with the nearest reference class", "annotation"),
+    PredicateVocab("hyddb_ko_supported", "HydDB KO-supported", "A KOfam KO hit captures HydDB references of the assigned subgroup (supporting evidence)", "annotation"),
+    PredicateVocab("hyddb_ko_conflict", "HydDB KO conflict", "KOfam KO hits capture HydDB references outside the assigned group", "annotation"),
     PredicateVocab("hydrogenase_complex1_review", "Hydrogenase/Complex I review", "HydDB NiFe hit with Complex I-superfamily domains and no NiFeSe_Hases", "annotation"),
 ]
 
@@ -843,6 +842,7 @@ ADDITIONAL_PREDICATES = [
     PredicateVocab("pin_domain", "PIN domain", "PilT N-terminus RNase domain", "enzyme", "nuclease"),
     PredicateVocab("dockerin", "Dockerin", "Cellulosome dockerin domain", "structure"),
     PredicateVocab("cohesin", "Cohesin domain", "Cellulosome cohesin domain", "structure"),
+    PredicateVocab("complex_subunit", "Complex subunit", "Component of a multi-subunit complex (KEGG module)", "structure"),
 
     # Transport - additional
     PredicateVocab("sodium_transporter", "Sodium transporter", "Na+ transport protein", "transport", "ion_transporter"),
@@ -922,7 +922,6 @@ VIRAL_PREDICATES = [
     # Lysogeny
     PredicateVocab("lysogeny", "Lysogeny", "Involved in lysogenic cycle", "viral"),
     PredicateVocab("excisionase", "Excisionase", "Prophage excision", "viral", "lysogeny"),
-    PredicateVocab("repressor", "Repressor", "Transcriptional repressor", "viral"),
     PredicateVocab("anti_repressor", "Anti-repressor", "Repressor antagonist", "viral"),
 
     # Host interaction / Anti-defense
@@ -934,10 +933,6 @@ VIRAL_PREDICATES = [
     PredicateVocab("dna_injection", "DNA injection", "Genome injection into host", "viral"),
 
     # Replication-associated
-    PredicateVocab("dna_polymerase", "DNA polymerase", "DNA replication polymerase", "viral", "viral_replication"),
-    PredicateVocab("rna_polymerase", "RNA polymerase", "RNA polymerase", "viral", "viral_replication"),
-    PredicateVocab("helicase", "Helicase", "DNA/RNA unwinding", "viral", "viral_replication"),
-    PredicateVocab("primase", "Primase", "Primer synthesis", "viral", "viral_replication"),
     PredicateVocab("ssb_protein", "SSB protein", "Single-strand DNA binding", "viral", "viral_replication"),
 
     # Nucleases
@@ -949,11 +944,6 @@ VIRAL_PREDICATES = [
     PredicateVocab("dna_modification", "DNA modification", "Modifies DNA bases", "viral"),
     PredicateVocab("dam_methylase", "Dam methylase", "GATC adenine methylation", "viral", "dna_modification"),
     PredicateVocab("dcm_methylase", "Dcm methylase", "CCWGG cytosine methylation", "viral", "dna_modification"),
-
-    # Regulatory
-    PredicateVocab("transcription_factor", "Transcription factor", "Regulates transcription", "viral"),
-    PredicateVocab("sigma_factor", "Sigma factor", "RNA polymerase sigma subunit", "viral", "transcription_factor"),
-    PredicateVocab("anti_sigma", "Anti-sigma factor", "Sigma factor inhibitor", "viral", "transcription_factor"),
 
     # Other enzymes
     PredicateVocab("deaminase", "Deaminase", "Removes amino groups", "viral"),

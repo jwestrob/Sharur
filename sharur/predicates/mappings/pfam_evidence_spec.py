@@ -107,7 +107,7 @@ d("molybdenum_binding", ["GO:0030151", "GO:0043546", "GO:0030151"], [r"molybd|\b
 d("molybdenum_cofactor", ["GO:0032324", "GO:0043546"], [r"molybd"])
 d("fad_binding", ["GO:0050660", "GO:0071949"], [r"\bFAD|flavin adenine|FAD_binding|FAD_oxidored|flavoprotein"])
 d("fmn_binding", ["GO:0010181"], [r"\bFMN|flavin mononucleotide|Flavodoxin|flavodoxin|Oxidored_FMN|FMN_red|Nitroreductase|Flavin_Reduct|FMN_dh|FMN_bind"])
-d("flavin_binding", ["GO:0050660", "GO:0010181", "GO:0009055"], [r"flavin|\bFAD|\bFMN|flavodoxin|flavoprotein|Flavoprotein|ETF"])
+d("flavin_binding", ["GO:0050660", "GO:0010181"], [r"flavin|\bFAD|\bFMN|flavodoxin|flavoprotein|Flavoprotein|ETF"])
 d("pqq_binding", ["GO:0070968"], [r"\bPQQ|pyrroloquinoline"])
 d("plp_binding", ["GO:0030170"], [r"pyridoxal|\bPLP|PALP|Pyridoxal"])
 d("thiamine_binding", ["GO:0030976", "GO:0030975"], [r"thiamin|\bTPP|TPP_enzyme|thiamine pyrophosphate"])
@@ -117,7 +117,7 @@ d("radical_sam", ["GO:0051539"], [r"radical ?SAM|Radical_SAM|SPASM|\bRS_|DUF4953
 d("coenzyme_a_binding", ["GO:0120225"], [r"\bCoA\b|coenzyme A"])
 d("f420_dependent", [], [r"F420|F_420|coenzyme F420"])
 d("oxygen_binding", ["GO:0019825"], [r"oxygen[- ]binding|globin|hemerythrin|hemocyanin|NiFe_hyd_SSU"])
-d("cytochrome", ["GO:0020037", "GO:0009055"], [r"cytochrom|\bCyt_|Cytochrom_|COX|\bcyt\b"])
+d("cytochrome", [], [r"cytochrom|apocytochrom|Apocytochr|\bCyt_|Cytochrom_|COX|\bcyt\b"])
 d("thioredoxin", ["GO:0015035"], [r"thioredoxin|Thioredoxin|\bTrx|Redoxin|DsbA|DsbB|DsbD|Glutaredoxin|glutaredoxin|\bTlpA|AhpC|SCO1|ResA"])
 d("glutaredoxin", ["GO:0015038"], [r"glutaredoxin"])
 d("redox", ["GO:0016491"], [r"redox|thioredoxin|oxidoreductase"])
@@ -313,8 +313,9 @@ d("nifese_hydrogenase", [], [r"NiFeSe"])
 d("fefe_hydrogenase", ["GO:0008901"], [r"Fe[- ]only hydrogenase|FeFe|\[FeFe\]|Iron hydrogenase|iron[- ]only|Fe_hyd|iron hydrogenase|Iron only hydrogenase"])
 d("fe_only_hydrogenase", ["GO:0047068"], [r"\bHmd|methylenetetrahydromethanopterin dehydrogenase|HMD"])
 d("hydrogenase_maturation", ["GO:0051604", "GO:0016151", "GO:0065003"], [r"hydrogenase.*(maturation|expression|formation|assembly|protease)|Hyp[A-F]|HypA|HypB|HypC|HypD|HypE|HypF|HycI|HupF|HupG|HyaE|HyaF|HybE|HybG|HydE|HydF|HydG|zf-HYPF|Ni_insertion|nickel incorporation|NiFe_hyd_mat|HupF_HypC|HycI|Hydrogenase/urease nickel incorporation|HypF_C|Kae1-like|Carbamoyltransferase"])
-d("mbh_hydrogenase", [], [r"\bMBH\b|Mbh"])
-d("ech_hydrogenase", [], [r"\bEch\b|energy-converting hydrogenase"])
+d("mbh_hydrogenase", [], [r"\bMBH\b|Mbh|mbh[A-N]"])
+# Ech is HydDB Group 4e; "energy-converting hydrogenase" also names Eha/Ehb (Groups 4h/4i).
+d("ech_hydrogenase", [], [r"\bEch\b|ech hydrogenase"])
 d("tetrapyrrole", [], [])
 d("fad_biosynthesis", ["GO:0006747", "GO:0009231", "GO:0003919"], [r"FAD synth|FMN adenylyltransferase|riboflavin|Rib[A-H]|FAD_syn|Flavokinase|FAD synthetase"])
 d("isoprenoid_biosynthesis", ["GO:0008299", "GO:0019288", "GO:0019287", "GO:0016114", "GO:0006720"], [r"isoprenoid|terpen|terpene|prenyl|polyprenyl|farnesyl|geranyl|squalene|hopene|carotenoid|Lycopene|MEP|DXP|DXS|DXR|IspC|IspD|IspE|IspF|IspG|IspH|MVA|mevalonate|HMG-CoA|IPP|IDI|isopentenyl|UbiA|MenA|polyprenyltransferase|trans-isoprenyl|Polyprenyl_synt|SQS_PSY|CrtB|CrtI|Amino_oxidase|Lycopene_cycl|ERG|Lanosterol|IspA|GGPS|HpnC|HpnD|YgbB|MECDP|LytB|GcpE|NHL|DXP_synthase|DXP_reductoisom"])
@@ -457,7 +458,9 @@ d("nickel_binding", ['GO:0016151'], ['nickel|urease|NiFe', 'Ni_|HypA|HypB|UreE|U
 
 d("iron_sulfur", ['GO:0051536', 'GO:0051539', 'GO:0051537', 'GO:0051538'], ['iron[- ]sulfur|iron[- ]sulphur|4fe-4s|2fe-2s|3fe-4s|radical sam|fe-s cluster', 'Fer[24]|Fe-?S\\b|FeS\\b|Rieske|Radical_SAM|NifU|SufE|IscU|DHODB_Fe-S|Fe-S_bind|Fer4_NifH|Molybdop_Fe4S4|SPASM'])
 
-d("ferredoxin", ['GO:0009055'], ['4fe-4s|2fe-2s|3fe-4s|flavodoxin', 'Fer[24]|Rieske|Flavodoxin'])
+# Ferredoxin is the carrier protein; Fe-S binding domains (Fer2/Fer4, "4Fe-4S binding")
+# and enzymes that use ferredoxin as a partner carry iron_sulfur / their activity instead.
+d("ferredoxin", [], [r"ferredoxin(?![- ]?(oxidoreductase|reductase|hydrogenase|dependent|thioredoxin|type|:|nadp))"])
 
 d("electron_transport", ['GO:0009055', 'GO:0022900'], ['electron (transfer|transport)|flavodoxin|cytochrom|rubredoxin|nadh.*(dehydrogenase|oxidoreductase)|quinone|quinol|4fe-4s|2fe-2s', 'Fer[24]|Rieske|ETF\\b|Cyt_|Cytochrom|Oxidored_q|Complex1|COX\\d|NQR|Rnf[A-G]|Hdr[A-E]|DsrC|DsrMK|Flavodoxin'])
 
@@ -569,3 +572,13 @@ d("nadp_binding", ['GO:0050661'], ['(nadph?|nad\\(p\\)h?)[- ](binding|dependent)
 d("cofactor_binding", ['GO:0048037', 'GO:0050662'], ['(nad\\(p\\)h?|nad\\(p\\)|nadph?|nadh?|fad|fmn|flavin|f420|pqq|biotin|lipoyl|lipoate|thiamin\\w*|tpp|pyridoxal[- ]phosphate|pyridoxal|plp|cobalamin|b12|heme|haem|s-adenosylmethionine|coenzyme a|coa|molybdopterin|pterin)[- ](binding|dependent)|cofactor[- ]binding|coenzyme[- ]binding', 'NAD_binding|NADP_binding|FAD_binding|FMN_bind|B12-binding|PQQ\\b|Biotin_lipoyl|Lipoyl|TPP_enzyme|F420_oxidored'])
 d("iron_sulfur_biosynthesis", [], [r"SufBD|SufB\b|SufD\b|SufC\b|SufS\b|SufE\b"])
 d("mobile_element", [], [r"Tni[ABQ]\b|Tns[A-E]\b"])
+
+# ---- Cofactor classes implied by GO activity definitions --------------------
+# GO's "NAD or NADP as acceptor" / "acting on NAD(P)H" oxidoreductase classes
+# mirror ENZYME's NAD(P) sub-subclasses; SAM-dependent methyltransferase
+# activity requires S-adenosylmethionine; "flavin as acceptor" classes mirror
+# ENZYME's flavin sub-subclasses. IDs checked against go-basic.obo.
+d("sam_binding", ["GO:0008757"])
+d("nad_binding", ["GO:0016616", "GO:0016620", "GO:0016628", "GO:0016639", "GO:0016646", "GO:0016651",
+                  "GO:0016680", "GO:0016696", "GO:0016723", "GO:0016726", "GO:0016731", "GO:0046857"])
+d("flavin_binding", ["GO:0046997", "GO:0052890"])

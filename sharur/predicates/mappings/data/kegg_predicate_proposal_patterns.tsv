@@ -1,0 +1,109 @@
+# Regexes (case-insensitive) over KEGG KO definitions proposing predicates; judged like curated rows.
+# pattern	predicates
+\bdehydrogenase\b	dehydrogenase,oxidoreductase
+\breductase\b	reductase,oxidoreductase
+\boxidase\b	oxidase,oxidoreductase
+\bkinase\b	kinase,transferase
+\bphosphatase\b	phosphatase,hydrolase
+\btransferase\b	transferase
+\bhydrolase\b	hydrolase
+\blyase\b	lyase
+\bsynthase\b	synthase
+\bsynthetase\b	synthetase,ligase
+\bprotease\b|\bpeptidase\b	protease,hydrolase
+\bnuclease\b	nuclease,hydrolase
+\bligase\b	ligase
+\bisomerase\b	isomerase
+monooxygenase	oxidoreductase,monooxygenase
+dioxygenase	oxidoreductase,dioxygenase
+peroxidase	oxidoreductase,peroxidase
+oxygenase	oxidoreductase,oxygenase
+aminotransferase|transaminase	aminotransferase,transferase,plp_binding
+acetyltransferase	acetyltransferase,transferase
+methyltransferase|O-methyltransferase|N-methyltransferase	methyltransferase,transferase,sam_binding
+glycosyltransferase|glucosyltransferase|galactosyltransferase|mannosyltransferase	glycosyltransferase,transferase,carbohydrate_active
+phosphotransferase	kinase,transferase
+deaminase	hydrolase,amidase
+dehalogenase|chlorohydrolase	hydrolase,dehalogenase
+decarboxylase	lyase,decarboxylase
+dehydratase	lyase,dehydratase
+\bepimerase\b	isomerase,epimerase
+\bmutase\b	isomerase,mutase
+\bracemase\b	isomerase,racemase
+\btransporter\b|\bpermease\b	transporter
+ABC.*transporter|ABC.*transport system|ATP-binding cassette	transporter,abc_transporter,atp_binding
+\bchannel\b	transporter,ion_channel
+\bsymporter\b	transporter,symporter
+\bantiporter\b	transporter,antiporter
+efflux	transporter,efflux_pump
+transcription.*regulator|regulator.*transcription|transcriptional repressor	regulator,transcription_factor
+response.*regulator	response_regulator,two_component
+sensor.*kinase|histidine.*kinase	sensor_kinase,two_component
+sigma.*factor	sigma_factor
+transcription.*factor|TFIIB|TBP	transcription,dna_binding
+HTH-type|DNA[-/ ].*binding|DNA/RNA-binding	dna_binding
+nucleotide binding protein	nucleotide_binding,binding
+\bhydrogenase\b	hydrogenase,hydrogen_metabolism
+\bnitrogenase\b	nitrogenase,nitrogen_fixation
+nitrate.*reductase|nar[GHI]	nitrate_reduction,denitrification
+nitrite.*reductase|nir[SK]	denitrification
+sulfite.*reductase|dsr[AB]	sulfate_reduction,sulfur_metabolism
+methyl.*coenzyme.*M.*reductase|mcr[ABG]	methanogenesis,one_carbon_metabolism
+RuBisCO|ribulose.*bisphosphate.*carboxylase|rbc[LS]	rubisco,carbon_fixation
+photosystem|psa[AB]|psb[AD]	photosynthesis
+O-antigen.*biosynthesis|O\d+-antigen	glycosyltransferase,lps_biosynthesis,carbohydrate_active
+dTDP.*sugar|dTDP-\d-deoxy|dTDP-.*hexose	carbohydrate_active
+UDP.*sugar|CDP.*sugar|GDP.*sugar|NDP.*sugar	carbohydrate_active
+polysaccharide	carbohydrate_active
+nonribosomal.*peptide|NRPS	nrps,secondary_metabolism
+polyketide|PKS	polyketide_synthesis,secondary_metabolism
+halogenase|brominase	oxidoreductase,secondary_metabolism
+biosynthesis.*protein	biosynthesis
+avermectin|erythromycin|streptomycin|kanamycin|gentamicin|novobiocin|pristinamycin|gramicidin|bleomycin	antibiotic_biosynthesis,secondary_metabolism
+flagell	flagellum
+pil[iu]s|fimbr	pilus
+\bribosom	ribosomal_protein,translation
+\bchaperone\b|chaperonin|prefoldin	chaperone,stress_response
+zinc finger|Zn-ribbon	zinc_finger,zinc_binding
+uncharacterized protein|hypothetical protein|unknown function	hypothetical
+(translation )?(initiation|elongation|release) factor|peptide chain release factor	translation
+tRNA synthetase|aminoacyl-tRNA	translation,trna_synthetase,synthetase,ligase
+proliferating cell nuclear antigen|\bPCNA\b	replication,sliding_clamp
+replication factor C	replication,clamp_loader,atp_binding
+DNA replication factor|archaeal cell division control protein 6|\bcdc6	replication,atpase,dna_binding
+DNA repair|\bRad[AB]\b|\bRad50\b|\bMre11\b|\bSbc[CD]\b|\bRecB\b|DNA polymerase	dna_repair
+endonuclease	endonuclease,nuclease,hydrolase
+exosome complex|ribonuclease|[mr]RNA .*processing|RNA-binding|ribonucleoprotein	rna_binding,rnase
+signal recognition particle receptor|\bftsY\b	signal_recognition,gtp_binding
+protein pelota|\bpelA\b	translation
+protein archease	chaperone
+\btranslin\b	dna_binding,rna_binding
+segregation and condensation protein|chromosome.*partition	chromosome_partitioning
+cell division protein|septum site	cell_division
+\btransposase\b	transposase,mobile_element
+\bintegrase\b	integrase,mobile_element
+\bphage\b	phage_related
+recombinase	recombinase,mobile_element
+circadian|clock.*protein|KaiC	signaling
+ATPase	atpase,atp_binding
+GTPase	gtpase,gtp_binding
+GTP-binding	gtp_binding
+radical.*SAM	radical_sam,iron_sulfur
+Fe-S cluster assembly	iron_sulfur_biosynthesis,iron_sulfur
+cobalamin|B12	cobalamin_binding,cobalt_binding
+ferredoxin	iron_sulfur,electron_transport
+flavin|FAD|FMN	fad_binding
+NAD|NADP|NADH	nad_binding
+PLP|pyridoxal	plp_binding
+CRISPR|Cas\d+	crispr_associated,defense_system
+restriction|methylase.*DNA|DNA.*methylase	restriction_modification
+mRNA interferase	toxin_antitoxin,rnase
+antitoxin	toxin_antitoxin,antitoxin
+\bFts[AZWLNQKX]\b	cell_division,divisome
+\bPar[AB]\b	cell_division,chromosome_partitioning
+heat.*shock|cold.*shock	stress_response
+superoxide.*dismutase|catalase|peroxiredoxin	oxidative_stress
+SEC61|protein transport protein	transporter,membrane
+membrane-associated protein|membrane protein|transmembrane protein	membrane
+MscS	membrane,ion_channel
+multiple antibiotic resistance	antibiotic_resistance,membrane

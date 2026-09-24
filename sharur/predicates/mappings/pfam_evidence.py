@@ -9,9 +9,11 @@ A (Pfam family, predicate) pair is supported by one of:
 - ``enzyme:<EC> (<name>)``: the description names an enzyme listed in the
   Expasy ENZYME database whose EC class maps to the predicate through
   :data:`sharur.predicates.mappings.kegg_map.EC_TO_PREDICATES`;
-- ``swissprot:single k/n`` or ``swissprot:all k/n``: reviewed UniProtKB/Swiss-Prot
-  proteins containing the family agree on the predicate through curator-assigned
-  EC numbers or experimentally supported GO terms (thresholds below).
+- ``swissprot:k/n single-domain k/n`` or ``swissprot:k/n co-domains excluded``:
+  reviewed UniProtKB/Swiss-Prot proteins containing the family agree on the
+  predicate through curator-assigned EC numbers, experimentally supported GO
+  terms, or the KEGG-evidenced predicates of their KOs (thresholds below;
+  :mod:`sharur.predicates.mappings.swissprot_evidence`).
 
 ``scripts/build_pfam_predicate_map.py`` applies these rules to build the shipped
 map; ``tests/test_pfam_map_integrity.py`` re-verifies every shipped pair.

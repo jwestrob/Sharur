@@ -9,7 +9,6 @@ consensus thresholds here; set ``SHARUR_SWISSPROT`` (uniprot_sprot.dat.gz) and
 after editing proposals or evidence definitions.
 """
 
-import importlib.util
 import os
 import re
 from pathlib import Path
@@ -45,7 +44,7 @@ SNAPSHOT = {acc: {"name": name, "desc": desc, "go": set(filter(None, go.split(",
                   "enzymes": {p: ecs.split("|") for p, ecs in (x.split("=", 1) for x in enz.split(";") if x)}}
             for acc, name, desc, go, enz in _rows("pfam_evidence_snapshot.tsv")}
 PAIRS = [(acc, pred, ev) for acc, (_, _, evidence) in MAP.items() for pred, ev in evidence.items()]
-SWISSPROT = re.compile(r"swissprot:(\d+)/(\d+) (?:single-domain (\d+)/(\d+)|co-domains excluded)")
+SWISSPROT = re.compile(r"swissprot:(\d+)/(\d+)(?: KOs (\d+)/(\d+))? (?:single-domain (\d+)/(\d+)|co-domains excluded)")
 
 
 def _meets_consensus(pred, detail):
@@ -55,9 +54,11 @@ def _meets_consensus(pred, detail):
     k, n = int(m.group(1)), int(m.group(2))
     covered = n >= SWISSPROT_COVERAGE[0] and k >= SWISSPROT_COVERAGE[1] * n \
         and wilson_lower_bound(k, n) >= SWISSPROT_MIN_LOWER_BOUND
-    if m.group(3) is None:
+    if m.group(3) is not None:
+        covered = covered and int(m.group(4)) >= 2 and int(m.group(3)) >= SWISSPROT_COVERAGE[1] * int(m.group(4))
+    if m.group(5) is None:
         return covered
-    ks, ns = int(m.group(3)), int(m.group(4))
+    ks, ns = int(m.group(5)), int(m.group(6))
     return covered and ns >= SWISSPROT_SINGLE[0] and ks >= SWISSPROT_SINGLE[1] * ns
 
 
@@ -98,26 +99,38 @@ def test_swissprot_pairs_record_their_release():
 
 
 @pytest.mark.skipif(not (os.environ.get("SHARUR_SWISSPROT") and os.environ.get("SHARUR_GO_OBO")),
-                    reason="set SHARUR_SWISSPROT and SHARUR_GO_OBO to recount Swiss-Prot consensus")
+                    reason="set SHARUR_SWISSPROT and SHARUR_GO_OBO (and SHARUR_SWISSPROT_KEGG when the "
+                           "map was built with KEGG gene links) to recount Swiss-Prot consensus")
 def test_swissprot_counts_recount_from_reviewed_proteins():
-    script = Path(__file__).resolve().parents[1] / "scripts/build_pfam_predicate_map.py"
-    spec = importlib.util.spec_from_file_location("build_pfam_predicate_map", script)
-    build = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(build)
-    obo = Path(os.environ["SHARUR_GO_OBO"])
-    build.read_go(Path(os.devnull), obo)
-    proteins = build.read_swissprot(Path(os.environ["SHARUR_SWISSPROT"]), build.read_go.ancestors)
+    from sharur.predicates.mappings.kegg_map import KEGG_EVIDENCE
+    from sharur.predicates.mappings.swissprot_evidence import (
+        go_ancestors,
+        ortholog_support,
+        pfam_view,
+        read_gene_ko_links,
+        read_swissprot,
+    )
+
+    reviewed = read_swissprot(Path(os.environ["SHARUR_SWISSPROT"]), go_ancestors(Path(os.environ["SHARUR_GO_OBO"])))
+    kegg_links = os.environ.get("SHARUR_SWISSPROT_KEGG")
+    gene_ko = read_gene_ko_links(Path(kegg_links)) if kegg_links else None
+    ko_predicates = {ko: {p for p, e in ev.items() if not e.startswith("swissprot:")}
+                     for ko, ev in KEGG_EVIDENCE.items()}
+    proteins = pfam_view(reviewed, gene_ko, ko_predicates)
     mismatched = []
     for acc, pred, ev in PAIRS:
         m = SWISSPROT.fullmatch(ev)
         if not m:
             continue
-        carriers = [(fams, preds) for fams, preds in proteins if acc in fams]
-        counted = [sum(pred in p for _, p in carriers), len(carriers)]
-        if m.group(3) is not None:
-            single = [p for fams, p in carriers if len(fams) == 1]
+        carriers = [(fams, preds, kos) for fams, preds, kos in proteins if acc in fams]
+        counted = [sum(pred in p for _, p, _ in carriers), len(carriers)]
+        k_kos, n_kos = ortholog_support([(p, kos) for _, p, kos in carriers], pred)
+        if n_kos >= 2:
+            counted += [k_kos, n_kos]
+        if m.group(5) is not None:
+            single = [p for fams, p, _ in carriers if len(fams) == 1]
             counted += [sum(pred in p for p in single), len(single)]
-        if list(map(int, filter(None, m.groups()))) != counted:
+        if [int(g) for g in m.groups() if g is not None] != counted:
             mismatched.append((acc, pred, ev, counted))
     assert not mismatched, mismatched[:20]
 
@@ -158,6 +171,10 @@ def _families_with(pred):
     ("ATP-cone", {"kinase"}),                                           # mostly ribonucleotide reductases
     ("HATPase_c", {"sensor_kinase"}),                                   # also gyrase, Hsp90, MutL
     ("GATase", {"lyase"}),
+    ("Fer4", {"ferredoxin"}),                                           # 4Fe-4S binding domain, many enzymes
+    ("HNOB", {"cytochrome"}),                                           # heme binding without electron carriage
+    ("Lipid_desat", {"monooxygenase"}),                                 # EC 1.14.19 desaturase
+    ("TauD", {"monooxygenase"}),                                        # EC 1.14.11 2OG-dependent dioxygenase
 ])
 def test_known_false_claims_stay_out(family, absent):
     accs = [acc for acc, (name, _, _) in MAP.items() if name == family]

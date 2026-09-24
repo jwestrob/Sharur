@@ -55,6 +55,8 @@ accession_overrides:
   # HydDB review flags are quality flags, never functional support
   hyddb_needs_curation: flags
   hyddb_class_conflict: flags
+  hyddb_ko_supported: flags
+  hyddb_ko_conflict: flags
   # P-loop_NTPase — very broad superfamily
   PF00005: supports  # ABC_tran is still specific enough for "supports"
   ABC_tran: supports

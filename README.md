@@ -271,8 +271,8 @@ Sharur ships with skill specs in `.claude/skills/` that give Claude Code structu
 
 The predicate system is what makes Sharur more than a database wrapper. Annotations are mapped to functional predicates via curated rules:
 
-- **PFAM**: a generated family-to-predicate table (`sharur/predicates/mappings/data/pfam_predicates.tsv`) in which every pair cites its support from the family's InterPro GO annotation, its Pfam name/description, or an ENZYME name; `scripts/build_pfam_predicate_map.py` builds it from proposals and `tests/test_pfam_map_integrity.py` re-verifies it
-- **KEGG**: KO-to-predicate mappings for metabolic functions
+- **PFAM**: a generated family-to-predicate table (`sharur/predicates/mappings/data/pfam_predicates.tsv`) in which every pair cites its support: the family's InterPro GO annotation, its Pfam name/description, an ENZYME name, or consensus among reviewed Swiss-Prot proteins carrying the family (curated EC numbers, experimental GO, and the KEGG-evidenced predicates of their KOs). `scripts/build_pfam_predicate_map.py` builds it from proposals and `tests/test_pfam_map_integrity.py` re-verifies it
+- **KEGG**: a generated KO-to-predicate table (`sharur/predicates/mappings/data/kegg_predicates.tsv`) whose pairs cite KEGG's own information (EC numbers, BRITE placement, module membership, including `complex_subunit` for '+'-joined module components), HydDB reference labels for KOs KEGG names as hydrogenases, the KO's KEGG symbols/name, or Swiss-Prot consensus. `scripts/build_kegg_predicate_map.py` builds it and `tests/test_kegg_map_integrity.py` re-verifies it
 - **CAZy**: Carbohydrate-active enzyme families
 - **VOGdb**: Viral orthologous groups
 - **Computed**: `giant` (>1000 aa), `unannotated` (no hits), `membrane_protein` (TM helices)

@@ -668,7 +668,7 @@ To promote or demote a specific accession:
 2. Open `review_queue.tsv` -- accessions sorted by priority (n_proteins * n_genomes)
 3. For each high-priority unmapped accession:
    - Determine the correct predicate(s) it should map to
-   - Add the mapping to the appropriate V1 mapping file (`pfam_map.py`, `kegg_map.py`, etc.)
+   - Propose the mapping in the matching proposal file (`sharur/predicates/mappings/data/pfam_predicate_proposals.tsv`, `kegg_predicate_proposals.tsv`, or the KEGG BRITE/module rule tables) and rebuild the generated map; the pair ships when its evidence verifies
    - Or add an accession override in `relation_overrides.yaml`
 4. Re-run V2 to verify the accession is no longer unresolved
 

@@ -592,7 +592,7 @@ medium: size_class
 small: size_class
 tiny: size_class
 
-# === quality_flag (16 predicates) ===
+# === quality_flag (18 predicates) ===
 cazy_annotated: quality_flag
 confident_hit: quality_flag
 gc_high: quality_flag
@@ -601,6 +601,8 @@ gc_outlier: quality_flag
 hyddb_annotated: quality_flag  # override from metabolism
 hyddb_needs_curation: quality_flag
 hyddb_class_conflict: quality_flag
+hyddb_ko_supported: quality_flag
+hyddb_ko_conflict: quality_flag
 hydrogenase_complex1_review: quality_flag
 hypothetical: quality_flag
 kegg_annotated: quality_flag

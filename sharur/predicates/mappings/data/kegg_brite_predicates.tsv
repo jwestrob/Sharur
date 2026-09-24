@@ -1,0 +1,141 @@
+# KEGG BRITE node -> predicate rules (curated). A KO placed under a matching node
+# carries the predicates, with its node path as evidence.
+# node_path: " > "-joined levels below the hierarchy root; each level is a literal
+#   prefix of KEGG's node label, or a regex (fullmatch) when prefixed with "re:".
+#   An empty path matches every KO in the hierarchy.
+# definition_regex: optional; KEGG's KO definition (symbols; name) must match it.
+# Map component-level predicates only: locus/system calls belong to system callers.
+# hierarchy	node_path	definition_regex	predicates
+ko02048	CRISPR-Cas system		crispr_associated
+ko02048	CRISPR-Cas system > Universal Cas proteins		crispr_adaptation
+ko02048	CRISPR-Cas system > Type I CRISPR-Cas system		crispr_type_i
+ko02048	CRISPR-Cas system > Type I CRISPR-Cas system > Subtype I-A		crispr_type_i_a
+ko02048	CRISPR-Cas system > Type I CRISPR-Cas system > Subtype I-B		crispr_type_i_b
+ko02048	CRISPR-Cas system > Type I CRISPR-Cas system > Subtype I-C		crispr_type_i_c
+ko02048	CRISPR-Cas system > Type I CRISPR-Cas system > Subtype I-D		crispr_type_i_d
+ko02048	CRISPR-Cas system > Type I CRISPR-Cas system > Subtype I-E		crispr_type_i_e
+ko02048	CRISPR-Cas system > Type I CRISPR-Cas system > Subtype I-F		crispr_type_i_f
+ko02048	CRISPR-Cas system > Type II CRISPR-Cas system		crispr_type_ii
+ko02048	CRISPR-Cas system > Type II CRISPR-Cas system > Subtype II-A		crispr_type_ii_a
+ko02048	CRISPR-Cas system > Type II CRISPR-Cas system > Subtype II-B		crispr_type_ii_b
+ko02048	CRISPR-Cas system > Type III CRISPR-Cas system		crispr_type_iii
+ko02048	CRISPR-Cas system > Type III CRISPR-Cas system > Subtype III-A		crispr_type_iii_a
+ko02048	CRISPR-Cas system > Type III CRISPR-Cas system > Subtype III-B		crispr_type_iii_b
+ko02048	Restriction and modification system		restriction_modification
+ko02048	Restriction and modification system > Type I R-M system		rm_type_i
+ko02048	Restriction and modification system > Type II R-M system		rm_type_ii
+ko02048	Restriction and modification system > Type II R-M system > Restriction endonucleases		restriction_enzyme
+ko02048	Restriction and modification system > Type II R-M system > DNA methyltransferases		methyltransferase_rm
+ko02048	Restriction and modification system > Type III R-M system		rm_type_iii
+ko02048	Restriction and modification system > Type IV R-M system		rm_type_iv
+ko02048	Toxin-antitoxin system	(?i)\bantitoxin\b	antitoxin
+ko02048	Toxin-antitoxin system	(?i)(?<!anti)\btoxin\b|mRNA interferase	toxin
+ko02048	Toxin-antitoxin system > Type IV TA system > AbiEii-AbiEi		abi_e
+ko02048	Toxin-antitoxin system > Type III TA system > AbiQ		abortive_infection
+ko02048	DNA phosphothiolation system		defense_system
+ko02044	Type I secretion system		t1ss_component
+ko02044	Type II secretion system > General secretion pathway protein		t2ss_component
+ko02044	Type II secretion system > Pilin secretion/fimbrial assembly protein		pilus
+ko02044	Type II secretion system > Tight adherence (Tad) export apparatus		pilus
+ko02044	Type II secretion system > Toxin co-regulated pilus biosynthesis protein		type_iv_pilus
+ko02044	Type II secretion system > MSHA pilus biogenesis protein		type_iv_pilus
+ko02044	Type II secretion system > Type IVa pilus homolog protein		type_iv_pilus
+ko02044	Type II secretion system > Archaeal flagellar protein		flagellum
+ko02044	Type III secretion system > Type III secretion core apparatus		t3ss_component
+ko02044	Type III secretion system > Flagellar export apparatus		flagellum
+ko02044	Type IV secretion system		t4ss_component
+ko02044	Type IV secretion system > Conjugal DNA-protein transfer (VirB/D) protein		conjugation
+ko02044	Type IV secretion system > Conjugal transfer pilus assembly protein		conjugation
+ko02044	Type IV secretion system > Trb secretion system protein		conjugation
+ko02044	Type V secretion system		t5ss_component
+ko02044	Type VI secretion system > Imp/Vas secretion system core components		t6ss_component
+ko02044	Type VII secretion system		secretion_component
+ko02044	Chaperone-usher system		pilus
+ko02044	Sec (secretion) system		sec_pathway
+ko02044	Twin-arginine translocation (Tat) system		tat_pathway
+ko02022			two_component
+ko02022		(?i)histidine kinase	sensor_kinase
+ko02022		(?i)response regulator	response_regulator
+ko02022	OmpR family	(?i)response regulator	ompr_family
+ko02022	NarL family	(?i)response regulator	narl_family
+ko02022	CheA family > CheA-CheYBV (chemotaxis)		chemotaxis
+ko02035	Flagellar system > Chemotaxis proteins		chemotaxis
+ko02035	Flagellar system > Flagellar assembly proteins		flagellum
+ko02035	Flagellar system > Flagellar assembly proteins > C ring		flagellar_motor
+ko02035	Flagellar system > Flagellar assembly proteins > Stator		flagellar_motor
+ko02035	Flagellar system > Archaeal flagellar assembly proteins		flagellum
+ko02035	Pilus system		pilus
+ko02035	Pilus system > Twitching motility proteins		type_iv_pilus
+ko01504	Gene variants		antibiotic_resistance
+ko01504	Gene variants > beta-Lactamase genes		beta_lactamase
+ko01504	Gene variants > Aminoglycoside resistance genes		aminoglycoside_resistance
+ko01504	Gene sets > beta-Lactam resistance modules > re:(Methicillin resistance|beta-Lactam resistance, Bla system).*		antibiotic_resistance
+ko01504	Gene sets > Vancomycin resistance modules > re:Vancomycin resistance.*		antibiotic_resistance
+ko01504	Gene sets > Multipdrug resistance modules > re:Multidrug resistance, efflux pump.*	(?i)efflux|multidrug|outer membrane protein|membrane fusion|transporter|permease	efflux_pump multidrug_resistance
+ko03400	re:(Eukaryotic|Prokaryotic) type > re:(SSBR|DSBR|TLS).*		dna_repair
+ko03400	re:(Eukaryotic|Prokaryotic) type > SSBR > BER		base_excision_repair
+ko03400	re:(Eukaryotic|Prokaryotic) type > SSBR > NER		nucleotide_excision_repair
+ko03400	re:(Eukaryotic|Prokaryotic) type > SSBR > MMR		mismatch_repair
+ko03400	re:(Eukaryotic|Prokaryotic) type > DSBR > HR		recombinational_repair
+ko03400	Prokaryotic type > TLS > Other SOS response factors		sos_response
+ko03032			replication
+ko03032	re:(Eukaryotic|Prokaryotic) type > DNA Topoisomerases		topoisomerase
+ko03021			transcription
+ko03021	Prokaryotic type > re:(Bacterial|Archaeal) type > RNA polymerase		rna_polymerase
+ko03021	Eukaryotic type > re:RNA polymerase (I|II|III) system > re:RNA polymerase (I|II|III)		rna_polymerase
+ko03110	Heat shock proteins		chaperone heat_shock
+ko03110	Heat shock proteins > HSP90		hsp90
+ko03110	Heat shock proteins > HSP70 / DNAK		hsp70
+ko03110	Heat shock proteins > HSP60 / Chaperonin		hsp60
+ko03110	Heat shock proteins > HSP20		small_hsp
+ko03110	Other chaperones and cochaperones		chaperone
+ko03012			translation translation_factor
+ko03011	Ribosomal proteins		ribosomal_protein translation
+ko03016	re:(Eukaryotic|Prokaryotic) type > tRNA modification factors		trna_modification
+ko03016	re:(Eukaryotic|Prokaryotic) type > Aminoacyl-tRNA synthetases (AARSs) > Other AARSs		trna_synthetase
+ko03016	re:(Eukaryotic|Prokaryotic) type > re:(5'processing|3'processing).*		rna_processing
+ko00194	Photosystem and electron transport system > Photosystem II		photosynthesis photosystem_ii
+ko00194	Photosystem and electron transport system > Photosystem I		photosynthesis photosystem_i
+ko00194	Photosystem and electron transport system > Cytochrome b6/f complex		photosynthesis electron_transport
+ko00194	Photosystem and electron transport system > Photosynthetic electron transport		photosynthesis electron_transport
+ko00194	Antenna proteins		photosynthesis light_harvesting
+ko00194	Anoxygenic photosystem		photosynthesis
+ko01011			peptidoglycan
+ko01011	Precursor biosynthesis		murein_synthesis
+ko01011	Peptidoglycan biosynthesis and degradation > re:Glycosyltransferase/DD-Transpeptidase.*		pbp transpeptidase
+ko01011	Peptidoglycan biosynthesis and degradation > DD-Transpeptidase (Class B PBP)		pbp transpeptidase
+ko01011	Peptidoglycan biosynthesis and degradation > re:DD-Carboxypeptidase/DD-Endopeptidase.*		pbp
+ko01011	Peptidoglycan biosynthesis and degradation > Transpeptidase		transpeptidase
+ko01011	Peptidoglycan biosynthesis and degradation > Lytic transglycosylase		lytic_transglycosylase
+ko01005			lps_biosynthesis
+ko01005	Lipid A		lipid_a_biosynthesis
+ko01005	O-antigen repeat unit		o_antigen
+ko01003	re:(?!Unclassified).*		glycosyltransferase carbohydrate_active
+ko01002	re:(Aspartic|Cysteine|Glutamic|Metallo|Mixed|Serine|Threonine) peptidases|Peptidases of unknown catalytic type		peptidase
+ko01002	Cysteine peptidases		cysteine_protease
+ko01002	Cysteine peptidases > re:Family (C12|C19): .*		deubiquitinase
+ko01002	Serine peptidases > Family S14: ClpP endopeptidase family		clp_protease
+ko01002	Serine peptidases > Family S16: lon protease family		lon_protease
+ko03000			transcription_factor
+ko03000	re:(Eukaryotic|Prokaryotic) type > Helix-turn-helix		helix_turn_helix dna_binding
+ko03000	Prokaryotic type > Ribbon-helix-helix		ribbon_helix_helix dna_binding
+ko03000	Eukaryotic type > re:Basic helix-loop-helix.*		helix_loop_helix
+ko03000	Eukaryotic type > Zinc finger		zinc_finger
+ko03000	Prokaryotic type > Helix-turn-helix > AraC family		arac_family
+ko03000	Prokaryotic type > Helix-turn-helix > LysR family		lysr_family
+ko03000	Prokaryotic type > Helix-turn-helix > LacI family		laci_family
+ko03000	Prokaryotic type > Helix-turn-helix > GntR family		gntr_family
+ko03000	Prokaryotic type > Helix-turn-helix > TetR/AcrR family		tetr_family
+ko03000	Prokaryotic type > Helix-turn-helix > Lrp/AsnC family		asnc_family
+ko03000	Prokaryotic type > Helix-turn-helix > LuxR family		luxr_family
+ko03000	Prokaryotic type > Helix-turn-helix > MarR family		marr_family
+ko03000	Prokaryotic type > Helix-turn-helix > IclR family		iclr_family
+ko03000	Prokaryotic type > Helix-turn-helix > CRP/FNR family		crp_fnr_family
+ko02000	re:ABC transporters, (eukaryotic|prokaryotic) type		transporter abc_transporter
+ko02000	Solute carrier family (SLC)		transporter
+ko02000	Major facilitator superfamily (MFS)		transporter mfs_transporter
+ko02000	Major facilitator superfamily (MFS) > Sugar transporters		sugar_transporter
+ko02000	Major facilitator superfamily (MFS) > Nitrate/nitrite transporters		nitrate_transporter
+ko02000	Major facilitator superfamily (MFS) > Metal transporters		metal_transporter
+ko02000	Phosphotransferase system (PTS) > Enzyme II		transporter sugar_transporter
+ko02000	Other transporters > re:(Aquaporins|Pores ion channels|Electrochemical potential-driven|Primary active transporters).*		transporter

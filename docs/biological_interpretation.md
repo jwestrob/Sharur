@@ -188,4 +188,8 @@ If all three find nothing AND genome is high-quality (<50 contigs), absence is p
 
 ### PFAM Mapping Scaling
 
-Add or change Pfam meanings in the proposal files (`sharur/predicates/mappings/data/pfam_predicate_proposals.tsv` for families, `pfam_predicate_proposal_patterns.tsv` for name/description patterns), then run `scripts/build_pfam_predicate_map.py`. A proposed pair ships only when the family's InterPro GO annotation, Pfam name/description, or an ENZYME name supports it (`sharur/predicates/mappings/pfam_evidence.py`); the shipped table records that evidence per pair.
+Add or change Pfam meanings in the proposal files (`sharur/predicates/mappings/data/pfam_predicate_proposals.tsv` for families, `pfam_predicate_proposal_patterns.tsv` for name/description patterns), then run `scripts/build_pfam_predicate_map.py`. A proposed pair ships only when the family's InterPro GO annotation, Pfam name/description, or an ENZYME name supports it (`sharur/predicates/mappings/pfam_evidence.py`); the shipped table records that evidence per pair. With `--swissprot`, consensus among reviewed Swiss-Prot proteins carrying the family also supports a pair: coverage across all carriers, and attribution through single-domain carriers or the absence of an explaining co-domain.
+
+### KEGG Mapping Scaling
+
+KO meanings come from KEGG itself. Map a BRITE node or a KEGG module to predicates in `sharur/predicates/mappings/data/kegg_brite_predicates.tsv` or `kegg_module_predicates.tsv` (component-level predicates only; keep modules whose components serve other pathways out), or propose a KO pair in `kegg_predicate_proposals.tsv`, then run `scripts/build_kegg_predicate_map.py`. A proposed pair ships when KEGG's EC numbers, BRITE placement, module membership, the KO's symbols/name, HydDB reference labels (KOs KEGG names as hydrogenases), or Swiss-Prot consensus supports it (`sharur/predicates/mappings/kegg_evidence.py`).
