@@ -44,7 +44,7 @@ from sharur.predicates.mappings.kegg_evidence import (
 )
 from sharur.predicates.mappings.kegg_map import get_predicates_for_ec, parse_ec_numbers
 from sharur.predicates.mappings.pfam_evidence import resolve
-from sharur.predicates.vocabulary import PREDICATE_BY_ID
+from sharur.predicates.vocabulary import PREDICATE_BY_ID, component_level
 
 
 REST = "https://rest.kegg.jp"
@@ -274,9 +274,12 @@ def build(inputs: Path, out_dir: Path, kofam_ko_list: Path | None = None,
                 dropped.append((ko, symbols, name, proposed, pred or "(no vocabulary equivalent)"))
         for pred, ev in consensus.get(ko, {}).items():
             evidence.setdefault(pred, ev)
-        evidence = {p: e for p, e in evidence.items() if p in PREDICATE_BY_ID}
-        if evidence:
-            mapped[ko] = evidence
+        component: dict[str, str] = {}
+        for pred, ev in evidence.items():  # maps carry component-level predicates only
+            if pred in PREDICATE_BY_ID:
+                component.setdefault(component_level(pred), ev)
+        if component:
+            mapped[ko] = component
 
     provenance = {
         "kegg_release": kegg_release(inputs / "kegg_info.txt"),

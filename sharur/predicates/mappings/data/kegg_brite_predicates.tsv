@@ -4,7 +4,8 @@
 #   prefix of KEGG's node label, or a regex (fullmatch) when prefixed with "re:".
 #   An empty path matches every KO in the hierarchy.
 # definition_regex: optional; KEGG's KO definition (symbols; name) must match it.
-# Map component-level predicates only: locus/system calls belong to system callers.
+# Map component-level predicates only (vocabulary level 'component'): system-level
+# predicates (validated multi-gene systems) come from system callers.
 # hierarchy	node_path	definition_regex	predicates
 ko02048	CRISPR-Cas system		crispr_associated
 ko02048	CRISPR-Cas system > Universal Cas proteins		crispr_adaptation
@@ -22,17 +23,13 @@ ko02048	CRISPR-Cas system > Type III CRISPR-Cas system		crispr_type_iii
 ko02048	CRISPR-Cas system > Type III CRISPR-Cas system > Subtype III-A		crispr_type_iii_a
 ko02048	CRISPR-Cas system > Type III CRISPR-Cas system > Subtype III-B		crispr_type_iii_b
 ko02048	Restriction and modification system		restriction_modification
-ko02048	Restriction and modification system > Type I R-M system		rm_type_i
-ko02048	Restriction and modification system > Type II R-M system		rm_type_ii
 ko02048	Restriction and modification system > Type II R-M system > Restriction endonucleases		restriction_enzyme
 ko02048	Restriction and modification system > Type II R-M system > DNA methyltransferases		methyltransferase_rm
-ko02048	Restriction and modification system > Type III R-M system		rm_type_iii
-ko02048	Restriction and modification system > Type IV R-M system		rm_type_iv
 ko02048	Toxin-antitoxin system	(?i)\bantitoxin\b	antitoxin
 ko02048	Toxin-antitoxin system	(?i)(?<!anti)\btoxin\b|mRNA interferase	toxin
-ko02048	Toxin-antitoxin system > Type IV TA system > AbiEii-AbiEi		abi_e
-ko02048	Toxin-antitoxin system > Type III TA system > AbiQ		abortive_infection
-ko02048	DNA phosphothiolation system		defense_system
+ko02048	Toxin-antitoxin system > Type IV TA system > AbiEii-AbiEi		abi_domain
+ko02048	Toxin-antitoxin system > Type III TA system > AbiQ		abi_domain
+ko02048	DNA phosphothiolation system		defense_component
 ko02044	Type I secretion system		t1ss_component
 ko02044	Type II secretion system > General secretion pathway protein		t2ss_component
 ko02044	Type II secretion system > Pilin secretion/fimbrial assembly protein		pilus

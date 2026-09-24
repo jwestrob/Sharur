@@ -25,7 +25,7 @@ from sharur.predicates.pfam_identity import COMPLEX1, NIFESE_HASES, has_pfam_dom
 from sharur.predicates.mappings.kegg_map import get_predicates_for_kegg
 from sharur.predicates.mappings.cazy_map import get_predicates_for_cazy
 from sharur.predicates.mappings.vog_map import get_vog_predicates
-from sharur.predicates.vocabulary import get_hierarchy
+from sharur.predicates.vocabulary import component_level, get_hierarchy
 
 if TYPE_CHECKING:
     from sharur.storage.duckdb_store import DuckDBStore
@@ -130,6 +130,10 @@ _TA_SYSTEM_TYPE_PREDICATES = {
     "rosmerta": "rosmerta",
     "shosta": "shosta",
 }
+
+
+# Annotation sources whose rows are validated multi-gene system calls.
+SYSTEM_SOURCES = frozenset({"defensefinder_system", "txsscan_system"})
 
 
 def _normalize_system_name(value: str) -> str:
@@ -564,6 +568,10 @@ class PredicateGenerator:
             elif ann.evalue > 1e-5:
                 predicates.add("weak_hit")
 
+        # Only system callers emit system-level predicates; single-gene evidence
+        # keeps its component-level equivalent.
+        if source not in SYSTEM_SOURCES:
+            predicates = {component_level(p) for p in predicates} - {None}
         return predicates
 
     def _predicates_from_properties(self, protein: ProteinRecord) -> set[str]:

@@ -55,10 +55,13 @@ This returns:
 defense_predicates = [
     'crispr_associated', 'cas_domain',
     'restriction_modification', 'restriction_enzyme', 'methyltransferase',
-    'toxin_antitoxin', 'toxin_domain', 'antitoxin_domain',
-    'defense_system', 'anti_crispr', 'anti_restriction',
-    'abortive_infection', 'retron',
+    'toxin', 'antitoxin', 'toxin_domain', 'antitoxin_domain',
+    'defense_component', 'anti_crispr', 'anti_restriction', 'abi_domain',
 ]
+# Component-level predicates (above) come from single genes or domains and mark
+# candidates. System-level predicates (defense_system, toxin_antitoxin,
+# abortive_infection, rm_type_*, named defense_* systems) come only from
+# validated system callers; query defense_systems for system claims.
 
 for pred in defense_predicates:
     count = b.store.execute(f"""
@@ -156,10 +159,10 @@ if padloc_systems:
 Compare DefenseFinder/PADLOC system-level calls with predicate-based detection to find discrepancies:
 
 ```python
-# Predicate-based defense protein count
+# Predicate-based defense candidate count (component level)
 pred_defense = b.store.execute("""
     SELECT COUNT(DISTINCT protein_id) FROM protein_predicates
-    WHERE 'defense_system' = ANY(predicates)
+    WHERE 'defense_component' = ANY(predicates)
 """)[0][0]
 
 # DefenseFinder protein count
@@ -179,7 +182,7 @@ if df_defense > 0:
         WHERE a.source = 'defensefinder'
           AND a.protein_id NOT IN (
             SELECT protein_id FROM protein_predicates
-            WHERE 'defense_system' = ANY(predicates)
+            WHERE 'defense_component' = ANY(predicates)
           )
         LIMIT 10
     """)
@@ -325,8 +328,7 @@ defense_rich = b.store.execute("""
     JOIN protein_predicates pp ON p.protein_id = pp.protein_id
     WHERE 'crispr_associated' = ANY(pp.predicates)
        OR 'restriction_modification' = ANY(pp.predicates)
-       OR 'toxin_antitoxin' = ANY(pp.predicates)
-       OR 'defense_system' = ANY(pp.predicates)
+       OR 'defense_component' = ANY(pp.predicates)
     GROUP BY p.contig_id
     HAVING COUNT(DISTINCT p.protein_id) >= 5
     ORDER BY n_defense DESC
@@ -399,10 +401,9 @@ Go beyond inventories — interpret the defense repertoire ecologically.
 # Calculate defense investment per genome
 defense_load = b.store.execute("""
     SELECT p.bin_id,
-           COUNT(DISTINCT CASE WHEN 'defense_system' = ANY(pp.predicates)
+           COUNT(DISTINCT CASE WHEN 'defense_component' = ANY(pp.predicates)
                                OR 'crispr_associated' = ANY(pp.predicates)
                                OR 'restriction_modification' = ANY(pp.predicates)
-                               OR 'toxin_antitoxin' = ANY(pp.predicates)
                  THEN p.protein_id END) as n_defense,
            COUNT(DISTINCT p.protein_id) as n_total
     FROM proteins p

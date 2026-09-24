@@ -2,7 +2,7 @@
 # Pfam: Pfam-A.hmm sha256 8bab3a946e6d99a4 (24076 families); Pfam-A.clans.tsv.gz (30134 families)
 # GO: pfam2go sha256 30274dd59c468d70; go-basic.obo sha256 b08d45b268b8c24c
 # ENZYME: enzyme.dat sha256 6e1f553fcaa15ba7
-# Swiss-Prot: uniprot_sprot.dat.gz 2026_03 sha256 c87208822a56e8ae (553,641 reviewed proteins with Pfam); KEGG gene links swissprot_kegg_ko.tsv sha256 20ab0dd3b910cb82; KO predicates from kegg_predicates.tsv sha256 ba1af2e5cbf70b00
+# Swiss-Prot: uniprot_sprot.dat.gz 2026_03 sha256 c87208822a56e8ae (553,641 reviewed proteins with Pfam); KEGG gene links swissprot_kegg_ko.tsv sha256 20ab0dd3b910cb82; KO predicates from kegg_predicates.tsv sha256 054c42a1455b7f34
 # accession	name	description	go_anchors	enzymes
 PF00001	7tm_1	7 transmembrane receptor (rhodopsin family)	GO:0007165,GO:0016020,GO:0023052,GO:0038023,GO:0065007	
 PF00002	7tm_2	7 transmembrane receptor (Secretin family)	GO:0007165,GO:0016020,GO:0023052,GO:0038023,GO:0065007	

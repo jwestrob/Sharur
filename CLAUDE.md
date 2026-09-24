@@ -191,9 +191,12 @@ report/draft files remain independently writable.
 **Don't stop at generic predicates — drill into subgroup-level detail.**
 
 - **Hydrogenases:** `hydrogenase` → check `nife_group1`–`nife_group4`, `fefe_groupA`–`fefe_groupC`. Group 3 vs 4 reveals uptake vs evolution.
-- **CRISPR:** `cas_domain` → check `type_i_crispr`/`type_ii_crispr`/`type_iii_crispr`, effectors, `loci` table.
-- **Defense:** `defense_system` → inspect whichever curated callers exist in the live
-  schema for specific types. **CRITICAL: NEVER report raw system-profile HMM hits as
+- **CRISPR:** `cas_domain` → check `crispr_type_i`/`crispr_type_ii`/`crispr_type_iii` (and subtypes such as `crispr_type_i_e`), effectors, `loci` table.
+- **Defense:** `defense_component` (gene/domain evidence) marks candidates → inspect
+  whichever curated callers exist in the live schema for specific types.
+  System-level predicates (`defense_system`, `toxin_antitoxin`, `abortive_infection`,
+  `rm_type_*`, named `defense_*` systems, `type_*_secretion`) are emitted only from
+  validated system-caller rows. **CRITICAL: NEVER report raw system-profile HMM hits as
   systems.** Only purpose-built caller output such as the current `defense_systems`
   table (materialized by `sharur/colocation.py`) supports a named system claim.
 - **CAZy:** `carbohydrate_active` → check `cazy:GH5`, `cazy:GT2`, etc. GH families reveal substrate specificity.

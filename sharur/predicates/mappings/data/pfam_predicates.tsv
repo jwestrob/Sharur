@@ -2,7 +2,7 @@
 # Pfam: Pfam-A.hmm sha256 8bab3a946e6d99a4 (24076 families); Pfam-A.clans.tsv.gz (30134 families)
 # GO: pfam2go sha256 30274dd59c468d70; go-basic.obo sha256 b08d45b268b8c24c
 # ENZYME: enzyme.dat sha256 6e1f553fcaa15ba7
-# Swiss-Prot: uniprot_sprot.dat.gz 2026_03 sha256 c87208822a56e8ae (553,641 reviewed proteins with Pfam); KEGG gene links swissprot_kegg_ko.tsv sha256 20ab0dd3b910cb82; KO predicates from kegg_predicates.tsv sha256 ba1af2e5cbf70b00
+# Swiss-Prot: uniprot_sprot.dat.gz 2026_03 sha256 c87208822a56e8ae (553,641 reviewed proteins with Pfam); KEGG gene links swissprot_kegg_ko.tsv sha256 20ab0dd3b910cb82; KO predicates from kegg_predicates.tsv sha256 054c42a1455b7f34
 # accession	name	predicates	evidence
 PF00001	7tm_1	membrane	membrane=go:GO:0016020
 PF00002	7tm_2	membrane	membrane=go:GO:0016020
@@ -1169,7 +1169,7 @@ PF01863	YgjP-like	metal_binding,protease	metal_binding=text:metal;protease=text:
 PF01864	CarS-like	lipid_metabolism,nucleotidyltransferase,synthase,transferase	lipid_metabolism=text:CDP-archaeol;nucleotidyltransferase=swissprot:54/54 single-domain 54/54;synthase=text:synthase;transferase=enzyme:2.7.7.67 (cdp-archaeol synthase)
 PF01865	PhoU_div	hypothetical	hypothetical=text:unknown function
 PF01866	Diphthamide_syn	translation,translation_factor	translation=swissprot:50/56 KOs 2/2 single-domain 50/56;translation_factor=swissprot:50/56 KOs 2/2 single-domain 50/56
-PF01867	Cas_Cas1	cas_domain,crispr_adaptation,crispr_associated,defense_system,dna_repair,hydrolase,recombinational_repair	cas_domain=go:GO:0043571;crispr_adaptation=swissprot:53/56 single-domain 49/51;crispr_associated=swissprot:53/56 single-domain 49/51;defense_system=go:GO:0051607;dna_repair=swissprot:53/56 single-domain 49/51;hydrolase=swissprot:53/56 single-domain 48/51;recombinational_repair=swissprot:53/56 single-domain 49/51
+PF01867	Cas_Cas1	cas_domain,crispr_adaptation,crispr_associated,defense_component,dna_repair,hydrolase,recombinational_repair	cas_domain=go:GO:0043571;crispr_adaptation=swissprot:53/56 single-domain 49/51;crispr_associated=swissprot:53/56 single-domain 49/51;defense_component=go:GO:0051607;dna_repair=swissprot:53/56 single-domain 49/51;hydrolase=swissprot:53/56 single-domain 48/51;recombinational_repair=swissprot:53/56 single-domain 49/51
 PF01868	RNase_P-MRP_p29	endonuclease,hydrolase,nuclease,rna_binding,rna_processing,rnase	endonuclease=swissprot:42/42 single-domain 42/42;hydrolase=text:nuclease;nuclease=text:Ribonuclease;rna_binding=swissprot:37/42 single-domain 37/42;rna_processing=go:GO:0006396;rnase=text:RNase
 PF01869	BcrAD_BadFG	atp_binding,atpase	atp_binding=text:ATPase;atpase=text:ATPase
 PF01870	Hjc	dnase,endonuclease,hydrolase,mobile_element,nuclease,resolvase	dnase=swissprot:14/14 KOs 2/2 single-domain 14/14;endonuclease=swissprot:14/14 KOs 2/2 single-domain 14/14;hydrolase=swissprot:14/14 KOs 2/2 single-domain 14/14;mobile_element=text:resolvase;nuclease=text:holliday junction resolvase;resolvase=text:Hjc
@@ -1179,7 +1179,7 @@ PF01874	CitG	cofactor_biosynthesis,glycosyltransferase,synthase,transferase	cofa
 PF01876	RNase_P_p30	endonuclease,hydrolase,nuclease,rna_binding,rna_processing,rnase	endonuclease=swissprot:30/30 single-domain 30/30;hydrolase=swissprot:30/30 single-domain 30/30;nuclease=swissprot:30/30 single-domain 30/30;rna_binding=swissprot:30/30 single-domain 30/30;rna_processing=go:GO:0006396;rnase=text:RNase
 PF01877	RNA_binding	binding,rna_binding	binding=text:binding;rna_binding=text:RNA_bind
 PF01880	Desulfoferrodox	oxidative_stress,oxidoreductase,reductase,superoxide_dismutase	oxidative_stress=text:Desulfoferrodoxin;oxidoreductase=swissprot:17/17 single-domain 9/9;reductase=swissprot:16/17 single-domain 8/9;superoxide_dismutase=swissprot:17/17 single-domain 9/9
-PF01881	Cas_Cas6_C	cas_domain,crispr_associated,crispr_type_i,crispr_type_i_a,crispr_type_i_d,defense_system,hydrolase,nuclease,rna_binding,rnase	cas_domain=text:Cas_;crispr_associated=swissprot:8/8 single-domain 3/3;crispr_type_i=swissprot:8/8 single-domain 3/3;crispr_type_i_a=swissprot:8/8 single-domain 3/3;crispr_type_i_d=swissprot:8/8 single-domain 3/3;defense_system=text:Cas_;hydrolase=swissprot:8/8 single-domain 3/3;nuclease=swissprot:8/8 single-domain 3/3;rna_binding=swissprot:8/8 single-domain 3/3;rnase=swissprot:8/8 single-domain 3/3
+PF01881	Cas_Cas6_C	cas_domain,crispr_associated,crispr_type_i,crispr_type_i_a,crispr_type_i_d,defense_component,hydrolase,nuclease,rna_binding,rnase	cas_domain=text:Cas_;crispr_associated=swissprot:8/8 single-domain 3/3;crispr_type_i=swissprot:8/8 single-domain 3/3;crispr_type_i_a=swissprot:8/8 single-domain 3/3;crispr_type_i_d=swissprot:8/8 single-domain 3/3;defense_component=text:Cas_;hydrolase=swissprot:8/8 single-domain 3/3;nuclease=swissprot:8/8 single-domain 3/3;rna_binding=swissprot:8/8 single-domain 3/3;rnase=swissprot:8/8 single-domain 3/3
 PF01882	DUF58	hypothetical	hypothetical=text:unknown function
 PF01883	FeS_assembly_P	iron_sulfur,iron_sulfur_biosynthesis,metal_binding	iron_sulfur=text:Iron-sulfur;iron_sulfur_biosynthesis=text:Iron-sulfur cluster assembly;metal_binding=text:FeS
 PF01884	PcrB	transferase	transferase=go:GO:0016740
@@ -1198,7 +1198,7 @@ PF01900	RNase_P_Rpp14	endonuclease,hydrolase,nuclease,rna_binding,rna_processing
 PF01902	Diphthami_syn_2	synthase,translation	synthase=text:synthase;translation=swissprot:8/8 co-domains excluded
 PF01903	CbiX	cobalamin_binding,cobalt_binding,lyase,metal_binding	cobalamin_binding=text:CbiX;cobalt_binding=text:CbiX;lyase=swissprot:25/25 KOs 3/3 single-domain 25/25;metal_binding=text:CbiX
 PF01904	DUF72	hypothetical	hypothetical=text:unknown function
-PF01905	DevR	cas_domain,crispr_associated,crispr_type_i,crispr_type_i_a,defense_system,regulator	cas_domain=text:Csa;crispr_associated=text:DevR;crispr_type_i=swissprot:5/5 KOs 2/2 single-domain 5/5;crispr_type_i_a=swissprot:5/5 KOs 2/2 single-domain 5/5;defense_system=text:DevR;regulator=text:regulat
+PF01905	DevR	cas_domain,crispr_associated,crispr_type_i,crispr_type_i_a,defense_component,regulator	cas_domain=text:Csa;crispr_associated=text:DevR;crispr_type_i=swissprot:5/5 KOs 2/2 single-domain 5/5;crispr_type_i_a=swissprot:5/5 KOs 2/2 single-domain 5/5;defense_component=text:DevR;regulator=text:regulat
 PF01906	YbjQ_1	binding,metal_binding	binding=text:binding;metal_binding=text:metal
 PF01907	Ribosomal_L37e	ribosomal_protein,translation	ribosomal_protein=go:GO:0003735;translation=go:GO:0006412
 PF01909	NTP_transf_2	nucleotidyltransferase,transferase	nucleotidyltransferase=swissprot:234/235 KOs 8/9 single-domain 12/13;transferase=go:GO:0016740
@@ -1219,7 +1219,7 @@ PF01925	TauE	sulfur_metabolism,transporter	sulfur_metabolism=text:Sulfite;transp
 PF01926	MMR_HSR1	binding,gtp_binding,gtpase,rna_binding	binding=go:GO:0005488;gtp_binding=go:GO:0005525;gtpase=text:GTPase;rna_binding=text:ribosom
 PF01927	Mut7-C	nuclease,rna_processing	nuclease=text:RNAse;rna_processing=text:Mut7
 PF01929	Ribosomal_L14e	ribosomal_protein,translation	ribosomal_protein=go:GO:0003735;translation=go:GO:0006412
-PF01930	Cas_Cas4	cas_domain,crispr_associated,defense_system,hydrolase,hypothetical	cas_domain=text:Cas_;crispr_associated=text:Cas_;defense_system=text:Cas_;hydrolase=swissprot:10/10 KOs 2/2 single-domain 6/6;hypothetical=text:unknown function
+PF01930	Cas_Cas4	cas_domain,crispr_associated,defense_component,hydrolase,hypothetical	cas_domain=text:Cas_;crispr_associated=text:Cas_;defense_component=text:Cas_;hydrolase=swissprot:10/10 KOs 2/2 single-domain 6/6;hypothetical=text:unknown function
 PF01931	NTPase_I-T	hydrolase,hypothetical	hydrolase=swissprot:87/95 KOs 2/2 single-domain 85/93;hypothetical=text:unknown function
 PF01933	CofD	transferase	transferase=go:GO:0016740
 PF01934	HepT-like	hydrolase,nuclease,rnase	hydrolase=text:nuclease;nuclease=go:GO:0004518;rnase=go:GO:0004540
@@ -1496,7 +1496,7 @@ PF02446	Glyco_hydro_77	carbohydrate_active,glycosyltransferase,transferase	carbo
 PF02447	GntP_permease	membrane,transporter	membrane=go:GO:0016020;transporter=go:GO:0005215
 PF02449	Glyco_hydro_42	carbohydrate_active,glycosidase,hydrolase	carbohydrate_active=go:GO:0005975;glycosidase=go:GO:0016798;hydrolase=go:GO:0016787
 PF02450	LCAT	transferase	transferase=go:GO:0016740
-PF02452	PemK_toxin	antitoxin_domain,hydrolase,toxin,toxin_domain	antitoxin_domain=text:antitoxin;hydrolase=swissprot:37/39 KOs 2/2 single-domain 37/39;toxin=swissprot:35/39 KOs 2/2 single-domain 35/39;toxin_domain=text:toxin
+PF02452	PemK_toxin	antitoxin_domain,defense_component,hydrolase,toxin,toxin_domain	antitoxin_domain=text:antitoxin;defense_component=text:toxin-antitoxin;hydrolase=swissprot:37/39 KOs 2/2 single-domain 37/39;toxin=swissprot:35/39 KOs 2/2 single-domain 35/39;toxin_domain=text:toxin
 PF02457	DAC	binding,nucleotidyltransferase,transferase	binding=text:binding;nucleotidyltransferase=swissprot:74/74 KOs 2/2 co-domains excluded;transferase=swissprot:74/74 KOs 2/2 co-domains excluded
 PF02458	Transferase	transferase	transferase=text:Transferase
 PF02461	AMO	oxidoreductase,oxygenase	oxidoreductase=text:oxygenase;oxygenase=text:oxygenase
@@ -1593,7 +1593,7 @@ PF02598	Methyltrn_RNA_3	methyltransferase,transferase	methyltransferase=text:met
 PF02601	Exonuc_VII_L	hydrolase,nuclease	hydrolase=go:GO:0016787;nuclease=go:GO:0004518
 PF02602	HEM4	dehydratase,heme_biosynthesis,lyase,synthase	dehydratase=swissprot:21/21 KOs 2/2 single-domain 18/18;heme_biosynthesis=go:GO:0033014;lyase=swissprot:21/21 KOs 2/2 single-domain 18/18;synthase=text:synthase
 PF02603	Hpr_kinase_N	kinase,transferase	kinase=go:GO:0016301;transferase=go:GO:0016740
-PF02604	PhdYeFM_antitox	antitoxin,antitoxin_domain,toxin_antitoxin	antitoxin=swissprot:25/27 KOs 6/6 single-domain 25/27;antitoxin_domain=text:Antitoxin;toxin_antitoxin=swissprot:25/27 KOs 6/6 single-domain 25/27
+PF02604	PhdYeFM_antitox	antitoxin,antitoxin_domain,defense_component	antitoxin=swissprot:25/27 KOs 6/6 single-domain 25/27;antitoxin_domain=text:Antitoxin;defense_component=text:toxin-antitoxin
 PF02605	PsaL	photosynthesis	photosynthesis=go:GO:0015979
 PF02606	LpxK	atp_binding,kinase,lipid_a_biosynthesis,lps_biosynthesis,transferase	atp_binding=swissprot:376/376 single-domain 373/373;kinase=go:GO:0016301;lipid_a_biosynthesis=swissprot:370/376 single-domain 367/373;lps_biosynthesis=swissprot:370/376 single-domain 367/373;transferase=go:GO:0016740
 PF02607	B12-binding_2	binding,cobalamin_binding,cobalt_binding,metal_binding	binding=text:binding;cobalamin_binding=text:B12-binding;cobalt_binding=text:B12-binding;metal_binding=text:B12
@@ -2187,7 +2187,7 @@ PF03683	UPF0175	hypothetical	hypothetical=text:Uncharacterised
 PF03685	UPF0147	hypothetical	hypothetical=text:Uncharacterised
 PF03690	MYG1_exonuc	nuclease	nuclease=text:exonuc
 PF03692	CxxCxxCC	metal_binding,zinc_binding	metal_binding=text:zinc;zinc_binding=text:zinc
-PF03693	ParD_antitoxin	antitoxin,antitoxin_domain,toxin_antitoxin	antitoxin=swissprot:10/11 single-domain 10/11;antitoxin_domain=text:ParD;toxin_antitoxin=swissprot:10/11 single-domain 10/11
+PF03693	ParD_antitoxin	antitoxin,antitoxin_domain,defense_component	antitoxin=swissprot:10/11 single-domain 10/11;antitoxin_domain=text:ParD;defense_component=text:toxin-antitoxin
 PF03699	UPF0182	hypothetical	hypothetical=text:Uncharacterised
 PF03702	AnmK	atp_binding,kinase,transferase	atp_binding=swissprot:262/264 KOs 2/2 single-domain 262/264;kinase=text:kinase;transferase=go:GO:0016740
 PF03705	CheR_N	chemotaxis,methyltransferase,transferase	chemotaxis=text:CheR;methyltransferase=text:methyltransferase;transferase=text:transferase
@@ -2217,7 +2217,7 @@ PF03745	DUF309	hypothetical	hypothetical=text:unknown function
 PF03746	LamB_YcsF	hydrolase	hydrolase=swissprot:237/238 single-domain 237/238
 PF03747	ADP_ribosyl_GH	hydrolase	hydrolase=text:hydrolase
 PF03748	FliL	flagellum	flagellum=go:GO:0009288
-PF03750	Csm2_III-A	crispr_associated,defense_system	crispr_associated=text:Csm2;defense_system=text:Csm2
+PF03750	Csm2_III-A	crispr_associated,defense_component	crispr_associated=text:Csm2;defense_component=text:Csm2
 PF03755	YicC-like_N	hydrolase,nuclease	hydrolase=text:nuclease;nuclease=text:ribonuclease
 PF03756	AfsA	biosynthesis	biosynthesis=text:biosynth
 PF03761	DUF316	hypothetical	hypothetical=text:DUF3
@@ -2232,7 +2232,7 @@ PF03778	DUF321	hypothetical	hypothetical=text:unknown function
 PF03783	CsgG	transporter	transporter=text:transport
 PF03785	Peptidase_C25_C	hydrolase,protease	hydrolase=go:GO:0016787;protease=go:GO:0008233
 PF03786	UxuA	dehydratase,lyase	dehydratase=go:GO:0016836;lyase=go:GO:0016829
-PF03787	RAMPs	crispr_associated,defense_system	crispr_associated=text:RAMP;defense_system=text:RAMP
+PF03787	RAMPs	crispr_associated,defense_component	crispr_associated=text:RAMP;defense_component=text:RAMP
 PF03788	LrgA	transporter	transporter=swissprot:133/133 KOs 2/2 single-domain 133/133
 PF03796	DnaB_C	helicase	helicase=go:GO:0004386
 PF03799	FtsQ_DivIB_C	cell_division,divisome	cell_division=text:Cell division;divisome=text:FtsQ
@@ -2555,7 +2555,7 @@ PF04359	DUF493	hypothetical	hypothetical=text:unknown function
 PF04361	DUF494	hypothetical	hypothetical=text:unknown function
 PF04363	DUF496	hypothetical	hypothetical=text:unknown function
 PF04364	DNA_pol3_chi	dna_polymerase,replication	dna_polymerase=go:GO:0003887;replication=go:GO:0006260
-PF04365	BrnT_toxin	antitoxin_domain,hydrolase,nuclease,toxin_domain	antitoxin_domain=text:antitoxin;hydrolase=text:nuclease;nuclease=text:Ribonuclease;toxin_domain=text:toxin
+PF04365	BrnT_toxin	antitoxin_domain,defense_component,hydrolase,nuclease,toxin_domain	antitoxin_domain=text:antitoxin;defense_component=text:toxin-antitoxin;hydrolase=text:nuclease;nuclease=text:Ribonuclease;toxin_domain=text:toxin
 PF04366	Ysc84	binding	binding=text:binding
 PF04367	DUF502	hypothetical	hypothetical=text:unknown function
 PF04368	DUF507	hypothetical	hypothetical=text:unknown function
@@ -2864,8 +2864,8 @@ PF05008	V-SNARE	transporter	transporter=go:GO:0006810
 PF05010	TACC_C	coiled_coil	coiled_coil=text:coiled-coil
 PF05013	FGase	amidase,hydrolase	amidase=text:amidohydrolase;hydrolase=text:hydrolase
 PF05014	Nuc_deoxyrib_tr	nucleotide_metabolism,transferase	nucleotide_metabolism=text:Nucleoside;transferase=text:transferase
-PF05015	HigB-like_toxin	antitoxin_domain,toxin_domain	antitoxin_domain=text:antitoxin;toxin_domain=text:toxin
-PF05016	ParE_toxin	antitoxin_domain,toxin_antitoxin,toxin_domain	antitoxin_domain=text:antitoxin;toxin_antitoxin=text:toxin;toxin_domain=text:toxin
+PF05015	HigB-like_toxin	antitoxin_domain,defense_component,toxin_domain	antitoxin_domain=text:antitoxin;defense_component=text:toxin-antitoxin;toxin_domain=text:toxin
+PF05016	ParE_toxin	antitoxin_domain,defense_component,toxin_domain	antitoxin_domain=text:antitoxin;defense_component=text:toxin-antitoxin;toxin_domain=text:toxin
 PF05019	Coq4	biosynthesis,cofactor_biosynthesis,decarboxylase,lyase	biosynthesis=go:GO:0009058;cofactor_biosynthesis=go:GO:0006744;decarboxylase=swissprot:103/104 single-domain 103/104;lyase=swissprot:103/104 single-domain 103/104
 PF05020	zf-NPL4	binding,metal_binding,zinc_binding	binding=text:binding;metal_binding=text:zf-;zinc_binding=text:zf-
 PF05022	SRP40_C	secretion_component,signal_recognition	secretion_component=text:SRP;signal_recognition=text:SRP4
@@ -2913,7 +2913,7 @@ PF05100	Phage_tail_L	phage_related	phage_related=go:GO:0019058
 PF05101	VirB3	secretion_component,t4ss_component	secretion_component=text:VirB;t4ss_component=text:VirB
 PF05105	Phage_holin_4_1	phage_related	phage_related=text:Phage
 PF05106	Phage_holin_3_1	phage_related	phage_related=text:Phage
-PF05107	Cas_Cas7	cas_domain,defense_system	cas_domain=go:GO:0043571;defense_system=go:GO:0043571
+PF05107	Cas_Cas7	cas_domain,defense_component	cas_domain=go:GO:0043571;defense_component=go:GO:0043571
 PF05108	T7SS_ESX1_EccB	atp_binding,atpase,hydrolase,secretion_component,transporter	atp_binding=swissprot:13/14 single-domain 13/14;atpase=swissprot:13/14 single-domain 13/14;hydrolase=swissprot:12/14 single-domain 12/14;secretion_component=text:T7SS;transporter=text:transport
 PF05113	DUF693	hypothetical	hypothetical=text:unknown function
 PF05115	PetL	cytochrome,electron_transport,heme_binding,respiration	cytochrome=text:Cytochrom;electron_transport=go:GO:0009055;heme_binding=text:Cytochrome;respiration=text:Cytochrome B
@@ -3338,7 +3338,7 @@ PF06012	DUF908	hypothetical	hypothetical=text:Unknown Function
 PF06017	Myosin_TH1	binding	binding=text:binding
 PF06019	Phage_30_8	phage_related	phage_related=text:Phage
 PF06021	Gly_acyl_tr_N	transferase	transferase=go:GO:0016740
-PF06023	Csa1	cas_domain,crispr_associated,defense_system,hydrolase,nuclease	cas_domain=text:Csa;crispr_associated=text:Csa1;defense_system=text:Csa1;hydrolase=text:nuclease;nuclease=text:exonuclease
+PF06023	Csa1	cas_domain,crispr_associated,defense_component,hydrolase,nuclease	cas_domain=text:Csa;crispr_associated=text:Csa1;defense_component=text:Csa1;hydrolase=text:nuclease;nuclease=text:exonuclease
 PF06025	DUF913	hypothetical	hypothetical=text:Unknown Function
 PF06026	Rib_5-P_isom_A	isomerase,pentose_phosphate	isomerase=go:GO:0016853;pentose_phosphate=go:GO:0006098
 PF06027	SLC35F	transporter	transporter=swissprot:9/10 KOs 2/2 single-domain 9/10
@@ -3478,7 +3478,7 @@ PF06287	DUF1039	hypothetical	hypothetical=text:unknown function
 PF06288	DUF1040	hypothetical	hypothetical=text:unknown function
 PF06289	FlbD	flagellum	flagellum=text:Flagell
 PF06293	Kdo	kinase,lps_biosynthesis,transferase	kinase=text:kinase;lps_biosynthesis=text:Kdo;transferase=text:kinase
-PF06296	RelE	antitoxin_domain,toxin_domain	antitoxin_domain=text:RelB;toxin_domain=text:toxin
+PF06296	RelE	antitoxin_domain,defense_component,toxin_domain	antitoxin_domain=text:RelB;defense_component=text:toxin-antitoxin;toxin_domain=text:toxin
 PF06298	PsbY	photosynthesis	photosynthesis=go:GO:0015979
 PF06299	DUF1045	hypothetical	hypothetical=text:unknown function
 PF06300	Tsp45I	restriction_enzyme,restriction_modification	restriction_enzyme=text:Tsp45I;restriction_modification=text:Tsp45I
@@ -3506,7 +3506,7 @@ PF06350	HSL_N	hydrolase,lipase	hydrolase=go:GO:0016787;lipase=go:GO:0016042
 PF06351	Allene_ox_cyc	isomerase	isomerase=swissprot:6/6 single-domain 6/6
 PF06353	DUF1062	hypothetical	hypothetical=text:unknown function
 PF06356	DUF1064	hypothetical	hypothetical=text:unknown function
-PF06357	Omega-toxin	defense_system,toxin_domain	defense_system=go:GO:0006952;toxin_domain=text:toxin
+PF06357	Omega-toxin	defense_component,toxin_domain	defense_component=go:GO:0006952;toxin_domain=text:toxin
 PF06362	DUF1067	hypothetical	hypothetical=text:unknown function
 PF06364	DUF1068	hypothetical	hypothetical=text:unknown function
 PF06366	FlhE	flagellum	flagellum=text:Flh
@@ -3714,12 +3714,12 @@ PF06748	DUF1217	hypothetical	hypothetical=text:unknown function
 PF06749	DUF1218	hypothetical	hypothetical=text:unknown function
 PF06750	A24_N_bact	hydrolase,protease	hydrolase=text:Peptidase;protease=text:Peptidase
 PF06751	EutB	lyase	lyase=go:GO:0016829
-PF06755	CbtA_toxin	antitoxin_domain,toxin_domain	antitoxin_domain=text:antitoxin;toxin_domain=text:toxin
+PF06755	CbtA_toxin	antitoxin_domain,defense_component,toxin_domain	antitoxin_domain=text:antitoxin;defense_component=text:toxin-antitoxin;toxin_domain=text:toxin
 PF06760	DUF1221	hypothetical	hypothetical=text:unknown function
 PF06762	LMF1	hydrolase,lipase	hydrolase=text:Lipase;lipase=text:Lipase
 PF06763	Minor_tail_Z	phage_related	phage_related=text:tail
 PF06764	DUF1223	hypothetical	hypothetical=text:unknown function
-PF06769	YoeB_toxin	antitoxin_domain,hydrolase,toxin,toxin_domain	antitoxin_domain=text:antitoxin;hydrolase=swissprot:8/8 single-domain 8/8;toxin=swissprot:7/8 single-domain 7/8;toxin_domain=text:toxin
+PF06769	YoeB_toxin	antitoxin_domain,defense_component,hydrolase,toxin,toxin_domain	antitoxin_domain=text:antitoxin;defense_component=text:toxin-antitoxin;hydrolase=swissprot:8/8 single-domain 8/8;toxin=swissprot:7/8 single-domain 7/8;toxin_domain=text:toxin
 PF06778	Chlor_dismutase	oxidoreductase	oxidoreductase=swissprot:64/64 KOs 4/4 single-domain 59/59
 PF06779	MFS_4	mfs_transporter,transporter	mfs_transporter=text:MFS;transporter=text:MFS
 PF06781	CrgA	cell_division	cell_division=text:Cell division
@@ -3963,7 +3963,7 @@ PF07247	AATase	acetyltransferase,transferase	acetyltransferase=text:acetyltransf
 PF07248	DUF1431	hypothetical	hypothetical=text:unknown function
 PF07250	Glyoxal_oxid_N	oxidase,oxidoreductase	oxidase=text:oxidase;oxidoreductase=text:oxidase
 PF07252	DUF1433	hypothetical	hypothetical=text:unknown function
-PF07254	Cpta_toxin	antitoxin_domain,membrane,toxin_domain	antitoxin_domain=text:antitoxin;membrane=text:Membrane;toxin_domain=text:toxin
+PF07254	Cpta_toxin	antitoxin_domain,defense_component,membrane,toxin_domain	antitoxin_domain=text:antitoxin;defense_component=text:toxin-antitoxin;membrane=text:Membrane;toxin_domain=text:toxin
 PF07256	DUF1435	hypothetical	hypothetical=text:unknown function
 PF07261	DnaB_2	membrane	membrane=text:membrane
 PF07270	DUF1438	hypothetical	hypothetical=text:unknown function
@@ -4193,7 +4193,7 @@ PF07698	7TM-7TMR_HD	hydrolase	hydrolase=text:hydrolase
 PF07699	Ephrin_rec_like	kinase,transferase	kinase=text:kinase;transferase=text:kinase
 PF07700	HNOB	binding,heme_binding,iron_binding	binding=go:GO:0005488;heme_binding=go:GO:0020037;iron_binding=text:Haem
 PF07701	HNOBA	heme_binding,iron_binding	heme_binding=text:Heme;iron_binding=text:Heme
-PF07704	PSK_trans_fac	antitoxin,dna_binding,regulator,toxin_antitoxin,transcription_factor	antitoxin=swissprot:12/12 single-domain 12/12;dna_binding=text:transcription factor;regulator=text:transcription factor;toxin_antitoxin=swissprot:12/12 single-domain 12/12;transcription_factor=text:transcription factor
+PF07704	PSK_trans_fac	antitoxin,dna_binding,regulator,transcription_factor	antitoxin=swissprot:12/12 single-domain 12/12;dna_binding=text:transcription factor;regulator=text:transcription factor;transcription_factor=text:transcription factor
 PF07706	TAT_ubiq	aminotransferase,plp_binding,transferase	aminotransferase=go:GO:0008483;plp_binding=go:GO:0030170;transferase=go:GO:0016740
 PF07711	RabGGT_insert	transferase	transferase=go:GO:0016740
 PF07713	DUF1604	hypothetical	hypothetical=text:unknown function
@@ -4236,7 +4236,7 @@ PF07773	TCTN_DUF1619	hypothetical	hypothetical=text:DUF1
 PF07774	EMC1_C	membrane	membrane=text:membrane
 PF07776	zf-AD	metal_binding,zinc_binding,zinc_finger	metal_binding=go:GO:0046872;zinc_binding=go:GO:0008270;zinc_finger=go:GO:0008270
 PF07777	MFMR	binding	binding=text:binding
-PF07779	Cas1_AcylT	acetyltransferase,transferase	acetyltransferase=swissprot:9/10 single-domain 7/7;transferase=text:Transferase
+PF07779	Cas1_AcylT	acetyltransferase,defense_component,transferase	acetyltransferase=swissprot:9/10 single-domain 7/7;defense_component=text:Cas1;transferase=text:Transferase
 PF07784	DUF1622	hypothetical	hypothetical=text:unknown function
 PF07785	DUF1623	hypothetical	hypothetical=text:unknown function
 PF07786	HGSNAT_cat	acetyltransferase,transferase	acetyltransferase=text:acetyltransferase;transferase=text:transferase
@@ -4323,7 +4323,7 @@ PF07922	Glyco_transf_52	carbohydrate_active,glycosyltransferase,transferase	carb
 PF07924	NuiA	hydrolase,nuclease	hydrolase=text:Nuclease;nuclease=text:Nuclease
 PF07925	RdRP_5	nucleotidyltransferase,rna_polymerase,transcription,transferase	nucleotidyltransferase=swissprot:6/6 single-domain 6/6;rna_polymerase=text:RNA pol;transcription=text:RNA pol;transferase=swissprot:6/6 single-domain 6/6
 PF07926	TPR_MLP1_2	repeat_domain,tpr_repeat	repeat_domain=text:TPR_;tpr_repeat=text:TPR
-PF07927	HicA_toxin	antitoxin_domain,hydrolase,toxin_domain	antitoxin_domain=text:antitoxin;hydrolase=swissprot:5/5 single-domain 5/5;toxin_domain=text:toxin
+PF07927	HicA_toxin	antitoxin_domain,defense_component,hydrolase,toxin_domain	antitoxin_domain=text:antitoxin;defense_component=text:toxin-antitoxin;hydrolase=swissprot:5/5 single-domain 5/5;toxin_domain=text:toxin
 PF07928	Vps54	cytoplasmic	cytoplasmic=swissprot:7/8 co-domains excluded
 PF07930	DAP_B	hydrolase,protease	hydrolase=go:GO:0016787;protease=go:GO:0008233
 PF07931	CPT	antibiotic_resistance,transferase	antibiotic_resistance=text:CPT;transferase=go:GO:0016740
@@ -4416,7 +4416,7 @@ PF08163	DNAPKcs_CC3	kinase,transferase	kinase=text:kinase;transferase=text:kinas
 PF08164	TRAUB	dna_binding,regulator,transcription_factor	dna_binding=text:transcription factor;regulator=text:transcription factor;transcription_factor=text:transcription factor
 PF08173	YbgT_YccB	membrane	membrane=text:Membrane
 PF08174	Anillin	cell_division	cell_division=text:Cell division
-PF08178	GnsAB_toxin	antitoxin_domain,toxin_domain	antitoxin_domain=text:antitoxin;toxin_domain=text:toxin
+PF08178	GnsAB_toxin	antitoxin_domain,defense_component,toxin_domain	antitoxin_domain=text:antitoxin;defense_component=text:toxin-antitoxin;toxin_domain=text:toxin
 PF08187	Tetradecapep	regulator	regulator=go:GO:0065007
 PF08191	LRR_adjacent	lrr_repeat,repeat_domain	lrr_repeat=text:LRR;repeat_domain=text:LRR
 PF08192	Peptidase_S64	hydrolase,protease	hydrolase=text:Peptidase;protease=text:Peptidase
@@ -4435,7 +4435,7 @@ PF08220	HTH_DeoR	dna_binding,helix_turn_helix	dna_binding=go:GO:0003700;helix_tu
 PF08221	HTH_9	dna_binding,helix_turn_helix,rna_polymerase,transcription	dna_binding=text:helix-turn-helix;helix_turn_helix=text:HTH;rna_polymerase=text:RNA pol;transcription=text:RNA pol
 PF08222	HTH_CodY	dna_binding,helix_turn_helix	dna_binding=text:helix-turn-helix;helix_turn_helix=text:HTH
 PF08224	DUF1719	hypothetical	hypothetical=text:unknown function
-PF08225	Antimicrobial19	defense_system,secreted,stress_response	defense_system=swissprot:5/5 single-domain 5/5;secreted=swissprot:5/5 single-domain 5/5;stress_response=swissprot:5/5 single-domain 5/5
+PF08225	Antimicrobial19	defense_component,secreted,stress_response	defense_component=swissprot:5/5 single-domain 5/5;secreted=swissprot:5/5 single-domain 5/5;stress_response=swissprot:5/5 single-domain 5/5
 PF08226	DUF1720	hypothetical	hypothetical=text:unknown function
 PF08229	SHR3_chaperone	chaperone,membrane,stress_response	chaperone=text:chaperon;membrane=text:membrane;stress_response=text:chaperon
 PF08236	SRI	transcription	transcription=go:GO:0006355
@@ -4706,7 +4706,7 @@ PF08792	A2L_zn_ribbon	zinc_binding	zinc_binding=text:zinc
 PF08794	FHBP_C	binding	binding=text:binding
 PF08795	DUF1796	hydrolase,hypothetical,protease	hydrolase=text:peptidase;hypothetical=text:DUF1;protease=text:peptidase
 PF08796	DUF1797	hypothetical	hypothetical=text:unknown function
-PF08798	CRISPR_assoc	cas_domain,crispr_associated,defense_system	cas_domain=text:CRISPR;crispr_associated=text:CRISPR;defense_system=text:CRISPR
+PF08798	CRISPR_assoc	cas_domain,crispr_associated,defense_component	cas_domain=text:CRISPR;crispr_associated=text:CRISPR;defense_component=text:CRISPR
 PF08803	ydhR	oxidoreductase,oxygenase	oxidoreductase=text:oxygenase;oxygenase=text:oxygenase
 PF08804	gp32	binding,dna_binding	binding=go:GO:0005488;dna_binding=go:GO:0003677
 PF08807	DUF1798	hypothetical	hypothetical=text:unknown function
@@ -4728,9 +4728,9 @@ PF08838	DUF1811	hypothetical	hypothetical=text:unknown function
 PF08840	BAAT_C	hydrolase	hydrolase=text:hydrolase
 PF08841	DDR	dehydratase,lyase	dehydratase=text:dehydratase;lyase=text:dehydratase
 PF08842	Mfa2	pilus	pilus=text:Fimbri
-PF08843	AbiEii	abortive_infection,antitoxin_domain,toxin_domain,transferase	abortive_infection=text:AbiE;antitoxin_domain=text:AbiEi;toxin_domain=text:toxin;transferase=text:transferase
+PF08843	AbiEii	abi_domain,antitoxin_domain,toxin_domain,transferase	abi_domain=text:AbiE;antitoxin_domain=text:AbiEi;toxin_domain=text:toxin;transferase=text:transferase
 PF08844	DUF1815	hypothetical	hypothetical=text:unknown function
-PF08845	SymE_toxin	antitoxin_domain,toxin_domain	antitoxin_domain=text:antitoxin;toxin_domain=text:toxin
+PF08845	SymE_toxin	antitoxin_domain,defense_component,toxin_domain	antitoxin_domain=text:antitoxin;defense_component=text:toxin-antitoxin;toxin_domain=text:toxin
 PF08846	DUF1816	hypothetical	hypothetical=text:unknown function
 PF08848	DUF1818	hypothetical	hypothetical=text:unknown function
 PF08850	DUF1820	hypothetical	hypothetical=text:unknown function
@@ -4782,7 +4782,7 @@ PF08926	DUF1908	hypothetical	hypothetical=text:unknown function
 PF08930	DUF1912	hypothetical	hypothetical=text:unknown function
 PF08931	Caudo_bapla_RBP	binding,phage_related	binding=text:binding;phage_related=text:head
 PF08933	PrnB	synthase	synthase=text:synthase
-PF08937	ThsB_TIR	defense_system	defense_system=text:ThsB
+PF08937	ThsB_TIR	defense_component	defense_component=text:ThsB
 PF08940	DUF1918	hypothetical	hypothetical=text:unknown function
 PF08942	DUF1919	hypothetical	hypothetical=text:unknown function
 PF08943	CsiD	dioxygenase,oxidoreductase,oxygenase	dioxygenase=swissprot:35/35 single-domain 35/35;oxidoreductase=swissprot:35/35 single-domain 35/35;oxygenase=swissprot:35/35 single-domain 35/35
@@ -5020,7 +5020,7 @@ PF09340	NuA4	acetyltransferase,transferase	acetyltransferase=text:acetyltransfer
 PF09341	Pcc1	dna_binding,regulator,transcription,transcription_factor	dna_binding=text:Transcription factor;regulator=text:Transcription factor;transcription=text:Transcription;transcription_factor=text:Transcription factor
 PF09342	DUF1986	hypothetical	hypothetical=text:unknown function
 PF09343	DUF2460	hypothetical	hypothetical=text:hypothetical
-PF09344	Cas_CT1975	cas_domain,crispr_associated,defense_system	cas_domain=text:Cas_;crispr_associated=text:Cas_;defense_system=text:Cas_
+PF09344	Cas_CT1975	cas_domain,crispr_associated,defense_component	cas_domain=text:Cas_;crispr_associated=text:Cas_;defense_component=text:Cas_
 PF09347	DUF1989	hypothetical	hypothetical=text:unknown function
 PF09348	DUF1990	hypothetical	hypothetical=text:unknown function
 PF09351	DUF1993	hypothetical	hypothetical=text:unknown function
@@ -5052,7 +5052,7 @@ PF09399	bCoV_lipid_BD	binding	binding=text:binding
 PF09400	DUF2002	hypothetical	hypothetical=text:unknown function
 PF09405	Btz	binding	binding=go:GO:0005488
 PF09406	DUF2004	hypothetical	hypothetical=text:unknown function
-PF09407	AbiEi_1	abortive_infection,antitoxin_domain	abortive_infection=text:AbiE;antitoxin_domain=text:AbiEi
+PF09407	AbiEi_1	abi_domain,antitoxin_domain	abi_domain=text:AbiE;antitoxin_domain=text:AbiEi
 PF09408	bCoV_S1_RBD	binding	binding=text:binding
 PF09412	XendoU	hydrolase,lyase,nuclease,rnase	hydrolase=text:nuclease;lyase=swissprot:15/15 single-domain 11/11;nuclease=go:GO:0004518;rnase=swissprot:14/15 single-domain 10/11
 PF09413	DUF2007	hypothetical	hypothetical=text:DUF2
@@ -5078,7 +5078,7 @@ PF09446	VMA21	atp_binding,atpase,membrane	atp_binding=swissprot:35/43 single-dom
 PF09448	MmlI	isomerase	isomerase=text:isomerase
 PF09449	DUF2020	hypothetical	hypothetical=text:unknown function
 PF09450	DUF2019	hypothetical	hypothetical=text:unknown function
-PF09455	Csx1_HEPN	cas_domain,defense_system,hydrolase,nuclease	cas_domain=text:Csx;defense_system=text:CRISPR;hydrolase=text:nuclease;nuclease=text:ribonuclease
+PF09455	Csx1_HEPN	cas_domain,defense_component,hydrolase,nuclease	cas_domain=text:Csx;defense_component=text:CRISPR;hydrolase=text:nuclease;nuclease=text:ribonuclease
 PF09459	EB_dh	dehydrogenase,oxidoreductase	dehydrogenase=text:dehydrogenase;oxidoreductase=text:dehydrogenase
 PF09460	Saf-Nte_pilin	pilus	pilus=text:pilin
 PF09468	RNase_H2-Ydr279	dna_binding,helix_turn_helix	dna_binding=text:wHTH;helix_turn_helix=text:wHTH
@@ -5089,11 +5089,11 @@ PF09476	Pilus_CpaD	pilus	pilus=text:Pilus
 PF09477	Type_III_YscG	chaperone,secretion_component,stress_response,t3ss_component	chaperone=text:chaperon;secretion_component=text:type I;stress_response=text:chaperon;t3ss_component=text:type III secretion
 PF09478	CBM49	binding	binding=go:GO:0005488
 PF09480	PrgH	secretion_component	secretion_component=text:secretion
-PF09481	CRISPR_Cse1	cas_domain,crispr_associated,defense_system	cas_domain=text:CRISPR;crispr_associated=text:CRISPR;defense_system=text:CRISPR
+PF09481	CRISPR_Cse1	cas_domain,crispr_associated,defense_component	cas_domain=text:CRISPR;crispr_associated=text:CRISPR;defense_component=text:CRISPR
 PF09482	OrgA_MxiK	secretion_component,t3ss_component	secretion_component=text:type I;t3ss_component=text:type III secretion
 PF09483	HpaP	secretion_component	secretion_component=text:secretion
-PF09484	Cas_TM1802	cas_domain,crispr_associated,defense_system	cas_domain=text:Cas_;crispr_associated=text:Cas_;defense_system=text:Cas_
-PF09485	CRISPR_Cse2	cas_domain,crispr_associated,defense_system	cas_domain=text:CRISPR;crispr_associated=text:CRISPR;defense_system=text:CRISPR
+PF09484	Cas_TM1802	cas_domain,crispr_associated,defense_component	cas_domain=text:Cas_;crispr_associated=text:Cas_;defense_component=text:Cas_
+PF09485	CRISPR_Cse2	cas_domain,crispr_associated,defense_component	cas_domain=text:CRISPR;crispr_associated=text:CRISPR;defense_component=text:CRISPR
 PF09486	HrpB7	secretion_component,t3ss_component	secretion_component=text:type I;t3ss_component=text:type III secretion
 PF09487	HrpB2	secretion_component,t3ss_component	secretion_component=text:type I;t3ss_component=text:type III secretion
 PF09488	Osmo_MPGsynth	synthase	synthase=text:synthase
@@ -5143,7 +5143,7 @@ PF09554	RE_HaeII	hydrolase,nuclease,restriction_enzyme,restriction_modification	
 PF09556	RE_HaeIII	hydrolase,nuclease,restriction_enzyme,restriction_modification	hydrolase=text:nuclease;nuclease=text:restriction endonuclease;restriction_enzyme=text:RE_;restriction_modification=text:RE_
 PF09557	DUF2382	hypothetical	hypothetical=text:unknown function
 PF09558	DUF2375	hypothetical	hypothetical=text:unknown function
-PF09559	Cas6	cas_domain,defense_system	cas_domain=text:Cas6;defense_system=text:Crispr
+PF09559	Cas6	cas_domain,defense_component	cas_domain=text:Cas6;defense_component=text:Crispr
 PF09561	RE_HpaII	hydrolase,nuclease,restriction_enzyme,restriction_modification	hydrolase=text:nuclease;nuclease=text:restriction endonuclease;restriction_enzyme=text:RE_;restriction_modification=text:RE_
 PF09562	RE_LlaMI	hydrolase,nuclease,restriction_enzyme,restriction_modification	hydrolase=text:nuclease;nuclease=text:restriction endonuclease;restriction_enzyme=text:RE_;restriction_modification=text:RE_
 PF09563	RE_LlaJI	hydrolase,nuclease,restriction_enzyme,restriction_modification	hydrolase=text:nuclease;nuclease=text:restriction endonuclease;restriction_enzyme=text:RE_;restriction_modification=text:RE_
@@ -5173,18 +5173,18 @@ PF09604	Potass_KdpF	atp_binding,atpase	atp_binding=text:ATPase;atpase=text:ATPas
 PF09605	Trep_Strep	membrane	membrane=text:integral
 PF09607	BrkDBD	binding,dna_binding	binding=text:binding;dna_binding=text:DNA-binding
 PF09608	Alph_Pro_TM	membrane	membrane=text:transmembrane
-PF09609	Cas_GSU0054	cas_domain,defense_system	cas_domain=text:Cas_;defense_system=text:Cas_
-PF09611	Cas_Csy1	cas_domain,defense_system	cas_domain=text:Cas_;defense_system=text:Cas_
+PF09609	Cas_GSU0054	cas_domain,defense_component	cas_domain=text:Cas_;defense_component=text:Cas_
+PF09611	Cas_Csy1	cas_domain,defense_component	cas_domain=text:Cas_;defense_component=text:Cas_
 PF09613	HrpB1_HrpK	secretion_component,t3ss_component	secretion_component=text:type I;t3ss_component=text:type III secretion
-PF09614	Cas_Csy2	cas_domain,defense_system	cas_domain=text:Cas_;defense_system=text:Cas_
-PF09615	Cas_Csy3	cas_domain,defense_system	cas_domain=text:Cas_;defense_system=text:Cas_
-PF09617	Cas_GSU0053	cas_domain,defense_system	cas_domain=text:Cas_;defense_system=text:Cas_
-PF09618	Cas_Csy4	cas_domain,defense_system	cas_domain=go:GO:0043571;defense_system=go:GO:0043571
+PF09614	Cas_Csy2	cas_domain,defense_component	cas_domain=text:Cas_;defense_component=text:Cas_
+PF09615	Cas_Csy3	cas_domain,defense_component	cas_domain=text:Cas_;defense_component=text:Cas_
+PF09617	Cas_GSU0053	cas_domain,defense_component	cas_domain=text:Cas_;defense_component=text:Cas_
+PF09618	Cas_Csy4	cas_domain,defense_component	cas_domain=go:GO:0043571;defense_component=go:GO:0043571
 PF09619	YscW	chaperone,secretion_component,stress_response	chaperone=text:chaperon;secretion_component=text:secretion;stress_response=text:chaperon
-PF09620	Cas_csx3	cas_domain,crispr_associated,defense_system	cas_domain=text:Cas_;crispr_associated=text:Cas_;defense_system=text:Cas_
+PF09620	Cas_csx3	cas_domain,crispr_associated,defense_component	cas_domain=text:Cas_;crispr_associated=text:Cas_;defense_component=text:Cas_
 PF09621	LcrR	secretion_component	secretion_component=text:secretion
 PF09622	DUF2391	hypothetical,membrane	hypothetical=text:DUF2;membrane=text:integral
-PF09623	Cas_NE0113	cas_domain,defense_system	cas_domain=text:Cas_;defense_system=text:Cas_
+PF09623	Cas_NE0113	cas_domain,defense_component	cas_domain=text:Cas_;defense_component=text:Cas_
 PF09624	DUF2393	hypothetical	hypothetical=text:unknown function
 PF09626	DHC	cytochrome,electron_transport,heme_binding,respiration	cytochrome=text:cytochrom;electron_transport=text:cytochrom;heme_binding=text:cytochrome;respiration=text:cytochrome c
 PF09630	DUF2024	hypothetical	hypothetical=text:unknown function
@@ -5197,13 +5197,13 @@ PF09637	Med18	transcription	transcription=swissprot:29/29 KOs 2/2 single-domain 
 PF09640	DUF2027	hypothetical	hypothetical=text:unknown function
 PF09641	DUF2026	hypothetical	hypothetical=text:unknown function
 PF09649	CHZ	chaperone,stress_response	chaperone=text:chaperon;stress_response=text:chaperon
-PF09651	Cas_APE2256	cas_domain,defense_system	cas_domain=text:Cas_;defense_system=text:Cas_
-PF09652	Cas_VVA1548	cas_domain,defense_system	cas_domain=text:Cas_;defense_system=text:Cas_
+PF09651	Cas_APE2256	cas_domain,defense_component	cas_domain=text:Cas_;defense_component=text:Cas_
+PF09652	Cas_VVA1548	cas_domain,defense_component	cas_domain=text:Cas_;defense_component=text:Cas_
 PF09654	DUF2396	hypothetical	hypothetical=text:unknown function
 PF09656	PGPGW	membrane	membrane=text:transmembrane
-PF09657	Cas_Csx8	cas_domain,defense_system	cas_domain=text:Cas_;defense_system=text:Cas_
-PF09658	Cas_Csx9	cas_domain,defense_system	cas_domain=text:Cas_;defense_system=text:Cas_
-PF09659	Cas_Csm6_HEPN	defense_system	defense_system=text:Cas_
+PF09657	Cas_Csx8	cas_domain,defense_component	cas_domain=text:Cas_;defense_component=text:Cas_
+PF09658	Cas_Csx9	cas_domain,defense_component	cas_domain=text:Cas_;defense_component=text:Cas_
+PF09659	Cas_Csm6_HEPN	defense_component	defense_component=text:Cas_
 PF09660	DUF2397	hypothetical	hypothetical=text:unknown function
 PF09661	DUF2398	hypothetical	hypothetical=text:unknown function
 PF09663	Amido_AtzD_TrzD	amidase,hydrolase	amidase=go:GO:0016810;hydrolase=go:GO:0016787
@@ -5212,7 +5212,7 @@ PF09665	RE_Alw26IDE	hydrolase,nuclease,restriction_enzyme,restriction_modificati
 PF09667	DUF2028	hypothetical	hypothetical=text:unknown function
 PF09668	Asp_protease	hydrolase,peptidase,protease	hydrolase=go:GO:0016787;peptidase=swissprot:36/37 KOs 3/3 single-domain 4/5;protease=go:GO:0008233
 PF09669	Phage_pRha	phage_related	phage_related=text:Phage
-PF09670	Cas_Cas02710	cas_domain,defense_system	cas_domain=text:Cas_;defense_system=text:Cas_
+PF09670	Cas_Cas02710	cas_domain,defense_component	cas_domain=text:Cas_;defense_component=text:Cas_
 PF09673	TrbC_Ftype	conjugation,mobile_element,pilus	conjugation=text:Trb;mobile_element=text:conjugat;pilus=text:pilin
 PF09674	DUF2400	hypothetical	hypothetical=text:unknown function
 PF09675	Chlamy_scaf	phage_related	phage_related=text:phage
@@ -5227,15 +5227,15 @@ PF09685	DUF4870	hypothetical	hypothetical=text:unknown function
 PF09691	T2SS_PulS_OutS	secretion_component,t2ss_component	secretion_component=text:T2SS;t2ss_component=text:T2SS
 PF09692	Arb1	chaperone,stress_response	chaperone=text:chaperon;stress_response=text:chaperon
 PF09693	Phage_XkdX	phage_related	phage_related=text:Phage
-PF09700	Cas_Cmr3	cas_domain,defense_system	cas_domain=text:Cas_;defense_system=text:Cas_
-PF09701	Cas_Cmr5	cas_domain,defense_system	cas_domain=text:Cas_;defense_system=text:Cas_
-PF09702	Cas_Csa5	cas_domain,defense_system	cas_domain=text:Cas_;defense_system=text:Cas_
-PF09703	Cas_Csa4	cas_domain,defense_system	cas_domain=text:Cas_;defense_system=text:Cas_
-PF09704	Cas_Cas5d	cas_domain,crispr_associated,crispr_type_i,defense_system	cas_domain=go:GO:0043571;crispr_associated=swissprot:6/6 KOs 4/4 single-domain 6/6;crispr_type_i=swissprot:6/6 KOs 4/4 single-domain 6/6;defense_system=go:GO:0043571
-PF09706	Cas_CXXC_CXXC	cas_domain,defense_system	cas_domain=text:Cas_;defense_system=text:Cas_
-PF09707	Cas_Cas2CT1978	cas_domain,crispr_associated,defense_system	cas_domain=text:Cas_;crispr_associated=text:Cas_;defense_system=text:Cas_
-PF09709	Cas_Csd1	cas_domain,defense_system	cas_domain=text:Cas_;defense_system=text:Cas_
-PF09711	Cas_Csn2	cas_domain,defense_system	cas_domain=text:Cas_;defense_system=text:Cas_
+PF09700	Cas_Cmr3	cas_domain,defense_component	cas_domain=text:Cas_;defense_component=text:Cas_
+PF09701	Cas_Cmr5	cas_domain,defense_component	cas_domain=text:Cas_;defense_component=text:Cas_
+PF09702	Cas_Csa5	cas_domain,defense_component	cas_domain=text:Cas_;defense_component=text:Cas_
+PF09703	Cas_Csa4	cas_domain,defense_component	cas_domain=text:Cas_;defense_component=text:Cas_
+PF09704	Cas_Cas5d	cas_domain,crispr_associated,crispr_type_i,defense_component	cas_domain=go:GO:0043571;crispr_associated=swissprot:6/6 KOs 4/4 single-domain 6/6;crispr_type_i=swissprot:6/6 KOs 4/4 single-domain 6/6;defense_component=go:GO:0043571
+PF09706	Cas_CXXC_CXXC	cas_domain,defense_component	cas_domain=text:Cas_;defense_component=text:Cas_
+PF09707	Cas_Cas2CT1978	cas_domain,crispr_associated,defense_component	cas_domain=text:Cas_;crispr_associated=text:Cas_;defense_component=text:Cas_
+PF09709	Cas_Csd1	cas_domain,defense_component	cas_domain=text:Cas_;defense_component=text:Cas_
+PF09711	Cas_Csn2	cas_domain,defense_component	cas_domain=text:Cas_;defense_component=text:Cas_
 PF09712	PHA_synth_III_E	synthase	synthase=text:synthase
 PF09716	ETRAMP	membrane	membrane=text:membrane
 PF09718	Tape_meas_lam_C	phage_related	phage_related=text:Lambda
@@ -5301,7 +5301,7 @@ PF09823	DUF2357	hypothetical	hypothetical=text:unknown function
 PF09824	ArsR	regulator,transcription_factor	regulator=text:ArsR;transcription_factor=text:ArsR
 PF09825	BPL_N	ligase	ligase=text:ligase
 PF09826	Beta_propel	repeat_domain	repeat_domain=text:Beta propeller
-PF09827	CRISPR_Cas2	cas_domain,crispr_adaptation,crispr_associated,defense_system,hydrolase,nuclease	cas_domain=text:CRISPR;crispr_adaptation=swissprot:70/78 single-domain 70/77;crispr_associated=text:CRISPR;defense_system=text:CRISPR;hydrolase=swissprot:78/78 single-domain 77/77;nuclease=text:Cas2
+PF09827	CRISPR_Cas2	cas_domain,crispr_adaptation,crispr_associated,defense_component,hydrolase,nuclease	cas_domain=text:CRISPR;crispr_adaptation=swissprot:70/78 single-domain 70/77;crispr_associated=text:CRISPR;defense_component=text:CRISPR;hydrolase=swissprot:78/78 single-domain 77/77;nuclease=text:Cas2
 PF09829	DUF2057	hypothetical	hypothetical=text:Uncharacterized
 PF09830	ATP_transf	transferase	transferase=go:GO:0016740
 PF09831	DUF2058	hypothetical	hypothetical=text:Uncharacterized
@@ -5325,7 +5325,7 @@ PF09850	DotU	secretion_component	secretion_component=text:secretion
 PF09852	DUF2079	hypothetical,membrane	hypothetical=text:DUF2;membrane=text:membrane
 PF09853	DUF2080	hypothetical	hypothetical=text:DUF2
 PF09855	Zn_ribbon_13	binding,hypothetical,metal_binding,zinc_binding	binding=text:binding;hypothetical=text:DUF2;metal_binding=text:Zn;zinc_binding=text:Zn
-PF09857	YjhX_toxin	antitoxin_domain,toxin_domain	antitoxin_domain=text:antitoxin;toxin_domain=text:toxin
+PF09857	YjhX_toxin	antitoxin_domain,defense_component,toxin_domain	antitoxin_domain=text:antitoxin;defense_component=text:toxin-antitoxin;toxin_domain=text:toxin
 PF09858	DUF2085	hypothetical,membrane	hypothetical=text:DUF2;membrane=text:membrane
 PF09859	Oxygenase-NA	oxidoreductase,oxygenase	oxidoreductase=text:Oxygenase;oxygenase=text:Oxygenase
 PF09860	DUF2087	hypothetical	hypothetical=text:Uncharacterized
@@ -5373,7 +5373,7 @@ PF09903	DUF2130	hypothetical	hypothetical=text:Uncharacterized
 PF09904	HTH_43	dna_binding,helix_turn_helix	dna_binding=text:Winged helix;helix_turn_helix=text:HTH
 PF09905	VF530	binding,dna_binding	binding=go:GO:0005488;dna_binding=go:GO:0003677
 PF09906	DUF2135	hypothetical	hypothetical=text:Uncharacterized
-PF09907	HigB_toxin	antitoxin_domain,toxin_domain	antitoxin_domain=go:GO:0110001;toxin_domain=text:toxin
+PF09907	HigB_toxin	antitoxin_domain,defense_component,toxin_domain	antitoxin_domain=go:GO:0110001;defense_component=go:GO:0110001;toxin_domain=text:toxin
 PF09909	DUF2138	hypothetical	hypothetical=text:Uncharacterized
 PF09910	DUF2139	hypothetical	hypothetical=text:Uncharacterized
 PF09911	DUF2140	hypothetical	hypothetical=text:Uncharacterized
@@ -5408,12 +5408,12 @@ PF09946	DUF2178	hypothetical,membrane	hypothetical=text:DUF2;membrane=text:membr
 PF09947	DUF2180	hypothetical	hypothetical=text:Uncharacterized
 PF09948	DUF2182	binding,hypothetical,membrane,metal_binding	binding=text:binding;hypothetical=text:DUF2;membrane=text:integral;metal_binding=text:metal
 PF09949	APP1_cat	hydrolase,phosphatase	hydrolase=go:GO:0016787;phosphatase=go:GO:0016791
-PF09952	AbiEi_2	abortive_infection,antitoxin_domain,regulator,transcription_factor	abortive_infection=text:AbiE;antitoxin_domain=text:AbiEi;regulator=text:regulat;transcription_factor=text:Transcriptional regulator
+PF09952	AbiEi_2	abi_domain,antitoxin_domain,regulator,transcription_factor	abi_domain=text:AbiE;antitoxin_domain=text:AbiEi;regulator=text:regulat;transcription_factor=text:Transcriptional regulator
 PF09953	DUF2187	hypothetical	hypothetical=text:Uncharacterized
 PF09954	DUF2188	hypothetical	hypothetical=text:Uncharacterized
 PF09955	DUF2189	hypothetical,membrane	hypothetical=text:DUF2;membrane=text:integral
 PF09956	Phage_cement_2	phage_related	phage_related=text:Phage
-PF09957	VapB_antitoxin	antitoxin,antitoxin_domain,toxin_antitoxin	antitoxin=swissprot:15/17 KOs 3/3 single-domain 15/17;antitoxin_domain=text:VapB;toxin_antitoxin=swissprot:15/17 KOs 3/3 single-domain 15/17
+PF09957	VapB_antitoxin	antitoxin,antitoxin_domain	antitoxin=swissprot:15/17 KOs 3/3 single-domain 15/17;antitoxin_domain=text:VapB
 PF09958	DUF2192	hypothetical	hypothetical=text:Uncharacterized
 PF09959	DUF2193	hypothetical	hypothetical=text:Uncharacterized
 PF09960	DUF2194	hypothetical	hypothetical=text:Uncharacterised
@@ -5483,7 +5483,7 @@ PF10036	RLL	transporter	transporter=text:transport
 PF10037	MRP-S27	ribosomal_protein,translation	ribosomal_protein=text:ribosomal protein;translation=text:ribosomal protein
 PF10038	DUF2274	hypothetical	hypothetical=text:unknown function
 PF10039	DUF2275	hypothetical,membrane	hypothetical=text:DUF2;membrane=text:integral
-PF10040	CRISPR_Cas6	cas_domain,crispr_associated,defense_system,hydrolase,nuclease,rnase	cas_domain=text:CRISPR;crispr_associated=text:CRISPR;defense_system=text:CRISPR;hydrolase=text:nuclease;nuclease=text:ribonuclease;rnase=text:ribonuclease
+PF10040	CRISPR_Cas6	cas_domain,crispr_associated,defense_component,hydrolase,nuclease,rnase	cas_domain=text:CRISPR;crispr_associated=text:CRISPR;defense_component=text:CRISPR;hydrolase=text:nuclease;nuclease=text:ribonuclease;rnase=text:ribonuclease
 PF10041	DUF2277	hypothetical	hypothetical=text:Uncharacterized
 PF10042	DUF2278	hypothetical	hypothetical=text:Uncharacterized
 PF10043	DUF2279	hypothetical,periplasmic	hypothetical=text:DUF2;periplasmic=text:periplasm
@@ -5561,7 +5561,7 @@ PF10131	PTPS_related	cofactor_biosynthesis,membrane,synthase	cofactor_biosynthes
 PF10133	CooT	co_oxidation,dehydrogenase,oxidoreductase	co_oxidation=text:CooT;dehydrogenase=text:dehydrogenase;oxidoreductase=text:dehydrogenase
 PF10135	Rod-binding	binding,flagellum,hydrolase	binding=text:binding;flagellum=swissprot:12/12 single-domain 6/6;hydrolase=swissprot:12/12 single-domain 6/6
 PF10136	SpecificRecomb	mobile_element,recombinase	mobile_element=text:recombinase;recombinase=text:Site-specific
-PF10137	CAP12-PCTIR_TIR	defense_system	defense_system=text:Pycsar
+PF10137	CAP12-PCTIR_TIR	defense_component	defense_component=text:Pycsar
 PF10141	ssDNA-exonuc_C	hydrolase,nuclease	hydrolase=text:nuclease;nuclease=text:exonuclease
 PF10143	PhosphMutase	isomerase,mutase	isomerase=go:GO:0016853;mutase=go:GO:0016866
 PF10145	PhageMin_Tail	phage_related	phage_related=text:Phage
@@ -5768,7 +5768,7 @@ PF10588	NADH-G_4Fe-4S_3	binding,iron_sulfur,metal_binding,oxidoreductase	binding
 PF10589	NADH_4Fe-4S	binding,iron_sulfur,metal_binding,oxidoreductase	binding=go:GO:0005488;iron_sulfur=go:GO:0051536;metal_binding=text:4Fe-4S;oxidoreductase=text:oxidoreductase
 PF10590	PNP_phzG_C	oxidase,oxidoreductase	oxidase=text:oxidase;oxidoreductase=text:oxidase
 PF10591	SPARC_Ca_bdg	binding	binding=go:GO:0005488
-PF10592	AIPR	defense_system	defense_system=text:AIPR
+PF10592	AIPR	defense_component	defense_component=text:AIPR
 PF10597	U5_2-snRNA_bdg	binding,rna_binding	binding=go:GO:0005488;rna_binding=go:GO:0003723
 PF10601	zf-LITAF-like	zinc_binding	zinc_binding=text:zinc
 PF10602	RPN7	hydrolase,protease	hydrolase=enzyme:3.4.25.1 (proteasome);protease=enzyme:3.4.25.1 (proteasome)
@@ -5982,7 +5982,7 @@ PF10895	DUF2715	hypothetical	hypothetical=text:unknown function
 PF10896	DUF2714	hypothetical	hypothetical=text:unknown function
 PF10897	DUF2713	hypothetical	hypothetical=text:unknown function
 PF10898	DUF2716	hypothetical	hypothetical=text:unknown function
-PF10899	AbiGi	abortive_infection,antitoxin_domain,defense_system,phage_related	abortive_infection=text:AbiG;antitoxin_domain=text:antitoxin;defense_system=text:abortive;phage_related=text:phage
+PF10899	AbiGi	abi_domain,antitoxin_domain,defense_component,phage_related	abi_domain=text:AbiG;antitoxin_domain=text:antitoxin;defense_component=text:abortive;phage_related=text:phage
 PF10901	DUF2690	hypothetical	hypothetical=text:unknown function
 PF10903	DUF2691	hypothetical	hypothetical=text:unknown function
 PF10904	DUF2694	hypothetical	hypothetical=text:unknown function
@@ -6346,7 +6346,7 @@ PF11376	DUF3179	hypothetical	hypothetical=text:unknown function
 PF11377	DUF3180	hypothetical	hypothetical=text:unknown function
 PF11378	DUF3181	hypothetical	hypothetical=text:unknown function
 PF11379	DUF3182	hypothetical	hypothetical=text:unknown function
-PF11380	Stealth_CR2	defense_system,transferase	defense_system=text:Stealth;transferase=swissprot:39/39 single-domain 3/3
+PF11380	Stealth_CR2	defense_component,transferase	defense_component=text:Stealth;transferase=swissprot:39/39 single-domain 3/3
 PF11381	DUF3185	hypothetical	hypothetical=text:unknown function
 PF11382	MctB	copper_binding,membrane,metal_binding,outer_membrane,transporter	copper_binding=text:Copper;membrane=go:GO:0016020;metal_binding=text:Copper;outer_membrane=text:outer membrane;transporter=text:transport
 PF11383	DUF3187	hypothetical	hypothetical=text:unknown function
@@ -6396,7 +6396,7 @@ PF11455	MazE-like	antitoxin_domain	antitoxin_domain=text:Antitoxin
 PF11456	DUF3019	hypothetical	hypothetical=text:unknown function
 PF11457	DUF3021	hypothetical	hypothetical=text:unknown function
 PF11458	Mistic	membrane	membrane=text:Membrane
-PF11459	AbiEi_3	abortive_infection,antitoxin_domain,regulator,transcription_factor	abortive_infection=text:AbiE;antitoxin_domain=text:AbiEi;regulator=text:regulat;transcription_factor=text:Transcriptional regulator
+PF11459	AbiEi_3	abi_domain,antitoxin_domain,regulator,transcription_factor	abi_domain=text:AbiE;antitoxin_domain=text:AbiEi;regulator=text:regulat;transcription_factor=text:Transcriptional regulator
 PF11460	DUF3007	hypothetical	hypothetical=text:unknown function
 PF11462	DUF3203	hypothetical	hypothetical=text:unknown function
 PF11463	R-HINP1I	hydrolase,nuclease,restriction_enzyme,restriction_modification	hydrolase=text:nuclease;nuclease=text:restriction endonuclease;restriction_enzyme=text:R-HINP1I;restriction_modification=text:R-HINP1I
@@ -6509,7 +6509,7 @@ PF11659	DUF3261	hypothetical	hypothetical=text:unknown function
 PF11660	DUF3262	hypothetical	hypothetical=text:unknown function
 PF11661	DUF2986	hypothetical	hypothetical=text:unknown function
 PF11662	DUF3263	hypothetical	hypothetical=text:unknown function
-PF11663	Toxin_YhaV	antitoxin_domain,hydrolase,nuclease,toxin_domain	antitoxin_domain=go:GO:0110001;hydrolase=text:nuclease;nuclease=go:GO:0004518;toxin_domain=go:GO:0004540
+PF11663	Toxin_YhaV	antitoxin_domain,defense_component,hydrolase,nuclease,toxin_domain	antitoxin_domain=go:GO:0110001;defense_component=go:GO:0110001;hydrolase=text:nuclease;nuclease=go:GO:0004518;toxin_domain=go:GO:0004540
 PF11666	DUF2933	hypothetical	hypothetical=text:unknown function
 PF11667	DUF3267	hydrolase,hypothetical,protease	hydrolase=text:peptidase;hypothetical=text:DUF3;protease=text:peptidase
 PF11669	WBP-1	binding	binding=text:binding
@@ -6670,7 +6670,7 @@ PF11898	DUF3418	hypothetical	hypothetical=text:unknown function
 PF11899	DUF3419	hypothetical	hypothetical=text:unknown function
 PF11900	DUF3420	hypothetical	hypothetical=text:unknown function
 PF11902	DUF3422	hypothetical	hypothetical=text:unknown function
-PF11903	ParD_like	antitoxin_domain	antitoxin_domain=text:ParD
+PF11903	ParD_like	antitoxin_domain,defense_component	antitoxin_domain=text:ParD;defense_component=text:toxin-antitoxin
 PF11905	DUF3425	hypothetical	hypothetical=text:unknown function
 PF11906	DUF3426	hypothetical	hypothetical=text:unknown function
 PF11907	DUF3427	hypothetical	hypothetical=text:unknown function
@@ -7018,7 +7018,7 @@ PF12436	USP7_ICP0_bdg	binding,hydrolase,protease	binding=text:binding;hydrolase=
 PF12437	GSIII_N	ligase,nitrogen_metabolism	ligase=go:GO:0016874;nitrogen_metabolism=text:Glutamine synthetase
 PF12438	DUF3679	hypothetical	hypothetical=text:unknown function
 PF12439	GDE_N	carbohydrate_active,hydrolase	carbohydrate_active=text:Glyco;hydrolase=enzyme:3.2.1.196 (glycogen debranching enzyme)
-PF12441	CopG_antitoxin	antitoxin_domain	antitoxin_domain=text:antitoxin
+PF12441	CopG_antitoxin	antitoxin_domain,defense_component	antitoxin_domain=text:antitoxin;defense_component=text:toxin-antitoxin
 PF12442	DUF3681	hypothetical	hypothetical=text:unknown function
 PF12443	AKNA	dna_binding,regulator,transcription_factor	dna_binding=text:transcription factor;regulator=text:transcription factor;transcription_factor=text:transcription factor
 PF12445	FliC	flagellum	flagellum=text:FliC
@@ -7037,7 +7037,7 @@ PF12463	DUF3689	hypothetical	hypothetical=text:unknown function
 PF12464	Mac	acetyltransferase,transferase	acetyltransferase=go:GO:0016407;transferase=go:GO:0016740
 PF12465	Pr_beta_C	hydrolase,protease	hydrolase=enzyme:3.4.25.1 (proteasome);protease=enzyme:3.4.25.1 (proteasome)
 PF12468	LRR_TTSS	lrr_repeat,repeat_domain,secretion_component	lrr_repeat=text:LRR;repeat_domain=text:leucine rich;secretion_component=text:secretion
-PF12469	Cmr2_N	cas_domain,defense_system	cas_domain=text:Cmr;defense_system=text:Cmr2
+PF12469	Cmr2_N	cas_domain,defense_component	cas_domain=text:Cmr;defense_component=text:Cmr2
 PF12470	SUFU_C	binding	binding=go:GO:0005488
 PF12471	GTP_CH_N	hydrolase	hydrolase=text:hydrolase
 PF12472	DUF3693	hypothetical,phage_related	hypothetical=text:DUF3;phage_related=text:Phage
@@ -7188,7 +7188,7 @@ PF12695	Abhydrolase_5	hydrolase	hydrolase=go:GO:0016787
 PF12697	Abhydrolase_6	esterase,hydrolase	esterase=text:Abhydrolase;hydrolase=text:hydrolase
 PF12698	ABC2_membrane_3	abc_transporter,membrane,transporter	abc_transporter=go:GO:0140359;membrane=go:GO:0016020;transporter=go:GO:0005215
 PF12699	phiKZ_IP	phage_related	phage_related=text:phage
-PF12703	ptaRNA1_toxin	antitoxin_domain,toxin_domain	antitoxin_domain=text:antitoxin;toxin_domain=text:toxin
+PF12703	ptaRNA1_toxin	antitoxin_domain,defense_component,toxin_domain	antitoxin_domain=text:antitoxin;defense_component=text:toxin-antitoxin;toxin_domain=text:toxin
 PF12704	MacB_PCD	abc_transporter,efflux_pump,periplasmic,transporter	abc_transporter=text:MacB;efflux_pump=text:MacB;periplasmic=text:periplasm;transporter=text:MacB
 PF12705	PDDEXK_1	hydrolase,nuclease	hydrolase=text:nuclease;nuclease=text:nuclease
 PF12706	Lactamase_B_2	antibiotic_resistance,beta_lactamase,hydrolase	antibiotic_resistance=text:Lactamase;beta_lactamase=text:Lactamase;hydrolase=text:Lactamase
@@ -7302,7 +7302,7 @@ PF12903	DUF3830	hypothetical	hypothetical=text:unknown function
 PF12904	Collagen_bind_2	binding	binding=text:bind
 PF12906	RINGv	ligase,transferase	ligase=swissprot:51/59 KOs 11/11 single-domain 40/47;transferase=swissprot:58/59 KOs 11/11 single-domain 46/47
 PF12907	zf-met2	binding,metal_binding,zinc_binding	binding=text:binding;metal_binding=text:zf-;zinc_binding=text:zf-
-PF12910	PHD_like	antitoxin_domain,toxin_domain	antitoxin_domain=text:Antitoxin;toxin_domain=text:RelE
+PF12910	PHD_like	antitoxin_domain,defense_component,toxin_domain	antitoxin_domain=text:Antitoxin;defense_component=text:toxin-antitoxin;toxin_domain=text:RelE
 PF12911	OppC_N	membrane,peptide_transporter,transporter	membrane=text:permease;peptide_transporter=text:OppC;transporter=text:OppC
 PF12915	DUF3833	hypothetical	hypothetical=text:unknown function
 PF12916	DUF3834	hypothetical	hypothetical=text:unknown function
@@ -7584,7 +7584,7 @@ PF13273	DUF4064	hypothetical	hypothetical=text:unknown function
 PF13274	SocA_Panacea	antitoxin_domain	antitoxin_domain=text:Antitoxin
 PF13275	S4_2	rna_binding	rna_binding=text:S4
 PF13276	HTH_21	dna_binding,helix_turn_helix	dna_binding=text:HTH;helix_turn_helix=text:HTH
-PF13280	WYL	defense_system	defense_system=text:WYL
+PF13280	WYL	defense_component	defense_component=text:WYL
 PF13281	MAP3K_TRAF_bd	binding	binding=text:binding
 PF13282	DUF4070	hypothetical	hypothetical=text:unknown function
 PF13284	DUF4072	hypothetical	hypothetical=text:unknown function
@@ -7601,7 +7601,7 @@ PF13300	DUF4078	hypothetical	hypothetical=text:unknown function
 PF13301	DUF4079	hypothetical	hypothetical=text:unknown function
 PF13302	Acetyltransf_3	acetyltransferase,transferase	acetyltransferase=text:Acetyltransferase;transferase=go:GO:0016740
 PF13303	PTS_EIIC_2	transferase	transferase=go:GO:0016740
-PF13304	AAA_21	aaa_domain,abortive_infection,antitoxin_domain,atp_binding,atpase,toxin_domain	aaa_domain=text:AAA_;abortive_infection=text:AbiE;antitoxin_domain=text:AbiEi;atp_binding=go:GO:0005524;atpase=go:GO:0016887;toxin_domain=text:toxin
+PF13304	AAA_21	aaa_domain,abi_domain,antitoxin_domain,atp_binding,atpase,toxin_domain	aaa_domain=text:AAA_;abi_domain=text:AbiE;antitoxin_domain=text:AbiEi;atp_binding=go:GO:0005524;atpase=go:GO:0016887;toxin_domain=text:toxin
 PF13305	TetR_C_33	regulator,tetr_family	regulator=text:TetR;tetr_family=text:TetR
 PF13306	LRR_5	lrr_repeat,repeat_domain	lrr_repeat=text:LRR;repeat_domain=text:Leucine rich
 PF13307	Helicase_C_2	helicase,isomerase	helicase=go:GO:0004386;isomerase=swissprot:96/96 KOs 5/5 co-domains excluded
@@ -7626,7 +7626,7 @@ PF13334	DUF4094	hypothetical	hypothetical=text:unknown function
 PF13335	Mg_chelatase_C	atp_binding,chelatase	atp_binding=text:Mg_chelatase;chelatase=text:chelatase
 PF13336	AcetylCoA_hyd_C	hydrolase,transferase	hydrolase=text:hydrolase;transferase=text:transferase
 PF13337	BrxL_ATPase	atp_binding,atpase,hydrolase,protease	atp_binding=text:ATPase;atpase=text:ATPase;hydrolase=text:protease;protease=text:protease
-PF13338	AbiEi_4	abortive_infection,antitoxin_domain,regulator,transcription_factor	abortive_infection=text:AbiE;antitoxin_domain=text:AbiEi;regulator=text:regulat;transcription_factor=text:Transcriptional regulator
+PF13338	AbiEi_4	abi_domain,antitoxin_domain,regulator,transcription_factor	abi_domain=text:AbiE;antitoxin_domain=text:AbiEi;regulator=text:regulat;transcription_factor=text:Transcriptional regulator
 PF13339	AATF-Che1	dna_binding,regulator,transcription_factor	dna_binding=text:transcription factor;regulator=text:transcription factor;transcription_factor=text:transcription factor
 PF13340	DUF4096	hypothetical,mobile_element,transposase	hypothetical=text:DUF4;mobile_element=text:transpos;transposase=text:transpos
 PF13342	Toprim_Crpt	isomerase,replication,topoisomerase	isomerase=text:isomerase;replication=text:topoisomerase;topoisomerase=text:topoisomerase
@@ -8049,17 +8049,17 @@ PF13933	HRXXH	hydrolase,protease,transporter	hydrolase=text:peptidase;protease=t
 PF13936	HTH_38	dna_binding,helix_turn_helix	dna_binding=text:Helix-turn-helix;helix_turn_helix=text:HTH
 PF13937	DUF4212	hypothetical	hypothetical=text:unknown function
 PF13938	DUF4213	hypothetical	hypothetical=text:DUF4
-PF13939	TisB_toxin	antitoxin_domain,toxin_domain	antitoxin_domain=text:antitoxin;toxin_domain=text:toxin
-PF13940	Ldr_toxin	antitoxin_domain,toxin_domain	antitoxin_domain=text:antitoxin;toxin_domain=text:toxin
+PF13939	TisB_toxin	antitoxin_domain,defense_component,toxin_domain	antitoxin_domain=text:antitoxin;defense_component=text:toxin-antitoxin;toxin_domain=text:toxin
+PF13940	Ldr_toxin	antitoxin_domain,defense_component,toxin_domain	antitoxin_domain=text:antitoxin;defense_component=text:toxin-antitoxin;toxin_domain=text:toxin
 PF13946	DUF4214	hypothetical	hypothetical=text:unknown function
 PF13947	GUB_WAK_bind	binding,kinase,transferase	binding=go:GO:0005488;kinase=text:kinase;transferase=text:kinase
 PF13948	DUF4215	hypothetical	hypothetical=text:unknown function
 PF13949	ALIX_LYPXL_bnd	binding	binding=go:GO:0005488
 PF13952	DUF4216	hypothetical	hypothetical=text:unknown function
-PF13955	Fst_toxin	antitoxin_domain,toxin_domain	antitoxin_domain=text:antitoxin;toxin_domain=text:toxin
-PF13956	Ibs_toxin	antitoxin_domain,toxin_domain	antitoxin_domain=text:antitoxin;toxin_domain=text:toxin
-PF13957	YafO_toxin	antitoxin_domain,toxin_domain	antitoxin_domain=text:antitoxin;toxin_domain=text:toxin
-PF13958	ToxN_toxin	antitoxin_domain,toxin_domain	antitoxin_domain=text:antitoxin;toxin_domain=go:GO:0004540
+PF13955	Fst_toxin	antitoxin_domain,defense_component,toxin_domain	antitoxin_domain=text:antitoxin;defense_component=text:toxin-antitoxin;toxin_domain=text:toxin
+PF13956	Ibs_toxin	antitoxin_domain,defense_component,toxin_domain	antitoxin_domain=text:antitoxin;defense_component=text:toxin-antitoxin;toxin_domain=text:toxin
+PF13957	YafO_toxin	antitoxin_domain,defense_component,toxin_domain	antitoxin_domain=text:antitoxin;defense_component=text:toxin-antitoxin;toxin_domain=text:toxin
+PF13958	ToxN_toxin	antitoxin_domain,defense_component,toxin_domain	antitoxin_domain=text:antitoxin;defense_component=text:toxin-antitoxin;toxin_domain=go:GO:0004540
 PF13959	CTE_SPB4	helicase	helicase=text:helicase
 PF13960	DUF4218	hypothetical	hypothetical=text:unknown function
 PF13961	DUF4219	hypothetical	hypothetical=text:unknown function
@@ -8171,9 +8171,9 @@ PF14146	DUF4305	hypothetical	hypothetical=text:unknown function
 PF14154	DUF4306	hypothetical	hypothetical=text:unknown function
 PF14155	DUF4307	hypothetical	hypothetical=text:unknown function
 PF14159	CAAD	ligase,translation,trna_synthetase	ligase=text:synthetase;translation=text:aminoacyl-tRNA;trna_synthetase=text:aminoacyl-tRNA
-PF14171	SpoIISA_toxin	antitoxin_domain,toxin_domain	antitoxin_domain=text:antitoxin;toxin_domain=text:toxin
+PF14171	SpoIISA_toxin	antitoxin_domain,defense_component,toxin_domain	antitoxin_domain=text:antitoxin;defense_component=text:toxin-antitoxin;toxin_domain=text:toxin
 PF14172	DUF4309	hypothetical	hypothetical=text:unknown function
-PF14185	SpoIISB_antitox	antitoxin_domain	antitoxin_domain=text:Antitoxin
+PF14185	SpoIISB_antitox	antitoxin_domain,defense_component	antitoxin_domain=text:Antitoxin;defense_component=text:toxin-antitoxin
 PF14187	DUF4310	hypothetical	hypothetical=text:unknown function
 PF14188	DUF4311	hypothetical	hypothetical=text:unknown function
 PF14189	DUF4312	hypothetical	hypothetical=text:unknown function
@@ -8213,7 +8213,7 @@ PF14248	DUF4345	hypothetical	hypothetical=text:unknown function
 PF14250	AbrB-like	regulator,transcription_factor	regulator=text:regulat;transcription_factor=text:transcriptional regulator
 PF14251	PterinBD-DUF4346	hypothetical	hypothetical=text:DUF4
 PF14252	DUF4347	hypothetical	hypothetical=text:unknown function
-PF14253	AbiH	abortive_infection,defense_system	abortive_infection=text:AbiH;defense_system=text:abortive infection
+PF14253	AbiH	abi_domain,defense_component	abi_domain=text:AbiH;defense_component=text:abortive infection
 PF14254	DUF4348	hypothetical	hypothetical=text:unknown function
 PF14257	DUF4349	hypothetical	hypothetical=text:unknown function
 PF14258	DUF4350	hypothetical	hypothetical=text:unknown function
@@ -8295,7 +8295,7 @@ PF14377	UBM	binding	binding=text:binding
 PF14378	PAP2_3	phosphatase,transferase	phosphatase=text:PAP2;transferase=swissprot:6/6 KOs 2/2 single-domain 6/6
 PF14380	WAK_assoc	kinase,transferase	kinase=text:kinase;transferase=text:kinase
 PF14382	ECR1_N	hydrolase,nuclease,rna_processing	hydrolase=text:nuclease;nuclease=text:exonuclease;rna_processing=text:Exosome
-PF14384	BrnA_antitoxin	antitoxin_domain	antitoxin_domain=text:antitoxin
+PF14384	BrnA_antitoxin	antitoxin_domain,defense_component	antitoxin_domain=text:antitoxin;defense_component=text:toxin-antitoxin
 PF14385	DUF4416	hypothetical	hypothetical=text:unknown function
 PF14386	DUF4417	hypothetical	hypothetical=text:unknown function
 PF14387	DUF4418	hypothetical	hypothetical=text:unknown function
@@ -8873,11 +8873,11 @@ PF15641	Tox-MPTase5	protease,toxin_domain	protease=text:peptidase;toxin_domain=t
 PF15642	Tox-ODYAM1	toxin_domain	toxin_domain=text:Toxin
 PF15643	Tox-PL-2	toxin_domain	toxin_domain=text:toxin
 PF15644	Gln_amidase	toxin_domain	toxin_domain=text:toxin
-PF15646	Tox-REase-2	defense_system,hydrolase,nuclease,restriction_enzyme,restriction_modification,toxin_domain	defense_system=text:Restriction;hydrolase=text:nuclease;nuclease=text:Restriction endonuclease;restriction_enzyme=text:Restriction endonuclease;restriction_modification=text:Restriction;toxin_domain=text:toxin
-PF15647	Tox-REase-3	defense_system,hydrolase,nuclease,restriction_enzyme,restriction_modification,toxin_domain	defense_system=text:Restriction;hydrolase=text:nuclease;nuclease=text:Restriction endonuclease;restriction_enzyme=text:Restriction endonuclease;restriction_modification=text:Restriction;toxin_domain=text:toxin
-PF15648	Tox-REase-5	defense_system,hydrolase,nuclease,restriction_enzyme,restriction_modification,toxin_domain	defense_system=text:Restriction;hydrolase=text:nuclease;nuclease=text:Restriction endonuclease;restriction_enzyme=text:Restriction endonuclease;restriction_modification=text:Restriction;toxin_domain=text:toxin
-PF15649	Tox-REase-7	defense_system,hydrolase,nuclease,restriction_enzyme,restriction_modification,toxin_domain	defense_system=text:Restriction;hydrolase=text:nuclease;nuclease=text:Restriction endonuclease;restriction_enzyme=text:Restriction endonuclease;restriction_modification=text:Restriction;toxin_domain=text:toxin
-PF15650	Tox-REase-9	defense_system,hydrolase,nuclease,restriction_enzyme,restriction_modification,toxin_domain	defense_system=text:Restriction;hydrolase=text:nuclease;nuclease=text:Restriction endonuclease;restriction_enzyme=text:Restriction endonuclease;restriction_modification=text:Restriction;toxin_domain=text:toxin
+PF15646	Tox-REase-2	defense_component,hydrolase,nuclease,restriction_enzyme,restriction_modification,toxin_domain	defense_component=text:Restriction;hydrolase=text:nuclease;nuclease=text:Restriction endonuclease;restriction_enzyme=text:Restriction endonuclease;restriction_modification=text:Restriction;toxin_domain=text:toxin
+PF15647	Tox-REase-3	defense_component,hydrolase,nuclease,restriction_enzyme,restriction_modification,toxin_domain	defense_component=text:Restriction;hydrolase=text:nuclease;nuclease=text:Restriction endonuclease;restriction_enzyme=text:Restriction endonuclease;restriction_modification=text:Restriction;toxin_domain=text:toxin
+PF15648	Tox-REase-5	defense_component,hydrolase,nuclease,restriction_enzyme,restriction_modification,toxin_domain	defense_component=text:Restriction;hydrolase=text:nuclease;nuclease=text:Restriction endonuclease;restriction_enzyme=text:Restriction endonuclease;restriction_modification=text:Restriction;toxin_domain=text:toxin
+PF15649	Tox-REase-7	defense_component,hydrolase,nuclease,restriction_enzyme,restriction_modification,toxin_domain	defense_component=text:Restriction;hydrolase=text:nuclease;nuclease=text:Restriction endonuclease;restriction_enzyme=text:Restriction endonuclease;restriction_modification=text:Restriction;toxin_domain=text:toxin
+PF15650	Tox-REase-9	defense_component,hydrolase,nuclease,restriction_enzyme,restriction_modification,toxin_domain	defense_component=text:Restriction;hydrolase=text:nuclease;nuclease=text:Restriction endonuclease;restriction_enzyme=text:Restriction endonuclease;restriction_modification=text:Restriction;toxin_domain=text:toxin
 PF15651	Tox-SGS	toxin_domain	toxin_domain=text:toxin
 PF15652	Tox-SHH	toxin_domain	toxin_domain=text:toxin
 PF15653	Tox-URI2	toxin_domain	toxin_domain=text:toxin
@@ -8913,13 +8913,13 @@ PF15727	DUF4678	hypothetical	hypothetical=text:unknown function
 PF15728	DUF4679	hypothetical	hypothetical=text:unknown function
 PF15729	CTSRT	ion_channel,transporter	ion_channel=text:channel;transporter=text:channel
 PF15730	DUF4680	hypothetical	hypothetical=text:unknown function
-PF15731	MqsA_antitoxin	antitoxin_domain	antitoxin_domain=text:Antitoxin
+PF15731	MqsA_antitoxin	antitoxin_domain,defense_component	antitoxin_domain=text:Antitoxin;defense_component=text:toxin-antitoxin
 PF15732	DUF4681	hypothetical	hypothetical=text:unknown function
 PF15733	DUF4682	hypothetical	hypothetical=text:unknown function
 PF15735	DUF4683	hypothetical	hypothetical=text:unknown function
 PF15736	DUF4684	hypothetical	hypothetical=text:unknown function
 PF15737	DUF4685	hypothetical	hypothetical=text:unknown function
-PF15738	YafQ_toxin	antitoxin_domain,toxin_domain	antitoxin_domain=text:antitoxin;toxin_domain=text:toxin
+PF15738	YafQ_toxin	antitoxin_domain,defense_component,toxin_domain	antitoxin_domain=text:antitoxin;defense_component=text:toxin-antitoxin;toxin_domain=text:toxin
 PF15740	PPP1R26_N	hydrolase,phosphatase	hydrolase=text:phosphatase;phosphatase=text:phosphatase
 PF15742	DUF4686	hypothetical	hypothetical=text:unknown function
 PF15747	DUF4687	hypothetical	hypothetical=text:unknown function
@@ -8939,7 +8939,7 @@ PF15774	DUF4702	hypothetical	hypothetical=text:unknown function
 PF15775	DUF4703	hypothetical	hypothetical=text:unknown function
 PF15777	Anti-TRAP	binding,rna_binding	binding=text:binding;rna_binding=text:RNA-binding
 PF15779	LRRC37	lrr_repeat,repeat_domain	lrr_repeat=text:LRR;repeat_domain=text:Leucine-rich
-PF15781	ParE-like_toxin	antitoxin_domain,toxin_domain	antitoxin_domain=text:antitoxin;toxin_domain=text:toxin
+PF15781	ParE-like_toxin	antitoxin_domain,defense_component,toxin_domain	antitoxin_domain=text:antitoxin;defense_component=text:toxin-antitoxin;toxin_domain=text:toxin
 PF15785	SMG1	kinase,transferase	kinase=go:GO:0016301;transferase=go:GO:0016740
 PF15786	PET117	cytochrome,electron_transport,heme_binding,oxidase,oxidoreductase,respiration	cytochrome=text:cytochrom;electron_transport=text:cytochrom;heme_binding=text:cytochrome;oxidase=text:oxidase;oxidoreductase=text:oxidase;respiration=text:cytochrome c
 PF15787	DUF4704	hypothetical	hypothetical=text:DUF4
@@ -9011,7 +9011,7 @@ PF15911	Beta-prop_WDR19_2nd	repeat_domain,wd40_repeat	repeat_domain=text:beta-pr
 PF15913	Furin-like_2	regulator,regulatory	regulator=swissprot:12/14 KOs 4/5 single-domain 4/5;regulatory=swissprot:12/14 KOs 4/5 single-domain 4/5
 PF15916	DUF4743	hypothetical	hypothetical=text:unknown function
 PF15918	DUF4744	hypothetical	hypothetical=text:unknown function
-PF15919	HicB_lk_antitox	antitoxin_domain	antitoxin_domain=text:HicB
+PF15919	HicB_lk_antitox	antitoxin_domain,defense_component	antitoxin_domain=text:HicB;defense_component=text:toxin-antitoxin
 PF15921	CCDC158	coiled_coil	coiled_coil=text:Coiled-coil
 PF15923	DUF4745	hypothetical	hypothetical=text:unknown function
 PF15924	ALG11_N	transferase	transferase=text:transferase
@@ -9022,9 +9022,9 @@ PF15932	DUF4748	hypothetical	hypothetical=text:unknown function
 PF15933	RnlB_antitoxin	antitoxin_domain,toxin_domain	antitoxin_domain=text:Antitoxin;toxin_domain=text:toxin
 PF15935	RnlA_toxin	toxin_domain	toxin_domain=text:toxin
 PF15936	DUF4749	hypothetical	hypothetical=text:unknown function
-PF15937	PrlF_antitoxin	antitoxin_domain,toxin_domain	antitoxin_domain=go:GO:0097351;toxin_domain=text:toxin
+PF15937	PrlF_antitoxin	antitoxin_domain,defense_component,toxin_domain	antitoxin_domain=go:GO:0097351;defense_component=go:GO:0097351;toxin_domain=text:toxin
 PF15938	DUF4750	hypothetical	hypothetical=text:unknown function
-PF15939	YmcE_antitoxin	antitoxin_domain	antitoxin_domain=text:antitoxin
+PF15939	YmcE_antitoxin	antitoxin_domain,defense_component	antitoxin_domain=text:antitoxin;defense_component=text:toxin-antitoxin
 PF15941	FidL_like	membrane	membrane=text:membrane
 PF15942	DUF4751	hypothetical	hypothetical=text:unknown function
 PF15943	YdaS_toxin	toxin_domain	toxin_domain=text:toxin
@@ -9043,7 +9043,7 @@ PF15962	DUF4765	hypothetical	hypothetical=text:unknown function
 PF15963	Myb_DNA-bind_7	binding,dna_binding	binding=text:bind;dna_binding=text:Myb
 PF15965	zf-TRAF_2	metal_binding,zinc_binding,zinc_finger	metal_binding=go:GO:0046872;zinc_binding=go:GO:0008270;zinc_finger=go:GO:0008270
 PF15968	RexB	ion_channel,membrane,transporter	ion_channel=text:channel;membrane=text:Membrane;transporter=text:channel
-PF15970	HicB-like_2	antitoxin_domain	antitoxin_domain=text:antitoxin
+PF15970	HicB-like_2	antitoxin_domain,defense_component	antitoxin_domain=text:antitoxin;defense_component=text:toxin-antitoxin
 PF15971	Mannosyl_trans4	transferase	transferase=go:GO:0016740
 PF15973	DUF4766	hypothetical	hypothetical=text:unknown function
 PF15974	Cadherin_tail	binding	binding=text:binding
@@ -9473,10 +9473,10 @@ PF16584	LolA_2	membrane,outer_membrane	membrane=text:membrane;outer_membrane=tex
 PF16586	DUF5060	hypothetical	hypothetical=text:unknown function
 PF16587	DUF5061	hypothetical,membrane,outer_membrane	hypothetical=text:DUF5;membrane=text:membrane;outer_membrane=text:outer membrane
 PF16588	zf-C2H2_10	metal_binding,zinc_binding,zinc_finger	metal_binding=text:zf-;zinc_binding=text:zf-;zinc_finger=text:zf-
-PF16592	Cas9_REC	cas_domain,defense_system,hydrolase,nuclease	cas_domain=text:Cas9;defense_system=text:Cas9;hydrolase=text:nuclease;nuclease=text:endonuclease
-PF16593	Cas9-BH	cas_domain,defense_system,hydrolase,nuclease	cas_domain=text:Cas9;defense_system=text:Cas9;hydrolase=text:nuclease;nuclease=text:endonuclease
+PF16592	Cas9_REC	cas_domain,defense_component,hydrolase,nuclease	cas_domain=text:Cas9;defense_component=text:Cas9;hydrolase=text:nuclease;nuclease=text:endonuclease
+PF16593	Cas9-BH	cas_domain,defense_component,hydrolase,nuclease	cas_domain=text:Cas9;defense_component=text:Cas9;hydrolase=text:nuclease;nuclease=text:endonuclease
 PF16594	ATP-synt_Z	atp_synthesis,energy_metabolism	atp_synthesis=text:ATP-synt;energy_metabolism=text:ATP-synt
-PF16595	Cas9_PI	cas_domain,defense_system,hydrolase,nuclease	cas_domain=text:Cas9;defense_system=text:Cas9;hydrolase=text:nuclease;nuclease=text:endonuclease
+PF16595	Cas9_PI	cas_domain,defense_component,hydrolase,nuclease	cas_domain=text:Cas9;defense_component=text:Cas9;hydrolase=text:nuclease;nuclease=text:endonuclease
 PF16606	zf-C2H2_assoc	metal_binding,zinc_binding,zinc_finger	metal_binding=text:zf-;zinc_binding=text:zf-;zinc_finger=text:zf-
 PF16608	TNRC6-PABC_bdg	binding	binding=text:binding
 PF16617	INTAP	binding	binding=text:binding
@@ -9513,7 +9513,7 @@ PF16689	APC_N_CC	coiled_coil	coiled_coil=text:CC
 PF16690	MMACHC	metal_binding,nad_binding,oxidoreductase,transferase	metal_binding=swissprot:6/6 single-domain 6/6;nad_binding=swissprot:6/6 single-domain 6/6;oxidoreductase=swissprot:6/6 single-domain 6/6;transferase=swissprot:6/6 single-domain 6/6
 PF16691	DUF5062	hypothetical	hypothetical=text:unknown function
 PF16694	Cytochrome_P460	cytochrome,electron_transport,heme_binding	cytochrome=text:Cytochrom;electron_transport=text:Cytochrom;heme_binding=text:Cytochrome
-PF16695	Tai4	defense_system,secretion_component,t6ss_component	defense_system=text:immunity protein;secretion_component=text:secretion;t6ss_component=text:T6SS
+PF16695	Tai4	defense_component,secretion_component,t6ss_component	defense_component=text:immunity protein;secretion_component=text:secretion;t6ss_component=text:T6SS
 PF16696	ZFYVE21_C	metal_binding,zinc_binding,zinc_finger	metal_binding=text:Zinc;zinc_binding=text:Zinc;zinc_finger=text:Zinc finger
 PF16697	Yop-YscD_cpl	membrane,secretion_component,t3ss_component	membrane=text:membrane;secretion_component=text:T3SS;t3ss_component=text:T3SS
 PF16698	ADAM17_MPD	membrane	membrane=text:Membrane
@@ -9582,7 +9582,7 @@ PF16805	Trans_coact	phage_related	phage_related=text:Phage
 PF16807	Phage_tail_terminator_4	phage_related	phage_related=text:Phage
 PF16808	PKcGMP_CC	coiled_coil,kinase,transferase	coiled_coil=text:CC;kinase=text:kinase;transferase=text:kinase
 PF16810	RXLR	secreted	secreted=swissprot:71/88 single-domain 68/82
-PF16813	Cas_St_Csn2	cas_domain,defense_system	cas_domain=text:Cas_;defense_system=text:Cas_
+PF16813	Cas_St_Csn2	cas_domain,defense_component	cas_domain=text:Cas_;defense_component=text:Cas_
 PF16817	DUF5073	hypothetical	hypothetical=text:unknown function
 PF16819	DUF5074	hypothetical	hypothetical=text:unknown function
 PF16822	ALGX	acetyltransferase,transferase	acetyltransferase=text:acetyltransferase;transferase=text:transferase
@@ -9615,7 +9615,7 @@ PF16867	DMSP_lyase	lyase	lyase=go:GO:0016829
 PF16870	OxoGdeHyase_C	dehydrogenase,oxidoreductase	dehydrogenase=text:dehydrogenase;oxidoreductase=text:dehydrogenase
 PF16871	DUF5077	hypothetical	hypothetical=text:unknown function
 PF16872	putAbiC	phage_related	phage_related=text:phage
-PF16873	AbiGii_2	abortive_infection,defense_system,phage_related,toxin_domain	abortive_infection=text:AbiG;defense_system=text:abortive;phage_related=text:phage;toxin_domain=text:toxin
+PF16873	AbiGii_2	abi_domain,defense_component,phage_related,toxin_domain	abi_domain=text:AbiG;defense_component=text:abortive;phage_related=text:phage;toxin_domain=text:toxin
 PF16874	Glyco_hydro_36C	hydrolase	hydrolase=text:hydrolase
 PF16875	Glyco_hydro_36N	hydrolase	hydrolase=text:hydrolase
 PF16877	DUF5078	hypothetical	hypothetical=text:unknown function
@@ -9739,8 +9739,8 @@ PF17084	TDA11	isomerase,replication,topoisomerase	isomerase=text:isomerase;repli
 PF17092	PCB_OB	binding	binding=text:binding
 PF17093	PBP_N	binding	binding=text:binding
 PF17095	CAMSAP_CC1	binding,calcium_binding	binding=go:GO:0005488;calcium_binding=text:Ca2
-PF17101	Stealth_CR1	defense_system	defense_system=text:Stealth
-PF17102	Stealth_CR3	defense_system	defense_system=text:Stealth
+PF17101	Stealth_CR1	defense_component	defense_component=text:Stealth
+PF17102	Stealth_CR3	defense_component	defense_component=text:Stealth
 PF17110	TFB6	dna_binding,regulator,transcription_factor	dna_binding=text:transcription factor;regulator=text:transcription factor;transcription_factor=text:transcription factor
 PF17111	PigL_N	biosynthesis	biosynthesis=text:biosynth
 PF17115	Toast_rack_N	hypothetical	hypothetical=text:DUF2
@@ -9799,7 +9799,7 @@ PF17176	tRNA_bind_3	binding,rna_binding	binding=text:bind;rna_binding=text:tRNA
 PF17179	Fer4_22	electron_transport,iron_sulfur,metal_binding	electron_transport=text:4Fe-4S;iron_sulfur=text:4Fe-4S;metal_binding=text:Fer4
 PF17180	Zn_ribbon_3CxxC_2	binding,metal_binding,zinc_binding	binding=text:binding;metal_binding=text:Zn;zinc_binding=text:Zn
 PF17189	Glyco_hydro_30C	hydrolase	hydrolase=text:hydrolase
-PF17194	AbiEi_3_N	abortive_infection,antitoxin_domain,regulator,transcription_factor	abortive_infection=text:AbiE;antitoxin_domain=text:AbiEi;regulator=text:regulat;transcription_factor=text:Transcriptional regulator
+PF17194	AbiEi_3_N	abi_domain,antitoxin_domain,regulator,transcription_factor	abi_domain=text:AbiE;antitoxin_domain=text:AbiEi;regulator=text:regulat;transcription_factor=text:Transcriptional regulator
 PF17195	DUF5132	hypothetical	hypothetical=text:unknown function
 PF17196	DUF5133	hypothetical	hypothetical=text:unknown function
 PF17197	DUF5134	hypothetical	hypothetical=text:unknown function
@@ -10212,8 +10212,8 @@ PF17885	Smoa_sbd	binding,oxidoreductase,oxygenase	binding=text:binding;oxidoredu
 PF17886	ArsA_HSP20	chaperone,heat_shock,stress_response	chaperone=text:HSP2;heat_shock=text:HSP;stress_response=text:HSP2
 PF17890	WW_like	cell_wall,hydrolase,peptidoglycan	cell_wall=text:Peptidoglycan;hydrolase=text:hydrolase;peptidoglycan=text:Peptidoglycan
 PF17891	FluMu_N	phage_related	phage_related=text:prophage
-PF17893	Cas9_b_hairpin	cas_domain,defense_system,hydrolase,nuclease	cas_domain=text:Cas9;defense_system=text:Cas9;hydrolase=text:nuclease;nuclease=text:endonuclease
-PF17894	Cas9_Topo	cas_domain,defense_system,hydrolase,nuclease	cas_domain=text:Cas9;defense_system=text:Cas9;hydrolase=text:nuclease;nuclease=text:endonuclease
+PF17893	Cas9_b_hairpin	cas_domain,defense_component,hydrolase,nuclease	cas_domain=text:Cas9;defense_component=text:Cas9;hydrolase=text:nuclease;nuclease=text:endonuclease
+PF17894	Cas9_Topo	cas_domain,defense_component,hydrolase,nuclease	cas_domain=text:Cas9;defense_component=text:Cas9;hydrolase=text:nuclease;nuclease=text:endonuclease
 PF17897	VCPO_N	oxidoreductase,peroxidase	oxidoreductase=text:peroxidase;peroxidase=text:peroxidase
 PF17899	Peptidase_M61_N	hydrolase,protease	hydrolase=text:Peptidase;protease=text:Peptidase
 PF17900	Peptidase_M1_N	hydrolase,protease	hydrolase=text:Peptidase;protease=text:Peptidase
@@ -10248,8 +10248,8 @@ PF17942	Morc6_S5	ribosomal_protein,translation	ribosomal_protein=text:ribosomal 
 PF17948	DnaT	binding,dna_binding,dna_repair,recombinational_repair	binding=text:binding;dna_binding=text:DNA-binding;dna_repair=swissprot:48/48 single-domain 48/48;recombinational_repair=swissprot:48/48 single-domain 48/48
 PF17949	PND	hydrolase,nuclease	hydrolase=text:nuclease;nuclease=text:nuclease
 PF17951	FAS_meander	fatty_acid_synthesis,lipid_metabolism,synthase	fatty_acid_synthesis=text:Fatty acid synth;lipid_metabolism=text:Fatty acid;synthase=text:synthase
-PF17952	Cas6_N	cas_domain,defense_system	cas_domain=text:Cas6;defense_system=text:Cas6
-PF17953	Csm4_C	cas_domain,crispr_associated,defense_system	cas_domain=text:Csm;crispr_associated=text:Csm4;defense_system=text:CRISPR
+PF17952	Cas6_N	cas_domain,defense_component	cas_domain=text:Cas6;defense_component=text:Cas6
+PF17953	Csm4_C	cas_domain,crispr_associated,defense_component	cas_domain=text:Csm;crispr_associated=text:Csm4;defense_component=text:CRISPR
 PF17956	NAPRTase_C	transferase	transferase=text:transferase
 PF17958	EF-hand_13	calcium_binding,hydrolase,phosphatase	calcium_binding=text:EF-hand;hydrolase=swissprot:14/14 single-domain 6/6;phosphatase=swissprot:14/14 single-domain 6/6
 PF17959	EF-hand_14	calcium_binding	calcium_binding=text:EF-hand
@@ -10281,7 +10281,7 @@ PF18013	Phage_lysozyme2	phage_related	phage_related=text:Phage
 PF18014	Acetyltransf_18	acetyltransferase,transferase	acetyltransferase=text:Acetyltransferase;transferase=text:transferase
 PF18015	Acetyltransf_19	acetyltransferase,transferase	acetyltransferase=text:Acetyltransferase;transferase=text:transferase
 PF18018	DNA_pol_D_N	dna_polymerase,replication	dna_polymerase=text:DNA_pol;replication=text:DNA polymerase
-PF18019	Cas3_HD	cas_domain,crispr_associated,crispr_type_i,defense_system,endonuclease,hydrolase,nuclease	cas_domain=text:Cas3;crispr_associated=swissprot:8/9 KOs 2/2 co-domains excluded;crispr_type_i=swissprot:8/9 KOs 2/2 co-domains excluded;defense_system=text:Cas3;endonuclease=swissprot:8/9 KOs 2/2 co-domains excluded;hydrolase=swissprot:9/9 KOs 2/2 co-domains excluded;nuclease=swissprot:9/9 KOs 2/2 co-domains excluded
+PF18019	Cas3_HD	cas_domain,crispr_associated,crispr_type_i,defense_component,endonuclease,hydrolase,nuclease	cas_domain=text:Cas3;crispr_associated=swissprot:8/9 KOs 2/2 co-domains excluded;crispr_type_i=swissprot:8/9 KOs 2/2 co-domains excluded;defense_component=text:Cas3;endonuclease=swissprot:8/9 KOs 2/2 co-domains excluded;hydrolase=swissprot:9/9 KOs 2/2 co-domains excluded;nuclease=swissprot:9/9 KOs 2/2 co-domains excluded
 PF18023	FKBP_N_2	chaperone	chaperone=text:FKBP
 PF18024	HTH_50	dna_binding,helix_turn_helix	dna_binding=go:GO:0003677;helix_turn_helix=go:GO:0003677
 PF18025	FucT_N	transferase	transferase=text:transferase
@@ -10301,12 +10301,12 @@ PF18051	RPN1_C	atp_binding,atpase,hydrolase,protease	atp_binding=text:ATPase;atp
 PF18053	GyrB_insert	replication,topoisomerase	replication=text:gyrase;topoisomerase=text:gyrase
 PF18055	RPN6_N	hydrolase,protease	hydrolase=enzyme:3.4.25.1 (proteasome);protease=enzyme:3.4.25.1 (proteasome)
 PF18057	DUF5594	hypothetical	hypothetical=text:unknown function
-PF18061	CRISPR_Cas9_WED	cas_domain,defense_system	cas_domain=text:CRISPR;defense_system=text:CRISPR
+PF18061	CRISPR_Cas9_WED	cas_domain,defense_component	cas_domain=text:CRISPR;defense_component=text:CRISPR
 PF18062	RE_AspBHI_N	hydrolase,nuclease,restriction_enzyme,restriction_modification	hydrolase=text:nuclease;nuclease=text:Restriction endonuclease;restriction_enzyme=text:RE_;restriction_modification=text:RE_
 PF18064	ParB_C	binding,chromosome_partitioning	binding=text:binding;chromosome_partitioning=text:ParB
 PF18066	Phage_ABA_S	phage_related	phage_related=text:Phage
 PF18067	Lipase_C	hydrolase,lipase	hydrolase=text:Lipase;lipase=text:Lipase
-PF18070	Cas9_PI2	cas_domain,defense_system	cas_domain=text:Cas9;defense_system=text:CRISPR
+PF18070	Cas9_PI2	cas_domain,defense_component	cas_domain=text:Cas9;defense_component=text:CRISPR
 PF18072	FGAR-AT_linker	transferase	transferase=text:transferase
 PF18073	Zn_ribbon_LapB	binding,metal_binding,zinc_binding	binding=text:binding;metal_binding=text:metal;zinc_binding=text:Zn
 PF18075	FtsX_ECD	cell_division,divisome	cell_division=text:FtsX;divisome=text:FtsX
@@ -10350,12 +10350,12 @@ PF18164	GNAT_C	acetyltransferase	acetyltransferase=text:GNAT
 PF18165	pP_pnuc_1	hydrolase,nuclease	hydrolase=text:nuclease;nuclease=text:nuclease
 PF18166	pP_pnuc_2	hydrolase,nuclease	hydrolase=text:nuclease;nuclease=text:nuclease
 PF18177	La_HTH_kDCL	dna_binding,helix_turn_helix	dna_binding=text:HTH;helix_turn_helix=text:HTH
-PF18182	mCpol	cas_domain,defense_system	cas_domain=text:CRISPR;defense_system=text:CRISPR
+PF18182	mCpol	cas_domain,defense_component	cas_domain=text:CRISPR;defense_component=text:CRISPR
 PF18190	Plk4_PB1	kinase,transferase	kinase=text:Kinase;transferase=text:Kinase
 PF18191	PnpCD_PnpD_N	oxidoreductase,oxygenase	oxidoreductase=text:oxygenase;oxygenase=text:oxygenase
 PF18196	Cdh1_DBD_1	binding,dna_binding,helicase	binding=text:binding;dna_binding=text:DNA-binding;helicase=text:helicase
 PF18198	AAA_lid_11	aaa_domain,atp_binding,atpase	aaa_domain=text:AAA_;atp_binding=text:AAA;atpase=text:AAA_
-PF18211	Csm1_B	crispr_associated,defense_system	crispr_associated=text:Csm1;defense_system=text:Csm1
+PF18211	Csm1_B	crispr_associated,defense_component	crispr_associated=text:Csm1;defense_component=text:Csm1
 PF18213	SUB1_ProdP9	hydrolase,protease	hydrolase=text:protease;protease=text:protease
 PF18215	Rtt106_N	chaperone,stress_response	chaperone=text:chaperon;stress_response=text:chaperon
 PF18216	N_formyltrans_C	transferase	transferase=text:transferase
@@ -10414,7 +10414,7 @@ PF18314	FAS_I_H	fatty_acid_synthesis,lipid_metabolism,synthase	fatty_acid_synthe
 PF18317	SDH_C	dehydrogenase,oxidoreductase,tca_cycle	dehydrogenase=text:dehydrogenase;oxidoreductase=text:dehydrogenase;tca_cycle=text:SDH
 PF18318	Gln-synt_C-ter	amino_acid_biosynthesis,ligase,nitrogen_metabolism	amino_acid_biosynthesis=text:Glutamine synthetase;ligase=text:synthetase;nitrogen_metabolism=text:Gln-synt
 PF18319	Zn_ribbon_PriA	helicase,zinc_binding	helicase=text:helicase;zinc_binding=text:Zn
-PF18320	Csc2	cas_domain,crispr_associated,defense_system	cas_domain=text:Csc;crispr_associated=text:Csc2;defense_system=text:Crispr
+PF18320	Csc2	cas_domain,crispr_associated,defense_component	cas_domain=text:Csc;crispr_associated=text:Csc2;defense_component=text:Crispr
 PF18321	3HCDH_RFF	dehydrogenase,oxidoreductase	dehydrogenase=text:dehydrogenase;oxidoreductase=text:dehydrogenase
 PF18322	CLIP_1	hydrolase,protease	hydrolase=text:protease;protease=text:protease
 PF18324	Isocitrate_DH_C_bact	dehydrogenase,oxidoreductase,tca_cycle	dehydrogenase=text:dehydrogenase;oxidoreductase=text:dehydrogenase;tca_cycle=text:isocitrate dehydrogenase
@@ -10458,7 +10458,7 @@ PF18384	zf_CCCH_5	metal_binding,zinc_binding,zinc_finger	metal_binding=text:Zinc
 PF18387	zf_C2H2_ZHX	metal_binding,zinc_binding,zinc_finger	metal_binding=text:Zinc;zinc_binding=text:Zinc;zinc_finger=text:Zinc-finger
 PF18391	CHIP_TPR_N	repeat_domain,tpr_repeat	repeat_domain=text:tetratricopeptide;tpr_repeat=text:TPR
 PF18394	TBK1_CCD1	binding,coiled_coil,kinase,transferase	binding=text:binding;coiled_coil=text:coiled-coil;kinase=text:kinase;transferase=text:kinase
-PF18395	Cas3_C	cas_domain,defense_system	cas_domain=text:Cas3;defense_system=text:Cas3
+PF18395	Cas3_C	cas_domain,defense_component	cas_domain=text:Cas3;defense_component=text:Cas3
 PF18396	TBK1_ULD	binding,kinase,transferase	binding=text:binding;kinase=text:kinase;transferase=text:kinase
 PF18398	CLIP_SPH_mas	hydrolase,protease	hydrolase=text:protease;protease=text:protease
 PF18399	CLIP_SPH_Scar	hydrolase,protease	hydrolase=text:protease;protease=text:protease
@@ -10503,7 +10503,7 @@ PF18462	DUF5612	hypothetical	hypothetical=text:unknown function
 PF18466	GluRS_N	ligase	ligase=text:ligase
 PF18467	DUF5613	hypothetical	hypothetical=text:unknown function
 PF18468	Pfk_N	kinase	kinase=text:kinase
-PF18470	Cas9_a	cas_domain,defense_system	cas_domain=text:Cas9;defense_system=text:Cas9
+PF18470	Cas9_a	cas_domain,defense_component	cas_domain=text:Cas9;defense_component=text:Cas9
 PF18471	Ribosomal_L27_C	ribosomal_protein,translation	ribosomal_protein=text:Ribosomal;translation=text:Ribosomal_
 PF18473	Urease_linker	nickel_binding	nickel_binding=text:Urease
 PF18474	DUF5614	hypothetical	hypothetical=text:unknown function
@@ -10532,7 +10532,7 @@ PF18515	Rh5	coiled_coil	coiled_coil=text:coiled-coil
 PF18516	RuvC_1	hydrolase,nuclease	hydrolase=text:nuclease;nuclease=text:nuclease
 PF18518	TcA_RBD	binding	binding=text:binding
 PF18522	DUF5620	hypothetical	hypothetical=text:unknown function
-PF18525	Cas9_C	cas_domain,defense_system	cas_domain=text:Cas9;defense_system=text:Cas9
+PF18525	Cas9_C	cas_domain,defense_component	cas_domain=text:Cas9;defense_component=text:Cas9
 PF18526	DB_JBP1	binding,dna_binding,oxidoreductase,oxygenase	binding=text:binding;dna_binding=text:DNA-binding;oxidoreductase=text:oxygenase;oxygenase=text:oxygenase
 PF18528	Ret2_MD	transferase	transferase=text:transferase
 PF18529	MIX	membrane	membrane=text:membrane
@@ -10643,8 +10643,8 @@ PF18718	CxC5	mobile_element,transposase	mobile_element=text:transpos;transposase
 PF18721	CxC6	mobile_element,transposase	mobile_element=text:transpos;transposase=text:transpos
 PF18723	HMUDK_hel	kinase,transferase	kinase=text:kinase;transferase=text:kinase
 PF18724	ADDT	transferase	transferase=text:transferase
-PF18728	HEPN_AbiV	abortive_infection,defense_system	abortive_infection=text:AbiV;defense_system=text:AbiV
-PF18732	HEPN_AbiA_CTD	abortive_infection	abortive_infection=text:AbiA
+PF18728	HEPN_AbiV	abi_domain,defense_component	abi_domain=text:AbiV;defense_component=text:AbiV
+PF18732	HEPN_AbiA_CTD	abi_domain	abi_domain=text:AbiA
 PF18740	EC042_2821	restriction_modification	restriction_modification=text:Restriction
 PF18747	HMUD2	kinase,transferase	kinase=text:kinase;transferase=text:kinase
 PF18748	HMUDK_HMUD1	kinase,transferase	kinase=text:kinase;transferase=text:kinase
@@ -10696,11 +10696,11 @@ PF18854	baeRF_family10	translation,translation_factor	translation=text:release f
 PF18855	baeRF_family11	translation,translation_factor	translation=text:release factor;translation_factor=text:release factor
 PF18856	baeRF_family12	translation,translation_factor	translation=text:release factor;translation_factor=text:release factor
 PF18859	acVLRF1	translation,translation_factor	translation=text:release factor;translation_factor=text:release factor
-PF18860	AbiJ_NTD3	abortive_infection,defense_system	abortive_infection=text:AbiJ;defense_system=text:AbiJ
+PF18860	AbiJ_NTD3	abi_domain,defense_component	abi_domain=text:AbiJ;defense_component=text:AbiJ
 PF18861	PTP_tm	hydrolase,phosphatase	hydrolase=text:phosphatase;phosphatase=text:phosphatase
-PF18863	AbiJ_NTD4	abortive_infection,defense_system	abortive_infection=text:AbiJ;defense_system=text:AbiJ
-PF18864	AbiTii	abortive_infection	abortive_infection=text:AbiT
-PF18865	AbiJ_NTD5	abortive_infection,defense_system	abortive_infection=text:AbiJ;defense_system=text:AbiJ
+PF18863	AbiJ_NTD4	abi_domain,defense_component	abi_domain=text:AbiJ;defense_component=text:AbiJ
+PF18864	AbiTii	abi_domain	abi_domain=text:AbiT
+PF18865	AbiJ_NTD5	abi_domain,defense_component	abi_domain=text:AbiJ;defense_component=text:AbiJ
 PF18866	CxC7	mobile_element,transposase	mobile_element=text:transpos;transposase=text:transpos
 PF18868	zf-C2H2_3rep	metal_binding,zinc_binding,zinc_finger	metal_binding=text:zf-;zinc_binding=text:zf-;zinc_finger=text:zf-
 PF18871	HEPN_Toprim_N	replication,topoisomerase	replication=text:Toprim;topoisomerase=text:Toprim
@@ -10819,7 +10819,7 @@ PF19014	DUF5743	hypothetical	hypothetical=text:unknown function
 PF19015	DUF5744	hypothetical	hypothetical=text:unknown function
 PF19016	DUF5745	hypothetical	hypothetical=text:unknown function
 PF19017	DUF5746	hypothetical	hypothetical=text:unknown function
-PF19021	Cmr7A	cas_domain,defense_system	cas_domain=text:Cmr;defense_system=go:GO:0051607
+PF19021	Cmr7A	cas_domain,defense_component	cas_domain=text:Cmr;defense_component=go:GO:0051607
 PF19022	DUF5748	hypothetical	hypothetical=text:unknown function
 PF19023	DUF5749	hypothetical	hypothetical=text:unknown function
 PF19024	DUF5750	hypothetical	hypothetical=text:unknown function
@@ -11025,7 +11025,7 @@ PF19302	DUF5915	hypothetical	hypothetical=text:unknown function
 PF19303	Anticodon_3	binding,ligase,rna_binding,translation,trna_synthetase	binding=text:binding;ligase=text:ligase;rna_binding=text:Anticodon;translation=text:Anticodon;trna_synthetase=text:Anticodon
 PF19304	PGDH_inter	dehydrogenase,oxidoreductase	dehydrogenase=text:dehydrogenase;oxidoreductase=text:dehydrogenase
 PF19306	WH_Lhr	dna_binding,helicase,winged_helix	dna_binding=text:winged helix;helicase=text:helicase;winged_helix=text:winged helix
-PF19308	CRISPR_Cas6_N	cas_domain,crispr_associated,defense_system	cas_domain=text:CRISPR;crispr_associated=text:CRISPR;defense_system=text:CRISPR
+PF19308	CRISPR_Cas6_N	cas_domain,crispr_associated,defense_component	cas_domain=text:CRISPR;crispr_associated=text:CRISPR;defense_component=text:CRISPR
 PF19310	TOP_N	protease	protease=text:peptidase
 PF19313	DUF5916	hypothetical	hypothetical=text:unknown function
 PF19314	DUF5917	hypothetical	hypothetical=text:unknown function
@@ -11802,7 +11802,7 @@ PF20293	MC6	abc_transporter,transporter	abc_transporter=text:ABC;transporter=tex
 PF20294	KMPT-N	protease	protease=text:peptidase
 PF20301	pNTSase1	ligase	ligase=text:synthetase
 PF20304	Sp-CxC	atp_binding,atpase	atp_binding=text:ATPase;atpase=text:ATPase
-PF20306	Sp-DndD	defense_system	defense_system=text:DndD
+PF20306	Sp-DndD	defense_component	defense_component=text:DndD
 PF20307	divDNAB	atp_binding,atpase	atp_binding=text:ATPase;atpase=text:ATPase
 PF20308	TPR-S	repeat_domain,tpr_repeat	repeat_domain=text:Tetratricopeptide;tpr_repeat=text:TPR
 PF20309	DRHyd-ASK	hydrolase	hydrolase=text:hydrolase
@@ -12080,12 +12080,12 @@ PF20692	cpSF2-GREB1	helicase	helicase=text:helicase
 PF20693	YobI-ATPase	atp_binding,atpase	atp_binding=text:ATPase;atpase=text:ATPase
 PF20695	UbiD_N	cofactor_biosynthesis,lyase	cofactor_biosynthesis=text:UbiD;lyase=text:lyase
 PF20696	UbiD_C	cofactor_biosynthesis,lyase	cofactor_biosynthesis=text:UbiD;lyase=text:lyase
-PF20697	NTase-conflict	defense_system,transferase	defense_system=text:conflict system;transferase=text:transferase
+PF20697	NTase-conflict	defense_component,transferase	defense_component=text:conflict system;transferase=text:transferase
 PF20698	PIN-TPR-GreABC	pin_domain,repeat_domain,tpr_repeat	pin_domain=text:PIN;repeat_domain=text:TPR;tpr_repeat=text:TPR
 PF20699	DUF6820	hypothetical	hypothetical=text:unknown function
 PF20700	Mutator	mobile_element,transposase	mobile_element=text:transpos;transposase=text:transpos
 PF20705	DUF6821	hypothetical	hypothetical=text:unknown function
-PF20706	GT4-conflict	carbohydrate_active,defense_system,glycosyltransferase,transferase	carbohydrate_active=text:Glyco;defense_system=text:conflict system;glycosyltransferase=text:Glycosyltransferase;transferase=text:transferase
+PF20706	GT4-conflict	carbohydrate_active,defense_component,glycosyltransferase,transferase	carbohydrate_active=text:Glyco;defense_component=text:conflict system;glycosyltransferase=text:Glycosyltransferase;transferase=text:transferase
 PF20708	DUF6822	hypothetical	hypothetical=text:unknown function
 PF20709	DUF6823	hypothetical	hypothetical=text:unknown function
 PF20710	DUF6824	hypothetical	hypothetical=text:unknown function
@@ -12141,10 +12141,10 @@ PF20812	PM2_P3	membrane,phage_related	membrane=text:membrane;phage_related=text:
 PF20813	FhbB	binding	binding=text:binding
 PF20814	CAA3_Cox_suIV	cytochrome,electron_transport,heme_binding,oxidase,oxidoreductase,respiration	cytochrome=text:cytochrom;electron_transport=text:cytochrom;heme_binding=text:cytochrome;oxidase=text:oxidase;oxidoreductase=text:oxidase;respiration=text:cytochrome c
 PF20819	T4_Rnl1_C	ligase	ligase=text:ligase
-PF20822	Cmr2_hel_dom1	cas_domain,defense_system	cas_domain=text:Cmr;defense_system=text:CRISPR
-PF20823	Cmr2_Zn-bd	binding,cas_domain,defense_system,metal_binding,zinc_binding	binding=text:binding;cas_domain=text:Cmr;defense_system=text:CRISPR;metal_binding=text:Zn;zinc_binding=text:Zn
-PF20824	Cmr2_hel_dom2	cas_domain,defense_system	cas_domain=text:Cmr;defense_system=text:CRISPR
-PF20829	Acr30-35_AcrF1	cas_domain,defense_system	cas_domain=text:CRISPR;defense_system=text:CRISPR
+PF20822	Cmr2_hel_dom1	cas_domain,defense_component	cas_domain=text:Cmr;defense_component=text:CRISPR
+PF20823	Cmr2_Zn-bd	binding,cas_domain,defense_component,metal_binding,zinc_binding	binding=text:binding;cas_domain=text:Cmr;defense_component=text:CRISPR;metal_binding=text:Zn;zinc_binding=text:Zn
+PF20824	Cmr2_hel_dom2	cas_domain,defense_component	cas_domain=text:Cmr;defense_component=text:CRISPR
+PF20829	Acr30-35_AcrF1	cas_domain,defense_component	cas_domain=text:CRISPR;defense_component=text:CRISPR
 PF20831	Reov_VP3_MTase1	methyltransferase,transferase	methyltransferase=text:Methyltransferase;transferase=text:transferase
 PF20832	Reov_VP3_MTase2	methyltransferase,transferase	methyltransferase=text:Methyltransferase;transferase=text:transferase
 PF20834	DUF6842	hypothetical	hypothetical=text:unknown function
@@ -12250,7 +12250,7 @@ PF21056	ZSWIM1-3_RNaseH-like	metal_binding,zinc_binding,zinc_finger	metal_bindin
 PF21065	Reovirus_L2_MT1	methyltransferase,transferase	methyltransferase=text:methyltransferase;transferase=text:transferase
 PF21066	Reovirus_L2_MT2	methyltransferase,transferase	methyltransferase=text:methyltransferase;transferase=text:transferase
 PF21068	ATPgraspMvdD	atp_binding	atp_binding=text:ATP
-PF21069	Csx12	cas_domain,defense_system,hydrolase,nuclease	cas_domain=text:Csx;defense_system=text:Csx1;hydrolase=text:nuclease;nuclease=text:endonuclease
+PF21069	Csx12	cas_domain,defense_component,hydrolase,nuclease	cas_domain=text:Csx;defense_component=text:Csx1;hydrolase=text:nuclease;nuclease=text:endonuclease
 PF21070	IcmF_helical	secretion_component,t6ss_component	secretion_component=text:secretion;t6ss_component=text:IcmF
 PF21071	LARP1_HEAT	heat_repeat,repeat_domain	heat_repeat=text:HEAT;repeat_domain=text:repeat
 PF21073	GDH_HM1	dehydrogenase,oxidoreductase	dehydrogenase=text:dehydrogenase;oxidoreductase=text:dehydrogenase
@@ -12276,7 +12276,7 @@ PF21104	Glyco_hydro_78_N	hydrolase	hydrolase=text:hydrolase
 PF21105	DyP_N	enzyme,halogenase,oxidase,oxidative_stress,oxidoreductase,peroxidase	enzyme=swissprot:6/6 co-domains excluded;halogenase=swissprot:6/6 co-domains excluded;oxidase=swissprot:6/6 co-domains excluded;oxidative_stress=swissprot:6/6 co-domains excluded;oxidoreductase=swissprot:6/6 co-domains excluded;peroxidase=swissprot:6/6 co-domains excluded
 PF21107	STPRs	repeat_domain	repeat_domain=text:repeat
 PF21108	MDN1_4th	aaa_domain,atp_binding,atpase	aaa_domain=text:AAA;atp_binding=text:ATPase;atpase=text:ATPase
-PF21111	CDI_toxin_EC869_like	defense_system,hydrolase,nuclease,restriction_modification,toxin_domain	defense_system=text:restriction;hydrolase=go:GO:0016787;nuclease=go:GO:0004518;restriction_modification=text:restriction;toxin_domain=text:toxin
+PF21111	CDI_toxin_EC869_like	defense_component,hydrolase,nuclease,restriction_modification,toxin_domain	defense_component=text:restriction;hydrolase=go:GO:0016787;nuclease=go:GO:0004518;restriction_modification=text:restriction;toxin_domain=text:toxin
 PF21113	LarA_C	central_metabolism,isomerase	central_metabolism=text:Lactate;isomerase=text:racemase
 PF21116	EF-hand_Zip	calcium_binding	calcium_binding=text:EF-hand
 PF21120	MCM_WH_arc	atp_binding,dna_binding,helicase,replication	atp_binding=text:MCM;dna_binding=text:winged-helix;helicase=text:MCM;replication=text:MCM_
@@ -12398,7 +12398,7 @@ PF21344	Zn_ribbon_LysW	zinc_binding	zinc_binding=text:Zn
 PF21347	DUF3108_like	hypothetical	hypothetical=text:DUF3
 PF21348	RGL11_C	lyase	lyase=text:lyase
 PF21349	RUBY_RBDX	oxidative_stress	oxidative_stress=text:Rubrerythrin
-PF21350	Cas6_I-A	cas_domain,defense_system	cas_domain=text:Cas6;defense_system=text:Cas6
+PF21350	Cas6_I-A	cas_domain,defense_component	cas_domain=text:Cas6;defense_component=text:Cas6
 PF21351	TetR_C_41	regulator,tetr_family	regulator=text:TetR;tetr_family=text:TetR
 PF21352	Zn_ribbon_Thio2	thioredoxin,zinc_binding	thioredoxin=text:Thioredoxin;zinc_binding=text:Zn
 PF21357	EIF3E_C	translation,translation_factor	translation=text:translation;translation_factor=text:translation initiation
@@ -12412,7 +12412,7 @@ PF21368	AI2M-like_HNH	hydrolase,nuclease	hydrolase=text:nuclease;nuclease=text:e
 PF21370	PAS_GdpP	esterase,hydrolase,signaling	esterase=text:esterase;hydrolase=text:esterase;signaling=text:Cyclic-di
 PF21372	Zn_ribbon_bTOP1	dna_binding,isomerase,metal_binding,replication,topoisomerase,zinc_binding,zinc_finger	dna_binding=text:Topoisomerase;isomerase=text:isomerase;metal_binding=text:Zn;replication=text:Topoisomerase;topoisomerase=text:Topoisomerase;zinc_binding=text:Zn;zinc_finger=text:Zn_ribbon
 PF21373	ZNHIT3_C	metal_binding,zinc_binding,zinc_finger	metal_binding=text:Zinc;zinc_binding=text:Zinc;zinc_finger=text:Zinc finger
-PF21384	Cas3_I-F_Cas2	cas_domain,defense_system,helicase,hydrolase,nuclease	cas_domain=text:Cas3;defense_system=text:Cas3;helicase=text:helicase;hydrolase=text:nuclease;nuclease=text:nuclease
+PF21384	Cas3_I-F_Cas2	cas_domain,defense_component,helicase,hydrolase,nuclease	cas_domain=text:Cas3;defense_component=text:Cas3;helicase=text:helicase;hydrolase=text:nuclease;nuclease=text:nuclease
 PF21390	Irp3-like_C	oxidoreductase,reductase	oxidoreductase=text:reductase;reductase=text:reductase
 PF21392	COQ9_N	biosynthesis,cofactor_biosynthesis	biosynthesis=text:biosynth;cofactor_biosynthesis=text:Ubiquinone biosynth
 PF21393	Phage_pb10_N	phage_related	phage_related=text:Phage
@@ -12482,7 +12482,7 @@ PF21564	Caudo_bapla_RBP_neck	binding,phage_related	binding=text:binding;phage_re
 PF21569	SET1_RBD	binding,methyltransferase,rna_binding,transferase	binding=text:binding;methyltransferase=text:methyltransferase;rna_binding=text:methyltransferase, RNA;transferase=text:transferase
 PF21570	ArgZ-like_C_2nd	amino_acid_metabolism,hydrolase	amino_acid_metabolism=text:Arginine;hydrolase=text:hydrolase
 PF21571	ArgZ-like_C_1st	amino_acid_metabolism,hydrolase	amino_acid_metabolism=text:Arginine;hydrolase=text:hydrolase
-PF21574	Cas9_PI_C	cas_domain,defense_system,hydrolase,nuclease	cas_domain=text:Cas9;defense_system=text:Cas9;hydrolase=text:nuclease;nuclease=text:endonuclease
+PF21574	Cas9_PI_C	cas_domain,defense_component,hydrolase,nuclease	cas_domain=text:Cas9;defense_component=text:Cas9;hydrolase=text:nuclease;nuclease=text:endonuclease
 PF21576	T6SS_Tgi2PP	secretion_component,t6ss_component	secretion_component=text:T6SS;t6ss_component=text:T6SS
 PF21579	PabTrmU54_TRAM_dom	methyltransferase,transferase,trna_modification	methyltransferase=text:methyltransferase;transferase=text:transferase;trna_modification=text:tRNA
 PF21580	SelB_WHD3	translation,translation_factor	translation=text:Elongation factor;translation_factor=text:Elongation factor
@@ -12588,7 +12588,7 @@ PF21793	DUF6877	hypothetical	hypothetical=text:unknown function
 PF21798	DUF6878	hypothetical	hypothetical=text:unknown function
 PF21799	MurD-like_N	ligase	ligase=text:ligase
 PF21800	KH_KRR1_2nd	rna_binding	rna_binding=text:KH
-PF21802	Cas3-like_C	cas_domain,defense_system	cas_domain=text:Cas3;defense_system=text:Cas3
+PF21802	Cas3-like_C	cas_domain,defense_component	cas_domain=text:Cas3;defense_component=text:Cas3
 PF21803	Nab2-zf4	metal_binding,zinc_binding,zinc_finger	metal_binding=text:zinc;zinc_binding=text:zinc;zinc_finger=text:zinc finger
 PF21804	Transposase_29	mobile_element,transposase	mobile_element=text:Transpos;transposase=text:Transpos
 PF21806	DUF6879	hypothetical	hypothetical=text:unknown function
@@ -12747,7 +12747,7 @@ PF22118	MtrF-like_dom-III	cytochrome,electron_transport,heme_binding,respiration
 PF22119	GST_C_8	transferase	transferase=text:transferase
 PF22120	T6SS_Tse3_N	cell_wall,peptidoglycan,secretion_component,t6ss_component	cell_wall=text:Peptidoglycan;peptidoglycan=text:Peptidoglycan;secretion_component=text:T6SS;t6ss_component=text:T6SS
 PF22124	Glyco_hydro_95_cat	hydrolase	hydrolase=text:hydrolase
-PF22126	C2c1_RuvC-like	cas_domain,defense_system,hydrolase,nuclease	cas_domain=text:CRISPR;defense_system=text:CRISPR;hydrolase=text:nuclease;nuclease=text:endonuclease
+PF22126	C2c1_RuvC-like	cas_domain,defense_component,hydrolase,nuclease	cas_domain=text:CRISPR;defense_component=text:CRISPR;hydrolase=text:nuclease;nuclease=text:endonuclease
 PF22127	NtdA_N	biosynthesis	biosynthesis=text:biosynth
 PF22129	CjCas9_WED-like	hydrolase,nuclease	hydrolase=text:nuclease;nuclease=text:endonuclease
 PF22130	Phage_gp38	phage_related	phage_related=text:Phage
@@ -12758,7 +12758,7 @@ PF22137	T6SS_Tle1-like_C	hydrolase,lipase,secretion_component,t6ss_component	hyd
 PF22139	XPD_arch	helicase	helicase=text:helicase
 PF22142	Hao_C	oxidoreductase	oxidoreductase=text:oxidoreductase
 PF22143	ScpA_C	hydrolase,protease	hydrolase=text:peptidase;protease=text:peptidase
-PF22147	AcrIC5	cas_domain,defense_system	cas_domain=text:CRISPR;defense_system=text:CRISPR
+PF22147	AcrIC5	cas_domain,defense_component	cas_domain=text:CRISPR;defense_component=text:CRISPR
 PF22149	Tt1219-like	pilus	pilus=text:pilin
 PF22150	Tt1218-like	pilus	pilus=text:pilin
 PF22151	Fer4_NDSU1	iron_sulfur,metal_binding,nad_binding,oxidoreductase,translocase,transporter	iron_sulfur=text:4Fe-4S;metal_binding=text:Fer4;nad_binding=enzyme:1.6.5.9 (nadh-ubiquinone oxidoreductase);oxidoreductase=go:GO:0016491;translocase=swissprot:26/26 KOs 2/2 co-domains excluded;transporter=swissprot:26/26 KOs 2/2 co-domains excluded
@@ -12784,7 +12784,7 @@ PF22199	FKBP26_IF	chaperone	chaperone=text:FKBP
 PF22201	FlaF_Ig-like	flagellum	flagellum=text:flagell
 PF22202	C2c1_helical_1st	hydrolase,nuclease	hydrolase=text:nuclease;nuclease=text:endonuclease
 PF22204	C2c1_WED-II	hydrolase,nuclease	hydrolase=text:nuclease;nuclease=text:endonuclease
-PF22206	Cas_Csm6_6H	cas_domain,defense_system	cas_domain=text:Cas_;defense_system=text:Cas_
+PF22206	Cas_Csm6_6H	cas_domain,defense_component	cas_domain=text:Cas_;defense_component=text:Cas_
 PF22209	CPV_RdRP_N	rna_polymerase,transcription	rna_polymerase=text:RNA pol;transcription=text:RNA pol
 PF22212	CPV_RdRP_pol_dom	nucleotidyltransferase,rna_polymerase,transcription,transferase	nucleotidyltransferase=swissprot:6/6 KOs 3/3 co-domains excluded;rna_polymerase=text:RNA pol;transcription=text:RNA pol;transferase=swissprot:6/6 KOs 3/3 co-domains excluded
 PF22213	CPV_RdRP_C	rna_polymerase,transcription	rna_polymerase=text:RNA pol;transcription=text:RNA pol
@@ -12800,7 +12800,7 @@ PF22224	AbpA-like	binding	binding=text:binding
 PF22225	RavZ_C	binding	binding=text:binding
 PF22226	Mre11_C	binding	binding=text:binding
 PF22227	DNA_pol3_gamma_R_C	dna_polymerase,replication	dna_polymerase=text:DNA_pol;replication=text:DNA polymerase
-PF22230	Csx1_CARF	cas_domain,defense_system,hydrolase,nuclease	cas_domain=text:Csx;defense_system=text:CRISPR;hydrolase=text:nuclease;nuclease=text:ribonuclease
+PF22230	Csx1_CARF	cas_domain,defense_component,hydrolase,nuclease	cas_domain=text:Csx;defense_component=text:CRISPR;hydrolase=text:nuclease;nuclease=text:ribonuclease
 PF22231	Hera_RBD	binding,helicase,rna_binding	binding=text:binding;helicase=text:helicase;rna_binding=text:DEAD
 PF22233	PhyR_sigma-like	regulator,response_regulator,two_component	regulator=text:regulat;response_regulator=text:Response regulator;two_component=text:Response regulator
 PF22234	Rv2466c-like	oxidoreductase,reductase	oxidoreductase=text:reductase;reductase=text:reductase
@@ -12856,7 +12856,7 @@ PF22326	MMS21_N	ligase	ligase=text:ligase
 PF22330	Rib_mS39_PPR	ribosomal_protein,translation	ribosomal_protein=text:ribosomal subunit;translation=text:ribosomal subunit
 PF22332	TAZ1_RBM	binding	binding=text:binding
 PF22334	TubZ_C_2	phage_related	phage_related=text:Phage
-PF22335	Cas10-Cmr2_palm2	cas_domain,defense_system	cas_domain=text:Cas10;defense_system=text:Cas10
+PF22335	Cas10-Cmr2_palm2	cas_domain,defense_component	cas_domain=text:Cas10;defense_component=text:Cas10
 PF22337	Phage_fiber_rpt	phage_related	phage_related=text:Phage
 PF22338	Pyruv_OxRed_insertion	oxidoreductase	oxidoreductase=text:oxidoreductase
 PF22339	YgxA-like_sub_bind	binding	binding=text:bind
@@ -12873,7 +12873,7 @@ PF22370	FliC-like_3rd	flagellum	flagellum=text:Flagell
 PF22375	Lgt1_N	glycosyltransferase,transferase	glycosyltransferase=text:Glucosyltransferase;transferase=text:transferase
 PF22376	PSV_trans_reg_dom	regulator,transcription_factor	regulator=text:regulat;transcription_factor=text:transcriptional regulator
 PF22381	Staph_reg_Sar_Rot	regulator,transcription_factor	regulator=text:regulat;transcription_factor=text:Transcriptional regulator
-PF22385	Cas9_C_2	cas_domain,defense_system,hydrolase,nuclease	cas_domain=text:Cas9;defense_system=text:Cas9;hydrolase=text:nuclease;nuclease=text:endonuclease
+PF22385	Cas9_C_2	cas_domain,defense_component,hydrolase,nuclease	cas_domain=text:Cas9;defense_component=text:Cas9;hydrolase=text:nuclease;nuclease=text:endonuclease
 PF22386	PPI	hydrolase,protease	hydrolase=text:Protease;protease=text:Protease
 PF22387	PhiCb5_coat	phage_related	phage_related=text:Phage
 PF22388	DUF6974	hypothetical	hypothetical=text:unknown function
@@ -12939,7 +12939,7 @@ PF22507	DUF6994	hypothetical	hypothetical=text:unknown function
 PF22510	FlhF_N	biosynthesis,flagellum	biosynthesis=text:biosynth;flagellum=text:Flh
 PF22511	PBP2	binding	binding=text:Binding
 PF22512	Csa_translocation_dom	rna_binding	rna_binding=text:S4
-PF22513	FitA-like_RHH	antitoxin,antitoxin_domain,toxin_antitoxin	antitoxin=swissprot:7/7 KOs 4/4 single-domain 7/7;antitoxin_domain=text:Antitoxin;toxin_antitoxin=swissprot:7/7 KOs 4/4 single-domain 7/7
+PF22513	FitA-like_RHH	antitoxin,antitoxin_domain	antitoxin=swissprot:7/7 KOs 4/4 single-domain 7/7;antitoxin_domain=text:Antitoxin
 PF22515	DUF6996	hypothetical	hypothetical=text:unknown function
 PF22518	DUF6997	hypothetical	hypothetical=text:unknown function
 PF22521	HypF_C_2	hydrogenase_maturation,transferase	hydrogenase_maturation=text:HypF;transferase=text:transferase
@@ -12979,7 +12979,7 @@ PF22583	UPF0425_C	transferase	transferase=swissprot:5/5 co-domains excluded
 PF22586	ANCHR-like_BBOX	binding,metal_binding,zinc_binding	binding=text:binding;metal_binding=text:zinc;zinc_binding=text:zinc
 PF22587	DNApolII_insertion	dna_polymerase,replication	dna_polymerase=text:DNA pol;replication=text:DNA polymerase
 PF22588	dCache_1_like	kinase,sensor_kinase,transferase,two_component	kinase=text:kinase;sensor_kinase=text:Histidine kinase;transferase=text:kinase;two_component=text:Histidine kinase
-PF22590	Cas3-like_C_2	cas_domain,defense_system,helicase,hydrolase,nuclease	cas_domain=text:Cas3;defense_system=text:Cas3;helicase=text:helicase;hydrolase=text:nuclease;nuclease=text:nuclease
+PF22590	Cas3-like_C_2	cas_domain,defense_component,helicase,hydrolase,nuclease	cas_domain=text:Cas3;defense_component=text:Cas3;helicase=text:helicase;hydrolase=text:nuclease;nuclease=text:nuclease
 PF22591	eIF3a_PCI_TPR-like	translation,translation_factor	translation=swissprot:45/56 single-domain 6/6;translation_factor=swissprot:45/56 single-domain 6/6
 PF22592	FCaBP_EF-hand	calcium_binding	calcium_binding=text:EF-hand
 PF22594	GTP-eEF1A_C	gtp_binding,translation,translation_factor	gtp_binding=text:GTP;translation=text:eEF;translation_factor=text:eEF
@@ -13023,7 +13023,7 @@ PF22653	DUF7007	hypothetical	hypothetical=text:unknown function
 PF22654	DUF7008	hypothetical	hypothetical=text:unknown function
 PF22657	SSB_1	binding,dna_repair,recombinational_repair	binding=go:GO:0005488;dna_repair=swissprot:89/89 single-domain 89/89;recombinational_repair=swissprot:89/89 single-domain 89/89
 PF22660	RS_preATP-grasp-like	atp_binding,ligase,radical_sam	atp_binding=text:synthetase;ligase=text:synthetase;radical_sam=text:RS_
-PF22662	Csa3_N	cas_domain,defense_system	cas_domain=text:Csa;defense_system=text:Csa3
+PF22662	Csa3_N	cas_domain,defense_component	cas_domain=text:Csa;defense_component=text:Csa3
 PF22664	TRI-like_N	transferase	transferase=swissprot:15/15 KOs 2/2 single-domain 13/13
 PF22665	DUF6293_C	hypothetical	hypothetical=text:DUF6
 PF22666	Glyco_hydro_2_N2	binding,hydrolase	binding=text:binding;hydrolase=text:hydrolase
@@ -13043,11 +13043,11 @@ PF22694	CtpB_N-like	hydrolase,protease	hydrolase=text:protease;protease=text:pro
 PF22695	EST1-like_DNA_bind	binding,dna_binding	binding=text:bind;dna_binding=text:DNA-binding
 PF22698	Semialdhyde_dhC_1	amino_acid_metabolism,dehydrogenase,oxidoreductase,reductase	amino_acid_metabolism=text:Semialdhyde_dh;dehydrogenase=text:dehydrogenase;oxidoreductase=text:dehydrogenase;reductase=swissprot:409/420 KOs 3/3 co-domains excluded
 PF22700	MVD-like_N	isoprenoid_biosynthesis	isoprenoid_biosynthesis=swissprot:23/25 KOs 4/4 single-domain 3/3
-PF22702	Cas9_RuvC	cas_domain,defense_system	cas_domain=text:Cas9;defense_system=text:Cas9
+PF22702	Cas9_RuvC	cas_domain,defense_component	cas_domain=text:Cas9;defense_component=text:Cas9
 PF22703	Cdc6_lid	aaa_domain,atp_binding,atpase,replication	aaa_domain=text:AAA;atp_binding=text:ATPase;atpase=text:ATPase;replication=text:Cdc6
 PF22707	S1CSD-TOTE-2	rna_binding	rna_binding=text:S1
 PF22708	S1CSD-TOTE-1	rna_binding	rna_binding=text:S1
-PF22721	TBP-TOTE	defense_system	defense_system=text:conflict system
+PF22721	TBP-TOTE	defense_component	defense_component=text:conflict system
 PF22722	NA-iREase1	hydrolase,nuclease,restriction_enzyme,restriction_modification	hydrolase=text:nuclease;nuclease=text:Restriction Endonuclease;restriction_enzyme=text:NA-iREase;restriction_modification=text:Restriction
 PF22723	NA-iREase2	hydrolase,nuclease,restriction_enzyme,restriction_modification	hydrolase=text:nuclease;nuclease=text:Restriction Endonuclease;restriction_enzyme=text:NA-iREase;restriction_modification=text:Restriction
 PF22739	NA-iREase3	hydrolase,nuclease,restriction_enzyme,restriction_modification	hydrolase=text:nuclease;nuclease=text:Restriction Endonuclease;restriction_enzyme=text:NA-iREase;restriction_modification=text:Restriction
@@ -13350,7 +13350,7 @@ PF23393	Beta-prop_WDR90_POC16_2nd	repeat_domain,wd40_repeat	repeat_domain=text:b
 PF23394	DUF7102	hypothetical	hypothetical=text:unknown function
 PF23396	DUF7103	hypothetical	hypothetical=text:unknown function
 PF23397	DUF7104	hypothetical	hypothetical=text:unknown function
-PF23400	CARF_Card1	crispr_associated,defense_system	crispr_associated=text:CARF;defense_system=text:CARF
+PF23400	CARF_Card1	crispr_associated,defense_component	crispr_associated=text:CARF;defense_component=text:CARF
 PF23401	HTH_Card1	dna_binding,helix_turn_helix	dna_binding=text:HTH;helix_turn_helix=text:HTH
 PF23405	WD40_APC4_C-half	repeat_domain,wd40_repeat	repeat_domain=text:WD40;wd40_repeat=text:WD40
 PF23406	ZNF380_CC	coiled_coil,zinc_binding	coiled_coil=text:CC;zinc_binding=swissprot:6/6 co-domains excluded
@@ -13820,8 +13820,8 @@ PF24117	DUF7391	hypothetical	hypothetical=text:unknown function
 PF24118	DUF7392	hypothetical	hypothetical=text:unknown function
 PF24119	DUF7393	hypothetical	hypothetical=text:unknown function
 PF24120	SsdA_C	toxin_domain	toxin_domain=text:toxin
-PF24121	Cas8b_N	cas_domain,defense_system	cas_domain=text:CRISPR;defense_system=text:CRISPR
-PF24122	Cas8b_C	cas_domain,defense_system	cas_domain=text:CRISPR;defense_system=text:CRISPR
+PF24121	Cas8b_N	cas_domain,defense_component	cas_domain=text:CRISPR;defense_component=text:CRISPR
+PF24122	Cas8b_C	cas_domain,defense_component	cas_domain=text:CRISPR;defense_component=text:CRISPR
 PF24124	YphA	membrane	membrane=text:integral
 PF24126	DUF7394	hypothetical	hypothetical=text:unknown function
 PF24127	DUF7395	hypothetical	hypothetical=text:unknown function
@@ -13949,7 +13949,7 @@ PF24298	DUF7482	hypothetical	hypothetical=text:unknown function
 PF24299	DUF7483	hypothetical	hypothetical=text:unknown function
 PF24302	DUF7484	hypothetical	hypothetical=text:unknown function
 PF24303	DUF7485	hypothetical	hypothetical=text:unknown function
-PF24304	AcrIIA4	cas_domain,defense_system	cas_domain=text:CRISPR;defense_system=text:CRISPR
+PF24304	AcrIIA4	cas_domain,defense_component	cas_domain=text:CRISPR;defense_component=text:CRISPR
 PF24307	DUF7486	hypothetical	hypothetical=text:unknown function
 PF24308	DUF7487	hypothetical	hypothetical=text:unknown function
 PF24314	DUF7488	hypothetical	hypothetical=text:unknown function
@@ -14743,10 +14743,10 @@ PF25692	Phage_depo_C	phage_related	phage_related=text:Phage
 PF25693	Phage_Y01A	phage_related	phage_related=text:Phage
 PF25695	BKRF4	binding	binding=go:GO:0005488
 PF25696	Phage_Gp168	binding,phage_related	binding=text:binding;phage_related=text:Phage
-PF25699	AcrF8	cas_domain,defense_system	cas_domain=text:CRISPR;defense_system=text:CRISPR
+PF25699	AcrF8	cas_domain,defense_component	cas_domain=text:CRISPR;defense_component=text:CRISPR
 PF25702	CrAss_Ring_2	phage_related	phage_related=text:Phage
-PF25703	AcrF31	cas_domain,defense_system	cas_domain=text:CRISPR;defense_system=text:CRISPR
-PF25704	AcrF2	cas_domain,defense_system	cas_domain=text:CRISPR;defense_system=text:CRISPR
+PF25703	AcrF31	cas_domain,defense_component	cas_domain=text:CRISPR;defense_component=text:CRISPR
+PF25704	AcrF2	cas_domain,defense_component	cas_domain=text:CRISPR;defense_component=text:CRISPR
 PF25708	Phage_T7_Gp5_9	phage_related	phage_related=text:Phage
 PF25710	CrAss_Ring_3_4	phage_related	phage_related=text:Phage
 PF25713	N4_GP8	phage_related	phage_related=text:GP8
@@ -14958,7 +14958,7 @@ PF26119	DUF8036	hypothetical	hypothetical=text:unknown function
 PF26121	HTH_CDT1	cell_division,dna_binding,helix_turn_helix	cell_division=text:Cell division;dna_binding=text:helix-turn-helix;helix_turn_helix=text:HTH
 PF26123	DUF8037	hypothetical	hypothetical=text:unknown function
 PF26124	DUF8038	hypothetical	hypothetical=text:unknown function
-PF26125	AcrVA2-like	cas_domain,defense_system	cas_domain=text:CRISPR;defense_system=text:CRISPR
+PF26125	AcrVA2-like	cas_domain,defense_component	cas_domain=text:CRISPR;defense_component=text:CRISPR
 PF26127	12TM_Mok13	membrane	membrane=text:transmembrane
 PF26133	DUF8039	hypothetical	hypothetical=text:unknown function
 PF26137	Toxin_SdpC	toxin_domain	toxin_domain=text:Toxin
@@ -14966,7 +14966,7 @@ PF26138	DUF8040	hypothetical	hypothetical=text:unknown function
 PF26140	HEAT_URB1	heat_repeat,repeat_domain	heat_repeat=text:HEAT;repeat_domain=text:repeat
 PF26145	DUF8041	hypothetical	hypothetical=text:unknown function
 PF26147	AB_HYDROLASE_YMC0-YMC35	hydrolase	hydrolase=text:HYDROLASE
-PF26151	AcrIF11_ADP_ribosyl	cas_domain,defense_system,transferase	cas_domain=text:CRISPR;defense_system=text:CRISPR;transferase=text:transferase
+PF26151	AcrIF11_ADP_ribosyl	cas_domain,defense_component,transferase	cas_domain=text:CRISPR;defense_component=text:CRISPR;transferase=text:transferase
 PF26154	DUF8042	hypothetical	hypothetical=text:unknown function
 PF26158	Claudin_TMEM179-179B	membrane	membrane=text:Transmembrane
 PF26159	DUF8043	hypothetical	hypothetical=text:unknown function
@@ -15011,7 +15011,7 @@ PF26237	DUF8054_C	hypothetical	hypothetical=text:unknown function
 PF26238	DUF8054_M	hypothetical	hypothetical=text:unknown function
 PF26239	DUF8572	hypothetical	hypothetical=text:unknown function
 PF26240	DUF8055	hypothetical	hypothetical=text:unknown function
-PF26241	Cas_Csc1	cas_domain,defense_system	cas_domain=text:Cas_;defense_system=text:Cas_
+PF26241	Cas_Csc1	cas_domain,defense_component	cas_domain=text:Cas_;defense_component=text:Cas_
 PF26243	DUF8056	hypothetical	hypothetical=text:unknown function
 PF26244	DUF8057	hypothetical	hypothetical=text:unknown function
 PF26245	TPR_TTI1_2nd_yeast	protein_binding,repeat_domain,tpr_repeat	protein_binding=text:interacting;repeat_domain=text:TPR_;tpr_repeat=text:TPR
@@ -15575,7 +15575,7 @@ PF27071	DUF8345	hypothetical	hypothetical=text:unknown function
 PF27079	HTH_SpdB_C	dna_binding,helix_turn_helix	dna_binding=text:HTH;helix_turn_helix=text:HTH
 PF27080	SpdB_N	membrane	membrane=text:transmembrane
 PF27082	Znf_C2H2_Trps1_4th	metal_binding,zinc_binding,zinc_finger	metal_binding=text:zinc;zinc_binding=text:zinc;zinc_finger=text:zinc finger
-PF27083	MazE_antitoxin_C	antitoxin,antitoxin_domain,dna_binding,regulator,toxin_antitoxin,transcription_factor	antitoxin=swissprot:14/16 single-domain 13/15;antitoxin_domain=text:MazE;dna_binding=swissprot:14/16 single-domain 13/15;regulator=swissprot:14/16 single-domain 13/15;toxin_antitoxin=swissprot:14/16 single-domain 13/15;transcription_factor=swissprot:14/16 single-domain 13/15
+PF27083	MazE_antitoxin_C	antitoxin,antitoxin_domain,dna_binding,regulator,transcription_factor	antitoxin=swissprot:14/16 single-domain 13/15;antitoxin_domain=text:MazE;dna_binding=swissprot:14/16 single-domain 13/15;regulator=swissprot:14/16 single-domain 13/15;transcription_factor=swissprot:14/16 single-domain 13/15
 PF27084	Phage_YorO	phage_related	phage_related=text:Phage
 PF27086	LRR_F-Box-like	lrr_repeat,repeat_domain	lrr_repeat=text:LRR;repeat_domain=text:Leucine-rich
 PF27087	LRR_TMOD-LMOD	lrr_repeat,repeat_domain	lrr_repeat=text:LRR;repeat_domain=text:Leucine-rich
@@ -15662,7 +15662,7 @@ PF27460	HisZ_C	transferase	transferase=text:transferase
 PF27463	Rv1490	membrane	membrane=text:membrane
 PF27464	PlsB_N	transferase	transferase=text:transferase
 PF27465	Fis_N	binding,dna_binding	binding=text:binding;dna_binding=text:DNA-binding
-PF27466	Rv0299_toxin	antitoxin_domain,toxin_domain	antitoxin_domain=text:antitoxin;toxin_domain=text:toxin
+PF27466	Rv0299_toxin	antitoxin_domain,defense_component,toxin_domain	antitoxin_domain=text:antitoxin;defense_component=text:toxin-antitoxin;toxin_domain=text:toxin
 PF27467	AddB_5th	helicase,hydrolase,nuclease	helicase=text:helicase;hydrolase=text:nuclease;nuclease=text:deoxyribonuclease
 PF27469	ATP_synt_eps_C	atp_synthesis,energy_metabolism,synthase	atp_synthesis=text:ATP synth;energy_metabolism=text:ATP synth;synthase=text:synthase
 PF27470	TfpB	pilus	pilus=text:pilus
@@ -15738,15 +15738,15 @@ PF27746	Small_heat_shock_put	chaperone,heat_shock,stress_response	chaperone=text
 PF27758	PRM1	membrane	membrane=text:membrane
 PF27771	zf_MP81	metal_binding,zinc_binding,zinc_finger	metal_binding=text:zinc;zinc_binding=text:zinc;zinc_finger=text:zinc finger
 PF27775	MmoD	oxidoreductase,oxygenase	oxidoreductase=text:oxygenase;oxygenase=text:oxygenase
-PF27782	Csf3	cas_domain,defense_system	cas_domain=text:CRISPR;defense_system=text:CRISPR
+PF27782	Csf3	cas_domain,defense_component	cas_domain=text:CRISPR;defense_component=text:CRISPR
 PF27783	PlcR	hydrolase,lipase	hydrolase=text:lipase;lipase=text:lipase
-PF27787	CRISPR-assoc_Csp2	cas_domain,cold_shock,defense_system	cas_domain=text:CRISPR;cold_shock=text:Csp;defense_system=text:CRISPR
-PF27788	CRISPR-assoc_Cas5p	cas_domain,defense_system	cas_domain=text:CRISPR;defense_system=text:CRISPR
+PF27787	CRISPR-assoc_Csp2	cas_domain,cold_shock,defense_component	cas_domain=text:CRISPR;cold_shock=text:Csp;defense_component=text:CRISPR
+PF27788	CRISPR-assoc_Cas5p	cas_domain,defense_component	cas_domain=text:CRISPR;defense_component=text:CRISPR
 PF27791	UPF0387_membrane	membrane	membrane=go:GO:0016020
 PF27792	CHIM_prot	membrane	membrane=text:integral
 PF27793	RNP_Burkhold	ribosomal_protein	ribosomal_protein=text:Ribosomal
-PF27795	CRISPR-assoc_prot_CsaX	cas_domain,defense_system	cas_domain=text:CRISPR;defense_system=text:CRISPR
-PF27799	CRISPR-assoc_Csx19	cas_domain,defense_system	cas_domain=text:CRISPR;defense_system=text:CRISPR
+PF27795	CRISPR-assoc_prot_CsaX	cas_domain,defense_component	cas_domain=text:CRISPR;defense_component=text:CRISPR
+PF27799	CRISPR-assoc_Csx19	cas_domain,defense_component	cas_domain=text:CRISPR;defense_component=text:CRISPR
 PF27800	WcaM	biosynthesis	biosynthesis=text:biosynth
 PF27805	MbnC-like	biosynthesis	biosynthesis=text:biosynth
 PF27808	Neuronatin	transporter	transporter=swissprot:6/6 single-domain 6/6
@@ -15774,7 +15774,7 @@ PF27878	PFTS_polysacc	biosynthesis,carbohydrate_active	biosynthesis=text:biosynt
 PF27882	CEP162_C	coiled_coil	coiled_coil=text:coiled-coil
 PF27888	GMNC_C	coiled_coil	coiled_coil=text:coiled-coil
 PF27889	PLP_IMCC1989	aminotransferase,cofactor_binding,plp_binding,transferase	aminotransferase=text:aminotransferase;cofactor_binding=text:PLP-dependent;plp_binding=text:PLP;transferase=text:transferase
-PF27890	CHP04423	cas_domain,defense_system	cas_domain=text:CRISPR;defense_system=text:CRISPR
+PF27890	CHP04423	cas_domain,defense_component	cas_domain=text:CRISPR;defense_component=text:CRISPR
 PF27893	GRASP_targ_2	atp_binding	atp_binding=text:ATP
 PF27895	CGA_synth-rel	synthase	synthase=text:synthase
 PF27896	Chaper_lep	chaperone,stress_response	chaperone=text:chaperon;stress_response=text:chaperon
@@ -15843,7 +15843,7 @@ PF28086	HVO_2142	metal_binding,zinc_binding,zinc_finger	metal_binding=text:Zinc;
 PF28087	HVO_2523	metal_binding,zinc_binding,zinc_finger	metal_binding=text:Zinc;zinc_binding=text:Zinc;zinc_finger=text:Zinc finger
 PF28088	HVO_2901	metal_binding,zinc_binding,zinc_finger	metal_binding=text:Zinc;zinc_binding=text:Zinc;zinc_finger=text:Zinc finger
 PF28092	Treh_trans_TtfA	transporter	transporter=text:transport
-PF28100	AcrIE3-like	cas_domain,defense_system	cas_domain=text:CRISPR;defense_system=text:CRISPR
+PF28100	AcrIE3-like	cas_domain,defense_component	cas_domain=text:CRISPR;defense_component=text:CRISPR
 PF28102	YoeI-like	membrane	membrane=text:Membrane
 PF28108	T7SS_assoc-like	secretion_component	secretion_component=text:secretion
 PF28112	SIAE_C	esterase,hydrolase	esterase=text:esterase;hydrolase=text:esterase
@@ -15857,7 +15857,7 @@ PF28131	DUF8372	hypothetical	hypothetical=text:unknown function
 PF28134	GINM1_N	membrane	membrane=text:integral
 PF28137	GINM1_C	membrane	membrane=text:integral
 PF28146	TapY2	secretion_component	secretion_component=text:secretion
-PF28149	AcrIIA6	cas_domain,defense_system	cas_domain=text:CRISPR;defense_system=text:CRISPR
+PF28149	AcrIIA6	cas_domain,defense_component	cas_domain=text:CRISPR;defense_component=text:CRISPR
 PF28151	TPR_STT4	repeat_domain,tpr_repeat	repeat_domain=text:repeat;tpr_repeat=text:TPR
 PF28152	HpnL	binding,metal_binding,nickel_binding	binding=text:binding;metal_binding=text:Nickel;nickel_binding=text:Nickel
 PF28153	VraH	abc_transporter,transporter	abc_transporter=text:ABC;transporter=text:ABC
@@ -15878,7 +15878,7 @@ PF28186	T4SS_Ceg10	secretion_component,t4ss_component	secretion_component=text:T
 PF28187	T4SS_Lem8	secretion_component,t4ss_component	secretion_component=text:T4SS;t4ss_component=text:T4SS
 PF28189	MftB-like	biosynthesis,chaperone,stress_response	biosynthesis=text:biosynth;chaperone=text:chaperon;stress_response=text:chaperon
 PF28190	MMSYN1_0478	mfs_transporter,transporter	mfs_transporter=text:MFS;transporter=text:MFS
-PF28192	Cas13a_endoribonuclease	cas_domain,defense_system,hydrolase,nuclease	cas_domain=text:Cas1;defense_system=text:Cas1;hydrolase=text:nuclease;nuclease=text:ribonuclease
+PF28192	Cas13a_endoribonuclease	cas_domain,defense_component,hydrolase,nuclease	cas_domain=text:Cas1;defense_component=text:Cas1;hydrolase=text:nuclease;nuclease=text:ribonuclease
 PF28194	MapA_lipoprotein	membrane,outer_membrane	membrane=text:membrane;outer_membrane=text:Outer membrane
 PF28197	Retron_Ec48_antiviral	membrane	membrane=text:membrane
 PF28201	PhrA_inhibitor	hydrolase,phosphatase	hydrolase=text:Phosphatase;phosphatase=text:Phosphatase
@@ -15897,7 +15897,7 @@ PF28241	T4P_EbsA	pilus	pilus=text:pilus
 PF28243	DUF6701_2nd	hypothetical	hypothetical=text:DUF6
 PF28244	CzcI	efflux_pump,transporter	efflux_pump=text:efflux;transporter=text:efflux
 PF28247	DUF6701_3rd	hypothetical	hypothetical=text:DUF6
-PF28248	Cas6_csf5	cas_domain,defense_system,hydrolase,nuclease	cas_domain=text:Cas6;defense_system=text:Cas6;hydrolase=text:nuclease;nuclease=text:endonuclease
+PF28248	Cas6_csf5	cas_domain,defense_component,hydrolase,nuclease	cas_domain=text:Cas6;defense_component=text:Cas6;hydrolase=text:nuclease;nuclease=text:endonuclease
 PF28250	Four_helix_put	membrane	membrane=text:membrane
 PF28251	P60-like	membrane	membrane=text:membrane
 PF28252	DUF8376	hypothetical	hypothetical=text:unknown function
@@ -15929,7 +15929,7 @@ PF28344	BRAT1	dna_repair,recombinational_repair	dna_repair=swissprot:5/5 single-
 PF28346	DUF8382	hypothetical	hypothetical=text:unknown function
 PF28348	CCDC137	coiled_coil	coiled_coil=text:Coiled-coil
 PF28349	HSF2BP_C	binding,chaperone,heat_shock,stress_response	binding=text:binding;chaperone=text:Heat shock;heat_shock=text:Heat shock;stress_response=text:shock
-PF28350	Cas13a_C	cas_domain,defense_system,nuclease	cas_domain=text:Cas1;defense_system=text:Cas1;nuclease=text:Cas13
+PF28350	Cas13a_C	cas_domain,defense_component,nuclease	cas_domain=text:Cas1;defense_component=text:Cas1;nuclease=text:Cas13
 PF28357	DUF8383	hypothetical	hypothetical=text:unknown function
 PF28358	NUJM_C	nad_binding,oxidoreductase	nad_binding=enzyme:1.6.5.9 (nadh-ubiquinone oxidoreductase);oxidoreductase=text:oxidoreductase
 PF28361	DUF8384	hypothetical	hypothetical=text:unknown function
@@ -16254,7 +16254,7 @@ PF29289	DUF8527	hypothetical	hypothetical=text:unknown function
 PF29291	DUF8528	hypothetical	hypothetical=text:unknown function
 PF29292	DUF8529	hypothetical	hypothetical=text:unknown function
 PF29293	DUF8530	hypothetical	hypothetical=text:unknown function
-PF29297	ShoB	antitoxin_domain,toxin_domain	antitoxin_domain=text:antitoxin;toxin_domain=text:toxin
+PF29297	ShoB	antitoxin_domain,defense_component,toxin_domain	antitoxin_domain=text:antitoxin;defense_component=text:toxin-antitoxin;toxin_domain=text:toxin
 PF29298	APHB_HrpA	binding	binding=text:binding
 PF29301	DUF8531	hypothetical	hypothetical=text:unknown function
 PF29314	zf_C2H2_LIN26-LIR3	metal_binding,zinc_binding,zinc_finger	metal_binding=text:Zinc;zinc_binding=text:Zinc;zinc_finger=text:Zinc finger
@@ -16573,7 +16573,7 @@ PF30447	HsdM_C	methyltransferase,restriction_enzyme,restriction_modification,tra
 PF30449	HilA_2nd	regulator,transcription_factor	regulator=text:regulat;transcription_factor=text:transcriptional regulator
 PF30450	SymE_C	hydrolase,nuclease	hydrolase=text:nuclease;nuclease=text:ribonuclease
 PF30453	GadE_N	regulator,transcription_factor	regulator=text:regulat;transcription_factor=text:transcriptional regulator
-PF30455	Cas3_4th	cas_domain,defense_system,helicase,hydrolase,nuclease	cas_domain=text:Cas3;defense_system=text:Cas3;helicase=text:helicase;hydrolase=text:nuclease;nuclease=text:endonuclease
+PF30455	Cas3_4th	cas_domain,defense_component,helicase,hydrolase,nuclease	cas_domain=text:Cas3;defense_component=text:Cas3;helicase=text:helicase;hydrolase=text:nuclease;nuclease=text:endonuclease
 PF30459	YfjR_link	regulator,transcription_factor	regulator=text:regulat;transcription_factor=text:Transcriptional regulator
 PF30461	Tnp_IS30_N	mobile_element,transposase	mobile_element=text:Tnp;transposase=text:Tnp
 PF30462	DUF8617	hypothetical	hypothetical=text:unknown function
@@ -16821,8 +16821,8 @@ PF30834	DUF8748	hypothetical	hypothetical=text:unknown function
 PF30835	CEP83_CC_2nd	coiled_coil	coiled_coil=text:coiled-coil
 PF30837	UBR4_Ub	ligase	ligase=text:ligase
 PF30838	UBR4_TPR	ligase,repeat_domain,tpr_repeat	ligase=text:ligase;repeat_domain=text:TPR;tpr_repeat=text:TPR
-PF30840	Cas_TM1802_M	cas_domain,defense_system	cas_domain=text:Cas_;defense_system=text:Cas_
-PF30841	Cas_TM1802_C	cas_domain,defense_system	cas_domain=text:Cas_;defense_system=text:Cas_
+PF30840	Cas_TM1802_M	cas_domain,defense_component	cas_domain=text:Cas_;defense_component=text:Cas_
+PF30841	Cas_TM1802_C	cas_domain,defense_component	cas_domain=text:Cas_;defense_component=text:Cas_
 PF30843	CCDC8	coiled_coil	coiled_coil=text:Coiled-coil
 PF30844	CEP164_CC	coiled_coil	coiled_coil=text:CC
 PF30847	DUF8749	hypothetical	hypothetical=text:unknown function

@@ -21,18 +21,30 @@ Predicates are organized by category:
 - viral: Viral protein functions (from VOGdb)
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional
+
+
+COMPONENT = "component"
+SYSTEM = "system"
 
 
 @dataclass(frozen=True)
 class PredicateVocab:
-    """Vocabulary entry for a predicate."""
+    """Vocabulary entry for a predicate.
+
+    ``parent`` is an is-a edge: hierarchy expansion adds it. ``part_of`` records
+    membership in a larger system and is never expanded. ``level`` separates
+    what one gene or domain can show (``component``) from claims about a
+    validated multi-gene system (``system``), which only system callers emit.
+    """
     predicate_id: str
     name: str
     description: str
     category: str
-    parent: Optional[str] = None  # For hierarchical predicates
+    parent: Optional[str] = None  # is-a; expanded
+    level: str = COMPONENT
+    part_of: Optional[str] = None  # membership; never expanded
 
 
 # ============================================================================
@@ -306,8 +318,8 @@ METABOLISM_PREDICATES = [
     PredicateVocab("fe_only_hydrogenase", "Fe-only hydrogenase", "Iron-only Hmd hydrogenase (methanogens)", "metabolism", "hydrogenase"),
 
     # Named complexes (also called from KEGG/Pfam ech/mbh subunits)
-    PredicateVocab("ech_hydrogenase", "Ech hydrogenase", "Energy-converting hydrogenase (Ech), HydDB [NiFe] Group 4e", "metabolism", "nife_group4"),
-    PredicateVocab("mbh_hydrogenase", "Mbh hydrogenase", "Membrane-bound hydrogenase complex (Mbh)", "metabolism", "nife_group4"),
+    PredicateVocab("ech_hydrogenase", "Ech hydrogenase", "Subunit of the energy-converting hydrogenase complex Ech (HydDB [NiFe] Group 4e)", "metabolism", "hydrogen_metabolism"),
+    PredicateVocab("mbh_hydrogenase", "Mbh hydrogenase", "Subunit of the membrane-bound hydrogenase complex Mbh", "metabolism", "hydrogen_metabolism"),
 
     # Functional traits stated for characterized subgroups
     PredicateVocab("uptake_hydrogenase", "Uptake hydrogenase", "H2 oxidation providing electrons for respiration", "metabolism", "hydrogenase"),
@@ -451,7 +463,7 @@ ENVELOPE_PREDICATES = [
     # Surface structures
     PredicateVocab("adhesin", "Adhesin", "Surface adhesion protein", "envelope"),
     PredicateVocab("pilus", "Pilus", "Pilus/fimbria component", "envelope"),
-    PredicateVocab("type_iv_pilus", "Type IV pilus", "Type IV pilus system", "envelope", "pilus"),
+    PredicateVocab("type_iv_pilus", "Type IV pilus", "Type IV pilus component", "envelope", "pilus"),
     PredicateVocab("flagellum", "Flagellum", "Flagellar component", "envelope"),
     PredicateVocab("flagellar_motor", "Flagellar motor", "Flagellar motor/switch", "envelope", "flagellum"),
     PredicateVocab("flagellar_hook", "Flagellar hook", "Flagellar hook protein", "envelope", "flagellum"),
@@ -486,12 +498,13 @@ MOBILE_PREDICATES = [
     PredicateVocab("holin", "Holin", "Membrane pore for lysis", "mobile", "phage_related"),
 
     # Defense systems
-    PredicateVocab("defense_system", "Defense system", "Anti-phage/MGE defense", "mobile"),
-    PredicateVocab("restriction_modification", "Restriction-modification", "R-M system component", "mobile", "defense_system"),
+    PredicateVocab("defense_system", "Defense system", "Validated anti-phage/MGE defense system (system caller)", "mobile"),
+    PredicateVocab("defense_component", "Defense component", "Gene or domain found in anti-phage/MGE defense systems", "mobile"),
+    PredicateVocab("restriction_modification", "Restriction-modification", "R-M system component", "mobile", "defense_component"),
     PredicateVocab("restriction_enzyme", "Restriction enzyme", "Restriction endonuclease", "mobile", "restriction_modification"),
     PredicateVocab("methyltransferase_rm", "DNA methyltransferase (R-M)", "R-M system methylase", "mobile", "restriction_modification"),
-    PredicateVocab("cas_domain", "Cas-like domain", "Domain found in Cas proteins (may also be transposase)", "mobile", "defense_system"),
-    PredicateVocab("crispr_associated", "CRISPR-associated", "Confirmed CRISPR-Cas system component", "mobile", "cas_domain"),
+    PredicateVocab("cas_domain", "Cas-like domain", "Domain found in Cas proteins (may also be transposase)", "mobile", "defense_component"),
+    PredicateVocab("crispr_associated", "CRISPR-associated", "CRISPR-associated (Cas) protein", "mobile", "cas_domain"),
     PredicateVocab("cas_nuclease", "Cas nuclease", "CRISPR effector nuclease", "mobile", "crispr_associated"),
 
     # CRISPR-Cas Class 1 (multi-subunit effector)
@@ -541,11 +554,12 @@ MOBILE_PREDICATES = [
     PredicateVocab("crispr_accessory", "CRISPR accessory", "CRISPR-associated accessory protein", "mobile", "crispr_associated"),
 
     PredicateVocab("in_crispr_array", "In CRISPR array", "ORF overlapping CRISPR array (likely spurious)", "mobile"),
-    PredicateVocab("toxin_domain", "Toxin-like domain", "Domain found in toxins (may have other functions)", "mobile", "defense_system"),
-    PredicateVocab("antitoxin_domain", "Antitoxin-like domain", "Domain found in antitoxins", "mobile", "defense_system"),
+    PredicateVocab("toxin_domain", "Toxin-like domain", "Domain found in toxins (may have other functions)", "mobile", "defense_component"),
+    PredicateVocab("antitoxin_domain", "Antitoxin-like domain", "Domain found in antitoxins", "mobile", "defense_component"),
+    PredicateVocab("abi_domain", "Abi domain", "Domain found in abortive infection proteins", "mobile", "defense_component"),
     PredicateVocab("toxin_antitoxin", "Toxin-antitoxin system", "Confirmed paired TA system", "mobile", "defense_system"),
-    PredicateVocab("toxin", "Toxin", "TA system toxin", "mobile", "toxin_antitoxin"),
-    PredicateVocab("antitoxin", "Antitoxin", "TA system antitoxin", "mobile", "toxin_antitoxin"),
+    PredicateVocab("toxin", "Toxin", "TA system toxin", "mobile", "toxin_domain"),
+    PredicateVocab("antitoxin", "Antitoxin", "TA system antitoxin", "mobile", "antitoxin_domain"),
     PredicateVocab("abortive_infection", "Abortive infection", "Abi defense system", "mobile", "defense_system"),
     PredicateVocab("cbass", "CBASS", "Cyclic oligonucleotide-based antiphage signaling system", "mobile", "defense_system"),
     PredicateVocab("brex", "BREX", "Bacteriophage exclusion defense system", "mobile", "defense_system"),
@@ -604,7 +618,7 @@ MOBILE_PREDICATES = [
     PredicateVocab("relaxase", "Relaxase", "Conjugative relaxase", "mobile", "conjugation"),
 
     # Secretion systems - gene-level component tags
-    PredicateVocab("secretion_system", "Secretion system", "Protein secretion apparatus", "mobile"),
+    PredicateVocab("secretion_system", "Secretion system", "Protein secretion machinery", "mobile"),
     PredicateVocab("secretion_component", "Secretion component", "Component of protein secretion machinery", "mobile", "secretion_system"),
     PredicateVocab("t1ss_component", "T1SS component", "Type I secretion component", "mobile", "secretion_component"),
     PredicateVocab("t2ss_component", "T2SS component", "Type II secretion component", "mobile", "secretion_component"),
@@ -975,6 +989,51 @@ ALL_PREDICATES = (
 )
 
 # Build lookup dictionaries
+# ---------------------------------------------------------------------------
+# Component vs system level
+# ---------------------------------------------------------------------------
+# System-level predicates assert a validated multi-gene system. Only system
+# callers (co-localization engines such as DefenseFinder/TXSScan system calls)
+# emit them; single-gene or single-domain evidence maps to the component
+# equivalent below. No component predicate may have a system-level ancestor.
+
+_NAMED_DEFENSE_SYSTEMS = tuple(
+    p.predicate_id for p in ALL_PREDICATES
+    if p.parent == "defense_system" and p.predicate_id.startswith("defense_")
+)
+_SECRETION_COMPONENTS = {
+    "type_i_secretion": "t1ss_component",
+    "type_ii_secretion": "t2ss_component",
+    "type_iii_secretion": "t3ss_component",
+    "type_iv_secretion": "t4ss_component",
+    "type_v_secretion": "t5ss_component",
+    "type_vi_secretion": "t6ss_component",
+}
+COMPONENT_EQUIVALENT: dict[str, Optional[str]] = {
+    "defense_system": "defense_component",
+    "toxin_antitoxin": "defense_component",
+    "abortive_infection": "abi_domain",
+    **{abi: "abi_domain" for abi in ("abi_alpha", "abi_e", "abi_j", "abi_l", "abi_p2", "abi_u", "abi_v", "abi_z")},
+    "cbass": "defense_component",
+    "brex": "defense_component",
+    **{rm: "restriction_modification" for rm in ("rm_type_i", "rm_type_ii", "rm_type_iii", "rm_type_iv", "rm_type_iig")},
+    **{ta: "defense_component" for ta in ("psyrta", "rosmerta", "shosta")},
+    **{name: "defense_component" for name in _NAMED_DEFENSE_SYSTEMS},
+    **_SECRETION_COMPONENTS,
+}
+_PART_OF = {
+    "toxin": "toxin_antitoxin",
+    "antitoxin": "toxin_antitoxin",
+    "abi_domain": "abortive_infection",
+    **{component: system for system, component in _SECRETION_COMPONENTS.items()},
+}
+ALL_PREDICATES = [
+    replace(p, level=SYSTEM if p.predicate_id in COMPONENT_EQUIVALENT else COMPONENT,
+            part_of=_PART_OF.get(p.predicate_id))
+    for p in ALL_PREDICATES
+]
+SYSTEM_PREDICATES = frozenset(COMPONENT_EQUIVALENT)
+
 PREDICATE_BY_ID = {p.predicate_id: p for p in ALL_PREDICATES}
 PREDICATES_BY_CATEGORY = {}
 for p in ALL_PREDICATES:
@@ -1000,6 +1059,11 @@ def list_categories() -> list[str]:
     return sorted(PREDICATES_BY_CATEGORY.keys())
 
 
+def component_level(predicate_id: str) -> Optional[str]:
+    """The predicate itself when component-level, else its component equivalent (None: drop)."""
+    return COMPONENT_EQUIVALENT.get(predicate_id, predicate_id)
+
+
 def get_hierarchy(predicate_id: str) -> list[str]:
     """Get full hierarchy for a predicate (from most specific to root)."""
     result = [predicate_id]
@@ -1011,7 +1075,12 @@ def get_hierarchy(predicate_id: str) -> list[str]:
 
 
 __all__ = [
+    "COMPONENT",
+    "COMPONENT_EQUIVALENT",
+    "SYSTEM",
+    "SYSTEM_PREDICATES",
     "PredicateVocab",
+    "component_level",
     "ALL_PREDICATES",
     "PREDICATE_BY_ID",
     "PREDICATES_BY_CATEGORY",

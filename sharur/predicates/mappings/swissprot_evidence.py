@@ -31,7 +31,7 @@ from sharur.predicates.mappings.pfam_evidence import (
     SWISSPROT_SINGLE,
     wilson_lower_bound,
 )
-from sharur.predicates.vocabulary import PREDICATE_BY_ID
+from sharur.predicates.vocabulary import PREDICATE_BY_ID, component_level
 
 
 EXPERIMENTAL_GO = {"EXP", "IDA", "IPI", "IMP", "IGI", "IEP", "HTP", "HDA", "HMP", "HGI", "HEP"}
@@ -82,11 +82,11 @@ def read_swissprot(path: Path, ancestors) -> list[Reviewed]:
 
     @cache
     def go_preds(go: str) -> frozenset[str]:
-        return frozenset(p for a in ancestors(go) for p in anchor_preds.get(a, ()))
+        return frozenset(component_level(p) for a in ancestors(go) for p in anchor_preds.get(a, ()))
 
     @cache
     def ec_preds(ec: str) -> frozenset[str]:
-        return frozenset(get_predicates_for_ec(ec))
+        return frozenset(component_level(p) for p in get_predicates_for_ec(ec))
 
     proteins: list[Reviewed] = []
     accession, pfams, preds, genes = None, set(), set(), set()

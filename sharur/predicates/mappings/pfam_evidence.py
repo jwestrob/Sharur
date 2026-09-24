@@ -195,9 +195,15 @@ def enzyme_phrases(desc: str, enzyme_names: dict[str, list[str]]) -> dict[str, l
 
 
 def resolve(predicate: str, vocabulary) -> str | None:
-    """Vocabulary predicate for a proposed name (aliases applied), or None."""
+    """Component-level vocabulary predicate for a proposed name (aliases applied), or None.
+
+    Maps emit component-level predicates; a system-level proposal resolves to
+    its component equivalent.
+    """
+    from sharur.predicates.vocabulary import component_level
+
     target = predicate if predicate in vocabulary else ALIASES.get(predicate)
-    return target if target in vocabulary else None
+    return component_level(target) if target in vocabulary else None
 
 
 def judge(predicate: str, name: str, desc: str, go_closure, enzyme_names) -> str | None:

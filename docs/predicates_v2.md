@@ -299,10 +299,22 @@ b.search_atoms(
 )
 ```
 
-Use the validated composites for system-level biological claims. Bare
-`defense_system` and `secretion_system` atoms can come from weaker component or
-domain evidence such as PFAM/supports or raw profile flags; they are useful for
-candidate discovery, not for reporting validated systems.
+Use the validated composites for system-level biological claims.
+
+### Component and system levels
+
+Each vocabulary entry has a `level`. **Component** predicates describe what one gene
+or domain shows (`toxin`, `restriction_modification`, `t4ss_component`,
+`defense_component`, `abi_domain`). **System** predicates assert a validated
+multi-gene system (`defense_system`, `toxin_antitoxin`, `abortive_infection`,
+`abi_*`, `rm_type_*`, named `defense_*` systems, CBASS, BREX, `type_*_secretion`);
+only system-caller sources (`defensefinder_system`, `txsscan_system`) emit them.
+Single-gene evidence that would name a system maps to the component equivalent
+(`vocabulary.COMPONENT_EQUIVALENT`), and no component predicate has a system-level
+ancestor, so hierarchy expansion never promotes a gene into a system. Membership in
+a system is recorded as `part_of` (for example `toxin` part_of `toxin_antitoxin`),
+which is informational and never expanded. `secretion_system` is the component-level
+root of secretion machinery; the `type_*_secretion` loci below it are system-level.
 
 ### Composite predicates (DSL)
 

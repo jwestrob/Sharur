@@ -582,3 +582,12 @@ d("sam_binding", ["GO:0008757"])
 d("nad_binding", ["GO:0016616", "GO:0016620", "GO:0016628", "GO:0016639", "GO:0016646", "GO:0016651",
                   "GO:0016680", "GO:0016696", "GO:0016723", "GO:0016726", "GO:0016731", "GO:0046857"])
 d("flavin_binding", ["GO:0046997", "GO:0052890"])
+
+# ---- Component-level equivalents of system predicates -----------------------
+# Maps emit component-level predicates only; system-level ones (defense_system,
+# toxin_antitoxin, abortive_infection, ...) come from system callers. A proposed
+# system predicate resolves to its component equivalent (vocabulary
+# COMPONENT_EQUIVALENT) and is judged on the specs below.
+d("abi_domain", [], list(E["abortive_infection"]["text"]))
+d("defense_component", list(E["defense_system"]["go"]) + ["GO:0110001", "GO:0097351"],
+  list(E["defense_system"]["text"]) + [r"toxin[- ]antitoxin"])

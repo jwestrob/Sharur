@@ -223,6 +223,8 @@ antibiotic_resistance: role
 antiporter: role
 antitoxin: role
 antitoxin_domain: role
+defense_component: role
+abi_domain: role
 arac_family: role
 arsenic_resistance: role
 asnc_family: role
