@@ -1419,7 +1419,7 @@ When logging a finding, the title must include all qualifiers. A reader should u
 
 #### Hydrogenase Validation (MANDATORY DISPATCH)
 
-HydDB NiFe calls have a ~50% false-positive rate from Complex I NuoD homology. **Do not report hydrogenase counts or make hydrogen metabolism claims without validation.**
+HydDB NiFe calls include Complex I homologs (shared Complex1_49kDa superfamily), and Sharur subgroups are provisional nearest-reference assignments. **Report hydrogenase counts and hydrogen metabolism claims after curation.**
 
 When you encounter hydrogenase findings, dispatch the hydrogenase skill agent:
 
@@ -1432,10 +1432,10 @@ Task(subagent_type="general-purpose",
 ```
 
 The hydrogenase agent will:
-1. Inventory all HydDB hits and PF00374-validated proteins
-2. Run neighborhood validation on every unvalidated hit (±8 genes)
-3. Reject Complex I NuoD false positives, rescue genuine Group 4 (Hyf/Hyc/Ech)
-4. Return validated counts with per-protein evidence
+1. Inventory `hydrogenase_classifications` (outcomes, subgroup labels, curation reasons)
+2. Curate every review-flagged call by neighborhood (±6 genes)
+3. Separate Complex I context from hydrogenase complex context
+4. Return raw, domain-cleared, and neighborhood-supported counts with per-protein evidence
 
 **Do not duplicate this work inline.** Flag hydrogenase findings as provisional until the agent returns.
 
@@ -1448,7 +1448,7 @@ Don't assume a pathway from one gene - check for the complete pathway:
 | MCR (methyl-CoM reductase) | - | This IS the definitive methanogenesis marker |
 | CODH | ACS, methyltransferases | Complete Wood-Ljungdahl needs all components |
 | Nitrogenase (nifH) | nifD, nifK clustered | Need the complete complex |
-| Hydrogenase | Dispatch `/hydrogenase` agent | See "Hydrogenase Validation" above — PF00374 misses Group 4 |
+| Hydrogenase | Dispatch `/hydrogenase` agent | See "Hydrogenase Validation" above — Group 4 needs neighborhood context |
 
 #### Archaeal-Specific Considerations
 - **RuBisCO in archaea** is usually Form II/III for AMP recycling, NOT CO2 fixation

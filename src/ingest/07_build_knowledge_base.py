@@ -283,6 +283,11 @@ class KnowledgeBaseBuilder:
                 self.pfam_acc_to_desc = {row.accession: row.description for row in pdf.itertuples()}
             except Exception as exc:
                 logger.warning(f"Failed to load PFAM reference ({pfam_path}): {exc}")
+        else:
+            logger.warning(
+                f"PFAM reference not found ({pfam_path}); Pfam annotations will store "
+                "profile names in the accession column"
+            )
         # KEGG KOFAM mapping
         ko_path = self.ref_dir / "ko_list"
         if ko_path.exists():
@@ -714,6 +719,13 @@ class KnowledgeBaseBuilder:
                 # Map names/descriptions from reference
                 if source == "pfam" and original_name is not None:
                     df["accession"] = df["accession"].map(self.pfam_id_to_acc).fillna(df["accession"])
+                    unmapped = df.loc[~df["accession"].astype(str).str.match(r"PF\d{5}"), "accession"]
+                    if not unmapped.empty:
+                        logger.warning(
+                            f"{tsv.name}: {len(unmapped):,} Pfam hits across "
+                            f"{unmapped.nunique():,} profiles lack a reference accession; "
+                            "their profile names are stored as accessions"
+                        )
                     df["name"] = df["accession"].map(self.pfam_acc_to_name)
                     df["description"] = df["accession"].map(self.pfam_acc_to_desc)
                 elif source == "kegg":
@@ -1053,31 +1065,19 @@ class KnowledgeBaseBuilder:
 
         console.print(f"  Found {hyddb_count} HydDB annotations, running subgroup classification...")
 
-        # Release DB so the external script can open its own connection
+        # Release DB so the classifier can open its own connection. Predicate
+        # generation runs after this step, so classification writes in place.
         self._release_db()
         try:
-            import sys
-            scripts_dir = Path(__file__).resolve().parents[2] / "scripts"
-            sys.path.insert(0, str(scripts_dir))
+            from sharur.hydrogenase.classifier import classify_database, summarize
 
-            from classify_hydrogenases import classify_hydrogenases as run_classification
-
-            results = run_classification(
-                db_path=str(self.db_path),
-                threads=self.threads,
-                update_predicates=True,
-                verbose=False,
+            results = classify_database(self.db_path, threads=self.threads)
+            summary = summarize(results)
+            console.print(
+                f"  Classified {len(results)} HydDB-hit proteins: {summary.outcomes}; "
+                f"curation {summary.curation}"
             )
 
-            if not results.empty:
-                n_curation = results['needs_curation'].sum() if 'needs_curation' in results.columns else 0
-                console.print(f"  Classified {len(results)} hydrogenases, {n_curation} need curation")
-            else:
-                console.print("  No hydrogenases classified")
-
-        except ImportError as e:
-            logger.warning(f"Could not import hydrogenase classification: {e}")
-            console.print("  [yellow]Hydrogenase classification skipped (missing dependencies)[/yellow]")
         except FileNotFoundError as e:
             logger.warning(f"HydDB reference not found: {e}")
             console.print("  [yellow]Hydrogenase classification skipped (HydDB reference not found)[/yellow]")

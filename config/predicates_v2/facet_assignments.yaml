@@ -80,6 +80,7 @@ fefe_hydrogenase: activity
 fermentation: activity
 fermentative_hydrogenase: activity
 ferredoxin: activity
+ferredoxin_coupled: activity
 folate_biosynthesis: activity
 formate_coupled: activity
 gluconeogenesis: activity
@@ -96,6 +97,7 @@ h2_evolving: activity
 h2_sensor: activity
 halogenase: activity
 heme_biosynthesis: activity
+heterodisulfide_reductase_linked: activity
 histidine_biosynthesis: activity
 hydrogen_metabolism: activity
 hydrogenase: activity
@@ -118,14 +120,13 @@ membrane_bound_hydrogenase: activity
 methanogen_hydrogenase: activity
 methanogenesis: activity
 methanotrophy: activity
-methyl_viologen_reducing: activity
 methylotrophy: activity
 methyltransferase: activity
-monomeric_fefe: activity
 monooxygenase: activity
 mutase: activity
 nad_biosynthesis: activity
-nadp_reducing: activity
+nad_coupled: activity
+nadp_coupled: activity
 nife_group1: activity
 nife_group2: activity
 nife_group3: activity
@@ -177,7 +178,6 @@ rnase: activity
 rubisco: activity
 secondary_metabolism: activity
 selenium_metabolism: activity
-sensory_hydrogenase: activity
 siderophore_biosynthesis: activity
 sugar_metabolism: activity
 sulfate_reduction: activity
@@ -599,6 +599,9 @@ gc_high: quality_flag
 gc_low: quality_flag
 gc_outlier: quality_flag
 hyddb_annotated: quality_flag  # override from metabolism
+hyddb_needs_curation: quality_flag
+hyddb_class_conflict: quality_flag
+hydrogenase_complex1_review: quality_flag
 hypothetical: quality_flag
 kegg_annotated: quality_flag
 low_complexity: quality_flag

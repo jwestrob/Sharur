@@ -374,11 +374,16 @@ class TestCompositeEvaluation:
     def test_energy_conserving_hydrogenase_from_yaml(self):
         """Should evaluate energy_conserving_hydrogenase from YAML config."""
         composites = load_composites()
-        atoms = [
-            _atom("nife_group4", relation=ClaimRelation.implies),
-        ]
+        for trait in ("energy_conserving_hydrogenase", "ech_hydrogenase", "mbh_hydrogenase"):
+            result = evaluate_composites([_atom(trait)], composites)
+            assert "energy_conserving_hydrogenase" in result
+
+    def test_group4_membership_alone_is_not_energy_conserving(self):
+        """Putative Group 4 subgroups (4f, 4g) carry membership without the trait."""
+        composites = load_composites()
+        atoms = [_atom("nife_group4", relation=ClaimRelation.supports)]
         result = evaluate_composites(atoms, composites)
-        assert "energy_conserving_hydrogenase" in result
+        assert "energy_conserving_hydrogenase" not in result
 
     def test_novel_membrane_protein_from_yaml(self):
         """Should evaluate novel_membrane_protein from YAML config."""

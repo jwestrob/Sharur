@@ -113,7 +113,7 @@ inside a local tool and keep the sequence text out of model-visible output.
 
 **Response:**
 ```
-23 of 29 genomes (79%) have group 4 hydrogenase (mbh_hydrogenase predicate).
+23 of 29 genomes (79%) have a HydDB Group 4 assignment (nife_group4 predicate; provisional until curated).
 
 Top genomes by count:
 - GCA_003598175.1: 12 proteins

@@ -15,6 +15,7 @@ from typing import Any, Optional
 
 import yaml
 
+from sharur.predicates.pfam_identity import pfam_keys
 from sharur.predicates_v2.model import ClaimRelation, SemanticFacet
 
 # ---------------------------------------------------------------------------
@@ -150,21 +151,22 @@ _SOURCE_ALIASES: dict[str, str] = {
 def get_relation(
     source_db: str,
     accession: Optional[str] = None,
+    name: Optional[str] = None,
 ) -> ClaimRelation:
     """Look up the claim relation for a source + accession.
 
     Priority:
-    1. Accession-level override in YAML
+    1. Accession-level override in YAML, keyed by accession or profile name
     2. Source-level default in YAML
     3. Hardcoded default (supports)
     """
     overrides = _load_relation_overrides()
 
     # Check accession-level override first
-    if accession:
-        acc_overrides = overrides.get("accession_overrides", {})
-        if accession in acc_overrides:
-            return ClaimRelation(acc_overrides[accession])
+    acc_overrides = overrides.get("accession_overrides", {})
+    for key in pfam_keys(accession, name):
+        if key in acc_overrides:
+            return ClaimRelation(acc_overrides[key])
 
     # Check source-level default
     src = _SOURCE_ALIASES.get(source_db.lower(), source_db.lower())

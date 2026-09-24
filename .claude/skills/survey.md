@@ -305,9 +305,9 @@ Your survey should address all major functional domains. Not every analysis appl
 **What do these organisms use for energy?** Map the electron flow from substrate to terminal acceptor.
 
 - **Respiration components**: Cytochromes, terminal oxidases, quinones
-- **Hydrogenases**: If detected, subtype them using HydDB classifications (Group 1-4, Mbh/Ech)
+- **Hydrogenases**: If detected, report the exact HydDB reference subgroup from `hydrogenase_classifications`
 
-> **Hydrogenase validation:** Raw HydDB counts have ~50% false-positive rate.
+> **Hydrogenase validation:** Raw HydDB NiFe counts include Complex I homologs.
 > After surveying, dispatch the `/hydrogenase` skill agent for neighborhood validation
 > before reporting hydrogen metabolism claims. See `.claude/skills/hydrogenase.md`.
 
@@ -399,7 +399,7 @@ Your survey should address all major functional domains. Not every analysis appl
 ### Specialized Analyses (When Relevant)
 
 **Hydrogenase Subtyping** (if hydrogenases detected):
-- Use HydDB classifications to assign Groups 1-4, Mbh/Ech
+- Use `hydrogenase_classifications` for subgroup labels; name complexes (Ech, Hyc, ...) from neighborhood genes
 - Distinguish uptake vs bidirectional vs energy-conserving
 - Check for maturation genes (HypA-F, HydE-G)
 
@@ -482,32 +482,24 @@ b.store.execute("SELECT COUNT(DISTINCT protein_id) FROM annotations WHERE access
 
 ## Hydrogenase Curation Protocol
 
-The pipeline classifies all HydDB hits with DIAMOND subgroup assignments and tags them with subgroup predicates (`nife_group1` through `nife_group4`, `fefe_groupA` through `fefe_groupC`). Hits that lack PFAM corroboration are tagged `hyddb_needs_curation` — these include legitimate Group 4 NiFe hydrogenases (Hyf/Hyc/Mbh/Ech) AND Complex I false positives that share HMM similarity.
+Stage 07 assigns each HydDB-hit protein the subgroup of its nearest HydDB reference and
+writes one reconciled row per protein to `hydrogenase_classifications`. Derived
+`hyddb_subgroup` labels carry group membership for every assignment and functional
+traits for subgroups that Søndergaard et al. 2016 Table 1 characterizes. Calls that lack
+the catalytic domain for their type carry `hyddb_needs_curation`; this set includes
+Group 4 hydrogenases and Complex I homologs alike.
 
-**When the survey finds hydrogenases, curate the flagged hits by neighborhood:**
+**When the survey finds hydrogenases, dispatch `.claude/skills/hydrogenase.md`.** It
+curates flagged calls by neighborhood:
 
-```python
-# Step 1: Get all hydrogenases and the subset needing curation
-all_hyddb = b.search_by_predicates(has=["nife_group4"])  # or broader: ["nife_hydrogenase"]
-needs_curation = b.search_by_predicates(has=["hyddb_needs_curation"])
+- **Hydrogenase context:** hycB–G/hycA (K15827–K15833), hyfA–J (K12136–K12145),
+  echA–F (K14086–K14091), Eha/Ehb/Coo subunit names, maturation genes (HypA–F
+  K04651–K04656, K03605), catalytic-domain Pfams on neighbors.
+- **Complex I context:** nuoA–N (K00330–K00343); Complex1_49kDa/30kDa, Oxidored_q4/q5_N/q6 on neighbors.
 
-# Step 2: For each flagged hit, check ±8 genes
-for pid in needs_curation[:30]:  # cap to avoid runaway loops
-    nbr = b.get_neighborhood(pid, window=8, all_annotations=True)
-    # Inspect neighbor KOs and PFAMs, log verdict
-```
-
-**Hydrogenase evidence** (any → likely real):
-- KEGG: K12136-K12145 (hyfA-J), K15828-K15833 (hycB-G)
-- KEGG: K04651-K04656, K03605 (maturation: HypA-F, HycI)
-- PFAM: PF00374 (NiFeSe_Hases) on a neighboring gene
-- HydDB annotation on a neighboring gene
-
-**Complex I evidence** (→ false positive):
-- KEGG: K00330-K00343 (nuoA-N)
-- PFAM: PF00346, PF00329 (Complex1_49kDa, Complex1_30kDa) on neighbors
-
-**Report with curation context:** "N NiFe hydrogenases classified (X Group 1-3 corroborated by PF00374, Y Group 4 confirmed by neighborhood markers, Z rejected as Complex I false positives)."
+**Report with curation context:** "N proteins assigned to HydDB subgroups by nearest
+reference (A with the catalytic domain for their type); of B review-flagged calls, C have
+hydrogenase neighborhood context and D sit in Complex I context."
 
 ---
 

@@ -64,9 +64,9 @@ is worse than no rule, because it launders an unexamined claim.
 ```
 BAD   "Only credit hydrogenase with NiFeSe_Hases."
 GOOD  "hyddb group 4 / energy_conserving / ech_hydrogenase: the group-4
-       catalytic subunit is homologous to Complex I NuoD, so most hits are
-       Complex I. Require NiFeSe_Hases on the same protein to credit a group-4
-       hydrogenase. This does not apply to other groups."
+       catalytic subunit shares the Complex1_49kDa superfamily with Complex I
+       NuoD. Credit a group-4 hydrogenase when its neighborhood carries
+       hydrogenase complex or maturation genes rather than nuoA-N."
 ```
 
 The general form: **when you observe X, the trap is Y, so require Z — and state

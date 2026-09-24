@@ -64,7 +64,7 @@ Citations for all bioinformatics tools and databases used in the Bennu metagenom
 ### DIAMOND
 > Buchfink, B., Xie, C. & Huson, D.H. (2015) Fast and sensitive protein alignment using DIAMOND. *Nature Methods* 12, 59--60. DOI: [10.1038/nmeth.3176](https://doi.org/10.1038/nmeth.3176)
 
-**Used for:** Fast protein alignment for hydrogenase subgroup classification (HydDB pipeline, `classify_hydrogenases.py`).
+**Used for:** Nearest-reference hydrogenase subgroup assignment against HydDB references (`sharur/hydrogenase/classifier.py`).
 **Verified:** [Nature Methods](https://www.nature.com/articles/nmeth.3176)
 **Abstract excerpt:** "DIAMOND is an open-source algorithm based on double indexing that is 20,000 times faster than BLASTX on short reads and has a similar degree of sensitivity."
 
@@ -97,7 +97,7 @@ For the KEGG database itself, also cite:
 ### HydDB
 > Sondergaard, D., Pedersen, C.N.S. & Greening, C. (2016) HydDB: A web tool for hydrogenase classification and analysis. *Scientific Reports* 6, 34212. DOI: [10.1038/srep34212](https://doi.org/10.1038/srep34212)
 
-**Used for:** Hydrogenase classification (Stage 04 via Astra, and `classify_hydrogenases.py`) -- classifies NiFe, FeFe, and Fe-only hydrogenases into 38 subgroups.
+**Used for:** Hydrogenase HMM discovery (Stage 04 via Astra), reference sequences for Sharur's nearest-reference subgroup assignment, and the Table 1 subgroup interpretations in `sharur/hydrogenase/subgroups.py`.
 **Verified:** [Nature Scientific Reports](https://www.nature.com/articles/srep34212)
 **Abstract excerpt:** "We present HydDB, a web tool for the classification and analysis of hydrogenase sequences, with an expanded classification scheme comprising 29 [NiFe], 8 [FeFe] and 1 [Fe] hydrogenase classes that defines 11 new classes with distinct biological functions."
 

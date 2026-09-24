@@ -170,30 +170,22 @@ contig_stats = b.store.execute("""
 
 ## 6. Hydrogenase Curation
 
-HydDB classifies proteins by structural similarity to known hydrogenases, but NADH dehydrogenase (Complex I) shares the same [NiFe] binding site fold and produces ~44% false positives for NiFe calls.
+Sharur assigns each HydDB-hit protein the subgroup of its nearest HydDB reference and
+records one reconciled row per protein in `hydrogenase_classifications` (outcome,
+reference label, identity, Pfam domain observations, curation reason, provenance).
+NiFe hydrogenases and respiratory Complex I share the Complex1_49kDa superfamily, so a
+HydDB NiFe call with Complex I-superfamily domains and no NiFeSe_Hases carries a review
+flag. Review flags mark calls that need neighborhood evidence; they neither exclude a
+hydrogenase nor validate one.
 
-The pipeline (`classify_hydrogenases.py`) uses a PF00374 filter that validates Groups 1-3 but **systematically rejects all Group 4 NiFe hydrogenases** (Hyf/Hyc/Mbh/Ech) because they diverged too far.
+**When you encounter hydrogenases, dispatch or follow `.claude/skills/hydrogenase.md`**,
+which curates every review-flagged call by its ±6-gene neighborhood (Complex I nuoA–N
+versus hydrogenase complex and maturation genes) and reports raw, domain-cleared, and
+neighborhood-supported counts measured on the dataset at hand.
 
-**When you encounter hydrogenases, run neighborhood-based curation on unvalidated HydDB hits:**
-
-```python
-# Step 1: Get pipeline-validated and unvalidated counts
-validated = b.search_by_predicates(has=["nife_hydrogenase"])   # PF00374-validated (Groups 1-3)
-all_hyddb = b.search_by_predicates(has=["hyddb:NiFe"])         # All HydDB NiFe calls
-unvalidated = [p for p in all_hyddb if p not in set(validated)]
-
-# Step 2: For each unvalidated hit, check ±8 gene neighborhood
-for pid in unvalidated:
-    nbr = b.get_neighborhood(pid, window=8, all_annotations=True)
-    # Hydrogenase evidence (→ rescue):
-    #   KEGG: K12136-K12145 (hyfA-J), K15828-K15833 (hycB-G)
-    #   KEGG: K04651-K04656 (HypA-F maturation), K03605 (HycI)
-    # Complex I evidence (→ reject):
-    #   KEGG: K00330-K00343 (nuoA-N)
-    # Ambiguous (both or neither): reject conservatively
-```
-
-**In reports, state the curation method:** "97 NiFe hydrogenases validated by PF00374 (Groups 1-3), plus 12 rescued by neighborhood curation (8 Group 4f + 4 Group 4e), excluding 66 Complex I false positives."
+**In reports, state the curation method:** "N proteins assigned to HydDB subgroups by
+nearest reference; A carry the catalytic domain for their type; of B review-flagged calls,
+C have hydrogenase neighborhood context and D sit in Complex I context."
 
 ---
 

@@ -111,8 +111,10 @@ before treating a migrated legacy database's system surface as available.
 ## Hydrogenase Classification
 **Script:** `scripts/classify_hydrogenases.py`
 **Requires:** HydDB HMMs via Astra, DIAMOND database (`data/reference/hyddb/HydDB_all.dmnd`)
-**Output:** Subgroup-level classification (NiFe Group 1-4, FeFe A-C)
-**Note:** Hits lacking PFAM corroboration are tagged `hyddb_needs_curation` for agent neighborhood curation.
+**Method:** Nearest HydDB reference by DIAMOND for proteins with a HydDB HMM hit (a Sharur procedure; HydDB's own classifier adds k-NN voting, non-hydrogenase screening, and gene-organization rules)
+**Output:** One row per protein in `hydrogenase_classifications` plus `hyddb_subgroup` labels; interpretations follow Søndergaard et al. 2016 Table 1 (`sharur/hydrogenase/subgroups.py`)
+**Curation:** Calls lacking the catalytic domain for their type carry `hyddb_needs_curation`; class disagreements carry `hyddb_class_conflict`
+**Refresh:** `python scripts/classify_hydrogenases.py --db ...` stages, validates, and reports (dry run); add `--publish` to replace the database atomically with a backup and re-seal
 **Full protocol:** `.claude/skills/hydrogenase.md`
 
 ## CAZyme Classification (dbCAN 3-tool consensus)

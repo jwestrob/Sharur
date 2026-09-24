@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Optional
 import re
 
 from sharur.predicates.mappings.pfam_map import get_predicates_for_pfam
+from sharur.predicates.pfam_identity import COMPLEX1, NIFESE_HASES, has_pfam_domain
 from sharur.predicates.mappings.kegg_map import get_predicates_for_kegg
 from sharur.predicates.mappings.cazy_map import get_predicates_for_cazy
 from sharur.predicates.mappings.vog_map import get_vog_predicates
@@ -306,48 +307,24 @@ class PredicateGenerator:
 
     def _validate_hydrogenase_calls(self, predicates: set[str]) -> set[str]:
         """
-        Validate HydDB hydrogenase classifications against PFAM domains.
+        Flag HydDB NiFe hits whose domains need review against Complex I.
 
-        HydDB NiFe hits have ~44% false positive rate from Complex I (NADH dehydrogenase)
-        because the [NiFe] binding site is similar. We require the NiFeSe_Hases domain
-        (PF00374) to confirm a true NiFe hydrogenase.
+        NiFe hydrogenase large subunits and respiratory Complex I subunits share
+        the Complex1_49kDa superfamily, so a HydDB NiFe hit carrying Complex I
+        domains without NiFeSe_Hases (PF00374) is a review case, not an
+        exclusion. NiFeSe_Hases clears this domain check only; it does not
+        establish a physiological role.
 
-        Similarly, FeFe hydrogenases should have Fe_hyd_lg_C (PF02906) or Fe_hyd_SSU (PF02256).
+        Direct-access Pfam predicates carry the stored accession, which is the
+        profile name when Stage 07 could not map it, so domains match either form.
         """
-        # Check for HydDB NiFe hit
-        has_hyddb_nife = "hyddb:NiFe" in predicates
+        pfam_ids = {pred[len("pfam:"):] for pred in predicates if pred.startswith("pfam:")}
 
-        if has_hyddb_nife:
-            # Check for validating PFAM domain
-            has_nifese_hases = "pfam:PF00374" in predicates  # NiFeSe_Hases
-
-            # Check for Complex I domains (indicates this is NADH dehydrogenase, not hydrogenase)
-            has_complex1 = (
-                "pfam:PF00346" in predicates or  # Complex1_49kDa
-                "pfam:PF00329" in predicates     # Complex1_30kDa
-            )
-
-            if not has_nifese_hases and has_complex1:
-                # This is Complex I (NADH dehydrogenase), not a hydrogenase
-                # Don't assign hydrogenase predicates - let PFAM provide correct annotation
-                predicates.discard("nife_hydrogenase")
-                predicates.discard("hydrogenase")
-                predicates.discard("hydrogen_metabolism")
-
-        # Check for HydDB FeFe hit
-        has_hyddb_fefe = "hyddb:FeFe" in predicates
-
-        if has_hyddb_fefe:
-            # FeFe should have Fe_hyd domains
-            has_fe_hyd = (
-                "pfam:PF02906" in predicates or  # Fe_hyd_lg_C
-                "pfam:PF02256" in predicates     # Fe_hyd_SSU
-            )
-
-            if not has_fe_hyd:
-                # Uncertain FeFe call - keep the annotation but note it's unvalidated
-                # We don't remove the predicate since FeFe false positives are less common
-                pass
+        if "hyddb:NiFe" in predicates:
+            has_nifese_hases = has_pfam_domain(pfam_ids, NIFESE_HASES)
+            has_complex1 = has_pfam_domain(pfam_ids, COMPLEX1)
+            if has_complex1 and not has_nifese_hases:
+                predicates.add("hydrogenase_complex1_review")
 
         return predicates
 

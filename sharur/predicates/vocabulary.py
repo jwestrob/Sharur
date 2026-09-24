@@ -285,54 +285,49 @@ METABOLISM_PREDICATES = [
     PredicateVocab("hydrogenase", "Hydrogenase", "H2 oxidation/production enzyme", "metabolism", "hydrogen_metabolism"),
     PredicateVocab("hyddb_annotated", "HydDB annotated", "Annotated by HydDB HMMs", "metabolism", "hydrogenase"),
 
+    # Hydrogenase classification follows Søndergaard et al. 2016 (HydDB, Table 1).
+    # Structural membership (type -> group) forms the hierarchy. Functional traits
+    # descend from `hydrogenase` so a trait never implies a group, and a group
+    # never implies a trait. See sharur/hydrogenase/subgroups.py.
+
     # NiFe hydrogenases (Ni-Fe active site)
     PredicateVocab("nife_hydrogenase", "NiFe hydrogenase", "Nickel-iron hydrogenase", "metabolism", "hydrogenase"),
     PredicateVocab("nifese_hydrogenase", "NiFeSe hydrogenase", "Selenium-containing NiFe hydrogenase", "metabolism", "nife_hydrogenase"),
-
-    # NiFe Group 1: Membrane-bound H2 uptake
-    PredicateVocab("nife_group1", "NiFe Group 1", "Membrane-bound respiratory uptake hydrogenases", "metabolism", "nife_hydrogenase"),
-    PredicateVocab("uptake_hydrogenase", "Uptake hydrogenase", "H2-oxidizing respiratory hydrogenase", "metabolism", "nife_group1"),
-
-    # NiFe Group 2: Cytoplasmic H2 sensors and uptake
-    PredicateVocab("nife_group2", "NiFe Group 2", "Cytoplasmic H2 sensors and cyanobacterial uptake", "metabolism", "nife_hydrogenase"),
-    PredicateVocab("cytoplasmic_hydrogenase", "Cytoplasmic hydrogenase", "Soluble cytoplasmic hydrogenase", "metabolism", "hydrogenase"),
-    PredicateVocab("h2_sensor", "H2 sensor", "Regulatory H2-sensing hydrogenase", "metabolism", "nife_group2"),
-
-    # NiFe Group 3: Bidirectional/cofactor-coupled
-    PredicateVocab("nife_group3", "NiFe Group 3", "Bidirectional cytoplasmic hydrogenases", "metabolism", "nife_hydrogenase"),
-    PredicateVocab("bidirectional_hydrogenase", "Bidirectional hydrogenase", "Reversible H2 production/consumption", "metabolism", "hydrogenase"),
-    PredicateVocab("f420_reducing", "F420-reducing", "Coenzyme F420-coupled hydrogenase", "metabolism", "nife_group3"),
-    PredicateVocab("nadp_reducing", "NAD(P)-reducing", "NAD(P)-coupled hydrogenase", "metabolism", "nife_group3"),
-    PredicateVocab("methyl_viologen_reducing", "MV-reducing", "Methyl viologen-reducing hydrogenase", "metabolism", "nife_group3"),
-
-    # NiFe Group 4: Energy-conserving H2-evolving
-    PredicateVocab("nife_group4", "NiFe Group 4", "Energy-conserving membrane-bound H2-evolving", "metabolism", "nife_hydrogenase"),
-    PredicateVocab("h2_evolving", "H2-evolving", "Proton-reducing H2-producing hydrogenase", "metabolism", "hydrogenase"),
-    PredicateVocab("energy_conserving_hydrogenase", "Energy-conserving", "Couples H2 evolution to ion gradient", "metabolism", "nife_group4"),
-    PredicateVocab("formate_coupled", "Formate-coupled", "Formate hydrogen lyase complex", "metabolism", "nife_group4"),
-    PredicateVocab("co_coupled", "CO-coupled", "CO dehydrogenase-coupled hydrogenase", "metabolism", "nife_group4"),
-    PredicateVocab("mbh_hydrogenase", "Mbh hydrogenase", "Membrane-bound hydrogenase complex", "metabolism", "nife_group4"),
-    PredicateVocab("ech_hydrogenase", "Ech hydrogenase", "Energy-conserving hydrogenase (Ech)", "metabolism", "nife_group4"),
+    PredicateVocab("nife_group1", "NiFe Group 1", "Respiratory H2-uptake [NiFe]-hydrogenases (HydDB Group 1)", "metabolism", "nife_hydrogenase"),
+    PredicateVocab("nife_group2", "NiFe Group 2", "Alternative and sensory uptake [NiFe]-hydrogenases (HydDB Group 2); roles differ by subgroup", "metabolism", "nife_hydrogenase"),
+    PredicateVocab("nife_group3", "NiFe Group 3", "Cofactor-coupled bidirectional [NiFe]-hydrogenases (HydDB Group 3)", "metabolism", "nife_hydrogenase"),
+    PredicateVocab("nife_group4", "NiFe Group 4", "Respiratory H2-evolving [NiFe]-hydrogenases (HydDB Group 4); roles differ by subgroup", "metabolism", "nife_hydrogenase"),
 
     # FeFe hydrogenases (Fe-Fe active site, H-cluster)
     PredicateVocab("fefe_hydrogenase", "FeFe hydrogenase", "Iron-iron hydrogenase (H-cluster)", "metabolism", "hydrogenase"),
-
-    # FeFe Group A: Monomeric fermentative
-    PredicateVocab("fefe_groupA", "FeFe Group A", "Monomeric cytoplasmic fermentative hydrogenases", "metabolism", "fefe_hydrogenase"),
-    PredicateVocab("monomeric_fefe", "Monomeric FeFe", "Single-subunit FeFe hydrogenase", "metabolism", "fefe_groupA"),
-    PredicateVocab("fermentative_hydrogenase", "Fermentative hydrogenase", "H2-evolving during fermentation", "metabolism", "h2_evolving"),
-
-    # FeFe Group B: Electron-bifurcating
-    PredicateVocab("fefe_groupB", "FeFe Group B", "Electron-bifurcating hydrogenases", "metabolism", "fefe_hydrogenase"),
-    PredicateVocab("bifurcating_hydrogenase", "Bifurcating hydrogenase", "Electron-bifurcating hydrogenase", "metabolism", "fefe_groupB"),
-
-    # FeFe Group C: Sensory/regulatory
-    PredicateVocab("fefe_groupC", "FeFe Group C", "Sensory/regulatory FeFe hydrogenases", "metabolism", "fefe_hydrogenase"),
-    PredicateVocab("sensory_hydrogenase", "Sensory hydrogenase", "Regulatory H2-sensing FeFe", "metabolism", "fefe_groupC"),
+    PredicateVocab("fefe_groupA", "FeFe Group A", "HydDB [FeFe] Group A; subtypes A1-A4 (prototypical, glutamate synthase-linked, bifurcating, formate dehydrogenase-linked) are assigned from gene organization", "metabolism", "fefe_hydrogenase"),
+    PredicateVocab("fefe_groupB", "FeFe Group B", "HydDB [FeFe] Group B, colonic-type (putative); physiological role unresolved", "metabolism", "fefe_hydrogenase"),
+    PredicateVocab("fefe_groupC", "FeFe Group C", "HydDB [FeFe] Group C (putative sensory/regulatory); physiological role unresolved", "metabolism", "fefe_hydrogenase"),
 
     # Fe-only hydrogenases (Hmd)
     PredicateVocab("fe_only_hydrogenase", "Fe-only hydrogenase", "Iron-only Hmd hydrogenase (methanogens)", "metabolism", "hydrogenase"),
-    PredicateVocab("methanogen_hydrogenase", "Methanogen hydrogenase", "Methanogen-associated Hmd", "metabolism", "fe_only_hydrogenase"),
+
+    # Named complexes (also called from KEGG/Pfam ech/mbh subunits)
+    PredicateVocab("ech_hydrogenase", "Ech hydrogenase", "Energy-converting hydrogenase (Ech), HydDB [NiFe] Group 4e", "metabolism", "nife_group4"),
+    PredicateVocab("mbh_hydrogenase", "Mbh hydrogenase", "Membrane-bound hydrogenase complex (Mbh)", "metabolism", "nife_group4"),
+
+    # Functional traits stated for characterized subgroups
+    PredicateVocab("uptake_hydrogenase", "Uptake hydrogenase", "H2 oxidation providing electrons for respiration", "metabolism", "hydrogenase"),
+    PredicateVocab("h2_sensor", "H2 sensor", "Regulatory H2-sensing hydrogenase", "metabolism", "hydrogenase"),
+    PredicateVocab("cytoplasmic_hydrogenase", "Cytoplasmic hydrogenase", "Soluble cytoplasmic hydrogenase", "metabolism", "hydrogenase"),
+    PredicateVocab("bidirectional_hydrogenase", "Bidirectional hydrogenase", "Physiologically reversible H2 oxidation/evolution", "metabolism", "hydrogenase"),
+    PredicateVocab("f420_reducing", "F420-coupled", "Couples H2 oxidation to coenzyme F420 reduction", "metabolism", "hydrogenase"),
+    PredicateVocab("nadp_coupled", "NADP-coupled", "Couples H2 metabolism to NADP(H)", "metabolism", "hydrogenase"),
+    PredicateVocab("nad_coupled", "NAD-coupled", "Interconverts electrons between H2 and NAD(H)", "metabolism", "hydrogenase"),
+    PredicateVocab("heterodisulfide_reductase_linked", "Heterodisulfide reductase-linked", "Bifurcates electrons from H2 to heterodisulfide and ferredoxin", "metabolism", "hydrogenase"),
+    PredicateVocab("h2_evolving", "H2-evolving", "Proton-reducing H2-producing hydrogenase", "metabolism", "hydrogenase"),
+    PredicateVocab("energy_conserving_hydrogenase", "Energy-conserving", "Couples H2 evolution to ion translocation", "metabolism", "hydrogenase"),
+    PredicateVocab("formate_coupled", "Formate-coupled", "Couples formate oxidation to H2 evolution", "metabolism", "hydrogenase"),
+    PredicateVocab("co_coupled", "CO-coupled", "Couples carbon monoxide oxidation to H2 evolution", "metabolism", "hydrogenase"),
+    PredicateVocab("ferredoxin_coupled", "Ferredoxin-coupled", "Couples reduced ferredoxin oxidation to H2 evolution", "metabolism", "hydrogenase"),
+    PredicateVocab("fermentative_hydrogenase", "Fermentative hydrogenase", "H2-evolving during fermentation", "metabolism", "h2_evolving"),
+    PredicateVocab("bifurcating_hydrogenase", "Bifurcating hydrogenase", "Electron-bifurcating hydrogenase", "metabolism", "hydrogenase"),
+    PredicateVocab("methanogen_hydrogenase", "Methanogen hydrogenase", "Methenyl-H4MPT dehydrogenase (Hmd) activity", "metabolism", "hydrogenase"),
 
     # Hydrogenase accessory/maturation
     PredicateVocab("hydrogenase_maturation", "Hydrogenase maturation", "Hydrogenase assembly factors (HypABCDEF)", "metabolism", "hydrogen_metabolism"),
@@ -714,6 +709,9 @@ ANNOTATION_PREDICATES = [
     PredicateVocab("cazy_annotated", "CAZy annotated", "Has CAZy family annotation", "annotation"),
     PredicateVocab("vog_annotated", "VOGdb annotated", "Has VOGdb ortholog annotation", "annotation"),
     PredicateVocab("hyddb_annotated", "HydDB annotated", "Has HydDB hydrogenase classification", "annotation"),
+    PredicateVocab("hyddb_needs_curation", "HydDB needs curation", "HydDB assignment lacks the catalytic-domain Pfam for its type", "annotation"),
+    PredicateVocab("hyddb_class_conflict", "HydDB class conflict", "Discovery HMM class disagrees with the nearest reference class", "annotation"),
+    PredicateVocab("hydrogenase_complex1_review", "Hydrogenase/Complex I review", "HydDB NiFe hit with Complex I-superfamily domains and no NiFeSe_Hases", "annotation"),
 ]
 
 # ============================================================================

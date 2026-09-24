@@ -15,6 +15,13 @@ from sharur.predicates.generator import (
     PredicateGenerator,
     ProteinRecord,
 )
+from sharur.predicates.pfam_identity import (
+    COMPLEX1,
+    COMPLEX1_30KDA,
+    COMPLEX1_49KDA,
+    NIFESE_HASES,
+    has_pfam_domain,
+)
 from sharur.predicates_v2.model import ClaimRelation, SemanticAtom, SemanticFacet
 from sharur.predicates_v2.rules import get_facet, get_relation
 
@@ -128,10 +135,10 @@ class AtomGenerator:
                 source_db=source_db,
             ))
 
-        # --- Post-processing: hydrogenase validation ---
-        # Replicate V1's _validate_hydrogenase_calls: NiFe hydrogenase
-        # hits from HydDB are false positives when Complex I domains
-        # are present without PF00374 (NiFeSe_Hases).
+        # --- Post-processing: hydrogenase domain review ---
+        # Mirrors V1's _validate_hydrogenase_calls: a HydDB NiFe hit with
+        # Complex I-superfamily domains and no PF00374 (NiFeSe_Hases) is
+        # flagged for review.
         return self._validate_hydrogenase_atoms(atoms)
 
     def _atoms_from_annotation(
@@ -168,7 +175,7 @@ class AtomGenerator:
             meta_predicates = {
                 "confident_hit", "weak_hit",
             }
-            base_relation = get_relation(source_db, ann.accession)
+            base_relation = get_relation(source_db, ann.accession, ann.name)
             built_specs: list[
                 tuple[str, SemanticFacet, ClaimRelation]
             ] = []
@@ -252,36 +259,36 @@ class AtomGenerator:
     def _validate_hydrogenase_atoms(
         self, atoms: list[SemanticAtom],
     ) -> list[SemanticAtom]:
-        """Validate hydrogenase atoms against Complex I false positives.
+        """Flag HydDB NiFe hits whose domains need review against Complex I.
 
-        When HydDB NiFe hit exists but PF00374 (NiFeSe_Hases) is absent
-        and Complex I domains are present, emit `excludes` atoms. The
-        aggregator will surface implies+excludes as a conflict for review.
-        Use the composite `nife_hydrogenase_validated` to find true positives.
+        When a HydDB NiFe hit exists, PF00374 (NiFeSe_Hases) is absent, and
+        Complex I-superfamily domains are present, emit a
+        `hydrogenase_complex1_review` quality flag. The superfamily is shared by
+        NiFe hydrogenases and respiratory Complex I, so this is a review state
+        rather than an exclusion. Domains match by accession or profile name.
         """
-        atom_ids = {a.atom_id for a in atoms}
         source_accessions = {a.source_accession for a in atoms}
 
-        has_hyddb_nife = "nife_hydrogenase" in atom_ids
-        if not has_hyddb_nife:
+        if not any(a.atom_id == "nife_hydrogenase" and a.source_db == "hyddb" for a in atoms):
             return atoms
 
-        has_nifese_hases = "PF00374" in source_accessions
-        has_complex1 = "PF00346" in source_accessions or "PF00329" in source_accessions
+        has_nifese_hases = has_pfam_domain(source_accessions, NIFESE_HASES)
+        has_complex1 = has_pfam_domain(source_accessions, COMPLEX1)
 
-        if not has_nifese_hases and has_complex1:
-            # Emit excludes atoms — aggregator will surface as conflict
-            pid = atoms[0].protein_id
-            complex1_acc = "PF00346" if "PF00346" in source_accessions else "PF00329"
-            for excluded_id in ("nife_hydrogenase", "hydrogenase", "hydrogen_metabolism"):
-                atoms.append(SemanticAtom(
-                    protein_id=pid,
-                    atom_id=excluded_id,
-                    facet=get_facet(excluded_id),
-                    relation=ClaimRelation.excludes,
-                    source_accession=complex1_acc,
-                    source_db="_validation",
-                ))
+        if has_complex1 and not has_nifese_hases:
+            complex1_acc = next(
+                acc for domain in (COMPLEX1_49KDA, COMPLEX1_30KDA)
+                for acc in sorted(source_accessions)
+                if has_pfam_domain((acc,), domain)
+            )
+            atoms.append(SemanticAtom(
+                protein_id=atoms[0].protein_id,
+                atom_id="hydrogenase_complex1_review",
+                facet=get_facet("hydrogenase_complex1_review"),
+                relation=ClaimRelation.flags,
+                source_accession=complex1_acc,
+                source_db="_validation",
+            ))
 
         return atoms
 

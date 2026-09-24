@@ -82,11 +82,12 @@ Hydrogenases are key for understanding energy metabolism, especially in anaerobe
 ```python
 # Hydrogenase classification
 hydrogenase_types = {
-    'Group 1 (uptake)': ['hydrogenase_uptake', 'K00436'],
-    'Group 2 (sensory)': ['hydrogenase_sensory'],
-    'Group 3 (bidirectional/F420)': ['hydrogenase_group3', 'K00440', 'K00441'],
-    'Group 4 (energy-conserving)': ['hydrogenase_group4', 'mbh_hydrogenase', 'ech_hydrogenase'],
-    'FeFe-hydrogenase': ['fefe_hydrogenase', 'K00532'],
+    # HydDB groups (nearest-reference assignment; see .claude/skills/hydrogenase.md)
+    'NiFe Group 1': ['nife_group1'],
+    'NiFe Group 2': ['nife_group2'],
+    'NiFe Group 3': ['nife_group3'],
+    'NiFe Group 4': ['nife_group4'],
+    'FeFe Group A/B/C': ['fefe_groupA', 'fefe_groupB', 'fefe_groupC'],
 }
 
 print("\nHydrogenase Classification:")

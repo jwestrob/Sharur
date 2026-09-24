@@ -14,7 +14,7 @@ source_defaults:
   vogdb: flags
   vog: flags
   hyddb: implies
-  hyddb_subgroup: implies      # DIAMOND classification — high confidence
+  hyddb_subgroup: supports     # Nearest-reference DIAMOND assignment; provisional
   defensefinder_system: implies
   defensefinder: flags
   txsscan_system: implies
@@ -24,23 +24,37 @@ source_defaults:
   _property: implies    # Size, GC — deterministic from data
   _computed: implies    # Annotation status predicates
 
-# Accession-level overrides (promote or demote specific accessions)
+# Accession-level overrides (promote or demote specific accessions).
+# Pfam entries list both the accession and the profile name: Stage 07 stores
+# the profile name in the accession column when its reference map lacks it.
 accession_overrides:
   # NiFeSe_Hases — definitive NiFe hydrogenase marker
   PF00374: implies
+  NiFeSe_Hases: implies
   # Fe_hyd_lg_C — definitive FeFe hydrogenase marker
   PF02906: implies
+  Fe_hyd_lg_C: implies
   # Fe_hyd_SSU — definitive FeFe hydrogenase small subunit
   PF02256: implies
+  Fe_hyd_SSU: implies
   # Complex1_49kDa — supports but context-dependent (could be hydrogenase OR Complex I)
   PF00346: supports
+  Complex1_49kDa: supports
   # Complex1_30kDa — supports but context-dependent
   PF00329: supports
+  Complex1_30kDa: supports
   # Urease alpha — definitive urease
   PF00449: implies
+  Urease_alpha: implies
   # Molybdopterin — definitive molybdenum cofactor
   PF00384: implies
+  Molybdopterin: implies
   # Radical_SAM — broad superfamily, flags not supports
   PF04055: flags
+  Radical_SAM: flags
+  # HydDB review flags are quality flags, never functional support
+  hyddb_needs_curation: flags
+  hyddb_class_conflict: flags
   # P-loop_NTPase — very broad superfamily
   PF00005: supports  # ABC_tran is still specific enough for "supports"
+  ABC_tran: supports

@@ -14,7 +14,7 @@
 #   none_of: [conditions]     - no condition may be true
 
 nife_hydrogenase_validated:
-  description: "NiFe hydrogenase confirmed by PFAM corroboration"
+  description: "NiFe hydrogenase with nickel-binding domain evidence and no implied Complex I subunit"
   facet: activity
   requires:
     all_of:
@@ -26,7 +26,7 @@ nife_hydrogenase_validated:
         relation: implies
 
 fefe_hydrogenase_validated:
-  description: "FeFe hydrogenase confirmed by PFAM corroboration"
+  description: "FeFe hydrogenase with iron-sulfur domain evidence"
   facet: activity
   requires:
     all_of:
@@ -37,11 +37,11 @@ fefe_hydrogenase_validated:
       - has_atom: iron_binding
 
 energy_conserving_hydrogenase:
-  description: "Group 4 NiFe hydrogenase (Ech/Mbh)"
+  description: "Ion-translocating H2-evolving hydrogenase (characterized Group 4 subgroup, Ech, or Mbh)"
   facet: activity
   requires:
     any_of:
-      - has_atom: nife_group4
+      - has_atom: energy_conserving_hydrogenase
       - has_atom: mbh_hydrogenase
       - has_atom: ech_hydrogenase
 
