@@ -6,7 +6,26 @@ import os
 
 import pytest
 
+from sharur.predicates.mappings.kegg_map import kegg_map_available
 from sharur.storage.duckdb_store import DuckDBStore
+
+
+# Tests that pin facts of the KEGG map need a local build (`sharur setup-kegg`).
+requires_kegg_map = pytest.mark.skipif(
+    not kegg_map_available(), reason="no local KEGG map; run `sharur setup-kegg`"
+)
+
+# A KO that stands in for a KEGG map entry in pipeline tests that run without KEGG data.
+FIXTURE_KO = "K99902"
+FIXTURE_KO_PREDICATES = ["hydrogenase", "hydrogen_metabolism"]
+
+
+@pytest.fixture
+def fixture_ko(monkeypatch):
+    from sharur.predicates.mappings import kegg_map
+
+    monkeypatch.setitem(kegg_map.KEGG_TO_PREDICATES, FIXTURE_KO, list(FIXTURE_KO_PREDICATES))
+    return FIXTURE_KO
 
 
 @pytest.fixture(scope="session", autouse=True)

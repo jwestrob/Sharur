@@ -217,6 +217,26 @@ def check_reference_dbs() -> list[Check]:
     return checks
 
 
+def check_kegg_map() -> Check:
+    """The locally built KEGG predicate map (``sharur setup-kegg``)."""
+    import json
+
+    from sharur.predicates.mappings.kegg_map import default_kegg_dir, kegg_dir
+
+    purpose = "KO -> predicate map built from KEGG on this machine"
+    directory = kegg_dir()
+    if directory is None:
+        return Check("KEGG predicate map", WARN,
+                     f"not built (run `sharur setup-kegg`; default {default_kegg_dir()})", False, purpose)
+    try:
+        prov = json.loads((directory / "provenance.json").read_text())
+        detail = f"{directory} (KEGG {prov['kegg_release']}; {prov['pairs']:,} pairs)"
+    except (OSError, KeyError, ValueError):
+        detail = f"{directory} (no provenance.json; rebuild with `sharur setup-kegg`)"
+        return Check("KEGG predicate map", WARN, detail, False, purpose)
+    return Check("KEGG predicate map", OK, detail, False, purpose)
+
+
 def check_api_keys() -> list[Check]:
     if os.environ.get("ESM_API_KEY"):
         detail, status = "set", OK
@@ -230,6 +250,7 @@ def run_all_checks() -> list[Check]:
     results: list[Check] = [check_ingest_entrypoint()]
     results.extend(check_tool(spec) for spec in TOOLS)
     results.extend(check_reference_dbs())
+    results.append(check_kegg_map())
     results.extend(check_api_keys())
     return results
 

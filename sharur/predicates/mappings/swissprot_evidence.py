@@ -8,7 +8,7 @@ KOs (KEGG's gene -> KO links for the protein's ``DR KEGG`` genes).
 
 Thresholds live beside ``SWISSPROT_COVERAGE`` in
 :mod:`sharur.predicates.mappings.pfam_evidence`. Used at build time by
-``scripts/build_pfam_predicate_map.py`` and ``scripts/build_kegg_predicate_map.py``,
+``scripts/build_pfam_predicate_map.py`` and ``scripts/build_kegg_swissprot_consensus.py``,
 and by the integrity tests' optional recounts.
 """
 

@@ -18,8 +18,9 @@ A (KO, predicate) pair is supported by one of:
 - ``text:<match>``: the KO's symbols or name state the predicate (the Pfam
   text conventions in :mod:`sharur.predicates.mappings.pfam_evidence_spec`).
 
-``scripts/build_kegg_predicate_map.py`` applies these rules to build the shipped
-map; ``tests/test_kegg_map_integrity.py`` re-verifies every shipped pair.
+``sharur setup-kegg`` (:mod:`sharur.predicates.mappings.kegg_build`) applies
+these rules to KEGG data fetched on the user's machine;
+``tests/test_kegg_map_integrity.py`` re-verifies every pair of a local build.
 """
 
 from __future__ import annotations
@@ -79,8 +80,8 @@ def load_brite_rules(path: Path = DATA / "kegg_brite_predicates.tsv") -> list[Br
     return rules
 
 
-def load_module_rules(path: Path = DATA / "kegg_module_predicates.tsv") -> dict[str, tuple[str, tuple[str, ...]]]:
-    return {module: (name, tuple(preds.split())) for module, name, preds in _rows(path)}
+def load_module_rules(path: Path = DATA / "kegg_module_predicates.tsv") -> dict[str, tuple[str, ...]]:
+    return {module: tuple(preds.split()) for module, preds in _rows(path)}
 
 
 def ko_definition(symbols: str, name: str) -> str:
@@ -103,7 +104,7 @@ def module_evidence(rules, memberships) -> dict[str, str]:
     """Predicates for a KO from its module memberships [(module, is_complex_component)]."""
     found: dict[str, str] = {}
     for module, in_complex in memberships:
-        for pred in rules.get(module, ("", ()))[1]:
+        for pred in rules.get(module, ()):
             found.setdefault(pred, f"module:{module}")
         if in_complex:
             found.setdefault("complex_subunit", f"module:{module}")

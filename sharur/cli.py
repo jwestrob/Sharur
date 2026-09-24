@@ -1218,6 +1218,41 @@ def doctor(
         raise typer.Exit(code=1)
 
 
+@app.command(name="setup-kegg")
+def setup_kegg(
+    directory: Optional[Path] = typer.Option(
+        None, "--dir", help="Where to build (default: $SHARUR_KEGG_DIR, else data/reference/kegg)."
+    ),
+    inputs: Optional[Path] = typer.Option(
+        None, "--inputs",
+        help="Build from KEGG files already on disk (list/ko as ko_list.tsv, brite/<id>.json, "
+             "modules.txt) instead of fetching, e.g. from a licensed KEGG copy.",
+    ),
+    kofam_ko_list: Path = typer.Option(
+        Path("data/reference/ko_list"), "--kofam-ko-list",
+        help="KOfam ko_list (downloaded when absent).",
+    ),
+    report: Optional[Path] = typer.Option(None, "--report", help="TSV of proposed pairs without evidence."),
+):
+    """Fetch KEGG data and build the KO -> predicate map on this machine.
+
+    KEGG data is subject to KEGG's terms: KEGG REST (used by default, about 100
+    requests at under 3 per second) is for academic use; other users need a KEGG
+    license and can build from their licensed files with --inputs. The built
+    files stay local; Sharur ships only its own rules.
+    """
+    from sharur.predicates.mappings.kegg_build import setup
+    from sharur.predicates.mappings.kegg_map import default_kegg_dir
+
+    out = directory or default_kegg_dir()
+    typer.echo("KEGG data is fetched under KEGG's terms of use (https://www.kegg.jp/kegg/legal.html): "
+               "KEGG REST is for academic use; non-academic users need a KEGG license.")
+    provenance = setup(out, inputs=inputs, kofam_ko_list=kofam_ko_list, report=report, log=typer.echo)
+    typer.echo(f"Built {out / 'kegg_predicates.tsv'} (KEGG {provenance['kegg_release']}; "
+               f"map sha256 {provenance['map_sha256'][:16]})")
+    typer.echo("Regenerate predicates for existing datasets to apply it.")
+
+
 # ------------------------------------------------------------------ #
 # Main entry point
 # ------------------------------------------------------------------ #

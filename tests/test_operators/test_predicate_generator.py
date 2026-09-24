@@ -19,6 +19,7 @@ from sharur.predicates.vocabulary import (
     list_categories,
     list_predicates,
 )
+from tests.conftest import requires_kegg_map
 
 
 class TestVocabulary:
@@ -242,12 +243,14 @@ class TestKeggMapping:
         yield
         kegg_map._load_ko_definitions.cache_clear()
 
+    @requires_kegg_map
     def test_direct_mapping(self):
         """Should map known KEGG orthologs."""
         preds = get_predicates_for_kegg("K00532", "hydrogenase large subunit")
         assert "hydrogenase" in preds
         assert "hydrogen_metabolism" in preds
 
+    @requires_kegg_map
     def test_nitrogenase(self):
         """Should map nitrogenase."""
         preds = get_predicates_for_kegg("K02586", "nitrogenase iron protein NifH [EC:1.18.6.1]")
@@ -277,24 +280,28 @@ class TestKeggMapping:
         assert "transferase" in preds
         assert "kinase" in preds
 
+    @requires_kegg_map
     def test_direct_dna_methylase(self):
         """Should map DNA methylases by KO."""
         preds = get_predicates_for_kegg("K00558", "")
         assert "methyltransferase" in preds
         assert "dna_methylase" in preds
 
+    @requires_kegg_map
     def test_direct_crispr(self):
         """Should map CRISPR Cas proteins by KO."""
         preds = get_predicates_for_kegg("K19091", "")
         assert "crispr_associated" in preds
         assert "nuclease" in preds
 
+    @requires_kegg_map
     def test_direct_primase(self):
         """Should map primase by KO."""
         preds = get_predicates_for_kegg("K02684", "")
         assert "primase" in preds
         assert "replication" in preds
 
+    @requires_kegg_map
     def test_direct_ubiquitin_ligase(self):
         """Should map ubiquitin ligase by KO."""
         preds = get_predicates_for_kegg("K15343", "")
@@ -307,34 +314,40 @@ class TestKeggMapping:
         assert "hydrolase" in preds
         assert "amidase" in preds
 
+    @requires_kegg_map
     def test_local_ko_definition_used_for_kofam_evalue_label(self):
         """KOFAM e-value labels should resolve through the local KO list."""
         preds = get_predicates_for_kegg("K23356", "evalue_1e-15")
         assert "regulator" in preds
         assert "transcription_factor" in preds
 
+    @requires_kegg_map
     def test_local_ko_definition_maps_uncharacterized(self):
         """Uncharacterized KO definitions should become hypothetical."""
         preds = get_predicates_for_kegg("K07041", "GA")
         assert "hypothetical" in preds
 
+    @requires_kegg_map
     def test_local_ko_definition_maps_replication(self):
         """Core replication KO definitions should map by keyword."""
         preds = get_predicates_for_kegg("K04802", "GA")
         assert "replication" in preds
         assert "sliding_clamp" in preds
 
+    @requires_kegg_map
     def test_local_ko_definition_maps_elongation_factor(self):
         """Translation factor definitions should map by keyword."""
         preds = get_predicates_for_kegg("K03231", "GA")
         assert "translation" in preds
 
+    @requires_kegg_map
     def test_local_ko_definition_maps_abc_transport_system(self):
         """ABC transport system definitions should map by keyword."""
         preds = get_predicates_for_kegg("K01990", "GA")
         assert "abc_transporter" in preds
         assert "atp_binding" in preds
 
+    @requires_kegg_map
     def test_high_volume_residual_kofam_mappings(self):
         """Common DPANN residual KOFAM definitions should map directly."""
         preds = get_predicates_for_kegg("K14623", "GA")
@@ -569,14 +582,14 @@ class TestPredicateGenerator:
         assert "kegg:K00001" in preds
         assert "cazy:GH5" in preds
 
-    def test_kofam_maps_as_kegg_ortholog(self):
+    def test_kofam_maps_as_kegg_ortholog(self, fixture_ko):
         """KOFAM K accessions should use the KEGG predicate mapping."""
         gen = PredicateGenerator(include_direct_access=True)
         protein = ProteinRecord(protein_id="test", sequence_length=500)
         annotations = [
             AnnotationRecord(
                 source="kofam",
-                accession="K00532",
+                accession=fixture_ko,
                 description="hydrogenase large subunit",
                 evalue=1e-40,
             ),
@@ -586,7 +599,7 @@ class TestPredicateGenerator:
         assert "hydrogenase" in preds
         assert "hydrogen_metabolism" in preds
         assert "kegg_annotated" in preds
-        assert "kegg:K00532" in preds
+        assert f"kegg:{fixture_ko}" in preds
 
     def test_direct_access_disabled(self):
         """Should not add direct access predicates when disabled."""

@@ -5,7 +5,7 @@ Reads the KEGG gene IDs referenced by a UniProtKB/Swiss-Prot flat file and the
 KEGG REST ``link/ko/<organism>`` files for those organisms, and writes
 ``gene<TAB>KO[,KO]`` rows for the referenced genes. The output feeds
 ``--swissprot-kegg`` in ``scripts/build_pfam_predicate_map.py`` and
-``scripts/build_kegg_predicate_map.py``.
+``scripts/build_kegg_swissprot_consensus.py``.
 
 Fetch the organism files first, one request at a time, e.g.:
     for org in $(organisms); do curl -sf https://rest.kegg.jp/link/ko/$org -o org_ko/$org.tsv; done

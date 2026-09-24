@@ -50,14 +50,14 @@ class TestAtomGenerator:
         assert transporter_atoms[0].evidence_evalue == 1e-50
         assert transporter_atoms[0].evidence_score == 200.0
 
-    def test_kegg_annotation(self):
+    def test_kegg_annotation(self, fixture_ko):
         """Should generate typed atoms from a KEGG annotation."""
         gen = AtomGenerator()
         protein = ProteinRecord(protein_id="test", sequence_length=500)
         annotations = [
             AnnotationRecord(
                 source="kegg",
-                accession="K00532",
+                accession=fixture_ko,
                 description="hydrogenase large subunit",
                 evalue=1e-40,
                 score=150.0,
@@ -75,14 +75,14 @@ class TestAtomGenerator:
         assert h_atoms[0].relation == ClaimRelation.implies
         assert h_atoms[0].facet == SemanticFacet.activity
 
-    def test_kofam_annotation_uses_kegg_mapping(self):
+    def test_kofam_annotation_uses_kegg_mapping(self, fixture_ko):
         """KOFAM K accessions should generate KEGG-derived atoms."""
         gen = AtomGenerator()
         protein = ProteinRecord(protein_id="test", sequence_length=500)
         annotations = [
             AnnotationRecord(
                 source="kofam",
-                accession="K00532",
+                accession=fixture_ko,
                 description="hydrogenase large subunit",
                 evalue=1e-40,
                 score=150.0,

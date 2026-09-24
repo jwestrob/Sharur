@@ -5,8 +5,8 @@ For every KO whose KEGG definition names a hydrogenase (EC 1.12, or
 "hydrogenase"/"hydrogenlyase" in its name), runs ``hmmsearch`` of the KOfam
 profile against the HydDB reference sequences and counts the HydDB labels of
 references scoring at or above the KOfam threshold (full-sequence or best-domain
-score, per ``ko_list``). ``scripts/build_kegg_predicate_map.py`` turns these
-counts into ``hyddb:`` evidence. Output: ``kegg_hyddb_snapshot.tsv``.
+score, per ``ko_list``). ``sharur setup-kegg`` turns these counts
+into ``hyddb:`` evidence. Output: ``kegg_hyddb_snapshot.tsv``.
 
 Usage:
     python scripts/build_kegg_hyddb_snapshot.py --ko-list ko_list.tsv \\

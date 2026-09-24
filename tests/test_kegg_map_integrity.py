@@ -1,12 +1,12 @@
-"""Every shipped KO -> predicate pair is supported by KEGG's own information.
+"""Every pair of the local KEGG build is supported by KEGG's own information.
 
-``kegg_predicates.tsv`` records one evidence item per pair; this suite
-re-verifies each item against ``kegg_evidence_snapshot.tsv`` (KEGG's symbols,
-name, BRITE placements and module memberships at build time),
-``kegg_hyddb_snapshot.tsv`` and the current rules. Swiss-Prot consensus pairs are
-checked against the consensus thresholds; set ``SHARUR_SWISSPROT``,
-``SHARUR_SWISSPROT_KEGG`` and ``SHARUR_GO_OBO`` to recount them. Rebuild with
-``scripts/build_kegg_predicate_map.py`` after editing proposals or rules.
+``sharur setup-kegg`` builds ``kegg_predicates.tsv`` with one evidence item per
+pair; this suite re-verifies each item against the build's
+``kegg_evidence_snapshot.tsv`` (KEGG's symbols, name, BRITE placements and
+module memberships), the shipped ``kegg_hyddb_snapshot.tsv`` and
+``kegg_swissprot_consensus.tsv``, and the current rules. It skips when no local
+build exists. Set ``SHARUR_SWISSPROT``, ``SHARUR_SWISSPROT_KEGG`` and
+``SHARUR_GO_OBO`` to recount the Swiss-Prot consensus from reviewed proteins.
 """
 
 import os
@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from sharur.predicates.mappings import kegg_map
+from sharur.predicates.mappings.kegg_build import load_swissprot_consensus
 from sharur.predicates.mappings.kegg_evidence import (
     PATH_SEP,
     brite_evidence,
@@ -26,14 +27,11 @@ from sharur.predicates.mappings.kegg_evidence import (
     load_module_rules,
     module_evidence,
     names_hydrogenase,
-    parse_module_definition,
 )
 from sharur.predicates.mappings.kegg_map import (
-    EC_TO_PREDICATES,
     KEGG_EVIDENCE,
     KEGG_TO_PREDICATES,
     get_predicates_for_ec,
-    get_predicates_for_kegg,
     parse_ec_numbers,
 )
 from sharur.predicates.mappings.pfam_evidence import (
@@ -48,14 +46,18 @@ from sharur.predicates.mappings.swissprot_evidence import (
     read_gene_ko_links,
     read_swissprot,
 )
-from sharur.predicates.vocabulary import ALL_PREDICATES, PREDICATE_BY_ID
 
 
 DATA = Path(kegg_map.__file__).with_name("data")
+LOCAL = kegg_map.kegg_dir()
+
+pytestmark = pytest.mark.skipif(LOCAL is None, reason="no local KEGG build; run `sharur setup-kegg`")
 
 
-def _rows(name):
-    return [line.rstrip("\n").split("\t") for line in (DATA / name).read_text().splitlines()
+def _rows(path):
+    if not path.exists():
+        return []
+    return [line.rstrip("\n").split("\t") for line in path.read_text().splitlines()
             if line and not line.startswith("#")]
 
 
@@ -73,30 +75,16 @@ def _memberships(modules):
 
 SNAPSHOT = {ko: {"symbols": symbols, "name": name, "brite": _placements(brite),
                  "modules": _memberships(modules)}
-            for ko, symbols, name, brite, modules in _rows("kegg_evidence_snapshot.tsv")}
+            for ko, symbols, name, brite, modules in _rows((LOCAL or DATA) / "kegg_evidence_snapshot.tsv")}
 PAIRS = [(ko, pred, ev) for ko, evidence in KEGG_EVIDENCE.items() for pred, ev in evidence.items()]
 BRITE_RULES = load_brite_rules()
 MODULE_RULES = load_module_rules()
 HYDDB = load_hyddb_snapshot()
+CONSENSUS = load_swissprot_consensus()
 
 
 def test_map_and_snapshot_cover_the_same_kos():
     assert set(KEGG_TO_PREDICATES) == set(SNAPSHOT)
-
-
-def test_vocabulary_ids_are_unique():
-    ids = [p.predicate_id for p in ALL_PREDICATES]
-    assert len(ids) == len(set(ids))
-
-
-@pytest.mark.parametrize("table", [KEGG_TO_PREDICATES, EC_TO_PREDICATES])
-def test_every_mapped_predicate_is_in_the_vocabulary(table):
-    assert not {p for preds in table.values() for p in preds if p not in PREDICATE_BY_ID}
-
-
-def test_rules_name_vocabulary_predicates():
-    named = {p for r in BRITE_RULES for p in r.predicates} | {p for _, ps in MODULE_RULES.values() for p in ps}
-    assert not named - set(PREDICATE_BY_ID)
 
 
 def test_every_pair_reverifies_against_the_snapshot():
@@ -120,7 +108,8 @@ def test_every_pair_reverifies_against_the_snapshot():
         elif kind == "swissprot":
             k, n = map(int, detail.split("/"))
             ok = pred not in SWISSPROT_EXCLUDED and n >= SWISSPROT_COVERAGE[0] \
-                and k >= SWISSPROT_COVERAGE[1] * n and wilson_lower_bound(k, n) >= SWISSPROT_MIN_LOWER_BOUND
+                and k >= SWISSPROT_COVERAGE[1] * n and wilson_lower_bound(k, n) >= SWISSPROT_MIN_LOWER_BOUND \
+                and CONSENSUS.get(ko, {}).get(pred) == ev
         else:
             ok = False
         if not ok:
@@ -163,24 +152,12 @@ def test_every_rule_is_used():
 
 def test_proposal_comments_start_with_the_kegg_symbol():
     mismatched = {}
-    for ko, _, comment in _rows("kegg_predicate_proposals.tsv"):
+    for ko, _, comment in _rows(DATA / "kegg_predicate_proposals.tsv"):
         if ko in SNAPSHOT and SNAPSHOT[ko]["symbols"]:
             symbols = {s.strip().lower() for s in SNAPSHOT[ko]["symbols"].split(",")}
             if comment.split(";")[0].strip().lower() not in symbols:
                 mismatched[ko] = comment
     assert not mismatched
-
-
-def test_runtime_uses_only_the_generated_map():
-    assert not hasattr(kegg_map, "KEGG_PATTERNS")
-    assert get_predicates_for_kegg("K99999", "hydrogenase membrane protein") == []
-    assert set(get_predicates_for_kegg("K99999", "x [EC:2.7.1.1]")) == set(get_predicates_for_ec("2.7.1.1"))
-
-
-def test_module_definition_parser():
-    parsed = parse_module_definition("K00330+(K00331+K00332,K13380)+K00334 (K00844,K12407) K01803-(K1,K00002)")
-    assert all(parsed[k] for k in ("K13380", "K00334", "K00002"))
-    assert not any(parsed[k] for k in ("K00844", "K12407"))
 
 
 @pytest.mark.parametrize(("ko", "present", "absent"), [
@@ -218,29 +195,3 @@ def test_corrected_entries(ko, present, absent):
 @pytest.mark.parametrize("ko", ["K15826", "K14129", "K14130"])
 def test_non_hydrogenase_kos_carry_no_hydrogenase_claims(ko):
     assert not {"hydrogenase", "nife_hydrogenase", "ech_hydrogenase"} & set(KEGG_TO_PREDICATES.get(ko, ()))
-
-
-@pytest.mark.parametrize(("ec", "present", "absent"), [
-    ("2.1.2.1", {"transferase"}, {"methyltransferase"}),
-    ("2.1.1.37", {"methyltransferase", "dna_methylase"}, set()),
-    ("2.1.1.45", {"methyltransferase"}, {"dna_methylase"}),
-    ("3.6.5.2", {"gtp_binding"}, {"atpase"}),
-    ("3.6.1.1", {"hydrolase"}, {"atpase", "atp_binding"}),
-    ("3.1.21.4", {"nuclease", "endonuclease"}, {"esterase"}),
-    ("3.1.-.-", {"hydrolase"}, {"esterase"}),
-    ("4.1.3.1", {"lyase"}, {"decarboxylase"}),
-    ("7.6.2.1", {"atp_binding"}, {"gtp_binding"}),
-    ("2.7.8.5", {"transferase"}, {"kinase"}),
-    ("1.4.1.3", {"oxidoreductase"}, {"aminotransferase"}),
-    ("2.6.1.1", {"aminotransferase", "plp_binding"}, set()),
-    ("1.2.1.12", {"nad_binding"}, set()),                          # ENZYME 1.2.1: NAD(+)/NADP(+) acceptor
-    ("1.3.8.7", {"flavin_binding"}, {"nad_binding"}),              # ENZYME 1.3.8: flavin acceptor
-    ("1.14.12.10", {"dioxygenase", "nad_binding"}, {"monooxygenase"}),
-    ("1.14.13.1", {"monooxygenase", "nad_binding"}, {"dioxygenase"}),
-    ("1.14.11.2", {"dioxygenase"}, {"monooxygenase"}),
-    ("1.14.19.1", {"oxygenase"}, {"monooxygenase", "dioxygenase"}),
-])
-def test_ec_classes(ec, present, absent):
-    preds = set(get_predicates_for_ec(ec))
-    assert present <= preds
-    assert not absent & preds

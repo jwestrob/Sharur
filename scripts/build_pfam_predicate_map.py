@@ -192,6 +192,8 @@ def main() -> int:
     swissprot_note = ""
     if args.swissprot:
         gene_ko = read_gene_ko_links(args.swissprot_kegg) if args.swissprot_kegg else None
+        if gene_ko and KEGG_MAPPING_FILE is None:
+            raise SystemExit("--swissprot-kegg needs a local KEGG map; run `sharur setup-kegg` first")
         # KO predicates from KEGG's own information (not the KO Swiss-Prot tier, which reuses these proteins)
         ko_predicates = {ko: {p for p, e in ev.items() if not e.startswith("swissprot:")}
                          for ko, ev in KEGG_EVIDENCE.items()}
