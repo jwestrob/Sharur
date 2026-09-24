@@ -23,6 +23,7 @@ references, so downstream code treats these predicates as provisional support.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 
@@ -217,6 +218,24 @@ CONTEXT_DEPENDENT_SUBGROUPS = frozenset(
 RETIRED_TERMS = frozenset(
     {"nadp_reducing", "methyl_viologen_reducing", "monomeric_fefe", "sensory_hydrogenase"}
 )
+
+
+_REFERENCE_LABEL = re.compile(r"^\[(NiFe|FeFe)\]_(Group_\w+)$")
+
+
+def parse_label(label: str) -> tuple[str | None, str | None]:
+    """``[NiFe]_Group_4a`` -> ("NiFe", "Group_4a"); ``[Fe]`` -> ("Fe", "Fe_only")."""
+    if label == "[Fe]":
+        return "Fe", "Fe_only"
+    match = _REFERENCE_LABEL.match(label)
+    return (match.group(1), match.group(2)) if match else (None, None)
+
+
+def group_of(hyd_type: str, subgroup: str) -> str:
+    """HydDB group containing a subgroup: ``Group_4a`` -> ``Group_4``, ``Group_A3`` -> ``Group_A``."""
+    if hyd_type == "Fe":
+        return subgroup
+    return subgroup[: len("Group_") + 1]
 
 
 def lookup(hyd_type: str, subgroup: str) -> Subgroup | None:

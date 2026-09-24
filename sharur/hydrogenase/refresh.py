@@ -72,6 +72,7 @@ class RefreshReport:
     proteins_classified: int = 0
     affected_proteins: int = 0
     outcomes: dict[str, int] = field(default_factory=dict)
+    ko_support: dict[str, int] = field(default_factory=dict)
     curation: dict[str, int] = field(default_factory=dict)
     transitions: list[Transition] = field(default_factory=list)
     checks: dict[str, str] = field(default_factory=dict)
@@ -123,6 +124,7 @@ class RefreshReport:
             f"Proteins classified: {self.proteins_classified:,}; regenerated: {self.affected_proteins:,}",
             f"Outcomes: {self.outcomes}",
             f"Curation status: {self.curation}",
+            f"KOfam support of assignments: {self.ko_support}",
             f"Curation flag transitions: {self.curation_transitions()}",
             f"Proteins with changed derived labels: {len(self.changed):,}",
         ]
@@ -294,6 +296,7 @@ def refresh_hydrogenases(
             ))
         summary = summarize(results)
         report.outcomes, report.curation = summary.outcomes, summary.curation
+        report.ko_support = summary.ko_support
         report.proteins_classified, report.affected_proteins = len(results), len(affected)
         if transitions_path:
             report.write_transitions(Path(transitions_path))

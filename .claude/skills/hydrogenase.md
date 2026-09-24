@@ -38,6 +38,7 @@ Each HydDB-hit protein has one row in `hydrogenase_classifications`:
 | `interpretation_status`, `reference_role` | Table 1 status (`characterized` / `putative` / `unresolved` / `unverified`) and role text |
 | `has_nifese_hases`, `has_fe_hyd`, `has_complex1`, `has_hmd` | Pfam domain observations on the same protein |
 | `curation_status`, `curation_reason` | `domain_check_cleared` or `needs_curation`, with the reason |
+| `ko_support`, `ko_support_detail` | How the protein's KOfam hits relate to the assigned subgroup (below), with each associated KO's HydDB label counts |
 | `reference_release`, `reference_sha256`, `classifier_version` | Provenance |
 
 Derived labels appear as `hyddb_subgroup` annotations and V2 atoms with relation
@@ -50,8 +51,30 @@ Derived labels appear as `hyddb_subgroup` annotations and V2 atoms with relation
   subtypes carry structure only because A1–A4 require gene organization.
 - **Review flags:** `hyddb_needs_curation` (catalytic-domain check not met),
   `hyddb_class_conflict` (HMM class and reference class disagree; no subgroup labels
-  are emitted), and `hydrogenase_complex1_review` (HydDB NiFe hit with
-  Complex I-superfamily domains and no NiFeSe_Hases).
+  are emitted), `hyddb_ko_conflict` (every associated KOfam hit captures HydDB
+  references outside the assigned group), and `hydrogenase_complex1_review` (HydDB
+  NiFe hit with Complex I-superfamily domains and no NiFeSe_Hases).
+- **Supporting flag:** `hyddb_ko_supported` (a KOfam hit captures HydDB references of
+  the assigned subgroup at ≥80%). It is a quality flag and adds no functional claim.
+
+### KOfam support (KO → HydDB subgroup associations)
+
+`sharur/predicates/mappings/data/kegg_hyddb_snapshot.tsv` records, for every KO KEGG
+names as a hydrogenase, the HydDB labels of the reference hydrogenases that score at or
+above that KO's KOfam threshold (`scripts/build_kegg_hyddb_snapshot.py`). For example
+K15830 (hycE) captures `[NiFe]_Group_4a` 47/47; K14090 (echE) captures 4e 130, 4c 27
+and 4g 13 of 170. `sharur.hydrogenase.ko_association` exposes these associations.
+
+They describe which references a KOfam profile captures, so they support or question a
+nearest-reference call and never change it. `ko_support` grades each assignment:
+`subgroup` (≥80% of an associated KO's references carry the assigned label),
+`compatible` (some do), `group` (none do; some share the group), `conflict` (none
+share the group or type, for every associated KO), `none` (no associated KO with ≥5
+references). [FeFe] KOs carry no associations: HydDB [FeFe] references are
+catalytic-domain segments that score below KOfam's full-length thresholds.
+
+Report KOfam support as corroboration beside the reference label ("assigned to [NiFe]
+Group 4a by nearest reference; its hycE KOfam hit captures Group 4a references 47/47").
 
 The exact subgroup label is always in `reference_label` and the direct-access
 predicate `hyddb_subgroup:<Group_xx>`. Report that label alongside any interpretation.
@@ -279,6 +302,7 @@ for an [FeFe] enzyme needs the downstream NuoF-domain gene, as in HydDB.
 | "HydDB HMM hit" | Raw `hyddb` row |
 | "Assigned to [NiFe] Group X by nearest reference" | `hydrogenase_classifications.outcome = 'assigned'` |
 | "Catalytic domain observed" | `curation_status = 'domain_check_cleared'` |
+| "KOfam hit corroborates the subgroup" | `ko_support = 'subgroup'` |
 | "Supported Group 4 hydrogenase" | Step 3 neighborhood verdict `supported` |
 | Named complex (Ech, Hyc, ...) | Subunit genes of that complex in the neighborhood |
 | Physiological role in this organism | Above, plus genome-level metabolic context |

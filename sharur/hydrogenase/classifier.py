@@ -8,8 +8,11 @@ classifier additionally votes over k=4 neighbors, excludes homologous
 non-hydrogenase families, and uses downstream genes for FeFe Group A subtypes.
 
 Each protein yields one reconciled :class:`Classification` that keeps the
-discovery HMM evidence, the reference match, Pfam domain observations, and the
-curation reason separately. Raw ``hyddb`` rows are read and never modified.
+discovery HMM evidence, the reference match, Pfam domain observations, KOfam
+support, and the curation reason separately. KOfam support compares the
+protein's KO hits with the HydDB references those KOs capture
+(:mod:`sharur.hydrogenase.ko_association`); it supports or questions an
+assignment and never changes it. Raw ``hyddb`` rows are read and never modified.
 """
 
 from __future__ import annotations
@@ -23,7 +26,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from sharur.hydrogenase.subgroups import UNVERIFIED, Subgroup, lookup
+from sharur.hydrogenase.ko_association import KOSupport, ko_support
+from sharur.hydrogenase.subgroups import UNVERIFIED, Subgroup, lookup, parse_label
 from sharur.predicates.pfam_identity import (
     COMPLEX1,
     FE_HYD,
@@ -33,7 +37,7 @@ from sharur.predicates.pfam_identity import (
 )
 
 
-CLASSIFIER_VERSION = "sharur-hyddb-nearest-reference/2"
+CLASSIFIER_VERSION = "sharur-hyddb-nearest-reference/3"
 
 HMD = frozenset({"PF03201", "HMD"})
 
@@ -49,10 +53,11 @@ NEEDS_CURATION = "needs_curation"
 
 CURATION_FLAG = "hyddb_needs_curation"
 CLASS_CONFLICT_FLAG = "hyddb_class_conflict"
-REVIEW_FLAGS = frozenset({CURATION_FLAG, CLASS_CONFLICT_FLAG})
+KO_SUPPORTED_FLAG = "hyddb_ko_supported"
+KO_CONFLICT_FLAG = "hyddb_ko_conflict"
+REVIEW_FLAGS = frozenset({CURATION_FLAG, CLASS_CONFLICT_FLAG, KO_CONFLICT_FLAG})
 
 _DISCOVERY_CLASSES = {"nife": "NiFe", "fefe": "FeFe", "fe_only": "Fe", "fe-only": "Fe", "feonly": "Fe"}
-_REFERENCE_LABEL = re.compile(r"^\[(NiFe|FeFe)\]_(Group_\w+)$")
 
 
 class HydrogenaseSearchError(RuntimeError):
@@ -108,6 +113,7 @@ class Classification:
     subgroup: Subgroup | None = None
     curation_status: str | None = None
     curation_reason: str = ""
+    ko_support: KOSupport = field(default_factory=lambda: KOSupport("none"))
 
     @property
     def derived_labels(self) -> tuple[str, ...]:
@@ -117,6 +123,10 @@ class Classification:
             labels.extend(self.subgroup.predicates)
             if self.curation_status == NEEDS_CURATION:
                 labels.append(CURATION_FLAG)
+            if self.ko_support.status == "subgroup":
+                labels.append(KO_SUPPORTED_FLAG)
+            elif self.ko_support.status == "conflict":
+                labels.append(KO_CONFLICT_FLAG)
         elif self.outcome == CLASS_CONFLICT:
             labels.append(CLASS_CONFLICT_FLAG)
         return tuple(dict.fromkeys(labels))
@@ -132,12 +142,7 @@ def parse_reference_id(sid: str) -> tuple[str, str, str, str | None, str | None]
     accession = parts[0]
     organism = parts[1] if len(parts) > 1 else ""
     label = parts[2] if len(parts) > 2 else ""
-    if label == "[Fe]":
-        return accession, organism, label, "Fe", "Fe_only"
-    match = _REFERENCE_LABEL.match(label)
-    if match:
-        return accession, organism, label, match.group(1), match.group(2)
-    return accession, organism, label, None, None
+    return (accession, organism, label, *parse_label(label))
 
 
 def find_reference(directory: Path | None = None) -> ReferenceInfo:
@@ -251,6 +256,13 @@ def classify(conn, reference: ReferenceInfo, threads: int = 4, search: SearchFn 
     """).fetchall():
         pfam.setdefault(pid, set()).update(pfam_keys(accession, name))
 
+    kos: dict[str, set[str]] = {}
+    for pid, accession in conn.execute("""
+        SELECT a.protein_id, a.accession FROM annotations a
+        JOIN _hyd_proteins h USING (protein_id) WHERE LOWER(a.source) IN ('kofam', 'kegg')
+    """).fetchall():
+        kos.setdefault(pid, set()).add(accession)
+
     sequences = {
         pid: seq for pid, seq in conn.execute("""
             SELECT p.protein_id, p.sequence FROM proteins p JOIN _hyd_proteins h USING (protein_id)
@@ -295,6 +307,8 @@ def classify(conn, reference: ReferenceInfo, threads: int = 4, search: SearchFn 
                 "Label present in the installed reference; interpretation unverified.", UNVERIFIED,
             )
             item.curation_status, item.curation_reason = curation(hit.hyd_type, item.domains)
+        if hit is not None and hit.hyd_type is not None:
+            item.ko_support = ko_support(kos.get(pid, ()), hit.hyd_type, hit.subgroup)
         results.append(item)
     return results
 
@@ -321,6 +335,8 @@ CLASSIFICATION_COLUMNS = (
     "has_hmd BOOLEAN",
     "curation_status VARCHAR",
     "curation_reason VARCHAR",
+    "ko_support VARCHAR",
+    "ko_support_detail VARCHAR",
     "derived_labels VARCHAR[]",
     "reference_release VARCHAR",
     "reference_sha256 VARCHAR",
@@ -338,7 +354,8 @@ def _row(item: Classification, reference: ReferenceInfo) -> tuple:
         sub.status if sub else None, sub.reference_role if sub else None,
         hit.pident if hit else None, hit.evalue if hit else None, hit.bitscore if hit else None,
         dom.nifese_hases, dom.fe_hyd, dom.complex1, dom.hmd,
-        item.curation_status, item.curation_reason or None, list(item.derived_labels),
+        item.curation_status, item.curation_reason or None,
+        item.ko_support.status, item.ko_support.detail or None, list(item.derived_labels),
         reference.release, reference.sha256, CLASSIFIER_VERSION,
     )
 
@@ -348,6 +365,10 @@ def _description(item: Classification, label: str, reference: ReferenceInfo) -> 
         return f"HydDB assignment needs curation: {item.curation_reason}"
     if label == CLASS_CONFLICT_FLAG:
         return f"HydDB class conflict: {item.curation_reason}"
+    if label == KO_SUPPORTED_FLAG:
+        return f"KOfam hit captures HydDB references of the assigned subgroup (supporting): {item.ko_support.detail}"
+    if label == KO_CONFLICT_FLAG:
+        return f"KOfam hits capture HydDB references outside the assigned group (review): {item.ko_support.detail}"
     sub = item.subgroup
     return (
         f"Sharur nearest-reference match to HydDB {reference.release}: {sub.label} "
@@ -359,8 +380,7 @@ def write_classifications(conn, results: list[Classification], reference: Refere
     """Replace ``hydrogenase_classifications`` and ``hyddb_subgroup`` rows in one transaction."""
     conn.execute("BEGIN TRANSACTION")
     try:
-        conn.execute(f"CREATE TABLE IF NOT EXISTS hydrogenase_classifications ({', '.join(CLASSIFICATION_COLUMNS)})")
-        conn.execute("DELETE FROM hydrogenase_classifications")
+        conn.execute(f"CREATE OR REPLACE TABLE hydrogenase_classifications ({', '.join(CLASSIFICATION_COLUMNS)})")
         if results:
             placeholders = ",".join(["?"] * len(CLASSIFICATION_COLUMNS))
             conn.executemany(
@@ -411,6 +431,7 @@ def classify_database(db_path: str | Path, threads: int = 4, reference_dir: Path
 class Summary:
     outcomes: dict[str, int] = field(default_factory=dict)
     curation: dict[str, int] = field(default_factory=dict)
+    ko_support: dict[str, int] = field(default_factory=dict)
 
 
 def summarize(results: list[Classification]) -> Summary:
@@ -419,4 +440,6 @@ def summarize(results: list[Classification]) -> Summary:
         summary.outcomes[item.outcome] = summary.outcomes.get(item.outcome, 0) + 1
         if item.curation_status:
             summary.curation[item.curation_status] = summary.curation.get(item.curation_status, 0) + 1
+        if item.outcome == ASSIGNED:
+            summary.ko_support[item.ko_support.status] = summary.ko_support.get(item.ko_support.status, 0) + 1
     return summary

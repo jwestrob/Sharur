@@ -21,6 +21,16 @@ from sharur.hydrogenase.classifier import (
     find_reference,
     parse_reference_id,
 )
+from sharur.hydrogenase.ko_association import (
+    COMPATIBLE,
+    CONFLICT,
+    GROUP,
+    NONE,
+    SUBGROUP,
+    associations,
+    ko_support,
+    load_associations,
+)
 from sharur.hydrogenase.refresh import refresh_hydrogenases
 from sharur.hydrogenase.subgroups import (
     CONTEXT_DEPENDENT_SUBGROUPS,
@@ -161,7 +171,7 @@ class TestProvisionalRelations:
         assert get_relation("hyddb_subgroup", "nife_group1", "nife_group1") == ClaimRelation.supports
 
     def test_review_flags_are_flags(self):
-        for flag in ("hyddb_needs_curation", "hyddb_class_conflict"):
+        for flag in ("hyddb_needs_curation", "hyddb_class_conflict", "hyddb_ko_supported", "hyddb_ko_conflict"):
             assert get_relation("hyddb_subgroup", flag, flag) == ClaimRelation.flags
 
 
@@ -208,6 +218,10 @@ ANNOTATIONS = [
     ("p_noseq", "hyddb", "NiFe", "NiFe", 95.0),
     ("p_unparsed", "hyddb", "NiFe", "NiFe", 99.0),
     ("p_unrelated", "pfam", "PF00005", "ABC_tran", 110.0),
+    # KOfam hits whose HydDB associations support or question the assignment
+    ("p_3d", "kofam", "K00436", "hoxH", 600.0),      # captures Group_3d 174/174 -> subgroup
+    ("p_1h", "kofam", "K15830", "hycE", 500.0),      # captures Group_4a 47/47 -> conflict
+    ("p_2a", "kofam", "K23549", "hupV", 450.0),      # Group_2a/2b/2c/2e -> compatible
 ]
 
 # Labels the pre-audit classifier wrote (seeded as stale state)
@@ -356,6 +370,21 @@ class TestClassification:
         assert item.subgroup.reference_name == "Bifurcating"
         assert "bifurcating_hydrogenase" not in item.derived_labels
 
+    def test_ko_support_is_recorded_beside_the_assignment(self, results):
+        agree, conflict, mixed = results["p_3d"], results["p_1h"], results["p_2a"]
+        assert (agree.ko_support.status, agree.ko_support.detail) == (SUBGROUP, "K00436 [NiFe]_Group_3d 174/174")
+        assert "hyddb_ko_supported" in agree.derived_labels
+        assert conflict.ko_support.status == CONFLICT
+        assert "hyddb_ko_conflict" in conflict.derived_labels
+        assert mixed.ko_support.status == COMPATIBLE
+        assert not {"hyddb_ko_supported", "hyddb_ko_conflict"} & set(mixed.derived_labels)
+        assert results["p_a3"].ko_support.status == NONE
+
+    def test_ko_support_leaves_assignment_and_curation_unchanged(self, results):
+        item = results["p_1h"]
+        assert (item.outcome, item.hit.subgroup, item.curation_status) == (ASSIGNED, "Group_1h", CLEARED)
+        assert {"nife_group1", "uptake_hydrogenase"} <= set(item.derived_labels)
+
     def test_raw_hmm_rows_are_read_only(self, db_path, reference_dir):
         before = _query(db_path, "SELECT * FROM annotations WHERE source = 'hyddb' ORDER BY annotation_id")
         hyd.classify_database(db_path, reference_dir=reference_dir, search=stub_search)
@@ -444,6 +473,24 @@ class TestRefresh:
                                "FROM hydrogenase_classifications WHERE protein_id = 'p_1h'")
         assert rows == [(ASSIGNED, "MM2022", hashlib.sha256(b"stub reference").hexdigest(),
                          hyd.CLASSIFIER_VERSION)]
+        # KOfam support: recorded per protein and emitted as flag labels only
+        support = dict(_query(db_path, "SELECT protein_id, ko_support FROM hydrogenase_classifications"))
+        assert (support["p_3d"], support["p_1h"], support["p_2a"]) == (SUBGROUP, CONFLICT, COMPATIBLE)
+        assert "hyddb_ko_supported" in _legacy(db_path, "p_3d")
+        relations = set(_query(db_path, "SELECT relation FROM semantic_atoms WHERE protein_id = 'p_1h' "
+                                        "AND atom_id = 'hyddb_ko_conflict'"))
+        assert relations == {("flags",)}
+
+    def test_publish_replaces_a_previous_classification_schema(self, db_path, reference_dir):
+        conn = duckdb.connect(str(db_path))
+        conn.execute("CREATE TABLE hydrogenase_classifications (protein_id VARCHAR PRIMARY KEY, outcome VARCHAR)")
+        conn.execute("INSERT INTO hydrogenase_classifications VALUES ('stale', 'assigned')")
+        conn.close()
+        refresh_hydrogenases(db_path, dry_run=False, reference_dir=reference_dir, search=stub_search)
+        columns = {r[0] for r in _query(db_path, "SELECT column_name FROM information_schema.columns "
+                                                 "WHERE table_name = 'hydrogenase_classifications'")}
+        assert {"ko_support", "ko_support_detail"} <= columns
+        assert _query(db_path, "SELECT COUNT(*) FROM hydrogenase_classifications WHERE protein_id = 'stale'") == [(0,)]
 
     def test_refresh_is_idempotent(self, db_path, reference_dir):
         refresh_hydrogenases(db_path, dry_run=False, reference_dir=reference_dir, search=stub_search)
@@ -491,3 +538,32 @@ class TestRefresh:
         with pytest.raises(RefreshValidationError, match="sharur migrate"):
             refresh_hydrogenases(db_path, dry_run=True, reference_dir=reference_dir, search=stub_search)
         assert _sha(db_path) == digest
+
+
+# --------------------------------------------------------------------------- #
+# KO -> HydDB subgroup associations
+# --------------------------------------------------------------------------- #
+
+
+class TestKOAssociation:
+    def test_associations_come_from_the_snapshot(self):
+        rows = associations("K14090")  # echE
+        assert [(a.label, a.count, a.total) for a in rows] == [
+            ("[NiFe]_Group_4e", 130, 170), ("[NiFe]_Group_4c", 27, 170), ("[NiFe]_Group_4g", 13, 170)]
+        assert associations("K00001") == ()
+
+    @pytest.mark.parametrize(("kos", "subgroup", "status"), [
+        (["K15830"], "Group_4a", SUBGROUP),
+        (["K14090"], "Group_4e", COMPATIBLE),      # 130/170 falls short of the agreement threshold
+        (["K14090"], "Group_4d", GROUP),
+        (["K15830"], "Group_1h", CONFLICT),
+        (["K15830", "K06281"], "Group_1h", COMPATIBLE),  # conflict needs every associated KO to conflict
+        (["K00001"], "Group_1a", NONE),
+        ([], "Group_1a", NONE),
+    ])
+    def test_support_grades(self, kos, subgroup, status):
+        assert ko_support(kos, "NiFe", subgroup).status == status
+
+    def test_every_associated_label_is_interpreted(self):
+        labels = {(a.hyd_type, a.subgroup) for rows in load_associations().values() for a in rows}
+        assert labels <= set(SUBGROUPS)
