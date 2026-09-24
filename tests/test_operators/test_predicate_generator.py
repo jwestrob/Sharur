@@ -84,11 +84,10 @@ class TestPfamMapping:
         assert "response_regulator" in preds
         assert "two_component" in preds
 
-    def test_pattern_matching(self):
-        """Should apply pattern matching for unmapped domains."""
-        # Unknown accession but has transport in description
+    def test_unmapped_families_get_no_predicates(self):
+        """Lookup is static; descriptions of unmapped families are not pattern-matched."""
         preds = get_predicates_for_pfam("PF99999", "Unknown", "Some transport protein")
-        assert "transporter" in preds
+        assert preds == []
 
     def test_enzyme_domains(self):
         """Should map enzyme domains."""
@@ -134,13 +133,12 @@ class TestPfamMapping:
         """Should map SufBD N-terminal region to Fe-S assembly."""
         preds = get_predicates_for_pfam("PF19295", "SufBD_N", "SufBD protein N-terminal region")
         assert "iron_sulfur_biosynthesis" in preds
-        assert "iron_sulfur" in preds
 
     def test_tnib_mapping(self):
         """Should map TniB as mobile-element associated."""
         preds = get_predicates_for_pfam("PF05621", "TniB", "Bacterial TniB protein")
         assert "mobile_element" in preds
-        assert "transposase" in preds
+        assert "transposase" not in preds  # TniB is the transposition ATPase, not the transposase
 
     def test_hhh_pattern_mapping(self):
         """Should map helix-hairpin-helix domains as DNA-binding."""
@@ -149,15 +147,16 @@ class TestPfamMapping:
 
     def test_high_volume_residual_pfam_mappings(self):
         """Common DPANN residual PFAM domains should map directly."""
+        # Pfam's name, description and GO for SET state no methyltransferase activity.
         preds = get_predicates_for_pfam("PF00856", "SET", "SET domain")
-        assert "methyltransferase" in preds
+        assert "methyltransferase" not in preds
 
         preds = get_predicates_for_pfam("PF01475", "FUR", "Ferric uptake regulator family")
         assert "transcription_factor" in preds
         assert "metal_homeostasis" in preds
 
         preds = get_predicates_for_pfam("PF21436", "STT3-PglB_core", "STT3/PglB/AglB core domain")
-        assert "glycosyltransferase" in preds
+        assert "glycosyltransferase" not in preds
 
         preds = get_predicates_for_pfam("PF01119", "DNA_mis_repair", "DNA mismatch repair protein, C-terminal domain")
         assert "dna_repair" in preds
@@ -169,7 +168,6 @@ class TestPfamMapping:
 
         preds = get_predicates_for_pfam("PF21984", "DnaD_N", "DnaD N-terminal domain")
         assert "replication" in preds
-        assert "dna_binding" in preds
 
         preds = get_predicates_for_pfam(
             "PF24827",
@@ -179,52 +177,45 @@ class TestPfamMapping:
         assert "hydrolase" in preds
         assert "amidase" in preds
 
-    def test_duplicate_pfam_mappings_are_merged(self):
-        """Duplicate in-code PFAM keys should retain the union of meanings."""
+    def test_evidence_supported_meanings_are_kept(self):
+        """Each family keeps the meanings its Pfam information supports."""
         preds = get_predicates_for_pfam("PF00374", "NiFeSe_Hases", "NiFeSe hydrogenase")
-        assert "nife_hydrogenase" in preds
-        assert "nifese_hydrogenase" in preds
-        assert "metal_binding" in preds
+        assert {"nife_hydrogenase", "nifese_hydrogenase", "metal_binding"} <= set(preds)
 
         preds = get_predicates_for_pfam("PF00485", "PRK", "Phosphoribulokinase")
-        assert "calvin_cycle" in preds
-        assert "carbon_fixation" in preds
-        assert "carbohydrate_active" in preds
+        assert {"calvin_cycle", "carbon_fixation"} <= set(preds)
+        assert "carbohydrate_active" not in preds
 
         preds = get_predicates_for_pfam("PF01061", "ABC2_membrane", "ABC-2 type transporter")
         assert "abc_transporter" in preds
-        assert "zinc_binding" in preds
+        assert "zinc_binding" not in preds
 
         preds = get_predicates_for_pfam("PF02518", "HATPase_c", "Histidine kinase-like ATPase")
-        assert "two_component" in preds
-        assert "chaperone" in preds
+        assert "chaperone" not in preds
 
     def test_packaged_pfam_mapping_file_loads(self):
-        """Curated PFAM mappings should load from the packaged TSV."""
-        mappings = pfam_map._load_pfam_mapping_file(pfam_map.PFAM_MAPPING_FILE)
+        """The generated map loads with evidence for every predicate."""
+        mappings, evidence = pfam_map._load_pfam_mapping_file(pfam_map.PFAM_MAPPING_FILE)
 
-        assert "PF00374" in mappings
         assert "nife_hydrogenase" in mappings["PF00374"]
+        assert mappings["NiFeSe_Hases"] == mappings["PF00374"]
+        assert set(evidence["PF00374"]) == set(mappings["PF00374"])
 
-    def test_pfam_mapping_file_rejects_implicit_duplicates(self, tmp_path):
-        """Duplicate PFAM TSV rows must explicitly opt into merge semantics."""
+    def test_pfam_mapping_file_rejects_duplicate_accessions(self, tmp_path):
+        """Each accession appears once in the generated map."""
         path = tmp_path / "pfam.tsv"
         path.write_text(
-            "PF00001\tmembrane\t\t\n"
-            "PF00001\ttransporter\t\t\n"
+            "PF00001\t7tm_1\tmembrane\tmembrane=go:GO:0016020\n"
+            "PF00001\t7tm_1\ttransporter\ttransporter=text:transport\n"
         )
-
-        with pytest.raises(ValueError, match="duplicate PFAM mapping"):
+        with pytest.raises(ValueError, match="duplicate accession"):
             pfam_map._load_pfam_mapping_file(path)
 
-        path.write_text(
-            "PF00001\tmembrane\t\t\n"
-            "PF00001\ttransporter\t\tmerge\n"
-        )
-        assert pfam_map._load_pfam_mapping_file(path)["PF00001"] == [
-            "membrane",
-            "transporter",
-        ]
+    def test_pfam_mapping_file_requires_evidence_for_each_predicate(self, tmp_path):
+        path = tmp_path / "pfam.tsv"
+        path.write_text("PF00001\t7tm_1\tmembrane,transporter\tmembrane=go:GO:0016020\n")
+        with pytest.raises(ValueError, match="evidence does not cover"):
+            pfam_map._load_pfam_mapping_file(path)
 
 
 class TestKeggMapping:
@@ -729,20 +720,10 @@ class TestMetalBindingMappings:
         assert "iron_sulfur" in preds
         assert "metal_binding" in preds
 
-    def test_metal_binding_patterns(self):
-        """Should match metal-binding patterns in descriptions."""
-        # Nickel pattern
-        preds = get_predicates_for_pfam("PF99999", "Unknown", "nickel-dependent enzyme")
-        assert "nickel_binding" in preds
-
-        # Copper pattern
-        preds = get_predicates_for_pfam("PF99998", "Unknown", "copper oxidase domain")
-        assert "copper_binding" in preds
-
-        # Cobalt/B12 pattern
-        preds = get_predicates_for_pfam("PF99997", "Unknown", "cobalamin binding protein")
-        assert "cobalt_binding" in preds
-        assert "cobalamin_binding" in preds
+    def test_metal_binding_needs_a_mapped_family(self):
+        """Metal-binding predicates come from mapped families, not free-text descriptions."""
+        assert get_predicates_for_pfam("PF99999", "Unknown", "nickel-dependent enzyme") == []
+        assert "cobalamin_binding" in get_predicates_for_pfam("PF02310", "B12-binding", "")
 
 
 class TestTopologyModule:

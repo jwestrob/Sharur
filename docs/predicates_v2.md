@@ -39,10 +39,10 @@ How confidently the source evidence supports the atom. Deterministic rules only 
 
 | Relation | Meaning | Typical sources |
 |----------|---------|-----------------|
-| `implies` | Strong evidence | KEGG ortholog, HydDB classification, computed properties |
-| `supports` | Moderate evidence | PFAM domain consistent with function, CAZy hit |
-| `flags` | Weak/ambiguous | VOGdb hit, DefenseFinder HMM (pre-system-validation), superfamily |
-| `excludes` | Counter-evidence | Complex I subunit excludes hydrogenase classification |
+| `implies` | Strong evidence | KEGG ortholog, HydDB HMM class, computed properties |
+| `supports` | Moderate evidence | PFAM domain consistent with function, CAZy hit, nearest-reference HydDB subgroup |
+| `flags` | Weak/ambiguous or review | VOGdb hit, DefenseFinder HMM (pre-system-validation), superfamily, hydrogenase review flags |
+| `excludes` | Counter-evidence | Reserved for evidence that rules a function out |
 | `unresolved` | No curated mapping | Annotation accession not in any mapping dict |
 
 ### SemanticAtom
@@ -557,9 +557,9 @@ nife_hydrogenase_validated:
 
 | Name | Purpose |
 |------|---------|
-| `nife_hydrogenase_validated` | NiFe hydrogenase with PFAM corroboration, no Complex I |
+| `nife_hydrogenase_validated` | NiFe hydrogenase with nickel-binding domain evidence and no implied Complex I subunit |
 | `fefe_hydrogenase_validated` | FeFe hydrogenase with iron-sulfur cluster |
-| `energy_conserving_hydrogenase` | Group 4 NiFe (Ech/Mbh) |
+| `energy_conserving_hydrogenase` | Ion-translocating H2-evolving hydrogenase (characterized Group 4 subgroup, Ech, or Mbh) |
 | `novel_membrane_protein` | Unannotated + TM helices |
 | `giant_unannotated` | Giant + no annotation |
 | `giant_multi_domain` | Giant + multi_domain |
@@ -605,12 +605,14 @@ source_defaults:
   kegg: implies       # KEGG orthologs are strong evidence
   pfam: supports      # PFAM domains are moderate evidence
   vogdb: flags        # VOGdb hits are weak/ambiguous
-  hyddb: implies      # HydDB is authoritative for hydrogenases
+  hyddb: implies      # HydDB HMM class (NiFe / FeFe / Fe)
+  hyddb_subgroup: supports  # Nearest-reference subgroup; provisional
   defensefinder: flags        # Raw HMM hits (pre-validation)
   defensefinder_system: implies  # System-validated hits
 
 accession_overrides:
-  PF00374: implies    # NiFeSe_Hases -- definitive NiFe marker
+  PF00374: implies    # NiFeSe_Hases -- NiFe catalytic domain
+  NiFeSe_Hases: implies  # Pfam overrides also list the profile name
   PF04055: flags      # Radical_SAM -- broad superfamily
 ```
 
@@ -785,8 +787,8 @@ generator) worked but had three structural limitations:
 1. **Flat booleans.** `hydrogenase`, `membrane`, and `giant` were all the same type — no
    way to ask "give me all activity-type predicates" or "what localization claims exist for
    this protein," and no way to distinguish a structural observation from a functional claim.
-2. **Hard-coded composite logic.** Rules like "NiFe hydrogenase requires PF00374 AND not
-   Complex I" lived in Python methods, so adding a validation rule meant editing code, not
+2. **Hard-coded composite logic.** Rules combining several domains (for example the NiFe
+   hydrogenase / Complex I domain review) lived in Python methods, so adding a validation rule meant editing code, not
    config.
 3. **No curation feedback.** Every new dataset had hundreds of annotation accessions that hit
    no mapping and silently produced no predicates, with no mechanism to surface
@@ -797,14 +799,16 @@ generator) worked but had three structural limitations:
 V2 deliberately **imports the existing V1 mapping dicts directly** rather than porting ~6200
 lines of Python mappings to YAML:
 
-1. `rules.py` imports `PFAM_TO_PREDICATES`/`PFAM_PATTERNS`, `KEGG_TO_PREDICATES`, etc. from
+1. `rules.py` imports `PFAM_TO_PREDICATES` (the generated, evidence-checked Pfam table), `KEGG_TO_PREDICATES`, etc. from
    `sharur/predicates/mappings/`.
 2. For each emitted V1 predicate, V2 looks up its facet in `facet_assignments.yaml` and its
    relation in `relation_overrides.yaml`. Defaults: facet from the V1 category→facet table
    (below); relation by source — `kegg`/`hyddb`/`defensefinder_system` → `implies`,
-   `pfam`/`cazy` → `supports`, `vogdb`/`defensefinder` (raw HMM) → `flags`.
+   `pfam`/`cazy`/`hyddb_subgroup` → `supports`, `vogdb`/`defensefinder` (raw HMM) → `flags`.
 3. YAML overrides take precedence — this is how specific PFAMs get promoted from `supports`
-   to `implies` (e.g. PF00374 NiFeSe_Hases → `implies hydrogenase`).
+   to `implies` (e.g. PF00374 NiFeSe_Hases → `implies hydrogenase`). Pfam overrides are keyed
+   by accession and profile name, because Stage 07 stores the profile name when its
+   reference map lacks the accession.
 4. Genuinely new rules with no V1 equivalent go directly in YAML.
 
 ### V1 category → V2 facet default mapping

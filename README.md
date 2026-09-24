@@ -271,13 +271,13 @@ Sharur ships with skill specs in `.claude/skills/` that give Claude Code structu
 
 The predicate system is what makes Sharur more than a database wrapper. Annotations are mapped to functional predicates via curated rules:
 
-- **PFAM**: domain-to-predicate mappings (~1,900 rows in `sharur/predicates/mappings/data/pfam_predicates.tsv`) + regex patterns
+- **PFAM**: a generated family-to-predicate table (`sharur/predicates/mappings/data/pfam_predicates.tsv`) in which every pair cites its support from the family's InterPro GO annotation, its Pfam name/description, or an ENZYME name; `scripts/build_pfam_predicate_map.py` builds it from proposals and `tests/test_pfam_map_integrity.py` re-verifies it
 - **KEGG**: KO-to-predicate mappings for metabolic functions
 - **CAZy**: Carbohydrate-active enzyme families
 - **VOGdb**: Viral orthologous groups
 - **Computed**: `giant` (>1000 aa), `unannotated` (no hits), `membrane_protein` (TM helices)
 
-This lets agents ask functional questions ("find electron-bifurcating hydrogenases") instead of remembering accession numbers.
+This lets agents ask functional questions ("find NAD-coupled hydrogenases") instead of remembering accession numbers.
 
 ### Predicate V2 (current backend)
 
@@ -301,7 +301,7 @@ The predicate system is a project very much in progress; there are tens of thous
 | 07 | Builder | Standard DuckDB knowledge base + predicates; optional dbCAN consensus with `--enable-cazymes` |
 | 06 | ESM2 | Standard post-pipeline protein embeddings (required for ELSA) |
 
-Stage 07 also runs **hydrogenase subgroup classification** when HydDB annotations are present: DIAMOND search against the HydDB reference database assigns NiFe/FeFe subgroups (e.g., Group 1a, Group 4e). All classified hits receive subgroup predicates (`nife_group1`, `fefe_groupB`, etc.). Hits lacking PFAM corroboration (including all Group 4 NiFe) are tagged `hyddb_needs_curation` for agent-level neighborhood validation. See `scripts/classify_hydrogenases.py`.
+Stage 07 also runs **hydrogenase subgroup assignment** when HydDB annotations are present: each HydDB-hit protein receives the subgroup of its nearest HydDB reference (DIAMOND), recorded once per protein in `hydrogenase_classifications` with its evidence and provenance. Group predicates (`nife_group1`, `fefe_groupB`, ...) follow every assignment; functional traits follow Søndergaard et al. 2016 Table 1 for characterized subgroups. Calls lacking the catalytic domain for their type carry `hyddb_needs_curation` for neighborhood curation. `scripts/classify_hydrogenases.py` refreshes an existing database through a validated staged copy.
 
 ## Development
 
