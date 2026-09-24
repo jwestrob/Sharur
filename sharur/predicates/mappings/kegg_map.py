@@ -65,7 +65,7 @@ EC_TO_PREDICATES: dict[str, list[str]] = {
 
     # EC 3: Hydrolases
     "3": ["hydrolase"],
-    "3.1": ["hydrolase", "esterase"],  # Ester bonds
+    "3.1": ["hydrolase"],  # Ester bonds (esterase is claimed at 3.1.1)
     "3.1.1": ["hydrolase", "esterase"],  # Carboxylic ester hydrolases
     "3.1.3": ["hydrolase", "phosphatase"],  # Phosphoric monoester
     "3.1.4": ["hydrolase", "phosphodiesterase"],  # Phosphoric diester

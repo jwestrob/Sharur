@@ -3,22 +3,22 @@
 import pytest
 
 from sharur.predicates.generator import (
-    PredicateGenerator,
     AnnotationRecord,
+    PredicateGenerator,
     ProteinRecord,
     generate_predicates_for_proteins,
 )
-from sharur.predicates.vocabulary import (
-    get_predicate,
-    list_predicates,
-    list_categories,
-    get_hierarchy,
-)
-from sharur.predicates.mappings.pfam_map import get_predicates_for_pfam
 from sharur.predicates.mappings import kegg_map, pfam_map
-from sharur.predicates.mappings.kegg_map import get_predicates_for_kegg, get_predicates_for_ec
 from sharur.predicates.mappings.cazy_map import get_predicates_for_cazy
+from sharur.predicates.mappings.kegg_map import get_predicates_for_ec, get_predicates_for_kegg
+from sharur.predicates.mappings.pfam_map import PFAM_EVIDENCE, get_predicates_for_pfam
 from sharur.predicates.mappings.vog_map import get_vog_predicates
+from sharur.predicates.vocabulary import (
+    get_hierarchy,
+    get_predicate,
+    list_categories,
+    list_predicates,
+)
 
 
 class TestVocabulary:
@@ -147,16 +147,20 @@ class TestPfamMapping:
 
     def test_high_volume_residual_pfam_mappings(self):
         """Common DPANN residual PFAM domains should map directly."""
-        # Pfam's name, description and GO for SET state no methyltransferase activity.
+        # Pfam's name, description and GO for SET state no methyltransferase activity;
+        # reviewed single-domain SET proteins carry curated methyltransferase ECs.
         preds = get_predicates_for_pfam("PF00856", "SET", "SET domain")
-        assert "methyltransferase" not in preds
+        assert "methyltransferase" in preds
+        assert PFAM_EVIDENCE["PF00856"]["methyltransferase"].endswith("single-domain 90/90")
 
         preds = get_predicates_for_pfam("PF01475", "FUR", "Ferric uptake regulator family")
         assert "transcription_factor" in preds
         assert "metal_homeostasis" in preds
 
+        # STT3 cores co-occur with other domains; every reviewed carrier is an oligosaccharyltransferase.
         preds = get_predicates_for_pfam("PF21436", "STT3-PglB_core", "STT3/PglB/AglB core domain")
-        assert "glycosyltransferase" not in preds
+        assert "glycosyltransferase" in preds
+        assert PFAM_EVIDENCE["PF21436"]["glycosyltransferase"].endswith("co-domains excluded")
 
         preds = get_predicates_for_pfam("PF01119", "DNA_mis_repair", "DNA mismatch repair protein, C-terminal domain")
         assert "dna_repair" in preds

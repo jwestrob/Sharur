@@ -159,16 +159,19 @@ def test_materialize_semantic_terms_from_existing_v2_state():
     """Backfill should rebuild semantic_terms without recomputing atoms."""
     store = _seed_store()
     generate_and_persist_v2(store, chunk_size=1, return_states=False)
+    terms_sql = """
+        SELECT protein_id, term_id, term_kind, facet, relation, source_db, source_accession
+        FROM semantic_terms
+        ORDER BY ALL
+    """
+    generated = store.conn.execute(terms_sql).fetchall()
     store.execute("DELETE FROM semantic_terms;")
 
     written = materialize_semantic_terms_from_v2(store, chunk_size=1)
 
     assert written > 0
-    assert store.conn.execute("""
-        SELECT COUNT(*)
-        FROM semantic_terms
-        WHERE protein_id = 'p1' AND term_id = 'pfam:PF00005'
-    """).fetchone()[0] == 1
+    assert store.conn.execute(terms_sql).fetchall() == generated
+    assert any(row[:3] == ("p1", "pfam:PF00005", "direct_access") for row in generated)
 
 
 def test_refresh_composites_updates_state_terms_and_legacy_cache():

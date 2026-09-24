@@ -8,7 +8,10 @@ A (Pfam family, predicate) pair is supported by one of:
   (see :mod:`sharur.predicates.mappings.pfam_evidence_spec` for conventions);
 - ``enzyme:<EC> (<name>)``: the description names an enzyme listed in the
   Expasy ENZYME database whose EC class maps to the predicate through
-  :data:`sharur.predicates.mappings.kegg_map.EC_TO_PREDICATES`.
+  :data:`sharur.predicates.mappings.kegg_map.EC_TO_PREDICATES`;
+- ``swissprot:single k/n`` or ``swissprot:all k/n``: reviewed UniProtKB/Swiss-Prot
+  proteins containing the family agree on the predicate through curator-assigned
+  EC numbers or experimentally supported GO terms (thresholds below).
 
 ``scripts/build_pfam_predicate_map.py`` applies these rules to build the shipped
 map; ``tests/test_pfam_map_integrity.py`` re-verifies every shipped pair.
@@ -22,6 +25,34 @@ from functools import cache
 from sharur.predicates.mappings.pfam_evidence_spec import HOMONYMS
 from sharur.predicates.mappings.pfam_evidence_spec import E as EVIDENCE
 
+
+# Swiss-Prot consensus. Coverage: the predicate holds for >= SWISSPROT_COVERAGE[1]
+# of >= SWISSPROT_COVERAGE[0] reviewed carriers of the family, with a Wilson 95%
+# lower bound >= SWISSPROT_MIN_LOWER_BOUND. Attribution: single-domain carriers
+# (when >= SWISSPROT_SINGLE[0] exist) agree at >= SWISSPROT_SINGLE[1]; otherwise
+# no family that carries the predicate on its own evidence co-occurs in
+# >= SWISSPROT_CODOMAIN_FRACTION of the supporting proteins.
+SWISSPROT_COVERAGE = (5, 0.8)
+SWISSPROT_MIN_LOWER_BOUND = 0.5
+SWISSPROT_SINGLE = (3, 0.8)
+SWISSPROT_CODOMAIN_FRACTION = 0.9
+
+
+def wilson_lower_bound(k: int, n: int, z: float = 1.96) -> float:
+    """Lower bound of the Wilson score interval for k successes in n trials."""
+    p = k / n
+    centre = p + z * z / (2 * n)
+    spread = z * (p * (1 - p) / n + z * z / (4 * n * n)) ** 0.5
+    return (centre - spread) / (1 + z * z / n)
+
+
+# Fold/architecture and bookkeeping predicates: function evidence never establishes them.
+SWISSPROT_EXCLUDED = frozenset({
+    "repeat_domain", "tpr_repeat", "wd40_repeat", "lrr_repeat", "kelch_repeat", "heat_repeat",
+    "ankyrin_repeat", "sel1_repeat", "helix_turn_helix", "winged_helix", "ribbon_helix_helix",
+    "helix_loop_helix", "zinc_finger", "coiled_coil", "beta_barrel", "beta_helix", "alpha_helical",
+    "p_loop", "aaa_domain", "cbs_domain", "pin_domain", "binding", "hypothetical", "unannotated",
+})
 
 # Predicate names used by earlier mapping layers that are not in the
 # vocabulary: vocabulary equivalent, or None when no equivalent exists.

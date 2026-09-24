@@ -6,7 +6,9 @@ Proposals come from ``pfam_predicate_proposals.tsv`` (curated family rows) and
 name/description). Each proposed (family, predicate) pair ships only when
 :func:`sharur.predicates.mappings.pfam_evidence.judge` finds support in the
 family's InterPro GO annotation, its Pfam name/description, or an ENZYME name
-in its description. Outputs, all under ``sharur/predicates/mappings/data``:
+in its description. With ``--swissprot``, a pair also ships when reviewed
+Swiss-Prot proteins carrying the family agree on it (curated EC numbers and
+experimentally evidenced GO terms; see :func:`swissprot_consensus`). Outputs, all under ``sharur/predicates/mappings/data``:
 
 - ``pfam_predicates.tsv``: accession, name, predicates, per-predicate evidence.
 - ``pfam_evidence_snapshot.tsv``: the Pfam/GO/ENZYME facts each shipped pair
@@ -16,6 +18,7 @@ Usage:
     python scripts/build_pfam_predicate_map.py \\
         --pfam-hmm ~/.config/Astra/PFAM/Pfam-A.hmm --pfam-clans Pfam-A.clans.tsv.gz \\
         --pfam2go pfam2go --go-obo go-basic.obo --enzyme-dat enzyme.dat \\
+        --swissprot uniprot_sprot.dat.gz --swissprot-release 2026_03 \\
         --report dropped_pairs.tsv
 """
 
@@ -36,13 +39,20 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from sharur.predicates.mappings.pfam_evidence import (  # noqa: E402
+from sharur.predicates.mappings.kegg_map import get_predicates_for_ec
+from sharur.predicates.mappings.pfam_evidence import (
     EVIDENCE,
+    SWISSPROT_CODOMAIN_FRACTION,
+    SWISSPROT_COVERAGE,
+    SWISSPROT_EXCLUDED,
+    SWISSPROT_MIN_LOWER_BOUND,
+    SWISSPROT_SINGLE,
     enzyme_phrases,
     judge,
     resolve,
+    wilson_lower_bound,
 )
-from sharur.predicates.vocabulary import PREDICATE_BY_ID  # noqa: E402
+from sharur.predicates.vocabulary import PREDICATE_BY_ID
 
 
 DATA = Path(__file__).resolve().parents[1] / "sharur/predicates/mappings/data"
@@ -103,6 +113,7 @@ def read_go(pfam2go: Path, obo: Path) -> dict[str, set[str]]:
         m = re.match(r"Pfam:(PF\d+) \S+ > GO:.* ; (GO:\d+)", line)
         if m:
             closure[m.group(1)] |= ancestors(m.group(2))
+    read_go.ancestors = ancestors
     return closure
 
 
@@ -131,6 +142,92 @@ def read_enzyme_names(path: Path) -> dict[str, list[str]]:
                             names[stripped].add(cur["ec"])
             cur = None
     return {k: sorted(v) for k, v in names.items()}
+
+
+EXPERIMENTAL_GO = {"EXP", "IDA", "IPI", "IMP", "IGI", "IEP", "HTP", "HDA", "HMP", "HGI", "HEP"}
+
+
+def read_swissprot(path: Path, ancestors) -> list[tuple[frozenset, frozenset]]:
+    """Reviewed proteins as (Pfam accessions, predicates from curated EC and experimental GO)."""
+    anchor_preds: dict[str, set[str]] = defaultdict(set)
+    for pred, spec in EVIDENCE.items():
+        for go in spec["go"]:
+            anchor_preds[go].add(pred)
+
+    @cache
+    def go_preds(go: str) -> frozenset[str]:
+        return frozenset(p for a in ancestors(go) for p in anchor_preds.get(a, ()))
+
+    @cache
+    def ec_preds(ec: str) -> frozenset[str]:
+        return frozenset(get_predicates_for_ec(ec))
+
+    proteins, pfams, preds = [], set(), set()
+    with gzip.open(path, "rt", encoding="latin-1") as handle:
+        for line in handle:
+            tag = line[:2]
+            if tag == "DR":
+                if line.startswith("DR   Pfam; "):
+                    pfams.add(line[11:18])
+                elif line.startswith("DR   GO; "):
+                    fields = line[5:].rstrip(".\n").split("; ")
+                    if len(fields) >= 4 and fields[3].split(":")[0] in EXPERIMENTAL_GO:
+                        preds |= go_preds(fields[1])
+            elif tag == "DE" and "EC=" in line:
+                preds |= ec_preds(line.split("EC=", 1)[1].split()[0].rstrip(";"))
+            elif tag == "//":
+                if pfams:
+                    proteins.append((frozenset(pfams), frozenset(preds & set(PREDICATE_BY_ID))))
+                pfams, preds = set(), set()
+    return proteins
+
+
+def swissprot_consensus(proteins, candidates, supported) -> dict[tuple[str, str], str]:
+    """Evidence strings for (family, predicate) pairs supported by reviewed-protein consensus.
+
+    Coverage and attribution thresholds are documented beside SWISSPROT_COVERAGE.
+    """
+    by_family: dict[str, list[int]] = defaultdict(list)
+    for i, (fams, _) in enumerate(proteins):
+        for f in fams:
+            by_family[f].append(i)
+    min_n, min_frac = SWISSPROT_COVERAGE
+    min_single, single_frac = SWISSPROT_SINGLE
+
+    covered: dict[tuple[str, str], list[int]] = {}
+    for fam, pred_set in candidates.items():
+        members = by_family.get(fam, ())
+        if len(members) < min_n:
+            continue
+        for pred in pred_set - SWISSPROT_EXCLUDED:
+            hits = [i for i in members if pred in proteins[i][1]]
+            if len(hits) >= min_frac * len(members) \
+                    and wilson_lower_bound(len(hits), len(members)) >= SWISSPROT_MIN_LOWER_BOUND:
+                covered[(fam, pred)] = hits
+
+    result: dict[tuple[str, str], str] = {}
+    unattributed = []
+    for (fam, pred), hits in covered.items():
+        coverage = f"swissprot:{len(hits)}/{len(by_family[fam])}"
+        single = [i for i in by_family[fam] if len(proteins[i][0]) == 1]
+        if len(single) >= min_single:
+            k = sum(pred in proteins[i][1] for i in single)
+            if k >= single_frac * len(single):
+                result[(fam, pred)] = f"{coverage} single-domain {k}/{len(single)}"
+        else:
+            unattributed.append((fam, pred, hits, coverage))
+
+    def owns(fam, pred):
+        return (fam, pred) in result or pred in supported.get(fam, ())
+
+    for fam, pred, hits, coverage in unattributed:
+        co = defaultdict(int)
+        for i in hits:
+            for g in proteins[i][0] - {fam}:
+                co[g] += 1
+        if not any(c >= SWISSPROT_CODOMAIN_FRACTION * len(hits) and owns(g, pred) for g, c in co.items()):
+            result[(fam, pred)] = f"{coverage} co-domains excluded"
+    return result
 
 
 def read_proposals(path: Path, by_name: dict[str, str]) -> dict[str, set[str]]:
@@ -165,6 +262,8 @@ def main() -> int:
     parser.add_argument("--pfam2go", type=Path, required=True)
     parser.add_argument("--go-obo", type=Path, required=True)
     parser.add_argument("--enzyme-dat", type=Path, required=True)
+    parser.add_argument("--swissprot", type=Path, help="uniprot_sprot.dat.gz (reviewed-protein consensus tier)")
+    parser.add_argument("--swissprot-release", default="", help="Release label recorded in the output header")
     parser.add_argument("--report", type=Path, help="TSV of proposed pairs that lack evidence")
     args = parser.parse_args()
 
@@ -182,7 +281,7 @@ def main() -> int:
                 proposals[acc].update(preds)
 
     shipped: dict[str, dict[str, str]] = {}
-    dropped = []
+    pending: dict[str, dict[str, str]] = defaultdict(dict)  # acc -> predicate -> original proposal
     for acc in sorted(proposals):
         name, desc = families[acc]
         for proposed in sorted(proposals[acc]):
@@ -191,13 +290,38 @@ def main() -> int:
             if evidence:
                 shipped.setdefault(acc, {})[predicate] = evidence
             else:
-                dropped.append((acc, name, desc, proposed, predicate or "(no vocabulary equivalent)"))
+                pending[acc][predicate or f"(no vocabulary equivalent: {proposed})"] = proposed
+
+    swissprot_note = ""
+    if args.swissprot:
+        proteins = read_swissprot(args.swissprot, read_go.ancestors)
+        candidates: dict[str, set[str]] = defaultdict(set)
+        for acc, preds in pending.items():
+            candidates[acc] |= {p for p in preds if p in PREDICATE_BY_ID}
+        for fams, preds in proteins:  # consensus may also add predicates nobody proposed
+            if len(fams) == 1:
+                (fam,) = fams
+                if fam in families:
+                    candidates[fam] |= preds
+        supported = {acc: set(v) for acc, v in shipped.items()}
+        added = 0
+        for (acc, pred), evidence in sorted(swissprot_consensus(proteins, candidates, supported).items()):
+            if acc in families and pred not in shipped.get(acc, {}):
+                shipped.setdefault(acc, {})[pred] = evidence
+                pending.get(acc, {}).pop(pred, None)
+                added += 1
+        swissprot_note = f"# Swiss-Prot: {args.swissprot.name} {args.swissprot_release} sha256 {sha256(args.swissprot)[:16]} ({len(proteins):,} reviewed proteins with Pfam)\n"
+        print(f"Swiss-Prot consensus added {added:,} pairs")
+
+    dropped = [(acc, *families[acc], proposed, pred) for acc, preds in sorted(pending.items())
+               for pred, proposed in sorted(preds.items())]
 
     sources = (
         f"# Pfam: {args.pfam_hmm.name} sha256 {sha256(args.pfam_hmm)[:16]} ({len(installed)} families); "
         f"{args.pfam_clans.name} ({len(current)} families)\n"
         f"# GO: {args.pfam2go.name} sha256 {sha256(args.pfam2go)[:16]}; {args.go_obo.name} sha256 {sha256(args.go_obo)[:16]}\n"
         f"# ENZYME: {args.enzyme_dat.name} sha256 {sha256(args.enzyme_dat)[:16]}\n"
+        + swissprot_note
     )
     anchors = {g for spec in EVIDENCE.values() for g in spec["go"]}
     with open(DATA / "pfam_predicates.tsv", "w") as out, open(DATA / "pfam_evidence_snapshot.tsv", "w") as snap:
