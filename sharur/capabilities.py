@@ -414,6 +414,53 @@ def _annotation_checks(
     return capabilities
 
 
+_MAP_LABELS = {
+    "pfam_map_sha256": "Pfam map",
+    "kegg_map_sha256": "KEGG map",
+    "kegg_rules_sha256": "KEGG rules",
+    "vocabulary_sha256": "vocabulary",
+    "v2_config_sha256": "V2 config",
+}
+
+
+def _predicate_map_check(store: DuckDBStore) -> Capability:
+    """Whether the stored predicates came from the maps installed now."""
+    from sharur.predicates.provenance import map_status
+
+    status = map_status(store)
+    installed = status.installed or {}
+    evidence: dict[str, Any] = {
+        "installed_kegg_release": installed.get("kegg_release") or "no local KEGG build",
+        "installed_pfam_sources": installed.get("pfam_sources"),
+    }
+    remediation = "Regenerate V2 predicates (`sharur compute-predicates --db DATASET/sharur.duckdb`)."
+    if status.state == "unstamped":
+        return Capability(
+            "predicate_maps", CapabilityState.stale,
+            "Predicates carry no map provenance stamp (generated before stamping existed).",
+            evidence=evidence, remediation=remediation,
+        )
+    stamp = status.stamp or {}
+    evidence.update({
+        "generated_at": str(stamp.get("generated_at")),
+        "generation_id": stamp.get("generation_id"),
+        "stamped_kegg_release": stamp.get("kegg_release") or "no local KEGG build",
+        "stamped_git_commit": stamp.get("git_commit"),
+        "changed": [_MAP_LABELS[f] for f in status.changed],
+        "later_subset_generations_on_other_maps": status.mixed_subsets,
+    })
+    if status.state == "stale":
+        return Capability(
+            "predicate_maps", CapabilityState.stale,
+            f"Predicates were generated with other maps than those installed ({', '.join(evidence['changed'])} changed).",
+            evidence=evidence, remediation=remediation,
+        )
+    summary = "Predicates match the installed maps."
+    if status.mixed_subsets:
+        summary += f" {status.mixed_subsets} later subset generation(s) used other maps."
+    return Capability("predicate_maps", CapabilityState.available, summary, evidence=evidence)
+
+
 def _semantic_checks(
     store: DuckDBStore,
     tables: dict[str, set[str]],
@@ -462,6 +509,8 @@ def _semantic_checks(
                 ),
             )
         )
+
+    checks.append(_predicate_map_check(store))
 
     if "protein_predicates" not in tables:
         checks.append(

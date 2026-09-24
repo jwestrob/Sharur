@@ -26,6 +26,7 @@ import pandas as pd
 
 from sharur.predicates.generator import AnnotationRecord, ProteinRecord
 from sharur.predicates_v2.aggregator import aggregate_atoms
+from sharur.predicates.provenance import record_generation
 from sharur.predicates_v2.compat import (
     direct_access_predicate_from_atom,
     direct_access_prefix_case_sql,
@@ -561,6 +562,16 @@ def generate_and_persist_v2(
         if checkpoint_enabled:
             _mark_full_generation_complete(store)
             _clear_generation_tables_best_effort(store)
+
+        record_generation(
+            store,
+            scope="full" if protein_ids is None else "subset",
+            protein_count=total_count,
+            semantic_fingerprint=semantic_fingerprint or _semantic_generation_fingerprint(
+                predict_topology=predict_topology,
+                update_legacy_predicates=update_legacy_predicates,
+            ),
+        )
     except BaseException:
         if checkpoint_enabled:
             _mark_full_generation_failed(store)
@@ -977,6 +988,12 @@ def _semantic_generation_fingerprint(
             digest.update(f"{label}/{path.relative_to(root)}\0".encode())
             digest.update(path.read_bytes())
             digest.update(b"\0")
+    # The KEGG map is built locally, outside the package trees above.
+    from sharur.predicates.mappings.kegg_map import KEGG_MAPPING_FILE
+
+    digest.update(b"kegg_map\0")
+    if KEGG_MAPPING_FILE is not None:
+        digest.update(KEGG_MAPPING_FILE.read_bytes())
     return digest.hexdigest()
 
 

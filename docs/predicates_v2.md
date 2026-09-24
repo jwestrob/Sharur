@@ -672,6 +672,22 @@ To promote or demote a specific accession:
    - Or add an accession override in `relation_overrides.yaml`
 4. Re-run V2 to verify the accession is no longer unresolved
 
+## Map provenance
+
+Every generation (full or subset) appends a row to `predicate_provenance` (schema
+version 7): the sha256 of the shipped Pfam map and its source releases, the sha256 and
+KEGG database dates of the local KEGG build (`sharur setup-kegg`; NULL when absent),
+hashes of the KEGG rules, vocabulary and V2 config, the semantic fingerprint, the
+Sharur version and git commit. `sharur preflight` reports `predicate_maps`:
+`available` when the latest full generation used the installed maps, `stale` when a
+map changed since (naming which) or when the database predates stamping. Regenerate
+to clear it.
+
+```sql
+SELECT generation_id, generated_at, scope, protein_count, kegg_release, pfam_sources
+FROM predicate_provenance ORDER BY generation_id;
+```
+
 ## DuckDB Tables
 
 Current V2 tables are part of schema version 5. The core V2 tables can also be

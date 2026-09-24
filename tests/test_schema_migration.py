@@ -68,7 +68,7 @@ def test_schema_version_table_has_correct_data(fresh_conn):
 
 def test_schema_version_constant():
     """SCHEMA_VERSION constant matches latest migration."""
-    assert SCHEMA_VERSION == 6
+    assert SCHEMA_VERSION == 7
 
 
 def test_duckdb_store_runs_migrations():
@@ -175,8 +175,8 @@ def test_v5_migration_quarantines_legacy_named_system_calls():
 
     applied = run_migrations(conn)
 
-    assert applied == 2
-    assert get_current_version(conn) == 6
+    assert applied == SCHEMA_VERSION - 4
+    assert get_current_version(conn) == SCHEMA_VERSION
     assert conn.execute("SELECT COUNT(*) FROM secretion_systems").fetchone()[0] == 0
     assert conn.execute(
         "SELECT source FROM annotations ORDER BY annotation_id"

@@ -5,6 +5,8 @@ from __future__ import annotations
 from contextlib import suppress
 from typing import TYPE_CHECKING
 
+from sharur.predicates.provenance import CREATE_SQL as PROVENANCE_SQL
+
 
 if TYPE_CHECKING:
     import duckdb
@@ -141,6 +143,15 @@ MIGRATIONS: list[tuple[int, str, str]] = [
         """
         INSERT INTO schema_version (version, description)
             VALUES (6, 'Contig navigation index');
+        """,
+    ),
+    (
+        7,
+        "Predicate map provenance stamps",
+        f"""
+        {PROVENANCE_SQL};
+        INSERT INTO schema_version (version, description)
+            VALUES (7, 'Predicate map provenance stamps');
         """,
     ),
 ]

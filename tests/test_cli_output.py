@@ -6,6 +6,7 @@ from typer.testing import CliRunner
 
 from sharur.cli import app
 from sharur.storage.duckdb_store import DuckDBStore
+from sharur.storage.schema import SCHEMA_VERSION
 
 
 def _make_cli_database(tmp_path):
@@ -35,7 +36,7 @@ def test_overview_json_output_is_structured(tmp_path):
     payload = json.loads(result.output)
     assert payload["status"] == "ok"
     assert payload["raw"]["genome_count"] == 1
-    assert payload["trace"]["schema_version"] == "6"
+    assert payload["trace"]["schema_version"] == str(SCHEMA_VERSION)
 
 
 def test_genomes_jsonl_output_emits_one_record_per_row(tmp_path):

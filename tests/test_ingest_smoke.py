@@ -7,6 +7,7 @@ import pytest
 from pandas.errors import EmptyDataError
 
 import sharur.colocation
+from sharur.storage.schema import SCHEMA_VERSION
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -270,7 +271,7 @@ def test_stage07_restart_v2_preserves_upstream_tables(tmp_path):
     ).fetchone()[0] == 1
     assert builder.conn.execute(
         "SELECT MAX(version) FROM schema_version"
-    ).fetchone()[0] == 6
+    ).fetchone()[0] == SCHEMA_VERSION
     assert "contig_id" in {
         row[0]
         for row in builder.conn.execute("DESCRIBE defense_systems").fetchall()

@@ -1,6 +1,6 @@
 """DuckDB schema for Sharur."""
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS bins (

@@ -39,6 +39,8 @@ from sharur.hydrogenase.subgroups import RETIRED_TERMS
 # Tables the refresh may change, and how far. Everything else must be identical.
 _PROTEIN_SCOPED = ("semantic_atoms", "semantic_state", "semantic_terms", "protein_predicates")
 _REPLACED = ("hydrogenase_classifications",)
+# Append-only: the refresh adds one subset stamp and leaves earlier stamps unchanged.
+_APPENDED = "predicate_provenance"
 
 
 class RefreshValidationError(RuntimeError):
@@ -156,10 +158,19 @@ def _fingerprint(conn, table: str, where: str = "") -> tuple[int, int]:
     return int(count), int(digest)
 
 
-def _fingerprints(conn) -> dict[str, tuple[int, int]]:
+def _max_generation(conn) -> int:
+    if _APPENDED not in _tables(conn):
+        return 0
+    return int(conn.execute(f"SELECT COALESCE(MAX(generation_id), 0) FROM {_APPENDED}").fetchone()[0])
+
+
+def _fingerprints(conn, provenance_max: int) -> dict[str, tuple[int, int]]:
     prints = {}
     for table in _tables(conn):
         if table in _REPLACED:
+            continue
+        if table == _APPENDED:
+            prints[table] = _fingerprint(conn, table, f"WHERE generation_id <= {provenance_max}")
             continue
         if table == "annotations":
             prints[table] = _fingerprint(conn, table, "WHERE source <> 'hyddb_subgroup'")
@@ -246,7 +257,8 @@ def refresh_hydrogenases(
             if affected:
                 conn.executemany("INSERT INTO _refresh_affected VALUES (?)", [(p,) for p in affected])
             tables_before = set(_tables(conn))
-            prints_before = _fingerprints(conn)
+            provenance_max = _max_generation(conn)
+            prints_before = _fingerprints(conn, provenance_max)
             totals_before = {
                 table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                 for table in ("semantic_state", "protein_predicates") if table in tables_before
@@ -277,7 +289,8 @@ def refresh_hydrogenases(
             conn.execute("CREATE TEMP TABLE _refresh_affected (protein_id VARCHAR)")
             if affected:
                 conn.executemany("INSERT INTO _refresh_affected VALUES (?)", [(p,) for p in affected])
-            _validate(conn, report, results, affected, prints_before, tables_before, totals_before)
+            _validate(conn, report, results, affected, prints_before, tables_before, totals_before,
+                      provenance_max)
             after_labels = _derived_labels(conn)
             conn.execute("CHECKPOINT")
         finally:
@@ -330,21 +343,29 @@ def refresh_hydrogenases(
         report.elapsed_s = time.monotonic() - started
 
 
-def _validate(conn, report, results, affected, prints_before, tables_before, totals_before) -> None:
+def _validate(conn, report, results, affected, prints_before, tables_before, totals_before,
+              provenance_max: int = 0) -> None:
     def check(name: str, ok: bool, detail: str) -> None:
         report.checks[name] = ("PASS " if ok else "FAIL ") + detail
         if not ok:
             raise RefreshValidationError(f"{name}: {detail}")
 
-    prints_after = _fingerprints(conn)
+    prints_after = _fingerprints(conn, provenance_max)
     for table, before in sorted(prints_before.items()):
         after = prints_after.get(table)
         scope = ("outside regenerated proteins" if table in _PROTEIN_SCOPED
+                 else "stamps before this refresh" if table == _APPENDED
                  else "raw HydDB HMM rows" if table == "annotations[hyddb]"
                  else "excluding hyddb_subgroup rows" if table == "annotations" else "all rows")
         check(f"unchanged:{table}", after == before, f"{before[0]:,} rows, {scope}")
 
     report.new_tables = sorted(set(_tables(conn)) - tables_before - set(_REPLACED))
+
+    appended = conn.execute(
+        f"SELECT scope, protein_count FROM {_APPENDED} WHERE generation_id > {provenance_max}"
+    ).fetchall()
+    check("provenance_stamped", len(appended) == 1 and appended[0][0] == "subset",
+          f"{len(appended)} new stamp(s): {appended}")
 
     hyd_proteins = conn.execute(
         "SELECT COUNT(DISTINCT protein_id) FROM annotations WHERE LOWER(source) = 'hyddb'"

@@ -4,6 +4,7 @@ import json
 
 from sharur.operators.base import OperatorContext
 from sharur.storage.duckdb_store import DuckDBStore
+from sharur.storage.schema import SCHEMA_VERSION
 
 
 def _result_for_store(store):
@@ -19,7 +20,7 @@ def test_trace_uses_live_schema_version(tmp_path):
 
     result = _result_for_store(store)
 
-    assert result.trace.schema_version == "6"
+    assert result.trace.schema_version == str(SCHEMA_VERSION)
     assert "sharur.duckdb@size=" in result.trace.dataset_version
 
 
