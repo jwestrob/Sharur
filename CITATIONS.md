@@ -1,6 +1,6 @@
 # Tool and Database Citations
 
-Citations for all bioinformatics tools and databases used in the Bennu metagenomic analysis pipeline.
+Citations for all bioinformatics tools and databases used in the Sharur metagenomic analysis pipeline.
 
 ---
 

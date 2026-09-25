@@ -15,7 +15,7 @@
   },
   "skills": {
     "explore": {
-      "description": "Curiosity-driven exploration of Bennu metagenomic data. Find surprising loci, test hypotheses, build narratives. Use with --focus metabolism|phage|defense|novel",
+      "description": "Curiosity-driven exploration of Sharur metagenomic data. Find surprising loci, test hypotheses, build narratives. Use with --focus metabolism|phage|defense|novel",
       "file": "skills/explore.md"
     },
     "survey": {
