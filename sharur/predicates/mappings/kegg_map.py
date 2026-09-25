@@ -79,6 +79,27 @@ EC_TO_PREDICATES: dict[str, list[str]] = {
     "1.22.1": ["oxidoreductase", "nad_binding"],  # ENZYME enzclass: With NAD(+) or NADP(+) as acceptor.
     "1.23.1": ["oxidoreductase", "nad_binding"],  # ENZYME enzclass: With NADH or NADPH as donor.
 
+    # Substrate-named enzymes (ENZYME accepted names)
+    "3.2.1.4": ["hydrolase", "glycosidase", "carbohydrate_active", "cellulase"],  # cellulase
+    "3.2.1.91": ["hydrolase", "glycosidase", "carbohydrate_active", "cellulase"],  # cellulose 1,4-beta-cellobiosidase (non-reducing end)
+    "3.2.1.176": ["hydrolase", "glycosidase", "carbohydrate_active", "cellulase"],  # cellulose 1,4-beta-cellobiosidase (reducing end)
+    "3.2.1.14": ["hydrolase", "glycosidase", "carbohydrate_active", "chitinase"],  # chitinase
+    "3.2.1.1": ["hydrolase", "glycosidase", "carbohydrate_active", "amylase"],  # alpha-amylase
+    "3.2.1.2": ["hydrolase", "glycosidase", "carbohydrate_active", "amylase"],  # beta-amylase
+    "3.2.1.8": ["hydrolase", "glycosidase", "carbohydrate_active", "xylanase"],  # endo-1,4-beta-xylanase
+    "3.2.1.78": ["hydrolase", "glycosidase", "carbohydrate_active", "mannanase"],  # mannan endo-1,4-beta-mannosidase
+    "3.2.1.15": ["hydrolase", "glycosidase", "carbohydrate_active", "pectinase"],  # endo-polygalacturonase
+    "3.2.1.17": ["hydrolase", "glycosidase", "carbohydrate_active", "lysozyme"],  # lysozyme
+    "4.2.2": ["lyase", "carbohydrate_active"],  # ENZYME enzclass: acting on polysaccharides
+    "4.2.2.2": ["lyase", "carbohydrate_active", "pectinase"],  # pectate lyase
+    "4.2.2.10": ["lyase", "carbohydrate_active", "pectinase"],  # pectin lyase
+    "3.1.1.11": ["hydrolase", "esterase", "carbohydrate_active", "pectinase"],  # pectinesterase
+
+    "1.14.99.53": ["oxidoreductase", "oxygenase", "monooxygenase", "lytic_polysaccharide_monooxygenase"],  # lytic chitin monooxygenase
+    "1.14.99.54": ["oxidoreductase", "oxygenase", "monooxygenase", "lytic_polysaccharide_monooxygenase"],  # lytic cellulose monooxygenase (C1-hydroxylating)
+    "1.14.99.55": ["oxidoreductase", "oxygenase", "monooxygenase", "lytic_polysaccharide_monooxygenase"],  # lytic starch monooxygenase
+    "1.14.99.56": ["oxidoreductase", "oxygenase", "monooxygenase", "lytic_polysaccharide_monooxygenase"],  # lytic cellulose monooxygenase (C4-dehydrogenating)
+
     # EC 2: Transferases
     "2": ["transferase"],
     "2.1": ["transferase"],  # Transferring one-carbon groups

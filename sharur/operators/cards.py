@@ -17,6 +17,7 @@ from typing import Any
 
 from sharur.operators.predicates_v2 import get_atoms, get_semantic_state
 from sharur.predicates.mappings import kegg_map
+from sharur.predicates.mappings.cazy_map import cazy_evidence
 from sharur.predicates.mappings.pfam_map import PFAM_EVIDENCE
 from sharur.predicates.pfam_identity import normalize_pfam_accession
 from sharur.predicates.provenance import map_status
@@ -31,7 +32,6 @@ COMPUTED_SOURCES = {
     "_validation": "cross-annotation validation rule",
 }
 RULE_SOURCES = {
-    "cazy": "CAZy family rule (sharur.predicates.mappings.cazy_map)",
     "vog": "VOG rule (sharur.predicates.mappings.vog_map)",
     "vogdb": "VOG rule (sharur.predicates.mappings.vog_map)",
     "hyddb": "HydDB HMM class rule",
@@ -51,6 +51,8 @@ def _map_evidence(source_db: str, accession: str) -> dict[str, str] | None:
         return PFAM_EVIDENCE.get(normalize_pfam_accession(accession))
     if source_db in ("kegg", "kofam"):
         return kegg_map.KEGG_EVIDENCE.get(accession)
+    if source_db == "cazy":
+        return cazy_evidence(accession) or None
     return None
 
 
@@ -65,7 +67,7 @@ def mapping_evidence(source_db: str, accession: str, predicate: str) -> dict[str
         return {"kind": "classification", "evidence": "HydDB nearest-reference classification (see classification)"}
     if source_db in ("kegg", "kofam") and not kegg_map.kegg_map_available():
         return {"kind": "rule", "evidence": "no local KEGG map; KEGG-stated EC numbers only (run `sharur setup-kegg`)"}
-    if source_db in ("pfam", "kegg", "kofam"):
+    if source_db in ("pfam", "kegg", "kofam", "cazy"):
         evidence = _map_evidence(source_db, accession)
         if evidence is None:
             return {"kind": "unsupported", "evidence": "accession absent from the current map (regenerate predicates)"}

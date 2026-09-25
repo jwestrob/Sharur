@@ -44,6 +44,7 @@ class Reviewed:
     pfams: frozenset[str]
     predicates: frozenset[str]  # from curated EC and experimental GO
     kegg_genes: frozenset[str]
+    cazy: frozenset[str] = frozenset()  # CAZy families (DR CAZy)
 
 
 def go_ancestors(obo: Path):
@@ -73,7 +74,7 @@ def go_ancestors(obo: Path):
 
 
 def read_swissprot(path: Path, ancestors) -> list[Reviewed]:
-    """Every reviewed protein with a Pfam or KEGG cross-reference."""
+    """Every reviewed protein with a Pfam, KEGG or CAZy cross-reference."""
     anchor_preds: dict[str, set[str]] = defaultdict(set)
     for pred, spec in EVIDENCE.items():
         for go in spec["go"]:
@@ -89,7 +90,7 @@ def read_swissprot(path: Path, ancestors) -> list[Reviewed]:
         return frozenset(component_level(p) for p in get_predicates_for_ec(ec))
 
     proteins: list[Reviewed] = []
-    accession, pfams, preds, genes = None, set(), set(), set()
+    accession, pfams, preds, genes, cazy = None, set(), set(), set(), set()
     with gzip.open(path, "rt", encoding="latin-1") as handle:
         for line in handle:
             tag = line[:2]
@@ -100,6 +101,8 @@ def read_swissprot(path: Path, ancestors) -> list[Reviewed]:
                     pfams.add(line[11:18])
                 elif line.startswith("DR   KEGG; "):
                     genes.add(line[11:].split(";")[0])
+                elif line.startswith("DR   CAZy; "):
+                    cazy.add(line[11:].split(";")[0].strip())
                 elif line.startswith("DR   GO; "):
                     fields = line[5:].rstrip(".\n").split("; ")
                     if len(fields) >= 4 and fields[3].split(":")[0] in EXPERIMENTAL_GO:
@@ -107,10 +110,10 @@ def read_swissprot(path: Path, ancestors) -> list[Reviewed]:
             elif tag == "DE" and "EC=" in line:
                 preds |= ec_preds(line.split("EC=", 1)[1].split()[0].rstrip(";"))
             elif tag == "//":
-                if pfams or genes:
+                if pfams or genes or cazy:
                     proteins.append(Reviewed(accession, frozenset(pfams), frozenset(preds & vocabulary),
-                                             frozenset(genes)))
-                accession, pfams, preds, genes = None, set(), set(), set()
+                                             frozenset(genes), frozenset(cazy)))
+                accession, pfams, preds, genes, cazy = None, set(), set(), set(), set()
     return proteins
 
 

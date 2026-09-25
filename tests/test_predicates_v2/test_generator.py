@@ -289,7 +289,7 @@ class TestAtomGenerator:
         protein = ProteinRecord(protein_id="test", sequence_length=400)
         annotations = [
             AnnotationRecord(
-                source="cazy", accession="GH5", evalue=1e-30,
+                source="cazy", accession="GH7", evalue=1e-30,
             )
         ]
         atoms = gen.generate_atoms(protein, annotations)

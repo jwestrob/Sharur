@@ -591,3 +591,4 @@ d("flavin_binding", ["GO:0046997", "GO:0052890"])
 d("abi_domain", [], list(E["abortive_infection"]["text"]))
 d("defense_component", list(E["defense_system"]["go"]) + ["GO:0110001", "GO:0097351"],
   list(E["defense_system"]["text"]) + [r"toxin[- ]antitoxin"])
+d("pectinase", ["GO:0004650", "GO:0030570", "GO:0047490", "GO:0030599"])

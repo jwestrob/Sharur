@@ -426,7 +426,9 @@ class TestCazyMapping:
         preds = get_predicates_for_cazy("GH5")
         assert "carbohydrate_active" in preds
         assert "glycoside_hydrolase" in preds
-        assert "cellulase" in preds
+        assert "cellulase" not in preds  # GH5 is polyspecific; reviewed members agree on glycosidase only
+        assert "cellulase" in get_predicates_for_cazy("GH7")
+        assert get_predicates_for_cazy("GH5_2") == get_predicates_for_cazy("GH5")
 
     def test_lpmo(self):
         """Should map LPMO families."""
@@ -434,7 +436,6 @@ class TestCazyMapping:
         assert "carbohydrate_active" in preds
         assert "auxiliary_activity" in preds
         assert "lytic_polysaccharide_monooxygenase" in preds
-        assert "copper_binding" in preds
 
     def test_cbm(self):
         """Should map CBM families."""
@@ -443,7 +444,7 @@ class TestCazyMapping:
         assert "carbohydrate_binding" in preds
 
     def test_fallback_pattern(self):
-        """Should use pattern fallback for unknown families."""
+        """Families absent from the map take their class predicates."""
         preds = get_predicates_for_cazy("GH999")
         assert "glycoside_hydrolase" in preds
         assert "carbohydrate_active" in preds
