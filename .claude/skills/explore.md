@@ -663,7 +663,7 @@ Survey found:
 Task(
     subagent_type="general-purpose",
     description="Test orphan dockerin hypothesis",
-    prompt="""Dataset: data/hinthialibacterota_v3/sharur.duckdb
+    prompt="""Dataset: data/DATASET/sharur.duckdb
 
 Hypothesis: "Orphan dockerin genomes (dockerin but no cohesin) are obligate syntrophic partners with distinct metabolic features compared to self-assembly genomes."
 
@@ -675,7 +675,7 @@ Your task:
 5. Document findings with evidence
 6. If you encounter ambiguous annotations or need literature context, dispatch a literature agent
 
-Write results to: data/hinthialibacterota_v3/exploration/hypothesis_orphan_dockerins.md
+Write results to: data/DATASET/exploration/hypothesis_NAME.md
 
 Include:
 - Statistical tests with p-values

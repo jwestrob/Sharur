@@ -291,7 +291,7 @@ def db_path(tmp_path):
         rows,
     )
     store.execute("CREATE TABLE rna_expression (protein_id VARCHAR, sample VARCHAR, tpm DOUBLE)")
-    store.execute("INSERT INTO rna_expression VALUES ('p_1h', 'PLM2_5cm', 225.73), ('p_unrelated', 'PLM1', 3.0)")
+    store.execute("INSERT INTO rna_expression VALUES ('p_1h', 'sample_B_5cm', 225.73), ('p_unrelated', 'sample_A', 3.0)")
     generate_and_persist_v2(store, update_legacy_predicates=True, return_states=False)
     store.close()
     return path

@@ -27,7 +27,7 @@ curated loci. Serialize its DuckDB write section and never overlap it with anoth
 
 ## Critical Background: Why VOGdb Density Is Misleading
 
-**Do NOT use raw VOGdb hit density as a prophage signal.** This was the single biggest lesson from Omnitrophota prophage detection:
+**Do NOT use raw VOGdb hit density as a prophage signal.** This was the single biggest lesson from an earlier large-dataset prophage survey:
 
 - 94% of VOGs are category Xu (uncharacterized) — they match housekeeping genes with viral orthologs
 - Many core bacterial genes (helicases, primases, recombinases) have VOGdb hits

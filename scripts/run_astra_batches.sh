@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run Astra annotation in batches for any database
-# Usage: ./run_astra_batches.sh <DB_NAME> <BATCH_SIZE> <THREADS> [EXTRA_FLAGS]
+# Usage: DATASET=data/DATASET ./run_astra_batches.sh <DB_NAME> <BATCH_SIZE> <THREADS> [EXTRA_FLAGS]
 # Example: ./run_astra_batches.sh VOGdb 200 12
 # Example: ./run_astra_batches.sh HydDB 0 12 --cut_ga   (0 = no batching, run all at once)
 # Example: ./run_astra_batches.sh DefenseFinder 400 12
@@ -13,8 +13,9 @@ THREADS="${3:?Usage: $0 <DB_NAME> <BATCH_SIZE> <THREADS> [EXTRA_FLAGS]}"
 shift 3
 EXTRA_FLAGS="$@"
 
-SYMLINK_DIR="data/omni_production/stage03_prodigal/genomes/all_protein_symlinks"
-OUTBASE="data/omni_production/stage04_astra"
+DATASET="${DATASET:?Set DATASET to the dataset directory, e.g. DATASET=data/my_dataset}"
+SYMLINK_DIR="$DATASET/stage03_prodigal/genomes/all_protein_symlinks"
+OUTBASE="$DATASET/stage04_astra"
 DB_LOWER=$(echo "$DB_NAME" | tr '[:upper:]' '[:lower:]')
 RESULT_DIR="$OUTBASE/${DB_LOWER}_results"
 COMBINED_OUT="$RESULT_DIR/${DB_NAME}_hits_df.tsv"

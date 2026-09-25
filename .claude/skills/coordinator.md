@@ -239,7 +239,7 @@ tasks = [
 
 # Structured (with priority and hints)
 tasks = [
-    {"description": "...", "priority": 3, "domain_hint": "coronamine"},
+    {"description": "...", "priority": 3, "domain_hint": "example_domain"},
     {"description": "...", "priority": 2, "task_type": "validate_hypothesis"},
 ]
 ```

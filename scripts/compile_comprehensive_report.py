@@ -5,8 +5,8 @@ Reads findings.jsonl from survey/ and exploration/ directories, plus an optional
 reports/report_manifest.json that organizes findings into thematic sections.
 
 Usage:
-    python scripts/compile_comprehensive_report.py --dataset data/omni_production/
-    python scripts/compile_comprehensive_report.py --dataset data/omni_production/ --output COMPREHENSIVE_REPORT.md
+    python scripts/compile_comprehensive_report.py --dataset data/DATASET/
+    python scripts/compile_comprehensive_report.py --dataset data/DATASET/ --output COMPREHENSIVE_REPORT.md
 """
 
 import argparse
@@ -257,7 +257,7 @@ def main():
     parser.add_argument(
         "--dataset",
         required=True,
-        help="Path to the dataset directory (e.g., data/omni_production/)",
+        help="Path to the dataset directory (e.g., data/DATASET/)",
     )
     parser.add_argument(
         "--output",

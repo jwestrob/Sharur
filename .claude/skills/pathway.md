@@ -168,7 +168,7 @@ plt.savefig("data/DATASET/exploration/figures/pathway_completeness.png", dpi=150
 
 ### Syntrophic Metabolism Focus
 
-For syntrophs (like Hinthialibacterota), key pathways to check:
+For syntrophs, key pathways to check:
 
 **Energy conservation:**
 - Group 4 hydrogenases (Mbh/Ech) - H2-evolving, energy-conserving

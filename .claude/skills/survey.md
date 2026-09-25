@@ -43,15 +43,13 @@ For curiosity-driven exploration, use `/explore` instead (run AFTER survey compl
 
 **GOOD (prose):**
 ```
-Hydrogen metabolism is nearly universal in Hinthialibacterota, with 39 of 41 genomes
-encoding NiFe hydrogenases. Group 4 Mbh-type energy-conserving complexes dominate,
-consistent with a syntrophic lifestyle where H2 production drives interspecies electron
-transfer. Maturation genes (HypA-F) co-localize with catalytic subunits in 35 of these
-genomes, suggesting functional operons rather than orphan genes. The two genomes lacking
-hydrogenases (GCA_029558215 and GCA_029558220) are both highly fragmented (>500 contigs),
-so absence likely reflects assembly gaps rather than genuine metabolic loss. Three genomes
-additionally encode FeFe hydrogenases, which may serve as fermentative H2-evolving enzymes
-under conditions where the Mbh complex is insufficient.
+Hydrogen metabolism is nearly universal in this lineage, with N of M genomes encoding
+NiFe hydrogenases. Group 4 energy-conserving complexes dominate, consistent with a
+syntrophic lifestyle where H2 production drives interspecies electron transfer.
+Maturation genes (HypA-F) co-localize with catalytic subunits in most of these genomes,
+suggesting functional operons rather than orphan genes. The genomes lacking hydrogenases
+(GENOME_A and GENOME_B) are both highly fragmented (>500 contigs), so absence likely
+reflects assembly gaps rather than genuine metabolic loss.
 ```
 
 **When bullets ARE appropriate:** Genuinely list-like content such as enzyme inventories, feature counts, or method descriptions. But even then, **open with a prose paragraph** that interprets the list before presenting it.
@@ -804,9 +802,9 @@ Bad survey:
 - "CAZymes: 1000 detected"
 
 Good survey:
-- "Defense investment is exceptionally high (15% of proteins) with universal CRISPR-Cas Type I-C systems in all 41 genomes plus extensive innate immunity (Paris, Jallet, Wadjet). This suggests constant phage pressure in their natural environment, consistent with their syntrophic lifestyle requiring stable partnerships despite mobile genetic element threats."
+- "Defense investment is exceptionally high (X% of proteins) with Type I-C CRISPR-Cas systems validated in every genome plus diverse additional systems. This suggests sustained phage pressure in their natural environment."
 
-- "Hydrogenases are nearly universal (40/41 genomes, 98%) with Group 4 Mbh-type energy-conserving complexes dominant. The single exception (GCA_029558215_1) is highly fragmented (725 contigs), suggesting hydrogenase genes were likely missed rather than genuinely absent. This universality indicates H2 cycling is core to Hinthialibacterota metabolism."
+- "Hydrogenases are nearly universal (N/M genomes) with Group 4 energy-conserving complexes dominant. The single exception (GENOME_A) is highly fragmented (725 contigs), so hydrogenase genes were likely missed rather than absent. This universality indicates H2 cycling is core to the lineage's metabolism."
 
 **Synthesis over enumeration.** Every number should answer "so what biologically?"
 

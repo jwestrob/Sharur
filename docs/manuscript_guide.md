@@ -86,7 +86,7 @@ When editing the manuscript, **always** append an entry documenting:
 
 **Do NOT:**
 - Create new Python PDF generators for manuscripts or comprehensive collaborator reports — write Markdown and use pandoc
-- Use hardcoded report scripts (`generate_paper_report.py`, etc.) for new datasets
+- Use hardcoded, dataset-specific report scripts for new datasets
 - Create versioned or dated PDF filenames — always `MANUSCRIPT.pdf`
 
 Maintained exception:
@@ -181,7 +181,7 @@ MANUSCRIPT.pdf                              ← pandoc
   "evidence": {"...": "..."},
   "verification": [
     {
-      "claim": "1,366 genomes carry NiFe Group 4",
+      "claim": "N genomes carry NiFe Group 4",
       "query": "SELECT COUNT(DISTINCT bin_id) FROM predicates WHERE predicate = 'nife_group4'",
       "expected": 1366
     }

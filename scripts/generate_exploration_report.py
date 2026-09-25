@@ -14,7 +14,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--dataset",
-        default="data/hinthialibacterota_production",
+        default="data/DATASET",
         help="Path to the dataset directory.",
     )
     parser.add_argument("--output", help="Optional output PDF path.")

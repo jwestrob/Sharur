@@ -204,7 +204,7 @@ For the KEGG database itself, also cite:
 ### Protenix
 > ByteDance AML AI4Science Team. (2025) Protenix -- Advancing Structure Prediction Through a Comprehensive AlphaFold3 Reproduction. *bioRxiv* 2025.01.08.631967. DOI: [10.1101/2025.01.08.631967](https://doi.org/10.1101/2025.01.08.631967)
 
-**Used for:** Protein complex structure prediction -- used for validating protein-protein interaction models (e.g., JAB-ubiquitin complex in GJALLARVIRUS analysis).
+**Used for:** Protein complex structure prediction -- used for validating protein-protein interaction models (e.g., a JAB-ubiquitin complex analysis).
 **Verified:** [bioRxiv](https://www.biorxiv.org/content/10.1101/2025.01.08.631967v1)
 **Note:** Preprint as of February 2026. Protenix is an open-source AlphaFold3 reproduction by ByteDance.
 **Abstract excerpt:** "Protenix is a comprehensive reproduction of AlphaFold3, tackling the challenges of predicting complex interactions involving proteins, ligands, and nucleic acids."

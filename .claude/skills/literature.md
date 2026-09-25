@@ -16,10 +16,10 @@ Systematic literature and database research to resolve functional ambiguity, int
 /literature PF12345                    # Domain/DUF research
 /literature foldseek AF-Q8ZZM4-F1     # Research a Foldseek hit
 /literature kegg K23108               # KEGG module context
-/literature organism Hinthialibacterota  # Lineage context
+/literature organism Patescibacteria  # Lineage context
 /literature defense CBASS             # Defense system research
 /literature family "giant adhesin"    # Protein family research
-/literature manuscript data/omni_production/MANUSCRIPT.md  # Verify & find all citations for manuscript
+/literature manuscript data/DATASET/MANUSCRIPT.md  # Verify & find all citations for manuscript
 ```
 
 ---
@@ -290,7 +290,7 @@ Systematic literature and database research to resolve functional ambiguity, int
 
 **When to use:** A manuscript draft exists with claims that need literature citations. This is the primary workflow for turning a data-driven manuscript into a citable publication. Run this BEFORE finalizing any manuscript.
 
-**Input:** Path to manuscript markdown file (e.g., `data/omni_production/MANUSCRIPT.md`)
+**Input:** Path to manuscript markdown file (e.g., `data/DATASET/MANUSCRIPT.md`)
 
 **Workflow:**
 

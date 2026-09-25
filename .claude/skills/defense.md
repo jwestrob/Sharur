@@ -686,7 +686,7 @@ def write_defense_loci(islands, locus_type="defense_island", clear_existing=True
 write_defense_loci(all_islands, locus_type="defense_island")
 ```
 
-**IMPORTANT:** Use `locus_type='defense_island'` (not `'island'`). The Omnitrophota dataset used `'island'` historically but `'defense_island'` is the correct convention going forward. Do NOT touch existing loci of other types (crispr, prophage, viral_contig).
+**IMPORTANT:** Use `locus_type='defense_island'` (not `'island'`). Older datasets used `'island'` but `'defense_island'` is the correct convention going forward. Do NOT touch existing loci of other types (crispr, prophage, viral_contig).
 
 ### Step 14: Characterize Defense Islands
 

@@ -202,9 +202,9 @@ Each line in `findings.jsonl` should normalize to this stored shape:
     }
   ],
   "protein_ids": [
-    "CoronaMine_BoilerAditFilter_100nm_15_12_2024_IL_777_6",
-    "CoronaMine_BoilerAditFilter_100nm_15_12_2024_IL_123011_2",
-    "CoronaMine_BoilerAditFilter_100nm_15_12_2024_IL_22959_1"
+    "GENOME_A_contig_777_6",
+    "GENOME_A_contig_123011_2",
+    "GENOME_A_contig_22959_1"
   ],
   "contigs": ["IL_777", "IL_22959", "IL_123011"],
   "provenance": {
@@ -241,7 +241,7 @@ This is valid agent-facing input as long as the normalizer can infer the phase f
     }
   ],
   "protein_ids": [
-    "CoronaMine_BoilerAditFilter_100nm_15_12_2024_IL_777_6"
+    "GENOME_A_contig_777_6"
   ]
 }
 ```
@@ -285,7 +285,7 @@ Structure the `evidence` field based on what was found.
 // Gene/protein-level finding
 {
   "protein_id": "IL_826_68",
-  "contig_id": "CoronaMine_..._IL_826",
+  "contig_id": "GENOME_A_contig_826",
   "accession": "PF13437",
   "name": "MtrB_PioB",
   "score": 559.5,

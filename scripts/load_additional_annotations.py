@@ -3,13 +3,13 @@
 
 Usage:
     python scripts/load_additional_annotations.py \
-        --db data/omni_production/sharur.duckdb \
-        --tsv data/omni_production/stage04_astra/hyddb_results/HydDB_hits_df.tsv \
+        --db data/DATASET/sharur.duckdb \
+        --tsv data/DATASET/stage04_astra/hyddb_results/HydDB_hits_df.tsv \
         --source hyddb
 
     python scripts/load_additional_annotations.py \
-        --db data/omni_production/sharur.duckdb \
-        --tsv data/omni_production/vogdb_results/VOGdb_hits_df.tsv \
+        --db data/DATASET/sharur.duckdb \
+        --tsv data/DATASET/vogdb_results/VOGdb_hits_df.tsv \
         --source vogdb --evalue 1e-10
 """
 
