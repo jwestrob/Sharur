@@ -277,7 +277,7 @@ The predicate system is what makes Sharur more than a database wrapper. Annotati
 - **VOGdb**: VOG functional categories and consensus-description matches vetted by the same text conventions as Pfam and KEGG
 - **Computed**: `giant` (>1000 aa), `unannotated` (no hits), `membrane_protein` (TM helices)
 
-Each predicate has a level: component predicates describe what one gene or domain shows; system-level predicates (validated defense or secretion systems) come only from system callers. `sharur why PROTEIN PREDICATE` shows the evidence behind any predicate, `sharur card PROTEIN` summarizes a protein, and `sharur modules` reports KEGG module completeness per genome or locus. Maintainers rebuild every map from a dated reference snapshot with `make snapshots predicate-maps recount`.
+Each predicate has a level: component predicates describe what one gene or domain shows; system-level predicates (validated defense or secretion systems) come only from system callers. `sharur why PROTEIN PREDICATE` shows the evidence behind any predicate, `sharur card PROTEIN` summarizes a protein, and `sharur modules` reports KEGG module completeness per genome or locus. Maintainers rebuild every map from a dated reference snapshot with `make snapshots predicate-maps recount`. [docs/predicate_construction.md](docs/predicate_construction.md) describes the sources, rules and thresholds.
 
 This lets agents ask functional questions ("find NAD-coupled hydrogenases") instead of remembering accession numbers.
 

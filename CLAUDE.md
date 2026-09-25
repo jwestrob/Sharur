@@ -22,6 +22,7 @@ Detailed guides live in `docs/` and `.claude/skills/`. **Read the relevant doc b
 | Making biological claims or interpreting annotations | `docs/biological_interpretation.md` |
 | Dispatching or working as a subagent | `docs/subagent_guide.md` |
 | Working with V2 predicate system | `docs/predicates_v2.md` |
+| Understanding where a predicate comes from | `docs/predicate_construction.md` |
 | Validating hydrogenases | `.claude/skills/hydrogenase.md` |
 | Querying ELSA synteny results | `.claude/skills/synteny.md` |
 | Coordinating multi-agent runs | `docs/agent_ops_spec.md`, `sharur/ops/` |
