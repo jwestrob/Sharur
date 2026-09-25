@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Rebuild every predicate map from one reference snapshot, in dependency order.
 
+0. SAM-dependent EC table from ENZYME reactions (``build_ec_sam_table.py``)
 1. HydDB x KOfam snapshot (``build_kegg_hyddb_snapshot.py``; needs hmmsearch and
    KOfam profiles, skipped otherwise)
 2. KO reviewed-protein consensus (``build_kegg_swissprot_consensus.py``; needs
@@ -52,6 +53,8 @@ def main() -> int:
     swissprot, obo = snap / "uniprot_sprot.dat.gz", snap / "go-basic.obo"
     links = snap / "swissprot_kegg_ko.tsv"
     kofam_list = args.kofam_ko_list if args.kofam_ko_list.exists() else snap / "kegg_inputs/kofam_ko_list"
+
+    run(py, str(SCRIPTS / "build_ec_sam_table.py"), "--enzyme-dat", str(snap / "enzyme.dat"))
 
     if shutil.which("hmmsearch") and args.kofam_dir.is_dir():
         run(py, str(SCRIPTS / "build_kegg_hyddb_snapshot.py"), "--ko-list", str(snap / "kegg_inputs/ko_list.tsv"),

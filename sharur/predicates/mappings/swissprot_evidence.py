@@ -1,6 +1,8 @@
 """Reviewed-protein (UniProtKB/Swiss-Prot) consensus evidence for Pfam and KO predicates.
 
-Each reviewed protein carries the predicates of its curator-assigned EC numbers
+Each reviewed protein carries the predicates of its curator-assigned EC numbers,
+its curated COFACTOR annotations (ChEBI, :data:`COFACTOR_PREDICATES`), SAM
+dependence from curated CATALYTIC ACTIVITY reactions,
 and experimentally evidenced GO terms (closed over is_a/part_of ancestors and
 matched to the GO anchors in :mod:`sharur.predicates.mappings.pfam_evidence_spec`).
 For Pfam consensus a protein also carries the KEGG-evidenced predicates of its
@@ -27,12 +29,51 @@ from sharur.predicates.mappings.pfam_evidence import (
     SWISSPROT_CODOMAIN_FRACTION,
     SWISSPROT_COVERAGE,
     SWISSPROT_EXCLUDED,
+    SWISSPROT_KO_MAJORITY,
     SWISSPROT_MIN_LOWER_BOUND,
     SWISSPROT_SINGLE,
     wilson_lower_bound,
 )
 from sharur.predicates.vocabulary import PREDICATE_BY_ID, component_level
 
+
+# Curated Swiss-Prot COFACTOR annotations (ChEBI) -> cofactor predicates. IDs and
+# names as they appear in the reviewed entries; substrate-like entries are left out.
+COFACTOR_PREDICATES = {
+    "CHEBI:18420": "magnesium_binding",   # Mg(2+)
+    "CHEBI:29105": "zinc_binding",        # Zn(2+)
+    "CHEBI:29035": "manganese_binding",   # Mn(2+)
+    "CHEBI:49883": "iron_sulfur",         # [4Fe-4S] cluster
+    "CHEBI:21137": "iron_sulfur",         # [3Fe-4S] cluster
+    "CHEBI:190135": "2fe2s",              # [2Fe-2S] cluster
+    "CHEBI:30408": "iron_sulfur",         # iron-sulfur cluster
+    "CHEBI:60519": "iron_sulfur",         # hybrid [4Fe-2O-2S] cluster
+    "CHEBI:597326": "plp_binding",        # pyridoxal 5'-phosphate
+    "CHEBI:57692": "fad_binding",         # FAD
+    "CHEBI:58210": "fmn_binding",         # FMN
+    "CHEBI:57618": "fmn_binding",         # FMNH2
+    "CHEBI:60344": "heme_binding",        # heme b
+    "CHEBI:30413": "heme_binding",        # heme
+    "CHEBI:61717": "heme_binding",        # heme c
+    "CHEBI:29033": "iron_binding",        # Fe(2+)
+    "CHEBI:29034": "iron_binding",        # Fe(3+)
+    "CHEBI:24875": "iron_binding",        # Fe cation
+    "CHEBI:29108": "calcium_binding",     # Ca(2+)
+    "CHEBI:58937": "thiamine_binding",    # thiamine diphosphate
+    "CHEBI:48828": "cobalt_binding",      # Co(2+)
+    "CHEBI:49786": "nickel_binding",      # Ni(2+)
+    "CHEBI:25516": "nickel_binding",      # Ni cation
+    "CHEBI:23378": "copper_binding",      # Cu cation
+    "CHEBI:29036": "copper_binding",      # Cu(2+)
+    "CHEBI:57540": "nad_binding",         # NAD(+)
+    "CHEBI:58349": "nad_binding",         # NADP(+)
+    "CHEBI:71302": "molybdenum_binding",  # Mo-molybdopterin
+    "CHEBI:18408": "cobalamin_binding",   # adenosylcob(III)alamin
+    "CHEBI:60240": "metal_binding",       # a divalent metal cation
+    "CHEBI:25213": "metal_binding",       # a metal cation
+}
+_COFACTOR = re.compile(r"Xref=ChEBI:(CHEBI:\d+)")
+SAM = "S-adenosyl-L-methionine"
 
 EXPERIMENTAL_GO = {"EXP", "IDA", "IPI", "IMP", "IGI", "IEP", "HTP", "HDA", "HMP", "HGI", "HEP"}
 KO_CONSENSUS = re.compile(r"swissprot:(\d+)/(\d+)")
@@ -91,9 +132,28 @@ def read_swissprot(path: Path, ancestors) -> list[Reviewed]:
 
     proteins: list[Reviewed] = []
     accession, pfams, preds, genes, cazy = None, set(), set(), set(), set()
+    topic, reaction = None, ""
     with gzip.open(path, "rt", encoding="latin-1") as handle:
         for line in handle:
             tag = line[:2]
+            if tag == "CC":
+                if line.startswith("CC   -!- "):
+                    topic = line[9:].split(":", 1)[0]
+                    reaction = ""
+                if topic == "COFACTOR":
+                    for chebi in _COFACTOR.findall(line):
+                        if chebi in COFACTOR_PREDICATES:
+                            preds.add(COFACTOR_PREDICATES[chebi])
+                elif topic == "CATALYTIC ACTIVITY":
+                    # Curated reaction (Rhea); SAM on the reactant side means SAM-dependent.
+                    reaction += " " + line[9:].strip()
+                    if "Reaction=" in reaction and ";" in reaction.split("Reaction=", 1)[1]:
+                        equation = reaction.split("Reaction=", 1)[1].split(";", 1)[0]
+                        if SAM in equation.split(" = ", 1)[0]:
+                            preds.add("sam_binding")
+                        topic = None
+                continue
+            topic = None
             if tag == "AC" and accession is None:
                 accession = line[5:].split(";")[0].strip()
             elif tag == "DR":
@@ -198,7 +258,7 @@ def family_consensus(proteins, candidates, supported) -> dict[tuple[str, str], s
                     or wilson_lower_bound(len(hits), len(members)) < SWISSPROT_MIN_LOWER_BOUND:
                 continue
             k_kos, n_kos = ortholog_support([proteins[i][1:] for i in members], pred)
-            if n_kos >= 2 and k_kos < min_frac * n_kos:
+            if n_kos >= 2 and k_kos <= SWISSPROT_KO_MAJORITY * n_kos:
                 continue
             covered[(fam, pred)] = (hits, k_kos, n_kos)
 

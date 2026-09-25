@@ -286,9 +286,23 @@ def parse_ec_numbers(definition: str) -> list[str]:
     return []
 
 
+def _load_sam_dependent_ecs() -> frozenset[str]:
+    path = Path(__file__).with_name("data") / "ec_sam_dependent.tsv"
+    if not path.exists():
+        return frozenset()
+    return frozenset(line.split("\t")[0] for line in path.read_text().splitlines()
+                     if line and not line.startswith("#"))
+
+
+# ECs whose ENZYME reaction consumes S-adenosyl-L-methionine (scripts/build_ec_sam_table.py).
+SAM_DEPENDENT_ECS = _load_sam_dependent_ecs()
+
+
 def get_predicates_for_ec(ec_number: str) -> list[str]:
     """Get predicates for an EC number."""
     predicates = set()
+    if ec_number in SAM_DEPENDENT_ECS:
+        predicates.add("sam_binding")
 
     # Try increasingly specific prefixes
     parts = ec_number.split(".")

@@ -21,6 +21,7 @@ from sharur.predicates.mappings.pfam_evidence import (
     EVIDENCE,
     SWISSPROT_COVERAGE,
     SWISSPROT_EXCLUDED,
+    SWISSPROT_KO_MAJORITY,
     SWISSPROT_MIN_LOWER_BOUND,
     SWISSPROT_SINGLE,
     text_evidence,
@@ -55,7 +56,7 @@ def _meets_consensus(pred, detail):
     covered = n >= SWISSPROT_COVERAGE[0] and k >= SWISSPROT_COVERAGE[1] * n \
         and wilson_lower_bound(k, n) >= SWISSPROT_MIN_LOWER_BOUND
     if m.group(3) is not None:
-        covered = covered and int(m.group(4)) >= 2 and int(m.group(3)) >= SWISSPROT_COVERAGE[1] * int(m.group(4))
+        covered = covered and int(m.group(4)) >= 2 and int(m.group(3)) > SWISSPROT_KO_MAJORITY * int(m.group(4))
     if m.group(5) is None:
         return covered
     ks, ns = int(m.group(5)), int(m.group(6))

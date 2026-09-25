@@ -38,6 +38,10 @@ SWISSPROT_COVERAGE = (5, 0.8)
 SWISSPROT_MIN_LOWER_BOUND = 0.5
 SWISSPROT_SINGLE = (3, 0.8)
 SWISSPROT_CODOMAIN_FRACTION = 0.9
+# When a family's reviewed carriers span two or more KOs, most KOs (each judged by
+# the majority of its own carriers) must agree, so one heavily reviewed ortholog
+# cannot speak for the family.
+SWISSPROT_KO_MAJORITY = 0.5
 
 
 def wilson_lower_bound(k: int, n: int, z: float = 1.96) -> float:
