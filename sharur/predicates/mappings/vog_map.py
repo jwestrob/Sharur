@@ -21,6 +21,11 @@ from __future__ import annotations
 import re
 from typing import Optional
 
+from sharur.predicates.mappings.pfam_evidence import vetted_match
+from sharur.predicates.vocabulary import component_level
+
+_ANTI_CRISPR = re.compile(r"\banti.?crispr\b|\bAcr[A-Z0-9]", re.I)
+
 # =============================================================================
 # VOGdb Functional Category Mappings
 # =============================================================================
@@ -128,7 +133,7 @@ VOG_DESCRIPTION_PATTERNS: list[tuple[re.Pattern, list[str]]] = [
     (re.compile(r"\bprimase\b", re.I), ["primase", "viral_replication"]),
     (re.compile(r"\bribonucleotide\s+reductase\b", re.I), ["oxidoreductase", "nucleotide_metabolism"]),
     (re.compile(r"\breplication\s+factor\s+C\b", re.I), ["replication"]),
-    (re.compile(r"\bligase\b", re.I), ["ligase"]),
+    (re.compile(r"(?<!ubiquitin )(?<!ubiquitin-protein )(?<!protein )\bligase\b", re.I), ["ligase"]),  # E3 ligases are EC 2.3.2
     (re.compile(r"\bsingle.strand.+binding\b", re.I), ["ssb_protein", "viral_replication"]),
     (re.compile(r"\brecombinase\b", re.I), ["recombinase"]),
     (re.compile(r"\bholliday\b", re.I), ["recombinase"]),
@@ -185,7 +190,7 @@ VOG_DESCRIPTION_PATTERNS: list[tuple[re.Pattern, list[str]]] = [
     # -------------------------------------------------------------------------
     (re.compile(r"\bE3\s+ubiquitin\s+ligase\b|\bubiquitin[-\s]*protein\s+ligase\b", re.I), ["ubiquitin_ligase", "protein_modification"]),
     (re.compile(r"\bdeubiquitin|ubiquitin\s+protease|ubiquitin\s+hydrolase|ubiquitin-specific\s+protease", re.I), ["deubiquitinase", "protease"]),
-    (re.compile(r"\bubiquitin\b", re.I), ["ubiquitin_like"]),
+    (re.compile(r"\bubiquitin\b(?![-\s]*(protein\s+)?(ligase|hydrolase|protease|specific|conjugating|activating|carboxyl))", re.I), ["ubiquitin_like"]),
 
     # -------------------------------------------------------------------------
     # Chromatin / histone
@@ -196,8 +201,8 @@ VOG_DESCRIPTION_PATTERNS: list[tuple[re.Pattern, list[str]]] = [
     # -------------------------------------------------------------------------
     # Toxin-Antitoxin
     # -------------------------------------------------------------------------
-    (re.compile(r"\btoxin\b", re.I), ["toxin"]),
-    (re.compile(r"\bantitoxin\b", re.I), ["antitoxin"]),
+    (re.compile(r"\btoxin\b", re.I), ["toxin_domain"]),  # phage toxins are not TA-system toxins
+    (re.compile(r"\bantitoxin\b", re.I), ["antitoxin_domain"]),
 
     # -------------------------------------------------------------------------
     # Enzymes
@@ -227,27 +232,30 @@ VOG_DESCRIPTION_PATTERNS: list[tuple[re.Pattern, list[str]]] = [
 ]
 
 
-def predicates_from_vog_description(description: str) -> list[str]:
+def vog_description_evidence(description: str) -> dict[str, str]:
+    """Predicates the consensus description states, with the vetted matched wording.
+
+    Each pattern match passes the same text conventions as Pfam and KEGG names
+    (:func:`sharur.predicates.mappings.pfam_evidence.vetted_match`): "-like"
+    matches, "X inhibitor"/"X-activating" relations and "regulator of X" are
+    rejected.
     """
-    Extract predicates from VOGdb description using pattern matching.
-
-    Args:
-        description: VOGdb ConsensusFunctionalDescription field
-
-    Returns:
-        List of predicate names
-    """
-    predicates = []
-
-    # Skip hypothetical proteins
-    if "hypothetical" in description.lower():
-        return []
-
+    if not description or "hypothetical" in description.lower():
+        return {}
+    evidence: dict[str, str] = {}
     for pattern, preds in VOG_DESCRIPTION_PATTERNS:
-        if pattern.search(description):
-            predicates.extend(preds)
+        for pred in preds:
+            if pred in evidence:
+                continue
+            match = vetted_match([pattern], description, pred)
+            if match:
+                evidence[pred] = f"text:{match}"
+    return evidence
 
-    return list(set(predicates))
+
+def predicates_from_vog_description(description: str) -> list[str]:
+    """Map a VOGdb consensus functional description to predicates (vetted matches only)."""
+    return sorted(vog_description_evidence(description))
 
 
 def predicates_from_vog(
@@ -295,30 +303,33 @@ VOG_DIRECT_MAPPINGS: dict[str, list[str]] = {
 }
 
 
+def vog_evidence(vog_id: str, category: Optional[str] = None, description: Optional[str] = None) -> dict[str, str]:
+    """Predicates for a VOG with evidence: ``category:<code>`` or ``text:<match>``.
+
+    Curated VOG entries (:data:`VOG_DIRECT_MAPPINGS`) ship only when the
+    description supports them.
+    """
+    evidence: dict[str, str] = {}
+    for code in ("Xr", "Xs", "Xh", "Xp"):
+        if category and code in category:
+            for pred in VOG_CATEGORY_TO_PREDICATES[code]:
+                evidence.setdefault(pred, f"category:{code}")
+    for pred, ev in vog_description_evidence(description or "").items():
+        evidence.setdefault(pred, ev)
+    for pred in VOG_DIRECT_MAPPINGS.get(vog_id, ()):
+        match = vetted_match([_ANTI_CRISPR], description or "", pred)
+        if match:
+            evidence.setdefault(pred, f"text:{match}")
+    return {component_level(p): e for p, e in evidence.items()}
+
+
 def get_vog_predicates(
     vog_id: str,
     category: Optional[str] = None,
     description: Optional[str] = None,
 ) -> list[str]:
-    """
-    Get predicates for a VOG, checking direct mappings first.
-
-    This is the main entry point for VOG predicate lookup.
-
-    Args:
-        vog_id: VOG identifier (e.g., "VOG12955")
-        category: VOGdb functional category
-        description: VOGdb consensus functional description
-
-    Returns:
-        List of predicate names
-    """
-    # Check direct mappings first
-    if vog_id in VOG_DIRECT_MAPPINGS:
-        return VOG_DIRECT_MAPPINGS[vog_id].copy()
-
-    # Fall back to pattern-based mapping
-    return predicates_from_vog(vog_id, category, description)
+    """Predicates for a VOG (category and vetted description evidence)."""
+    return sorted(vog_evidence(vog_id, category, description))
 
 
 __all__ = [
@@ -329,4 +340,6 @@ __all__ = [
     "predicates_from_vog_description",
     "predicates_from_vog",
     "get_vog_predicates",
+    "vog_description_evidence",
+    "vog_evidence",
 ]

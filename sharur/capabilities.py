@@ -418,6 +418,8 @@ _MAP_LABELS = {
     "pfam_map_sha256": "Pfam map",
     "kegg_map_sha256": "KEGG map",
     "kegg_rules_sha256": "KEGG rules",
+    "cazy_map_sha256": "CAZy map",
+    "vog_rules_sha256": "VOG rules",
     "vocabulary_sha256": "vocabulary",
     "v2_config_sha256": "V2 config",
 }

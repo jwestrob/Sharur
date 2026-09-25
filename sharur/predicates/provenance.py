@@ -2,7 +2,7 @@
 
 Every predicate generation (full or subset) appends a row to
 ``predicate_provenance`` recording the maps and rules in force: the shipped
-Pfam map, the locally built KEGG map (``sharur setup-kegg``), the vocabulary,
+Pfam and CAZy maps, the VOG rules, the locally built KEGG map (``sharur setup-kegg``), the vocabulary,
 the V2 configuration, and the semantic fingerprint. :func:`map_status`
 compares a database's stamps with the maps installed now, so preflight can
 report predicates that an older map produced.
@@ -23,6 +23,8 @@ from sharur import __version__
 
 PACKAGE = Path(__file__).resolve().parents[1]
 PFAM_MAP = PACKAGE / "predicates/mappings/data/pfam_predicates.tsv"
+CAZY_MAP = PACKAGE / "predicates/mappings/data/cazy_predicates.tsv"
+VOG_RULES = PACKAGE / "predicates/mappings/vog_map.py"
 VOCABULARY = PACKAGE / "predicates/vocabulary.py"
 V2_CONFIG = PACKAGE.parent / "config/predicates_v2"
 KEGG_RULES = (
@@ -45,6 +47,8 @@ PROVENANCE_COLUMNS = (
     "kegg_map_sha256 VARCHAR",  # NULL: no local KEGG build
     "kegg_release VARCHAR",
     "kegg_rules_sha256 VARCHAR NOT NULL",
+    "cazy_map_sha256 VARCHAR NOT NULL",
+    "vog_rules_sha256 VARCHAR NOT NULL",
     "vocabulary_sha256 VARCHAR NOT NULL",
     "v2_config_sha256 VARCHAR NOT NULL",
     "sharur_version VARCHAR NOT NULL",
@@ -53,7 +57,8 @@ PROVENANCE_COLUMNS = (
 CREATE_SQL = f"CREATE TABLE IF NOT EXISTS predicate_provenance ({', '.join(PROVENANCE_COLUMNS)})"
 
 # Fields compared by map_status; everything else is context.
-COMPARED = ("pfam_map_sha256", "kegg_map_sha256", "kegg_rules_sha256", "vocabulary_sha256", "v2_config_sha256")
+COMPARED = ("pfam_map_sha256", "kegg_map_sha256", "kegg_rules_sha256", "cazy_map_sha256", "vog_rules_sha256",
+            "vocabulary_sha256", "v2_config_sha256")
 
 
 def _sha256_file(path: Path) -> str:
@@ -109,6 +114,8 @@ def current_maps() -> dict[str, Any]:
         "kegg_map_sha256": kegg_sha,
         "kegg_release": kegg_release,
         "kegg_rules_sha256": _sha256_files(data / name for name in KEGG_RULES),
+        "cazy_map_sha256": _sha256_file(CAZY_MAP),
+        "vog_rules_sha256": _sha256_file(VOG_RULES),
         "vocabulary_sha256": _sha256_file(VOCABULARY),
         "v2_config_sha256": _sha256_files(sorted(V2_CONFIG.glob("*.yaml"))) if V2_CONFIG.is_dir() else "",
         "sharur_version": __version__,

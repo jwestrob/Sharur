@@ -159,11 +159,17 @@ def _compiled(predicate: str) -> tuple[re.Pattern, ...]:
     return tuple(compile_evidence(x) for x in EVIDENCE.get(predicate, {}).get("text", ()))
 
 
-def text_evidence(predicate: str, name: str, desc: str) -> str | None:
-    """Return the matched wording when the Pfam name/description states the predicate."""
-    text = f"{name} {desc}"
+def vetted_match(patterns, text: str, predicate: str = "") -> str | None:
+    """First match of ``patterns`` in ``text`` that states the thing itself.
+
+    Skips matches preceded by "activator/regulator/... of" (PRECEDED) and matches
+    followed by a relation ("X-binding", "X-associated", "X-interacting"); rejects
+    the text outright when a match names a relation that defines it ("X inhibitor",
+    "X-activating"); ignores "-like" matches (LIKE). ``predicate`` lets
+    ``*_binding`` / ``*_associated`` predicates accept their own relation word.
+    """
     found = None
-    for pattern in _compiled(predicate):
+    for pattern in patterns:
         for m in pattern.finditer(text):
             if PRECEDED.search(text[:m.start()]):
                 continue
@@ -176,10 +182,15 @@ def text_evidence(predicate: str, name: str, desc: str) -> str | None:
                 elif kind in ("binding", "associated", "antitoxin", "interaction"):
                     continue
                 else:
-                    return None  # the family is defined by a relation to the predicate
+                    return None  # the text is defined by a relation to the thing
             if found is None and not LIKE.match(rest):
                 found = m.group(0)
     return found
+
+
+def text_evidence(predicate: str, name: str, desc: str) -> str | None:
+    """Return the matched wording when the Pfam name/description states the predicate."""
+    return vetted_match(_compiled(predicate), f"{name} {desc}", predicate)
 
 
 def enzyme_phrases(desc: str, enzyme_names: dict[str, list[str]]) -> dict[str, list[str]]:

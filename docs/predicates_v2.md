@@ -698,7 +698,7 @@ membership, a neighborhood strip and the map status. Neither returns sequences.
 ## Map provenance
 
 Every generation (full or subset) appends a row to `predicate_provenance` (schema
-version 7): the sha256 of the shipped Pfam map and its source releases, the sha256 and
+version 7): the sha256 of the shipped Pfam and CAZy maps (with Pfam source releases), a hash of the VOG rules, the sha256 and
 KEGG database dates of the local KEGG build (`sharur setup-kegg`; NULL when absent),
 hashes of the KEGG rules, vocabulary and V2 config, the semantic fingerprint, the
 Sharur version and git commit. `sharur preflight` reports `predicate_maps`:

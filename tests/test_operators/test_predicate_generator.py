@@ -413,9 +413,17 @@ class TestVogMapping:
         assert "deubiquitinase" in preds
 
     def test_histone_patterns(self):
-        """Should map histone descriptions."""
-        preds = get_vog_predicates("VOG00006", description="histone-like protein")
-        assert "histone" in preds
+        """Histone descriptions map; "-like" descriptions (HU/H-NS nucleoid proteins) do not."""
+        assert "histone" in get_vog_predicates("VOG00006", description="histone H2A")
+        assert "histone" not in get_vog_predicates("VOG00006", description="histone-like protein")
+
+    def test_vetted_descriptions(self):
+        """Relations, -like wording and ubiquitin ligases do not state the thing itself."""
+        assert "lysis" not in get_vog_predicates("VOG1", description="lysis inhibitor protein")
+        assert "ligase" not in get_vog_predicates("VOG2", description="E3 ubiquitin ligase")
+        assert "ubiquitin_like" not in get_vog_predicates("VOG2", description="E3 ubiquitin ligase")
+        assert get_vog_predicates("VOG3", description="Shiga toxin subunit A") == ["toxin_domain"]
+        assert "anti_crispr" not in get_vog_predicates("VOG00563", description="hypothetical protein")
 
 
 class TestCazyMapping:

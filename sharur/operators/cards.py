@@ -32,8 +32,8 @@ COMPUTED_SOURCES = {
     "_validation": "cross-annotation validation rule",
 }
 RULE_SOURCES = {
-    "vog": "VOG rule (sharur.predicates.mappings.vog_map)",
-    "vogdb": "VOG rule (sharur.predicates.mappings.vog_map)",
+    "vog": "VOG functional category or vetted consensus-description match (vog_map.vog_evidence)",
+    "vogdb": "VOG functional category or vetted consensus-description match (vog_map.vog_evidence)",
     "hyddb": "HydDB HMM class rule",
     "defensefinder": "DefenseFinder profile rule (component level)",
 }
@@ -110,7 +110,7 @@ def _hydrogenase_row(store, protein_id: str, tables: set[str]) -> dict[str, Any]
 def _map_status(store) -> dict[str, Any]:
     status = map_status(store)
     labels = {"pfam_map_sha256": "Pfam map", "kegg_map_sha256": "KEGG map", "kegg_rules_sha256": "KEGG rules",
-              "vocabulary_sha256": "vocabulary", "v2_config_sha256": "V2 config"}
+              "cazy_map_sha256": "CAZy map", "vog_rules_sha256": "VOG rules", "vocabulary_sha256": "vocabulary", "v2_config_sha256": "V2 config"}
     return {"state": status.state, "changed": [labels[f] for f in status.changed],
             "generated_at": str((status.stamp or {}).get("generated_at")) if status.stamp else None}
 
