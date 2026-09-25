@@ -54,6 +54,10 @@ SWISSPROT_EXCLUDED = frozenset({
     "ankyrin_repeat", "sel1_repeat", "helix_turn_helix", "winged_helix", "ribbon_helix_helix",
     "helix_loop_helix", "zinc_finger", "coiled_coil", "beta_barrel", "beta_helix", "alpha_helical",
     "p_loop", "aaa_domain", "cbs_domain", "pin_domain", "binding", "hypothetical", "unannotated",
+    # Subcellular compartments depend on the organism's architecture (eukaryotic
+    # compartments, Gram type); reviewed proteins are mostly from other lineages.
+    "cytoplasmic", "secreted", "periplasmic", "inner_membrane", "outer_membrane", "cell_surface",
+    "membrane", "transmembrane",
 })
 
 # Predicate names used by earlier mapping layers that are not in the

@@ -2,7 +2,7 @@
 # Pfam: Pfam-A.hmm sha256 8bab3a946e6d99a4 (24076 families); Pfam-A.clans.tsv.gz (30134 families)
 # GO: pfam2go sha256 30274dd59c468d70; go-basic.obo sha256 b08d45b268b8c24c
 # ENZYME: enzyme.dat sha256 6e1f553fcaa15ba7
-# Swiss-Prot: uniprot_sprot.dat.gz 2026_03 sha256 c87208822a56e8ae (553,641 reviewed proteins with Pfam); KEGG gene links swissprot_kegg_ko.tsv sha256 20ab0dd3b910cb82; KO predicates from kegg_predicates.tsv sha256 054c42a1455b7f34
+# Swiss-Prot: uniprot_sprot.dat.gz 2026_03 sha256 c87208822a56e8ae (553,641 reviewed proteins with Pfam); KEGG gene links swissprot_kegg_ko.tsv sha256 20ab0dd3b910cb82; KO predicates from kegg_predicates.tsv sha256 0d327fc4d30284da
 # accession	name	description	go_anchors	enzymes
 PF00001	7tm_1	7 transmembrane receptor (rhodopsin family)	GO:0007165,GO:0016020,GO:0023052,GO:0038023,GO:0065007	
 PF00002	7tm_2	7 transmembrane receptor (Secretin family)	GO:0007165,GO:0016020,GO:0023052,GO:0038023,GO:0065007	
@@ -211,7 +211,7 @@ PF00291	PALP	Pyridoxal-phosphate dependent enzyme
 PF00292	PAX	'Paired box' domain	GO:0003677,GO:0005488,GO:0006355,GO:0019222,GO:0065007	
 PF00293	NUDIX	NUDIX domain		
 PF00294	PfkB	pfkB family carbohydrate kinase		
-PF00295	Glyco_hydro_28	Glycosyl hydrolases family 28	GO:0003824,GO:0004553,GO:0005975,GO:0016787,GO:0016798	
+PF00295	Glyco_hydro_28	Glycosyl hydrolases family 28	GO:0003824,GO:0004553,GO:0004650,GO:0005975,GO:0016787,GO:0016798	
 PF00296	Bac_luciferase	Luciferase-like monooxygenase	GO:0003824,GO:0016491	
 PF00297	Ribosomal_L3	Ribosomal protein L3	GO:0003735,GO:0005198,GO:0005840,GO:0006412,GO:0009058	
 PF00298	Ribosomal_L11	Ribosomal protein L11, RNA binding domain	GO:0003735,GO:0005198,GO:0005840,GO:0006412,GO:0009058	
@@ -544,7 +544,6 @@ PF00800	PDT	Prephenate dehydratase	GO:0003824,GO:0006520,GO:0008652,GO:0009058,G
 PF00801	PKD	PKD domain		
 PF00805	Pentapeptide	Pentapeptide repeats (8 copies)		
 PF00806	PUF	Pumilio-family RNA binding repeat	GO:0003723,GO:0005488	
-PF00807	Apidaecin	Apidaecin		
 PF00808	CBFD_NFYB_HMF	Histone-like transcription factor (CBF/NF-Y) and archaeal histone		
 PF00809	Pterin_bind	Pterin binding enzyme		
 PF00814	TsaD	tRNA N6-adenosine threonylcarbamoyltransferase		
@@ -701,14 +700,13 @@ PF01081	Aldolase	KDPG and KHG aldolase	GO:0003824,GO:0016829	aldolase=4.1.2.13
 PF01082	Cu2_monooxygen	Copper type II ascorbate-dependent monooxygenase, N-terminal domain	GO:0003824,GO:0004497,GO:0005488,GO:0005507,GO:0016491,GO:0046872	
 PF01083	Cutinase	Cutinase	GO:0003824,GO:0016787	cutinase=3.1.1.74
 PF01084	Ribosomal_S18	Ribosomal protein S18	GO:0003735,GO:0005198,GO:0005840,GO:0006412,GO:0009058	
-PF01086	Clathrin_lg_ch	Clathrin light chain	GO:0005198,GO:0005737,GO:0005886,GO:0006810,GO:0006886,GO:0015031,GO:0016020,GO:0016192	
 PF01087	GalP_UDP_transf	Galactose-1-phosphate uridyl transferase, N-terminal domain	GO:0003824,GO:0005975,GO:0016740,GO:0016772,GO:0016779,GO:0019318	uridyl transferase=2.7.7.12
 PF01088	Peptidase_C12	Ubiquitin carboxyl-terminal hydrolase, family 1	GO:0003824,GO:0004843,GO:0008233,GO:0008234,GO:0016787,GO:0101005	
 PF01090	Ribosomal_S19e	Ribosomal protein S19e	GO:0003735,GO:0005198,GO:0005840,GO:0006412,GO:0009058	
 PF01091	PTN_MK_C	PTN/MK heparin-binding protein family, C-terminal domain		
 PF01092	Ribosomal_S6e	Ribosomal protein S6e	GO:0003735,GO:0005198,GO:0005840,GO:0006412,GO:0009058	
 PF01094	ANF_receptor	Receptor family ligand binding region		
-PF01095	Pectinesterase	Pectinesterase	GO:0003824,GO:0016787,GO:0016788,GO:0052689,GO:0071555	pectinesterase=3.1.1.11
+PF01095	Pectinesterase	Pectinesterase	GO:0003824,GO:0016787,GO:0016788,GO:0030599,GO:0052689,GO:0071555	pectinesterase=3.1.1.11
 PF01096	Zn_ribbon_TFIIS	Transcription factor S-II (TFIIS)	GO:0005488,GO:0006351,GO:0008270,GO:0009058,GO:0016070,GO:0046872	
 PF01098	FTSW_RODA_SPOVE	Cell cycle protein	GO:0016020,GO:0051301	
 PF01106	NifU	NifU-like domain	GO:0005488,GO:0005506,GO:0016226,GO:0046872,GO:0051536	
@@ -911,7 +909,6 @@ PF01406	tRNA-synt_1e	tRNA synthetases class I (C) catalytic domain
 PF01408	GFO_IDH_MocA	Oxidoreductase family, NAD-binding Rossmann fold	GO:0000166,GO:0005488	
 PF01409	tRNA-synt_2d	tRNA synthetases class II core domain (F)	GO:0000049,GO:0000166,GO:0003723,GO:0003824,GO:0004812,GO:0005488,GO:0005524,GO:0006520,GO:0016070,GO:0016874,GO:0043039	
 PF01411	tRNA-synt_2c	tRNA synthetases class II (A)	GO:0000166,GO:0003824,GO:0004812,GO:0005488,GO:0005524,GO:0006412,GO:0006418,GO:0006520,GO:0009058,GO:0016070,GO:0016874,GO:0043039	
-PF01413	C4	C-terminal tandem repeated domain in type 4 procollagen	GO:0005198	
 PF01416	PseudoU_synth_1	tRNA pseudouridine synthase	GO:0001522,GO:0003723,GO:0003824,GO:0005488,GO:0009982,GO:0016070,GO:0016853,GO:0016866	pseudouridine synthase=4.2.1.70;trna pseudouridine synthase=5.4.99.12|5.4.99.25|5.4.99.26|5.4.99.27|5.4.99.28|5.4.99.42|5.4.99.45
 PF01418	HTH_6	Helix-turn-helix domain, rpiR family	GO:0003700,GO:0006355,GO:0019222,GO:0065007,GO:0140110	
 PF01420	Methylase_S	Type I restriction modification DNA specificity domain	GO:0003677,GO:0005488	
@@ -1642,7 +1639,6 @@ PF02666	PS_Dcarbxylase	Phosphatidylserine decarboxylase	GO:0003824,GO:0006629,GO
 PF02668	TauD	Taurine catabolism dioxygenase TauD, TfdA family	GO:0003824,GO:0016491	dioxygenase=1.13.11.62|1.13.11.77
 PF02669	KdpC	K+-transporting ATPase, c chain	GO:0005215,GO:0006810,GO:0006811,GO:0015075,GO:0016020,GO:0022857,GO:0030001,GO:0042626,GO:0046873	
 PF02670	DXP_reductoisom	1-deoxy-D-xylulose 5-phosphate reductoisomerase	GO:0000166,GO:0005488,GO:0050661	
-PF02672	CP12	CP12 domain		
 PF02673	BacA	Bacitracin resistance protein BacA	GO:0003824,GO:0016020,GO:0016787	
 PF02675	AdoMet_dc	S-adenosylmethionine decarboxylase	GO:0003824,GO:0009058,GO:0016829,GO:0016831	
 PF02676	TYW3	Methyltransferase TYW3		methyltransferase=2.5.1.61
@@ -1948,7 +1944,7 @@ PF03200	Glyco_hydro_63	Glycosyl hydrolase family 63 C-terminal domain
 PF03201	HMD	H2-forming N5,N10-methylene-tetrahydromethanopterin dehydrogenase		
 PF03203	MerC	MerC mercury resistance protein	GO:0000041,GO:0005215,GO:0006810,GO:0006811,GO:0010038,GO:0015075,GO:0016020,GO:0022857,GO:0030001,GO:0034220,GO:0046689,GO:0046873,GO:0050787,GO:0055085	
 PF03205	MobB	Molybdopterin guanine dinucleotide synthesis protein B	GO:0000166,GO:0005488,GO:0005525,GO:0006777,GO:0009058,GO:0019001,GO:0032324	
-PF03211	Pectate_lyase	Pectate lyase	GO:0003824,GO:0005576,GO:0016829,GO:0016837	pectate lyase=4.2.2.2
+PF03211	Pectate_lyase	Pectate lyase	GO:0003824,GO:0005576,GO:0016829,GO:0016837,GO:0030570	pectate lyase=4.2.2.2
 PF03214	RGP	Reversibly glycosylated polypeptide		
 PF03215	Rad17	Rad17 P-loop domain		
 PF03221	HTH_Tnp_Tc5	Tc5 transposase DNA-binding domain		
@@ -2159,7 +2155,6 @@ PF03626	COX4_pro	Prokaryotic Cytochrome C oxidase subunit IV	GO:0016020
 PF03627	PapG_N	PapG carbohydrate binding domain	GO:0005488,GO:0007155,GO:0030246	
 PF03628	PapG_C	PapG chaperone-binding domain		
 PF03629	SASA	Carbohydrate esterase, sialic acid-specific acetylesterase		acetylesterase=3.1.1.6
-PF03631	Virul_fac_BrkB	Virulence factor BrkB		
 PF03632	Glyco_hydro_65m	Glycosyl hydrolase family 65 central catalytic domain	GO:0003824,GO:0005975	
 PF03633	Glyco_hydro_65C	Glycosyl hydrolase family 65, C-terminal domain		
 PF03634	TCP	TCP family transcription factor		
@@ -2180,7 +2175,6 @@ PF03661	TMEM33_Pom33	Transmembrane protein 33/Nucleoporin POM33	GO:0016020
 PF03662	Glyco_hydro_79n	Glycosyl hydrolase family 79, N-terminal domain	GO:0003824,GO:0016020,GO:0016787,GO:0016798	
 PF03663	Glyco_hydro_76	Glycosyl hydrolase family 76		
 PF03664	Glyco_hydro_62	Glycosyl hydrolase family 62	GO:0003824,GO:0004553,GO:0005975,GO:0016787,GO:0016798	
-PF03665	UPF0172	Uncharacterised protein family (UPF0172)	GO:0005737,GO:0016020	
 PF03666	NPR3	Nitrogen Permease regulator of amino acid transport activity 3	GO:0065007	
 PF03669	ASTER	PAT complex subunit Asterix	GO:0005737,GO:0016020,GO:0044183	
 PF03683	UPF0175	Uncharacterised protein family (UPF0175)		
@@ -2416,7 +2410,6 @@ PF04138	GtrA_DPMS_TM	GtrA/DPMS, transmembrane domain	GO:0000271,GO:0005975,GO:00
 PF04139	Rad9	Rad9	GO:0006950,GO:0007165,GO:0023052,GO:0035556,GO:0065007	
 PF04140	ICMT	Isoprenylcysteine carboxyl methyltransferase (ICMT) family	GO:0003824,GO:0008168,GO:0008757,GO:0016020,GO:0016740	methyltransferase=2.5.1.61
 PF04143	Sulf_transp	Sulphur transport		
-PF04144	SCAMP	SCAMP family	GO:0006810,GO:0015031,GO:0016020	
 PF04145	Ctr	Ctr copper transporter family	GO:0000041,GO:0005215,GO:0006810,GO:0006811,GO:0015075,GO:0016020,GO:0022857,GO:0030001,GO:0034220,GO:0046873,GO:0055085	
 PF04148	Erv26	Transmembrane adaptor Erv26	GO:0006810,GO:0006888,GO:0016020,GO:0016192,GO:0048193	
 PF04149	DUF397	Domain of unknown function (DUF397)		
@@ -2598,7 +2591,7 @@ PF04423	Rad50_zn_hook	Rad50 zinc hook motif
 PF04424	MINDY_DUB	MINDY deubiquitinase	GO:0003824,GO:0004843,GO:0008233,GO:0008234,GO:0016787,GO:0101005	
 PF04428	Choline_kin_N	Choline kinase N terminus	GO:0003824,GO:0016740,GO:0016772	choline kinase=2.7.1.32
 PF04430	DUF498	Protein of unknown function (DUF498/DUF598)		
-PF04431	Pec_lyase_N	Pectate lyase, N terminus	GO:0003824,GO:0016829,GO:0016837	pectate lyase=4.2.2.2
+PF04431	Pec_lyase_N	Pectate lyase, N terminus	GO:0003824,GO:0016829,GO:0016837,GO:0030570	pectate lyase=4.2.2.2
 PF04432	FrhB_FdhB_C	Coenzyme F420 hydrogenase/dehydrogenase, beta subunit C terminus		
 PF04434	SWIM	SWIM zinc finger	GO:0005488,GO:0008270,GO:0046872	
 PF04435	SPK	Domain of unknown function (DUF545)		
@@ -2726,7 +2719,6 @@ PF04686	SsgA	Streptomyces sporulation and cell division protein, SsgA	GO:0051301
 PF04688	Holin_SPP1	SPP1 phage holin		
 PF04689	S1FA	DNA binding protein S1FA	GO:0003677,GO:0005488,GO:0006355,GO:0019222,GO:0065007	
 PF04693	DDE_Tnp_2	Archaeal putative transposase ISC1217		
-PF04695	Pex14_N	Pex14 N-terminal domain		
 PF04703	FaeA	FaeA-like protein	GO:0006355,GO:0019222,GO:0065007	
 PF04705	TSNR_N	Thiostrepton-resistance methylase, N terminus	GO:0003824,GO:0008168,GO:0008649,GO:0008757,GO:0016740,GO:0046677	thiostrepton-resistance methylase=2.1.1.230
 PF04715	Anth_synt_I_N	Anthranilate synthase component I, N terminal region		anthranilate synthase=4.1.3.27
@@ -3161,7 +3153,6 @@ PF05605	zf-Di19	Drought induced 19 protein (Di19), zinc-binding
 PF05606	DUF777	Borrelia burgdorferi protein of unknown function (DUF777)		
 PF05610	DUF779	Protein of unknown function (DUF779)		
 PF05611	DUF780	Caenorhabditis elegans protein of unknown function (DUF780)		
-PF05617	Prolamin_like	Prolamin-like		
 PF05618	Zn_protease	Putative ATP-dependant zinc protease		
 PF05619	DUF787	Borrelia burgdorferi protein of unknown function (DUF787)		
 PF05620	TMEM208_SND2	SRP-independent targeting protein 2/TMEM208		
@@ -3823,7 +3814,6 @@ PF06971	Put_DNA-bind_N	Putative DNA-binding protein N-terminus	GO:0006355,GO:001
 PF06973	DUF1297	Domain of unknown function (DUF1297)	GO:0000166,GO:0000287,GO:0003824,GO:0005488,GO:0005524,GO:0006163,GO:0006164,GO:0006188,GO:0009058,GO:0009117,GO:0009165,GO:0016874,GO:0046872,GO:0055086	
 PF06975	DUF1299	Protein of unknown function (DUF1299)		
 PF06978	POP1_N	Ribonucleases P/MRP protein subunit POP1, N-terminal		
-PF06979	TMEM70	TMEM70/TMEM186/TMEM223 protein family		
 PF06980	DUF1302	Protein of unknown function (DUF1302)		
 PF06983	3-dmu-9_3-mt	3-demethylubiquinone-9 3-methyltransferase		3-demethylubiquinone-9 3-methyltransferase=2.1.1.64
 PF06984	MRP-L47	Mitochondrial 39-S ribosomal protein L47 (MRP-L47)	GO:0003735,GO:0005198,GO:0005737,GO:0005840,GO:0006412,GO:0009058	
@@ -3840,7 +3830,6 @@ PF07006	DUF1310	Protein of unknown function (DUF1310)
 PF07013	DUF1314	Protein of unknown function (DUF1314)		
 PF07016	CRAM_rpt	Cysteine-rich acidic integral membrane protein precursor		
 PF07017	PagP	Antimicrobial peptide resistance and lipid A acylation protein PagP		
-PF07019	EMC6	EMC6		
 PF07021	MetW	Methionine biosynthesis protein MetW		
 PF07022	Phage_CI_repr	Bacteriophage CI repressor helix-turn-helix domain	GO:0003677,GO:0005488,GO:0006355,GO:0019222,GO:0045892,GO:0065007	
 PF07023	DUF1315	Protein of unknown function (DUF1315)		
@@ -4324,7 +4313,6 @@ PF07924	NuiA	Nuclease A inhibitor-like protein
 PF07925	RdRP_5	Reovirus RNA-dependent RNA polymerase lambda 3	GO:0003723,GO:0003824,GO:0005488,GO:0009058,GO:0016070,GO:0016740,GO:0016772,GO:0016779,GO:0019028,GO:0044423	
 PF07926	TPR_MLP1_2	TPR/MLP1/MLP2-like protein	GO:0006810,GO:0006886,GO:0015031	
 PF07927	HicA_toxin	HicA toxin of bacterial toxin-antitoxin,	GO:0003723,GO:0003729,GO:0005488	
-PF07928	Vps54	Vps54-like protein	GO:0006810,GO:0016192	
 PF07930	DAP_B	D-aminopeptidase, domain B	GO:0003824,GO:0008233,GO:0016787	
 PF07931	CPT	Chloramphenicol phosphotransferase-like protein	GO:0000166,GO:0003824,GO:0005488,GO:0005524,GO:0016740	
 PF07933	DUF1681	Protein of unknown function (DUF1681)	GO:0006810,GO:0016020	
@@ -4399,7 +4387,6 @@ PF08112	ATP-synt_E_2	ATP synthase epsilon subunit	GO:0005215,GO:0006163,GO:00061
 PF08113	CoxIIa	Cytochrome c oxidase subunit IIa family		
 PF08114	PMP1_2	ATPase proteolipid family	GO:0065007	
 PF08115	Toxin_28	SFI toxin family	GO:0005576	
-PF08117	Toxin_30	Ptu family	GO:0005576	
 PF08119	Toxin_31	Scorpion acidic alpha-KTx toxin family	GO:0005576	
 PF08122	NDUF_B12	NADH-ubiquinone oxidoreductase B12 subunit family	GO:0005737,GO:0006091,GO:0022900	nadh-ubiquinone oxidoreductase=1.6.5.9|7.1.1.2
 PF08123	DOT1	Histone methylation protein DOT1	GO:0003824,GO:0008168,GO:0008170,GO:0008757,GO:0016740	
@@ -4446,7 +4433,6 @@ PF08242	Methyltransf_12	Methyltransferase domain		methyltransferase=2.5.1.61
 PF08243	SPT2	SPT2 chromatin protein		
 PF08244	Glyco_hydro_32C	Glycosyl hydrolases family 32 C terminal		
 PF08245	Mur_ligase_M	Mur ligase middle domain	GO:0000166,GO:0003824,GO:0005488,GO:0005524,GO:0009058,GO:0016874	
-PF08251	Mastoparan_2	Mastoparan peptide		
 PF08263	LRRNT_2	Leucine rich repeat N-terminal domain		
 PF08264	Anticodon_1	Anticodon-binding domain of tRNA ligase	GO:0003824,GO:0004812,GO:0006412,GO:0006418,GO:0006520,GO:0009058,GO:0016070,GO:0016874,GO:0043039	
 PF08267	Meth_synt_1	Cobalamin-independent synthase, N-terminal domain	GO:0003824,GO:0005488,GO:0006520,GO:0008168,GO:0008270,GO:0008652,GO:0009058,GO:0016740,GO:0046872	
@@ -4665,7 +4651,6 @@ PF08694	UFC1	Ubiquitin-fold modifier-conjugating enzyme 1	GO:0003824,GO:0016740,
 PF08695	Coa1	Cytochrome oxidase complex assembly protein 1		cytochrome oxidase=7.1.1.9
 PF08696	Dna2	DNA replication factor Dna2		
 PF08701	GN3L_Grn1	GNL3L/Grn1 putative GTPase		
-PF08702	Fib_alpha	Fibrinogen alpha/beta chain family	GO:0005488,GO:0005515,GO:0005576,GO:0006950,GO:0065003,GO:0065007	
 PF08704	GCD14	tRNA methyltransferase complex GCD14 subunit		methyltransferase=2.5.1.61;trna methyltransferase=2.1.1.33|2.1.1.34|2.1.1.61
 PF08707	PriCT_2	Primase C terminal 2 (PriCT-2)	GO:0003824,GO:0016787	
 PF08708	PriCT_1	Primase C terminal 1 (PriCT-1)		
@@ -5270,7 +5255,6 @@ PF09772	Tmem26	Transmembrane protein 26
 PF09773	Meckelin	Meckelin (Transmembrane protein 67)		
 PF09776	Mitoc_L55	Mitochondrial ribosomal protein L55	GO:0003735,GO:0005198,GO:0005737,GO:0005840	
 PF09777	OSTMP1	Osteopetrosis-associated transmembrane protein 1 precursor		
-PF09779	Ima1_N	Ima1 N-terminal domain		
 PF09781	NDUF_B5	NADH:ubiquinone oxidoreductase, NDUFB5/SGDH subunit		
 PF09782	NDUF_B6	NADH:ubiquinone oxidoreductase, NDUFB6/B17 subunit	GO:0006091,GO:0006119,GO:0009060,GO:0015980,GO:0019646,GO:0022900,GO:0045333	
 PF09784	L31	Mitochondrial ribosomal protein L31		
@@ -5568,11 +5552,9 @@ PF10145	PhageMin_Tail	Phage-related minor tail protein
 PF10146	zf-C4H2	Zinc finger-containing protein		
 PF10149	TM231	Transmembrane protein 231		
 PF10150	RNase_E_G	Ribonuclease E/G family	GO:0003723,GO:0005488	
-PF10151	TMEM214	TMEM214, C-terminal, caspase 4 activator		
 PF10156	Med17	Subunit 17 of Mediator complex		
 PF10160	Tmemb_40	Predicted membrane protein		
 PF10163	EnY2	Transcription factor e(y)2	GO:0000785,GO:0006355,GO:0006810,GO:0009058,GO:0019222,GO:0045893,GO:0065007,GO:0140110	
-PF10164	BRI3	Brain protein I3		
 PF10166	DUF2368	Uncharacterised conserved protein (DUF2368)	GO:0005886,GO:0016020,GO:0019222,GO:0065007	
 PF10171	Tim29	Translocase of the Inner Mitochondrial membrane 29	GO:0005737,GO:0016020	
 PF10172	DDA1	Det1 complexing ubiquitin ligase		
@@ -5604,7 +5586,6 @@ PF10215	Ost4	Oligosaccaryltransferase
 PF10217	DUF2039	Uncharacterized conserved protein (DUF2039)		
 PF10222	DUF2152	Uncharacterized conserved protein (DUF2152)		
 PF10224	DUF2205	Short coiled-coil protein		
-PF10225	NEMP	NEMP family		
 PF10230	LIDHydrolase	Lipid-droplet associated hydrolase	GO:0003824,GO:0016787,GO:0016788	
 PF10231	COA8	Cytochrome c oxidase assembly factor 8	GO:0007165,GO:0023052,GO:0035556,GO:0065007	
 PF10232	Med8	Mediator of RNA polymerase II transcription complex subunit 8	GO:0006355,GO:0019222,GO:0065007,GO:0140110	rna polymerase ii=2.7.7.6
@@ -6574,7 +6555,6 @@ PF11760	CbiG_N	Cobalamin synthesis G N-terminal
 PF11761	CbiG_mid	Cobalamin biosynthesis central region		
 PF11762	Arabinose_Iso_C	L-arabinose isomerase C-terminal domain		l-arabinose isomerase=5.3.1.4
 PF11763	DIPSY	Cell-wall adhesin ligand-binding C-terminal		
-PF11765	Hyphal_reg_CWP	Hyphally regulated cell wall protein N-terminal		
 PF11767	SET_assoc	Histone lysine methyltransferase SET associated		methyltransferase=2.5.1.61
 PF11769	DUF3313	Protein of unknown function (DUF3313)		
 PF11770	GAPT	GRB2-binding adapter (GAPT)	GO:0016020	
@@ -6661,7 +6641,6 @@ PF11885	DUF3405	Protein of unknown function (DUF3405)
 PF11886	TOC159_MAD	Translocase of chloroplast 159/132, membrane anchor domain		
 PF11888	DUF3408	Protein of unknown function (DUF3408)		
 PF11890	DUF3410	Domain of unknown function (DUF3410)	GO:0005488,GO:0005515	
-PF11891	RETICULATA-like	Protein RETICULATA-related		
 PF11893	DUF3413	Domain of unknown function (DUF3413)		
 PF11895	Peroxidase_ext	Fungal peroxidase extension region		peroxidase=1.11.1.7
 PF11896	GlgE_dom_N_S	Alpha-1,4-glucan:maltose-1-phosphate maltosyltransferase, domain N/S	GO:0003824,GO:0004553,GO:0016787,GO:0016798	
@@ -7972,7 +7951,6 @@ PF13799	DUF4183	Domain of unknown function (DUF4183)
 PF13800	Sigma_reg_N	Sigma factor regulator N-terminal		
 PF13802	Gal_mutarotas_2	Glycosyl hydrolase 31 N-terminal galactose mutarotase-like domain		
 PF13803	DUF4184	Domain of unknown function (DUF4184)		
-PF13805	Pil1	Eisosome component PIL1		
 PF13806	Rieske_2	Rieske-like [2Fe-2S] domain	GO:0003824,GO:0008942,GO:0016491,GO:0046857,GO:0098809	
 PF13807	GNVR	G-rich domain on putative tyrosine kinase		
 PF13810	DUF4185	Domain of unknown function (DUF4185)		
@@ -8551,7 +8529,6 @@ PF14850	Pro_dh-DNA_bdg	DNA-binding domain of Proline dehydrogenase	GO:0003824,GO
 PF14852	Fis1_TPR_N	Fis1 N-terminal tetratricopeptide repeat		
 PF14853	Fis1_TPR_C	Fis1 C-terminal tetratricopeptide repeat		
 PF14855	PapJ	Pilus-assembly fibrillin subunit, chaperone		
-PF14857	TMEM151	TMEM151 family		
 PF14860	DrrA_P4M	DrrA phosphatidylinositol 4-phosphate binding domain	GO:0005488,GO:0005515,GO:0065007	
 PF14866	Scorpion_toxin_alpha-beta	Long chain scorpion toxin, cysteine-stabilized alpha/beta domain		
 PF14868	DUF4487	Domain of unknown function (DUF4487)		
@@ -9111,7 +9088,6 @@ PF16073	SAT	Starter unit:ACP transacylase in aflatoxin biosynthesis
 PF16074	PilW	Type IV Pilus-assembly protein W	GO:0043683	
 PF16075	DUF4815	Domain of unknown function (DUF4815)		
 PF16076	Acyltransf_C	Acyltransferase C-terminus		
-PF16077	Spaetzle	Spaetzle		
 PF16078	2-oxogl_dehyd_N	2-oxoglutarate dehydrogenase N-terminus		2-oxoglutarate dehydrogenase=1.2.4.2
 PF16079	Phage_holin_5_2	Phage holin family Hol44, in holin superfamily V		
 PF16080	Phage_holin_2_3	Bacteriophage holin family HP1		
@@ -9581,7 +9557,6 @@ PF16804	DUF5071	Domain of unknown function (DUF5071)
 PF16805	Trans_coact	Phage late-transcription coactivator		
 PF16807	Phage_tail_terminator_4	Putative tail termination protein		
 PF16808	PKcGMP_CC	Coiled-coil N-terminus of cGMP-dependent protein kinase		cgmp-dependent protein kinase=2.7.11.12;protein kinase=2.7.13.1|2.7.13.2|2.7.13.3
-PF16810	RXLR	RXLR phytopathogen effector protein, Avirulence activity		
 PF16813	Cas_St_Csn2	CRISPR-associated protein Csn2 subfamily St		
 PF16817	DUF5073	Domain of unknown function (DUF5073)		
 PF16819	DUF5074	Domain of unknown function (DUF5074)		
@@ -11698,7 +11673,6 @@ PF20138	DUF6528	Family of unknown function (DUF6528)
 PF20139	DUF6529	Family of unknown function (DUF6529)		
 PF20140	DUF6530	Family of unknown function (DUF6530)		
 PF20143	NAD_kinase_C	ATP-NAD kinase C-terminal domain		
-PF20147	Crinkler	Crinkler effector protein N-terminal domain		
 PF20148	DUF6531	Domain of unknown function (DUF6531)		
 PF20149	DUF6532	Domain of unknown function (DUF6532)		
 PF20151	DUF6533	Family of unknown function (DUF6533)		
@@ -12555,7 +12529,6 @@ PF21721	Gp38_N	Phage tail fibre adhesin Gp38 N-terminal domain
 PF21724	DUF6861	Family of unknown function (DUF6861)		
 PF21726	DUF6862	Family of unknown function (DUF6862)		
 PF21727	DUF6863	Family of unknown function (DUF6863)		
-PF21729	IRX15_IRX15L_GXM	IRX15/IRX15L/GXM	GO:0000271,GO:0005975,GO:0009058,GO:0042546	
 PF21732	DUF6864	Domain of unknown function (DUF6864)		
 PF21734	10_blade	10-bladed beta propeller domain		
 PF21737	DUF6865	Family of unknown function (DUF6865)		
@@ -15698,7 +15671,6 @@ PF27598	AKAP9_coil_N	AKAP9/Pericentrin, N-terminal coiled coil domain
 PF27602	HTH_ENOX1	ENOX1-like, C-terminal helix-turn-helix domain		
 PF27603	AKAP9_C	AKAP9-like coiled-coil region		
 PF27605	ODF2_C	ODF2 C-terminal coiled coil domain		
-PF27607	GPR137_N	GPR137 N-terminal domain		
 PF27611	YopE-YndK	YopE-YndK two-helix transmembrane domain		
 PF27615	DUF8350	Domain of unknown function (DUF8350)		
 PF27616	DUF8351	Domain of unknown function (DUF8351)		
@@ -16515,7 +16487,6 @@ PF30349	FMP33	Mitochondrial membrane protein FMP33
 PF30355	zf_C2H2-Disco	Disconnected/basonuclin C2H2-type zinc finger		
 PF30356	GPT2_C	Glycerol-3-phosphate acyltransferase 2 C-terminal domain		glycerol-3-phosphate acyltransferase=2.3.1.275|2.3.1.n5
 PF30357	RELCH_N	RAB11-binding protein RELCH N-terminal domain		
-PF30358	GOLM	GOLM		
 PF30359	RELCH_C	RAB11-binding protein RELCH C-terminal domain		
 PF30361	TRM82_WD	tRNA methyltransferase TRM82 WD40 domain		methyltransferase=2.5.1.61;trna methyltransferase=2.1.1.33|2.1.1.34|2.1.1.61
 PF30362	MAKR5_C	Membrane-associated kinase regulator 5 helix	GO:0005886,GO:0016020	

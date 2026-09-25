@@ -263,7 +263,7 @@ GT30	carbohydrate_active,glycosyltransferase,glycosyltransferase_cazy,transferas
 GT31	carbohydrate_active,enzyme,glycosyltransferase,glycosyltransferase_cazy,transferase	carbohydrate_active=class:GT;enzyme=swissprot:40/48 single-domain 36/44;glycosyltransferase=swissprot:47/48 single-domain 43/44;glycosyltransferase_cazy=class:GT;transferase=class:GT
 GT32	carbohydrate_active,enzyme,glycosyltransferase,glycosyltransferase_cazy,transferase	carbohydrate_active=class:GT;enzyme=swissprot:8/9 single-domain 8/9;glycosyltransferase=swissprot:9/9 single-domain 9/9;glycosyltransferase_cazy=class:GT;transferase=class:GT
 GT33	carbohydrate_active,glycosyltransferase_cazy,transferase	carbohydrate_active=class:GT;glycosyltransferase_cazy=class:GT;transferase=class:GT
-GT34	carbohydrate_active,cytoplasmic,enzyme,glycosyltransferase,glycosyltransferase_cazy,transferase	carbohydrate_active=class:GT;cytoplasmic=swissprot:8/9 single-domain 8/9;enzyme=swissprot:8/9 single-domain 8/9;glycosyltransferase=swissprot:9/9 single-domain 9/9;glycosyltransferase_cazy=class:GT;transferase=class:GT
+GT34	carbohydrate_active,enzyme,glycosyltransferase,glycosyltransferase_cazy,transferase	carbohydrate_active=class:GT;enzyme=swissprot:8/9 single-domain 8/9;glycosyltransferase=swissprot:9/9 single-domain 9/9;glycosyltransferase_cazy=class:GT;transferase=class:GT
 GT35	carbohydrate_active,glycosyltransferase,glycosyltransferase_cazy,transferase	carbohydrate_active=class:GT;glycosyltransferase=swissprot:29/29 single-domain 29/29;glycosyltransferase_cazy=class:GT;transferase=class:GT
 GT37	carbohydrate_active,glycosyltransferase_cazy,transferase	carbohydrate_active=class:GT;glycosyltransferase_cazy=class:GT;transferase=class:GT
 GT39	carbohydrate_active,glycosyltransferase,glycosyltransferase_cazy,transferase	carbohydrate_active=class:GT;glycosyltransferase=swissprot:17/17 single-domain 17/17;glycosyltransferase_cazy=class:GT;transferase=class:GT
@@ -288,7 +288,7 @@ GT58	carbohydrate_active,enzyme,glycosyltransferase,glycosyltransferase_cazy,tra
 GT59	carbohydrate_active,glycosyltransferase_cazy,transferase	carbohydrate_active=class:GT;glycosyltransferase_cazy=class:GT;transferase=class:GT
 GT6	carbohydrate_active,glycosyltransferase,glycosyltransferase_cazy,transferase	carbohydrate_active=class:GT;glycosyltransferase=swissprot:10/10 single-domain 10/10;glycosyltransferase_cazy=class:GT;transferase=class:GT
 GT60	carbohydrate_active,glycosyltransferase_cazy,transferase	carbohydrate_active=class:GT;glycosyltransferase_cazy=class:GT;transferase=class:GT
-GT61	carbohydrate_active,cytoplasmic,enzyme,glycosyltransferase,glycosyltransferase_cazy,transferase	carbohydrate_active=class:GT;cytoplasmic=swissprot:8/9 single-domain 8/9;enzyme=swissprot:8/9 single-domain 8/9;glycosyltransferase=swissprot:9/9 single-domain 9/9;glycosyltransferase_cazy=class:GT;transferase=class:GT
+GT61	carbohydrate_active,enzyme,glycosyltransferase,glycosyltransferase_cazy,transferase	carbohydrate_active=class:GT;enzyme=swissprot:8/9 single-domain 8/9;glycosyltransferase=swissprot:9/9 single-domain 9/9;glycosyltransferase_cazy=class:GT;transferase=class:GT
 GT62	carbohydrate_active,glycosyltransferase_cazy,transferase	carbohydrate_active=class:GT;glycosyltransferase_cazy=class:GT;transferase=class:GT
 GT63	carbohydrate_active,glycosyltransferase_cazy,transferase	carbohydrate_active=class:GT;glycosyltransferase_cazy=class:GT;transferase=class:GT
 GT64	carbohydrate_active,enzyme,glycosyltransferase,glycosyltransferase_cazy,transferase	carbohydrate_active=class:GT;enzyme=swissprot:9/11 single-domain 3/3;glycosyltransferase=swissprot:11/11 single-domain 3/3;glycosyltransferase_cazy=class:GT;transferase=class:GT
@@ -303,7 +303,7 @@ GT73	carbohydrate_active,glycosyltransferase_cazy,transferase	carbohydrate_activ
 GT74	carbohydrate_active,glycosyltransferase_cazy,transferase	carbohydrate_active=class:GT;glycosyltransferase_cazy=class:GT;transferase=class:GT
 GT75	carbohydrate_active,glycosyltransferase_cazy,transferase	carbohydrate_active=class:GT;glycosyltransferase_cazy=class:GT;transferase=class:GT
 GT76	carbohydrate_active,glycosyltransferase_cazy,transferase	carbohydrate_active=class:GT;glycosyltransferase_cazy=class:GT;transferase=class:GT
-GT77	carbohydrate_active,cytoplasmic,glycosyltransferase,glycosyltransferase_cazy,transferase	carbohydrate_active=class:GT;cytoplasmic=swissprot:9/11 single-domain 9/11;glycosyltransferase=swissprot:10/11 single-domain 10/11;glycosyltransferase_cazy=class:GT;transferase=class:GT
+GT77	carbohydrate_active,glycosyltransferase,glycosyltransferase_cazy,transferase	carbohydrate_active=class:GT;glycosyltransferase=swissprot:10/11 single-domain 10/11;glycosyltransferase_cazy=class:GT;transferase=class:GT
 GT78	carbohydrate_active,glycosyltransferase_cazy,transferase	carbohydrate_active=class:GT;glycosyltransferase_cazy=class:GT;transferase=class:GT
 GT8	carbohydrate_active,enzyme,glycosyltransferase,glycosyltransferase_cazy,transferase	carbohydrate_active=class:GT;enzyme=swissprot:26/32 single-domain 25/28;glycosyltransferase=swissprot:28/32 single-domain 26/28;glycosyltransferase_cazy=class:GT;transferase=class:GT
 GT80	carbohydrate_active,glycosyltransferase_cazy,transferase	carbohydrate_active=class:GT;glycosyltransferase_cazy=class:GT;transferase=class:GT
