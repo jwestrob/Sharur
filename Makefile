@@ -2,13 +2,23 @@
 SNAPSHOT ?= data/reference/snapshots/$(shell date +%Y-%m-%d)
 PYTHON ?= python
 
-.PHONY: test lint snapshots snapshots-with-links predicate-maps recount kegg
+.PHONY: test lint docs docs-serve docs-cli snapshots snapshots-with-links predicate-maps recount kegg
 
 test:
 	$(PYTHON) -m pytest --override-ini addopts="" -q
 
 lint:
 	$(PYTHON) -m ruff check --select E9,F63,F7,F82 sharur src/ingest tests
+
+# Documentation site (MkDocs Material); docs-cli regenerates the command reference.
+docs:
+	$(PYTHON) -m mkdocs build --strict
+
+docs-serve:
+	$(PYTHON) -m mkdocs serve
+
+docs-cli:
+	$(PYTHON) scripts/gen_cli_docs.py
 
 # Reference inputs for the predicate maps (Pfam, GO, ENZYME, Swiss-Prot, KEGG REST).
 snapshots:

@@ -110,6 +110,7 @@ def _build_tools_dag(
     skip_dbcan: bool,
     skip_crispr: bool,
     skip_embeddings: bool,
+    embedding_model: str | None = None,
     enable_cazymes: bool,
     pipeline_depth: int = 2,
 ) -> IngestDAG:
@@ -338,6 +339,7 @@ def _build_tools_dag(
                 request.accelerator,
                 "--skip-index",
                 "--force",
+                *(("--model", embedding_model) if embedding_model else ()),
                 str(stages.stage03),
                 str(stages.stage06),
             ],
@@ -707,6 +709,13 @@ def run(
         bool,
         typer.Option(help="Skip Stage 06 post-build embeddings (06_esm2_embeddings.py)"),
     ] = False,
+    embedding_model: Annotated[
+        str | None,
+        typer.Option(
+            "--embedding-model",
+            help="Hugging Face protein encoder for Stage 06 (default: facebook/esm2_t6_8M_UR50D)",
+        ),
+    ] = None,
     profile: Annotated[
         str,
         typer.Option(
@@ -822,6 +831,7 @@ def run(
             skip_dbcan=skip_dbcan,
             skip_crispr=skip_crispr,
             skip_embeddings=skip_embeddings,
+            embedding_model=embedding_model,
             enable_cazymes=enable_cazymes,
             pipeline_depth=pipeline_depth,
         )

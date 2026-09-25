@@ -1,0 +1,84 @@
+site_name: Sharur
+site_description: Agent-driven exploration of metagenomic datasets
+repo_url: https://github.com/jwestrob/Sharur
+repo_name: jwestrob/Sharur
+edit_uri: edit/main/docs/
+docs_dir: docs
+
+exclude_docs: |
+  preprint/
+  hooks/
+
+hooks:
+  - docs/hooks/root_links.py
+
+theme:
+  name: material
+  logo: assets/logo.png
+  favicon: assets/logo.png
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: blue grey
+      accent: amber
+      toggle:
+        icon: material/weather-night
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: blue grey
+      accent: amber
+      toggle:
+        icon: material/weather-sunny
+        name: Light mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Installation: getting-started/installation.md
+      - Ingest a dataset: getting-started/quickstart.md
+      - First look: getting-started/first-look.md
+  - Concepts:
+      - How predicates are built: predicate_construction.md
+      - Predicate system V2: predicates_v2.md
+      - Embeddings and similarity: concepts/embeddings.md
+      - Seals and provenance: concepts/seals.md
+      - Working with agents: concepts/agents.md
+  - Guides:
+      - Interpreting annotations: biological_interpretation.md
+      - Cases and context comparison: cases_and_evidence.md
+      - Structured findings: findings_spec.md
+      - Tools (Astra, ELSA, ESM3, Foldseek): tools_reference.md
+      - Data organization: DATA_ORGANIZATION.md
+  - Campaigns:
+      - Query service: query_service.md
+      - Agent coordination: agent_ops_spec.md
+      - Review workflow: review_workflow.md
+  - For agents:
+      - Analysis workflow: analysis_workflow.md
+      - Subagent guide: subagent_guide.md
+      - Manuscript guide: manuscript_guide.md
+  - Reference:
+      - Command line: reference/cli.md
+      - Quick reference: reference/quick-reference.md
+      - Ingest stages: reference/ingest-stages.md
+      - Co-location engine: COLOCATION_ENGINE_SPEC.md

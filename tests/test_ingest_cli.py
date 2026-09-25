@@ -111,3 +111,19 @@ def test_cazyme_consensus_opt_in_reaches_stage07(tmp_path):
         command for command in plan or [] if command[0].endswith("07_build_knowledge_base.py")
     )
     assert "--enable-cazymes" in builder
+
+
+def test_embedding_model_reaches_stage06(tmp_path):
+    plan = ingest.run(
+        input_dir=Path("dummy_dataset"),
+        data_dir=tmp_path / "dataset",
+        output=tmp_path / "dataset" / "sharur.duckdb",
+        mode="tools",
+        embedding_model="facebook/esm2_t33_650M_UR50D",
+        dry_run=True,
+    )
+
+    stage06 = next(
+        command for command in plan or [] if command[0].endswith("06_esm2_embeddings.py")
+    )
+    assert stage06[stage06.index("--model") + 1] == "facebook/esm2_t33_650M_UR50D"

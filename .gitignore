@@ -157,3 +157,6 @@ mmcif/
 *.cif
 .nfs*
 **/.nfs*
+
+# MkDocs build output
+site/

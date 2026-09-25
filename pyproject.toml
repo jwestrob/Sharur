@@ -64,6 +64,10 @@ reports = [
     "fpdf2>=2.7.0",
     "reportlab>=4.0.0",
 ]
+docs = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+]
 notebooks = [
     "jupyter>=1.0.0",
     "ipywidgets>=8.0.0",

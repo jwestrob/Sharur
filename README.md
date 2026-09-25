@@ -20,7 +20,7 @@ Sharur is model-agnostic. Its interface is a CLI and a Python API whose outputs 
 
 Given a set of metagenome-assembled genomes (MAGs), Sharur:
 
-1. **Ingests** proteins, annotations (Pfam, KOfam, HydDB, VOGdb, CAZy, DefenseFinder, TXSScan), CRISPR arrays, biosynthetic gene clusters, and ESM2 embeddings into one database.
+1. **Ingests** proteins, annotations (Pfam, KOfam, HydDB, VOGdb, CAZy, DefenseFinder, TXSScan), CRISPR arrays, biosynthetic gene clusters, and protein embeddings from the model of your choice into one database.
 2. **Computes predicates**: functional tags such as `nife_group3`, `sam_binding` or `crispr_associated`. Every mapping carries recorded evidence (GO, Pfam/KEGG text, ENZYME, KEGG BRITE and modules, HydDB, reviewed-protein consensus), and system-level claims come only from validated system callers. See [How predicates are built](docs/predicate_construction.md).
 3. **Exposes operators** for agents: predicate search, genomic neighborhoods, protein cards, predicate explanations, KEGG module completeness, embedding similarity, structure search, and export.
 4. **Records provenance**: dataset seals, a capability preflight, and a stamp of the predicate maps behind every generation.
@@ -73,12 +73,16 @@ sharur modules --db data/my_dataset/sharur.duckdb --bin GENOME_ID --min-complete
 sharur preflight --db data/my_dataset/sharur.duckdb --format json      # typed capability brief
 ```
 
-Seal a finished dataset and verify it later:
+### Seal a finished dataset
+
+A seal is a receipt for a dataset. Once ingest is done, `sharur seal` writes `dataset.seal.json`, which records the input genome files, every database table with its columns and row counts, the ingest stages that ran, the annotation sources present, and the software and git versions that produced them. All of that is summarized in one fingerprint, the dataset ID.
 
 ```bash
 sharur seal --db data/my_dataset/sharur.duckdb
 sharur verify-seal data/my_dataset/dataset.seal.json
 ```
+
+`verify-seal` rebuilds the receipt from what is on disk now and compares it with the stored one. A match means you, a collaborator or an agent are analyzing exactly the dataset the seal describes; a mismatch lists what changed (a table's row count, a replaced input, a new annotation source). Cite the dataset ID alongside results, and verify before resuming analysis after a break, after copying a dataset to another machine, or before archiving it. Seals check structure and sampled file contents by default; `--full` hashes every byte of the large files as well.
 
 ### Use the operators
 
@@ -110,7 +114,7 @@ Operator results expose `result.records`, `result.raw`, `result.status`, and `re
 
 **Extensions**, installed and used as needed:
 
-- **Embeddings and similarity**: ESM2 embeddings and FAISS indexes (`embeddings`, `vectors` extras).
+- **Embeddings and similarity**: protein embeddings plus FAISS indexes for similarity search (`embeddings`, `vectors` extras). Similarity search works with any model's per-protein vectors: `sharur-ingest --embedding-model` selects any Hugging Face protein encoder (ESM-2 8M by default), and embeddings computed elsewhere load directly, as an HDF5 file with `protein_ids` and `embeddings` datasets indexed by `sharur build-vector-index --embeddings FILE`.
 - **Synteny**: ELSA embedding-based conserved gene blocks, exposed through a run-scoped `synteny.duckdb` sidecar.
 - **Structure**: ESM3 structure prediction and Foldseek remote homology (`structure` extra).
 - **Campaign scale**: `sharur-ops`, `sharur-query`, `sharur-atlas`, `sharur-review` (below).
@@ -183,7 +187,7 @@ Proposals for new mappings are welcome: add them to the proposal files and rebui
 | 05a | GECCO | Optional biosynthetic gene clusters |
 | 05c | minced | CRISPR array detection |
 | 07 | Builder | DuckDB knowledge base and predicates; optional dbCAN consensus with `--enable-cazymes` |
-| 06 | ESM2 | Protein embeddings (required for ELSA) |
+| 06 | Protein language model | Per-protein embeddings, ESM-2 by default (required for ELSA) |
 
 Stage 07 also assigns hydrogenase subgroups: each HydDB-hit protein receives the subgroup of its nearest HydDB reference, recorded in `hydrogenase_classifications` with a catalytic-domain check and KOfam support. `scripts/classify_hydrogenases.py` refreshes an existing database through a validated staged copy.
 

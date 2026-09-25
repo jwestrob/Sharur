@@ -83,10 +83,13 @@ def _build_index_isolated(
         ) from exc
 
 
+DEFAULT_MODEL = "facebook/esm2_t6_8M_UR50D"
+
+
 class ESM2EmbeddingGenerator:
     """Generate protein embeddings using ESM2, streaming to HDF5."""
 
-    def __init__(self, model_name: str = "facebook/esm2_t6_8M_UR50D", device: str | None = None):
+    def __init__(self, model_name: str = DEFAULT_MODEL, device: str | None = None):
         self.model_name = model_name
 
         if device is None:
@@ -99,7 +102,7 @@ class ESM2EmbeddingGenerator:
         else:
             self.device = device
 
-        console.print(f"Loading ESM2 model: {model_name}")
+        console.print(f"Loading embedding model: {model_name}")
         console.print(f"Using device: {self.device}")
 
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -220,7 +223,7 @@ def write_manifest(
 def run_esm2_embeddings(
     stage03_dir: Path,
     output_dir: Path,
-    model_name: str = "facebook/esm2_t6_8M_UR50D",
+    model_name: str = DEFAULT_MODEL,
     batch_size: int | None = None,
     force: bool = False,
     build_index: bool = True,
@@ -228,7 +231,7 @@ def run_esm2_embeddings(
     device: str | None = None,
 ) -> dict[str, Any]:
     """Generate ESM2 embeddings and their persistent similarity sidecars."""
-    console.print("[bold blue]Stage 6: ESM2 Protein Embeddings[/bold blue]")
+    console.print("[bold blue]Stage 6: Protein Embeddings[/bold blue]")
 
     h5_path = output_dir / "protein_embeddings.h5"
     manifest_path = output_dir / "embedding_manifest.json"
@@ -345,6 +348,12 @@ if __name__ == "__main__":
     parser.add_argument("output_dir", type=Path)
     parser.add_argument("--force", action="store_true")
     parser.add_argument(
+        "--model",
+        default=DEFAULT_MODEL,
+        help="Hugging Face protein encoder loadable with AutoModel/AutoTokenizer "
+        f"(default: {DEFAULT_MODEL}); per-protein vectors are residue mean-pooled.",
+    )
+    parser.add_argument(
         "--device",
         choices=("cpu", "mps", "cuda"),
         default=None,
@@ -368,9 +377,10 @@ if __name__ == "__main__":
     result = run_esm2_embeddings(
         args.stage03_dir,
         args.output_dir,
+        model_name=args.model,
         force=args.force,
         build_index=not args.skip_index,
         index_threads=args.index_threads,
         device=args.device,
     )
-    print(f"ESM2 embeddings completed: {result['total_proteins']} proteins")
+    print(f"Embeddings completed: {result['total_proteins']} proteins")
