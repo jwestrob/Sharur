@@ -1218,6 +1218,21 @@ def doctor(
         raise typer.Exit(code=1)
 
 
+@app.command(name="describe")
+def describe(
+    db: str = typer.Option(DEFAULT_DB, "--db", "-d", help="Path to DuckDB database"),
+    output_format: BriefFormat = typer.Option(BriefFormat.markdown, "--format", "-f", help="markdown or json"),
+):
+    """What a dataset holds: annotation sources, curated callers, genome metadata, predicate state."""
+    from sharur.operators.introspection import describe_dataset, describe_dataset_markdown
+    from sharur.storage.duckdb_store import DuckDBStore
+
+    with DuckDBStore(db, read_only=True) as store:
+        result = describe_dataset(store)
+    typer.echo(json.dumps(result, indent=2, default=str) if output_format == BriefFormat.json
+               else describe_dataset_markdown(result))
+
+
 @app.command(name="card")
 def protein_card(
     protein_id: str = typer.Argument(..., help="Protein ID"),

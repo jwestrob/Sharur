@@ -192,6 +192,12 @@ class Sharur:
         """
         return overview(self.store)
 
+    def describe(self) -> dict:
+        """Annotation sources, curated callers, genome metadata and predicate state."""
+        from sharur.operators.introspection import describe_dataset
+
+        return describe_dataset(self.store)
+
     def describe_schema(self) -> SharurResult:
         """
         Describe database schema and available predicates.

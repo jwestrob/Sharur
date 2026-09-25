@@ -87,3 +87,14 @@ def test_cards_and_explanations_carry_no_sequence(store):
 def test_missing_protein(store):
     assert card(store, "nope") == {"protein_id": "nope", "found": False}
     assert "not found" in card_markdown(card(store, "nope"))
+
+
+def test_describe_reports_sources_callers_and_predicate_state(store):
+    from sharur.operators.introspection import describe_dataset, describe_dataset_markdown
+
+    d = describe_dataset(store)
+    assert d["proteins"] == 3
+    assert {s["source"] for s in d["annotation_sources"]} == {"pfam"}
+    assert d["bins"]["with_completeness"] == 1
+    assert d["predicates"]["map_status"] == "current"
+    assert "## Curated callers" in describe_dataset_markdown(d)

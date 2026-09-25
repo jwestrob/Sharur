@@ -241,6 +241,12 @@ Run `sharur doctor` to verify the core entry point, external tools, reference di
 and API keys are visible before an analysis run — `sharur doctor --strict` exits non-zero
 if a core requirement is missing.
 
+Start dataset work with `sharur describe --db data/DATASET/sharur.duckdb`: annotation
+sources with protein coverage, which curated callers exist (the only basis for named
+system or classification claims), genome completeness coverage, and whether predicates
+match the installed maps. KEGG-derived predicates and `sharur modules` need a local
+KEGG build (`sharur setup-kegg`; KEGG data stays on the user's machine).
+
 For an existing dataset, run `sharur preflight --db data/DATASET/sharur.duckdb` to inspect
 the typed live capability contract. Use `--format json` for agents and automation.
 

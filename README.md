@@ -273,9 +273,11 @@ The predicate system is what makes Sharur more than a database wrapper. Annotati
 
 - **PFAM**: a generated family-to-predicate table (`sharur/predicates/mappings/data/pfam_predicates.tsv`) in which every pair cites its support: the family's InterPro GO annotation, its Pfam name/description, an ENZYME name, or consensus among reviewed Swiss-Prot proteins carrying the family (curated EC numbers, experimental GO, and the KEGG-evidenced predicates of their KOs). `scripts/build_pfam_predicate_map.py` builds it from proposals and `tests/test_pfam_map_integrity.py` re-verifies it
 - **KEGG**: a KO-to-predicate table built on your machine by `sharur setup-kegg`, whose pairs cite KEGG's own information (EC numbers, BRITE placement, module membership, including `complex_subunit` for '+'-joined module components), HydDB reference labels for KOs KEGG names as hydrogenases, the KO's KEGG symbols/name, or Swiss-Prot consensus. Sharur ships only its rules; `sharur setup-kegg` fetches KEGG data under KEGG's terms (KEGG REST is for academic use; non-academic users need a KEGG license and can build from their licensed files with `--inputs`). `tests/test_kegg_map_integrity.py` re-verifies a local build
-- **CAZy**: Carbohydrate-active enzyme families
-- **VOGdb**: Viral orthologous groups
+- **CAZy**: a generated family-to-predicate table (`sharur/predicates/mappings/data/cazy_predicates.tsv`) from CAZy class definitions and Swiss-Prot consensus (`scripts/build_cazy_predicate_map.py`)
+- **VOGdb**: VOG functional categories and consensus-description matches vetted by the same text conventions as Pfam and KEGG
 - **Computed**: `giant` (>1000 aa), `unannotated` (no hits), `membrane_protein` (TM helices)
+
+Each predicate has a level: component predicates describe what one gene or domain shows; system-level predicates (validated defense or secretion systems) come only from system callers. `sharur why PROTEIN PREDICATE` shows the evidence behind any predicate, `sharur card PROTEIN` summarizes a protein, and `sharur modules` reports KEGG module completeness per genome or locus. Maintainers rebuild every map from a dated reference snapshot with `make snapshots predicate-maps recount`.
 
 This lets agents ask functional questions ("find NAD-coupled hydrogenases") instead of remembering accession numbers.
 

@@ -337,3 +337,92 @@ def _gather_predicate_summary(store: "DuckDBStore") -> dict[str, list[tuple[str,
 
 
 __all__ = ["overview", "describe_schema"]
+
+
+# --------------------------------------------------------------------------- #
+# Dataset description for analysis planning
+# --------------------------------------------------------------------------- #
+
+# Tables written by purpose-built callers; only these support named system or
+# classification claims.
+CURATED_CALLERS = {
+    "defense_systems": "validated defense systems (co-localization)",
+    "secretion_systems": "validated secretion systems (co-localization)",
+    "system_proteins": "proteins of validated systems",
+    "hydrogenase_classifications": "HydDB nearest-reference hydrogenase classification",
+    "loci": "curated loci (e.g. CRISPR arrays)",
+    "bgc_loci": "biosynthetic gene clusters",
+}
+
+
+def describe_dataset(store: "DuckDBStore") -> dict[str, Any]:
+    """What a dataset holds and what it can support: sources, callers, predicate state."""
+    from sharur.predicates.mappings.kegg_map import kegg_dir
+    from sharur.predicates.provenance import map_status
+
+    tables = {r[0] for r in store.execute(
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'")}
+    proteins = store.execute("SELECT COUNT(*) FROM proteins")[0][0] if "proteins" in tables else 0
+    sources = [
+        {"source": src, "rows": rows, "proteins": prots, "protein_fraction": round(prots / proteins, 4) if proteins else 0}
+        for src, rows, prots in store.execute(
+            "SELECT LOWER(source), COUNT(*), COUNT(DISTINCT protein_id) FROM annotations GROUP BY 1 ORDER BY 3 DESC")
+    ] if "annotations" in tables else []
+    callers = []
+    for table, meaning in CURATED_CALLERS.items():
+        if table not in tables:
+            continue
+        entry = {"table": table, "meaning": meaning, "rows": store.execute(f"SELECT COUNT(*) FROM {table}")[0][0]}
+        columns = {r[0] for r in store.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = ?", [table])}
+        if "classifier_version" in columns and entry["rows"]:
+            entry["versions"] = [r[0] for r in store.execute(f"SELECT DISTINCT classifier_version FROM {table}")]
+        callers.append(entry)
+    bins: dict[str, Any] = {}
+    if "bins" in tables:
+        columns = {r[0] for r in store.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'bins'")}
+        bins["count"] = store.execute("SELECT COUNT(*) FROM bins")[0][0]
+        for column in ("completeness", "contamination", "taxonomy"):
+            if column in columns:
+                bins[f"with_{column}"] = store.execute(f"SELECT COUNT({column}) FROM bins")[0][0]
+    status = map_status(store) if "predicate_provenance" in tables else None
+    local_kegg = kegg_dir()
+    schema = store.execute("SELECT MAX(version) FROM schema_version")[0][0] if "schema_version" in tables else None
+    return {
+        "proteins": proteins,
+        "schema_version": schema,
+        "annotation_sources": sources,
+        "curated_callers": callers,
+        "bins": bins,
+        "predicates": {
+            "v2_state_rows": store.execute("SELECT COUNT(*) FROM semantic_state")[0][0] if "semantic_state" in tables else 0,
+            "map_status": status.state if status else "unstamped",
+            "changed_maps": list(status.changed) if status else [],
+        },
+        "local_kegg_build": str(local_kegg) if local_kegg else None,
+    }
+
+
+def describe_dataset_markdown(d: dict[str, Any]) -> str:
+    lines = [f"# Dataset: {d['proteins']:,} proteins (schema {d['schema_version']})", "", "## Annotation sources"]
+    for s in d["annotation_sources"]:
+        lines.append(f"- {s['source']}: {s['rows']:,} rows on {s['proteins']:,} proteins ({s['protein_fraction']:.1%})")
+    lines += ["", "## Curated callers (support named system/classification claims)"]
+    if d["curated_callers"]:
+        for c in d["curated_callers"]:
+            version = f"; {', '.join(c['versions'])}" if c.get("versions") else ""
+            lines.append(f"- {c['table']}: {c['rows']:,} rows — {c['meaning']}{version}")
+    else:
+        lines.append("- none: report domain observations only")
+    b = d["bins"]
+    if b:
+        lines += ["", f"## Genomes: {b.get('count', 0):,}"]
+        for key in ("with_completeness", "with_contamination", "with_taxonomy"):
+            if key in b:
+                lines.append(f"- {key.replace('_', ' ')}: {b[key]:,}")
+    p = d["predicates"]
+    lines += ["", f"## Predicates: {p['v2_state_rows']:,} V2 states; maps {p['map_status']}"
+              + (f" (changed: {', '.join(p['changed_maps'])})" if p["changed_maps"] else "")]
+    lines.append(f"- local KEGG build: {d['local_kegg_build'] or 'absent (run `sharur setup-kegg`)'}")
+    return "\n".join(lines)

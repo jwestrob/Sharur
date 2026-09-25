@@ -26,7 +26,10 @@ PFAM_MAP = PACKAGE / "predicates/mappings/data/pfam_predicates.tsv"
 CAZY_MAP = PACKAGE / "predicates/mappings/data/cazy_predicates.tsv"
 VOG_RULES = PACKAGE / "predicates/mappings/vog_map.py"
 VOCABULARY = PACKAGE / "predicates/vocabulary.py"
-V2_CONFIG = PACKAGE.parent / "config/predicates_v2"
+# Source checkout keeps the V2 config at config/predicates_v2; wheels package it
+# at sharur/predicates_v2/config.
+V2_CONFIG = next((path for path in (PACKAGE.parent / "config/predicates_v2", PACKAGE / "predicates_v2/config")
+                  if path.is_dir()), PACKAGE / "predicates_v2/config")
 KEGG_RULES = (
     "kegg_brite_predicates.tsv",
     "kegg_module_predicates.tsv",
