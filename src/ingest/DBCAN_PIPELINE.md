@@ -37,46 +37,30 @@ The standard dbCAN annotation pipeline uses a **3-tool consensus** approach to m
 
 All database files should reside in `data/dbcan_db/`.
 
-| File | Size | Status | Required? | Notes |
-|------|------|--------|-----------|-------|
-| `CAZy.dmnd` | ~2.1 GB | **Present** | Yes | DIAMOND database for step 1 |
-| `dbCAN.hmm` | ~130 MB | **Present** (hmmpress'd) | Yes | HMM profiles for step 2 |
-| `dbCAN.hmm.h3{f,i,m,p}` | ~140 MB total | **Present** | Yes (auto-generated) | hmmpress index files |
-| `dbCAN-sub.hmm` | ~2.3 GB | **Present** (NOT hmmpress'd) | Recommended | Substrate HMM profiles for step 3 |
-| `dbCAN-sub.hmm.h3{f,i,m,p}` | — | **Missing** | Needed for step 3 | Must run `hmmpress dbCAN-sub.hmm` |
-| `fam-substrate-mapping.tsv` | ~92 KB | **Present** | Optional | Maps CAZy families to substrates |
+| File | Size | Required? | Notes |
+|------|------|-----------|-------|
+| `CAZy.dmnd` | ~2 GB | Yes | DIAMOND database for step 1 |
+| `dbCAN.hmm` (+ `hmmpress` index) | ~130 MB | Yes | HMM profiles for step 2 |
+| `dbCAN-sub.hmm` (+ `hmmpress` index) | ~2.3 GB | Recommended | Substrate HMM profiles for step 3; the release names it `dbCAN_sub.hmm`, and both names are accepted |
+| `fam-substrate-mapping.tsv` | ~100 KB | Optional | Maps CAZy families to substrates |
 
 ### How to Download / Update
 
-dbCAN databases are hosted at: https://bcb.unl.edu/dbCAN2/download/Databases/
-
-To download the latest version (V13 as of early 2026):
+dbCAN distributes its databases from an AWS S3 bucket (`s3://dbcan/`, public,
+region us-west-2); the release current in September 2026 is `db_v5-2_9-13-2025`.
+`run_dbcan database --db_dir data/dbcan_db --aws_s3` downloads the same files.
 
 ```bash
-cd data/dbcan_db/
+mkdir -p data/dbcan_db && cd data/dbcan_db/
+BASE=https://dbcan.s3.us-west-2.amazonaws.com/db_v5-2_9-13-2025
 
-# dbCAN HMM profiles (step 2)
-wget https://bcb.unl.edu/dbCAN2/download/Databases/V13/dbCAN-HMMdb-V13.txt
-mv dbCAN-HMMdb-V13.txt dbCAN.hmm
-hmmpress dbCAN.hmm
+curl -fLO "$BASE/CAZy.dmnd"                    # step 1 (prebuilt DIAMOND database)
+curl -fLO "$BASE/dbCAN.hmm" && hmmpress dbCAN.hmm   # step 2
+curl -fLO "$BASE/dbCAN_sub.hmm" && hmmpress dbCAN_sub.hmm   # step 3, ~2.3 GB
+curl -fLO "$BASE/fam-substrate-mapping.tsv"    # substrate mapping
 
-# DIAMOND database (step 1)
-wget https://bcb.unl.edu/dbCAN2/download/Databases/V13/CAZyDB.fa
-diamond makedb --in CAZyDB.fa --db CAZy.dmnd
-
-# dbCAN-sub HMM profiles (step 3) — large file, ~2.3 GB
-wget https://bcb.unl.edu/dbCAN2/download/Databases/V13/dbCAN_sub.hmm
-mv dbCAN_sub.hmm dbCAN-sub.hmm
-hmmpress dbCAN-sub.hmm
-
-# Substrate mapping
-wget https://bcb.unl.edu/dbCAN2/download/Databases/V13/fam-substrate-mapping-08252022.tsv
-mv fam-substrate-mapping-08252022.tsv fam-substrate-mapping.tsv
-```
-
-Alternatively, using AWS (if still available):
-```bash
-aws s3 cp s3://dbcan/db_v5-2_9-13-2025/ data/dbcan_db/ --no-sign-request --recursive
+# or everything in the release (includes PUL, TCDB, TF and peptidase databases):
+aws s3 cp s3://dbcan/db_v5-2_9-13-2025/ . --no-sign-request --recursive
 ```
 
 ### Astra Integration

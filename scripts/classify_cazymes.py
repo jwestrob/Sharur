@@ -593,7 +593,9 @@ def classify_cazymes(
         return pd.DataFrame()
 
     dbcan_hmm = dbcan / "dbCAN.hmm"
-    dbcan_sub = dbcan / "dbCAN-sub.hmm"
+    # dbCAN releases name the sub-family profiles dbCAN_sub.hmm; older docs used dbCAN-sub.hmm.
+    dbcan_sub = next((dbcan / n for n in ("dbCAN-sub.hmm", "dbCAN_sub.hmm") if (dbcan / n).exists()),
+                     dbcan / "dbCAN-sub.hmm")
     has_sub = dbcan_sub.exists() and dbcan_sub.stat().st_size > 0
 
     if verbose:
