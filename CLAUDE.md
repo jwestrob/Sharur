@@ -163,6 +163,8 @@ b.get_neighborhood(protein_id, window=10)
 b.get_neighborhood(protein_id, window=5, all_annotations=True)
 b.card(protein_id)                   # bounded summary: context, hits, evidence-backed predicates
 b.why(protein_id, "nad_binding")     # evidence path(s) behind one predicate
+b.modules(bins=[BIN], min_completeness=0.75)   # KEGG module completeness (needs sharur setup-kegg)
+b.locus_modules(protein_id, window=10)          # module steps co-encoded near a protein
 # CLI: sharur card PROTEIN --db ...;  sharur why PROTEIN PREDICATE --db ...
 ```
 

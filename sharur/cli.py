@@ -1252,6 +1252,31 @@ def why_predicate(
                else why_markdown(result))
 
 
+@app.command(name="modules")
+def kegg_modules(
+    db: str = typer.Option(DEFAULT_DB, "--db", "-d", help="Path to DuckDB database"),
+    bins: Optional[list[str]] = typer.Option(None, "--bin", "-b", help="Genome(s); repeatable."),
+    modules: Optional[list[str]] = typer.Option(None, "--module", "-m", help="Module(s), e.g. M00175; repeatable."),
+    min_completeness: float = typer.Option(0.0, "--min-completeness", help="Report modules at or above this fraction."),
+    around: Optional[str] = typer.Option(None, "--around", help="Protein ID: modules encoded in its neighborhood."),
+    window: int = typer.Option(10, "--window", "-w", help="Genes on each side for --around."),
+    output_format: BriefFormat = typer.Option(BriefFormat.markdown, "--format", "-f", help="markdown or json"),
+):
+    """KEGG module completeness per genome, or around one protein (needs `sharur setup-kegg`)."""
+    from sharur.modules import genome_modules, locus_modules, modules_markdown
+    from sharur.storage.duckdb_store import DuckDBStore
+
+    with DuckDBStore(db, read_only=True) as store:
+        if around:
+            rows = locus_modules(store, around, window=window)
+            title = f"KEGG modules within {window} genes of {around}"
+        else:
+            rows = genome_modules(store, bins=bins, modules=modules, min_completeness=min_completeness)
+            title = "KEGG module completeness"
+    typer.echo(json.dumps(rows, indent=2, default=str) if output_format == BriefFormat.json
+               else modules_markdown(rows, title))
+
+
 @app.command(name="setup-kegg")
 def setup_kegg(
     directory: Optional[Path] = typer.Option(

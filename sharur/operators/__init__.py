@@ -1236,6 +1236,19 @@ class Sharur:
 
         return get_atoms(self.store, protein_id)
 
+    def modules(self, bins: list[str] | None = None, modules: list[str] | None = None,
+                min_completeness: float = 0.0) -> list[dict]:
+        """KEGG module completeness per genome (needs `sharur setup-kegg`)."""
+        from sharur.modules import genome_modules
+
+        return genome_modules(self.store, bins=bins, modules=modules, min_completeness=min_completeness)
+
+    def locus_modules(self, protein_id: str, window: int = 10) -> list[dict]:
+        """KEGG module steps encoded near a protein (same contig, +/- window genes)."""
+        from sharur.modules import locus_modules
+
+        return locus_modules(self.store, protein_id, window=window)
+
     def why(self, protein_id: str, predicate: str) -> dict:
         """Every evidence path from a protein's annotations to one predicate."""
         from sharur.operators.cards import why

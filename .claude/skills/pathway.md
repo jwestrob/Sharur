@@ -26,7 +26,30 @@ Serialize any operation that writes DuckDB.
 
 You are analyzing metabolic pathway completeness in a metagenomic dataset using KEGG ortholog (KO) annotations.
 
-### Quick Analysis
+### KEGG module completeness (preferred)
+
+`b.modules()` / `sharur modules` evaluate KEGG's own module definitions (steps,
+alternatives, required and optional complex components, nested modules) from the
+local KEGG build (`sharur setup-kegg`). Each call reports steps complete over
+steps total, a partial-credit score, the KOs and proteins behind each found step,
+the KOs that would complete each missing step, and the bin's CheckM completeness.
+
+```python
+b = Sharur("data/DATASET/sharur.duckdb", read_only=True)
+rows = b.modules(bins=["GCA_003598175.1"], min_completeness=0.75)   # per genome
+rows = b.modules(modules=["M00175", "M00567"])                      # named modules, every genome
+near = b.locus_modules("PROTEIN_ID", window=10)                     # modules encoded near a protein
+# CLI: sharur modules --db ... --bin GCA_... --min-completeness 0.75
+#      sharur modules --db ... --module M00175
+#      sharur modules --db ... --around PROTEIN_ID --window 10
+```
+
+Report a module as "N/M steps detected in a MAG X% complete" and name the missing
+steps; an undetected step in an incomplete MAG is unobserved, not absent. Locus
+evaluation shows whether a complex's subunits are co-encoded, which supports a
+named-complex claim beyond single-gene hits.
+
+### Custom pathway sets (legacy)
 
 ```python
 from sharur.operators import Sharur

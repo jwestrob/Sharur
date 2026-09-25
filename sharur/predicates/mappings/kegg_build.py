@@ -14,6 +14,8 @@ need a KEGG license and can build from their licensed copy with ``--inputs``.
 - ``kegg_predicates.tsv``: KO, predicates, per-predicate evidence;
 - ``kegg_evidence_snapshot.tsv``: KEGG symbols, name, BRITE placements and
   module memberships per mapped KO (for the integrity tests);
+- ``kegg_modules.tsv``: module names, classes and definitions (for
+  :mod:`sharur.modules` completeness);
 - ``provenance.json``: KEGG release, retrieval time, input and rule checksums.
 """
 
@@ -155,33 +157,40 @@ def read_brite(brite_dir: Path, hierarchies) -> dict[str, list[tuple[str, tuple[
     return placements
 
 
-def read_modules(path: Path) -> tuple[set[str], dict[str, list[tuple[str, bool]]]]:
-    """Module flat file -> (module IDs, {KO: [(module, is_complex_component)]})."""
-    modules: set[str] = set()
-    memberships: dict[str, list] = defaultdict(list)
-    entry, field, definition = None, None, []
-
-    def flush():
-        if entry:
-            for ko, in_complex in parse_module_definition(" ".join(definition)).items():
-                memberships[ko].append((entry, in_complex))
-
+def read_module_entries(path: Path) -> dict[str, dict[str, str]]:
+    """Module flat file -> {module: {name, class, definition}}."""
+    entries: dict[str, dict[str, str]] = {}
+    entry, field = None, None
     with open(path) as handle:
         for line in handle:
-            tag, value = line[:12].strip(), line[12:].rstrip("\n")
+            tag, value = line[:12].strip(), line[12:].rstrip("\n").strip()
             if tag == "ENTRY":
-                flush()
-                entry, definition = value.split()[0], []
-                modules.add(entry)
+                entry = value.split()[0]
+                entries[entry] = {"name": "", "class": "", "definition": ""}
             elif tag == "///":
-                flush()
                 entry = None
             if tag:
                 field = tag
-            if field == "DEFINITION" and tag in ("DEFINITION", ""):
-                definition.append(value.strip())
-    flush()
-    return modules, memberships
+            if entry is None:
+                continue
+            if tag == "NAME":
+                entries[entry]["name"] = value
+            elif tag == "CLASS":
+                entries[entry]["class"] = value
+            elif field == "DEFINITION" and tag in ("DEFINITION", ""):
+                joined = f"{entries[entry]['definition']} {value}"
+                entries[entry]["definition"] = joined.strip()
+    return entries
+
+
+def read_modules(path: Path) -> tuple[set[str], dict[str, list[tuple[str, bool]]]]:
+    """Module flat file -> (module IDs, {KO: [(module, is_complex_component)]})."""
+    entries = read_module_entries(path)
+    memberships: dict[str, list] = defaultdict(list)
+    for module, entry in entries.items():
+        for ko, in_complex in parse_module_definition(entry["definition"]).items():
+            memberships[ko].append((module, in_complex))
+    return set(entries), memberships
 
 
 def kegg_release(info: Path) -> str:
@@ -312,6 +321,10 @@ def build(inputs: Path, out_dir: Path, kofam_ko_list: Path | None = None,
             brite = "|".join(f"{h}:{PATH_SEP.join(labels)}" for h, labels in placements.get(ko, ()))
             modules_col = ",".join(m + ("+" if c else "") for m, c in memberships.get(ko, ()))
             snap.write(f"{ko}\t{symbols}\t{name}\t{brite}\t{modules_col}\n")
+    with open(out_dir / "kegg_modules.tsv", "w") as mods:
+        mods.write(header + "# module\tname\tclass\tdefinition\n")
+        for module, entry in sorted(read_module_entries(inputs / "modules.txt").items()):
+            mods.write(f"{module}\t{entry['name']}\t{entry['class']}\t{entry['definition']}\n")
     provenance["map_sha256"] = sha256(out_dir / "kegg_predicates.tsv")
     (out_dir / "provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
     if report:
