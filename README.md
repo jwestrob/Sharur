@@ -23,7 +23,7 @@ Given a set of metagenome-assembled genomes (MAGs), Sharur:
 1. **Ingests** proteins, annotations (Pfam, KOfam, HydDB, VOGdb, CAZy, DefenseFinder, TXSScan), CRISPR arrays, biosynthetic gene clusters, and protein embeddings from the model of your choice into one database.
 2. **Computes predicates**: functional tags such as `nife_group3`, `sam_binding` or `crispr_associated`. Every mapping carries recorded evidence (GO, Pfam/KEGG text, ENZYME, KEGG BRITE and modules, HydDB, reviewed-protein consensus), and system-level claims come only from validated system callers. See [How predicates are built](docs/predicate_construction.md).
 3. **Exposes operators** for agents: predicate search, genomic neighborhoods, protein cards, predicate explanations, KEGG module completeness, embedding similarity, structure search, and export.
-4. **Records provenance**: dataset seals, a capability preflight, and a stamp of the predicate maps behind every generation.
+4. **Records provenance**: [dataset seals](docs/concepts/seals.md), a capability preflight, and a stamp of the predicate maps behind every generation.
 
 ## Working with agents
 
@@ -72,17 +72,6 @@ sharur why PROTEIN_ID nad_binding --db data/my_dataset/sharur.duckdb   # the evi
 sharur modules --db data/my_dataset/sharur.duckdb --bin GENOME_ID --min-completeness 0.75
 sharur preflight --db data/my_dataset/sharur.duckdb --format json      # typed capability brief
 ```
-
-### Seal a finished dataset
-
-A seal is a receipt for a dataset. Once ingest is done, `sharur seal` writes `dataset.seal.json`, which records the input genome files, every database table with its columns and row counts, the ingest stages that ran, the annotation sources present, and the software and git versions that produced them. All of that is summarized in one fingerprint, the dataset ID.
-
-```bash
-sharur seal --db data/my_dataset/sharur.duckdb
-sharur verify-seal data/my_dataset/dataset.seal.json
-```
-
-`verify-seal` rebuilds the receipt from what is on disk now and compares it with the stored one. A match means you, a collaborator or an agent are analyzing exactly the dataset the seal describes; a mismatch lists what changed (a table's row count, a replaced input, a new annotation source). Cite the dataset ID alongside results, and verify before resuming analysis after a break, after copying a dataset to another machine, or before archiving it. Seals check structure and sampled file contents by default; `--full` hashes every byte of the large files as well.
 
 ### Use the operators
 
