@@ -311,3 +311,60 @@ def neighborhood(genes: list[dict[str, Any]], *, start_edge: bool, end_edge: boo
             f'<text x="{(x1 + x2) / 2:.1f}" y="{y + 4}" class="gene-num">{g["number"]}</text></g></a>')
     return Markup(f'<svg class="hood" viewBox="0 0 {width} 72" role="img" aria-label="Gene neighborhood">'
                   f'{"".join(parts)}</svg>')
+
+
+# --------------------------------------------------------------------------- #
+# Small drawings for lists (Discover)
+# --------------------------------------------------------------------------- #
+
+
+def mini_architecture(length: int, domains: list[dict[str, Any]], scale: int, *, width: int = 600,
+                      height: int = 16, highlight: tuple[int, int] | None = None, partial: bool = False) -> Markup:
+    """A protein to a shared scale: backbone, Pfam domains, an optional highlighted span.
+
+    ``scale`` is the length that fills ``width``; ``partial`` adds a dashed tail
+    for a gene that runs off its contig.
+    """
+    if not length or not scale:
+        return Markup("")
+    usable = width - 10
+    w = max(6.0, usable * min(length, scale) / scale)
+    k = w / length
+    mid = height / 2
+    parts = [f'<rect x="1" y="{mid - 1.5:.1f}" width="{w:.1f}" height="3" rx="1.5" class="mini-backbone"/>']
+    if highlight:
+        lo, hi = highlight
+        parts.append(f'<rect x="{1 + (lo - 1) * k:.1f}" y="0.5" width="{max(2.0, (hi - lo + 1) * k):.1f}" '
+                     f'height="{height - 1}" rx="3" class="mini-highlight"/>')
+    for d in domains:
+        if d.get("start_aa") is None:
+            continue
+        x = 1 + (d["start_aa"] - 1) * k
+        dw = max(1.5, (d["end_aa"] - d["start_aa"] + 1) * k)
+        parts.append(f'<rect x="{x:.1f}" y="3" width="{dw:.1f}" height="{height - 6}" rx="2" '
+                     f'fill="{color_for(d["name"])}"><title>{_e(d["name"])} aa {d["start_aa"]}–{d["end_aa"]}</title></rect>')
+    if partial:
+        parts.append(f'<line x1="{1 + w:.1f}" y1="{mid:.1f}" x2="{min(width - 1, w + 9):.1f}" y2="{mid:.1f}" '
+                     f'class="mini-partial"/>')
+    # stretches across its cell; only horizontal extents carry meaning
+    return Markup(f'<svg class="mini mini-fill" viewBox="0 0 {width} {height}" width="100%" height="{height}" '
+                  f'preserveAspectRatio="none" role="img" aria-label="{_e(length)} aa">{"".join(parts)}</svg>')
+
+
+def gene_arrows(strands: str, *, gene: int = 9, gap: int = 2, height: int = 14, max_genes: int = 40) -> Markup:
+    """Consecutive genes as small strand arrows (``strands``: one '+' or '-' per gene)."""
+    shown = strands[:max_genes]
+    parts = []
+    for i, s in enumerate(shown):
+        x = i * (gene + gap)
+        tip = 3
+        if s == "+":
+            pts = f"{x},2 {x + gene - tip},2 {x + gene},{height / 2} {x + gene - tip},{height - 2} {x},{height - 2}"
+        else:
+            pts = f"{x + gene},2 {x + tip},2 {x},{height / 2} {x + tip},{height - 2} {x + gene},{height - 2}"
+        parts.append(f'<polygon points="{pts}" class="mini-gene"/>')
+    width = len(shown) * (gene + gap) + (14 if len(strands) > max_genes else 0)
+    if len(strands) > max_genes:
+        parts.append(f'<text x="{width - 12}" y="{height - 3}" class="mini-more">…</text>')
+    return Markup(f'<svg class="mini" viewBox="0 0 {width} {height}" width="{width}" height="{height}" '
+                  f'role="img" aria-label="{len(strands)} genes">{"".join(parts)}</svg>')

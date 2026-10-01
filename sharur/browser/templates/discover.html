@@ -1,19 +1,72 @@
 {% extends "base.html" %}
-{% from "_macros.html" import protein_link, genome_link %}
+{% from "_discover.html" import giant_row, dark_row, repeat_row, fusion_row, island_row, system_row, clade_rows %}
 {% block title %}Discover{% endblock %}
 {% block content %}
+{% set s = f.stats %}
 <h1>Discover</h1>
-<p class="lede">Starting points for finding something unusual. Search domain architectures below, or browse the extremes of the dataset.</p>
-<div class="panel">
-  <h2>Domain-architecture search <span class="hint">e.g. <code>TPR_* {10,}</code>, <code>^ . * VWA_2 $</code>, <code>Big_* {3,} . ( VWA | VWA_2 )</code></span></h2>
-  <form action="/architecture" method="get" class="table-tools"><input name="pattern" style="flex:1" placeholder="Domain pattern"><button>Search</button></form>
+<p class="lede">The dataset's extremes and oddities: very long proteins, domains fused only in one clade, long stretches nobody has annotated, systems seen almost nowhere. Each list says what it observed; open an entry to judge it.</p>
+<p class="actions"><a class="btn" href="/discover/random" title="Open a random entry from these lists">Surprise me</a></p>
+
+<div class="stats">
+  <a class="stat" href="#giants"><b>{{ num(s.giants) }}</b><span>proteins ≥ 3,000 aa · {{ num(f.giant_clades.genomes_with) }} genomes</span></a>
+  <a class="stat" href="#fusions"><b>{{ num(s.fusions) }}</b><span>clade-specific domain fusions</span></a>
+  <a class="stat" href="#islands"><b>{{ num(s.islands_10) }}</b><span>unannotated stretches of ≥ 10 genes</span></a>
+  <a class="stat" href="#dark"><b>{{ num(s.dark_1000) }}</b><span>unannotated proteins ≥ 1,000 aa</span></a>
+  <a class="stat" href="#systems"><b>{{ num(rare|length) }}</b><span>system types in ≤ 3 genomes</span></a>
 </div>
-<div class="grid g3 discover">
-  <div class="panel"><h2>Giant proteins</h2>
-    <table><tbody>{% for p in notable.giants[:40] %}<tr><td>{{ protein_link(p.protein_id) }}<div class="sub">{{ catalog.by_bin[p.bin_id].label if p.bin_id in catalog.by_bin else '' }}</div><div class="sub">{{ p.architecture or ('no placed domains' if p.architecture is defined else '') }}</div></td><td class="num">{{ num(p.length) }} <span class="count">aa</span></td></tr>{% endfor %}</tbody></table></div>
-  <div class="panel"><h2>Largest with no annotation</h2>
-    <table><tbody>{% for p in notable.dark[:40] %}<tr><td>{{ protein_link(p.protein_id) }}<div class="sub">{{ catalog.by_bin[p.bin_id].label if p.bin_id in catalog.by_bin else p.bin_id }}</div></td><td class="num">{{ num(p.length) }} <span class="count">aa</span></td></tr>{% endfor %}</tbody></table></div>
-  <div class="panel"><h2>Longest domain repeats</h2>
-    <table><tbody>{% for p in notable.repeats[:40] %}<tr><td>{{ protein_link(p.protein_id) }}<div class="sub">{{ p.domain }} × {{ p.run }}</div></td><td class="num">{{ num(p.length) }} <span class="count">aa</span></td></tr>{% endfor %}</tbody></table></div>
+
+<div class="panel">
+  <h2>Domain-architecture search</h2>
+  <form action="/architecture" method="get" class="table-tools"><input name="pattern" style="flex:1" placeholder="Domain pattern, e.g. TPR_* {10,}" aria-label="Domain pattern"><button>Search</button></form>
+  <div class="facet" style="margin-top:10px"><span>Try</span>
+    {% for example, what in [('TPR_* {10,}', 'ten or more TPRs'), ('^ . * VWA_2 $', 'ends in VWA_2'), ('Big_* {3,} . ( VWA | VWA_2 )', 'Ig-like runs before a VWA'), ('Cadherin* {5,}', 'cadherin arrays')] %}<a class="chip" href="/architecture?pattern={{ quote(example, safe='') }}" title="{{ what }}"><code>{{ example }}</code></a>{% endfor %}
+  </div>
+</div>
+
+<div class="feeds">
+  {% set scale = f.giants[0].length if f.giants else 1 %}
+  <section class="panel feed feed-wide" id="giants">
+    <header><h2>{{ feeds.giants[0] }}</h2><a href="/discover/giants">All {{ num(f.giants|length) }} →</a></header>
+    <p class="feed-why">{{ feeds.giants[1] }}</p>
+    <table class="feed-table"><tbody>{% for p in f.giants[:8] %}{{ giant_row(p, scale) }}{% endfor %}</tbody></table>
+  </section>
+
+  <section class="panel feed" id="clades">
+    <header><h2>{{ feeds.clades[0] }}</h2><a href="/discover/clades">All clades →</a></header>
+    <p class="feed-why">{{ feeds.clades[1] }} Clades by {{ f.giant_clades.rank }} with three or more genomes.</p>
+    {{ clade_rows(f.giant_clades, 10) }}
+  </section>
+
+  <section class="panel feed" id="systems">
+    <header><h2>{{ feeds.systems[0] }}</h2><a href="/discover/systems">All {{ num(rare|length) }} →</a></header>
+    <p class="feed-why">{{ feeds.systems[1] }}</p>
+    {% if rare %}<table class="feed-table"><tbody>{% for r in rare[:9] %}{{ system_row(r) }}{% endfor %}</tbody></table>{% else %}<p class="empty">No curated system calls in this dataset.</p>{% endif %}
+  </section>
+
+  <section class="panel feed feed-wide" id="fusions">
+    <header><h2>{{ feeds.fusions[0] }}</h2><a href="/discover/fusions">{% if s.fusions > f.fusions|length %}Top {{ num(f.fusions|length) }} of {{ num(s.fusions) }}{% else %}All {{ num(s.fusions) }}{% endif %} →</a></header>
+    <p class="feed-why">{{ feeds.fusions[1] }}</p>
+    {% if f.fusions %}<table class="feed-table"><tbody>{% for x in f.fusions[:8] %}{{ fusion_row(x) }}{% endfor %}</tbody></table>{% else %}<p class="empty">No clade-specific fusions at these thresholds.</p>{% endif %}
+  </section>
+
+  <section class="panel feed feed-wide" id="islands">
+    <header><h2>{{ feeds.islands[0] }}</h2><a href="/discover/islands">All {{ num(f.islands|length) }} →</a></header>
+    <p class="feed-why">{{ feeds.islands[1] }}</p>
+    <table class="feed-table"><tbody>{% for i in f.islands[:8] %}{{ island_row(i) }}{% endfor %}</tbody></table>
+  </section>
+
+  <section class="panel feed feed-wide" id="dark">
+    <header><h2>{{ feeds.dark[0] }}</h2><a href="/discover/dark">All {{ num(f.dark|length) }} →</a></header>
+    <p class="feed-why">{{ feeds.dark[1] }}</p>
+    {% set dscale = f.dark[0].length if f.dark else 1 %}
+    <table class="feed-table"><tbody>{% for p in f.dark[:7] %}{{ dark_row(p, dscale) }}{% endfor %}</tbody></table>
+  </section>
+
+  <section class="panel feed feed-wide" id="repeats">
+    <header><h2>{{ feeds.repeats[0] }}</h2><a href="/discover/repeats">All {{ num(f.repeats|length) }} →</a></header>
+    <p class="feed-why">{{ feeds.repeats[1] }}</p>
+    {% set rscale = (f.repeats|map(attribute='length')|max) if f.repeats else 1 %}
+    <table class="feed-table"><tbody>{% for p in f.repeats[:8] %}{{ repeat_row(p, rscale) }}{% endfor %}</tbody></table>
+  </section>
 </div>
 {% endblock %}

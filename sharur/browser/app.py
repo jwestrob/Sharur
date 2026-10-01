@@ -615,12 +615,46 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
     # Discover, search
     # ------------------------------------------------------------------ #
 
+    from sharur.browser import discover as discover_feeds  # noqa: PLC0415
+
+    def rare_systems() -> list[dict[str, Any]]:
+        if not hasattr(ctx, "_rare_systems"):
+            ctx._rare_systems = discover_feeds.rare_systems(catalog, getattr(ctx, "cctyper_systems", None))
+        return ctx._rare_systems
+
+    def feeds_or_pending(request: Request):
+        if not catalog.notable or "fusions" not in catalog.notable:
+            return render(request, "pending.html", "discover", what="Discovery lists",
+                          missing=catalog.ready.is_set())
+        return None
+
     @app.get("/discover", response_class=HTMLResponse)
     def discover(request: Request):
-        if not catalog.notable:
-            return render(request, "pending.html", "discover", what="Notable proteins",
-                          missing=catalog.ready.is_set())
-        return render(request, "discover.html", "discover", notable=catalog.notable)
+        return feeds_or_pending(request) or render(request, "discover.html", "discover", f=catalog.notable,
+                                                   rare=rare_systems(), feeds=discover_feeds.FEEDS)
+
+    @app.get("/discover/random")
+    def discover_random():
+        import random  # noqa: PLC0415
+
+        f = catalog.notable or {}
+        picks = [_url("protein", p["protein_id"]) for p in f.get("giants", [])[:100] + f.get("dark", [])[:100]]
+        picks += [_url("protein", x["example"]) for x in f.get("fusions", [])]
+        picks += [f'{_url("contig", i["contig_id"])}?start={max(1, i["start"] - 3000)}&span={i["end"] - i["start"] + 6000}'
+                  for i in f.get("islands", [])[:100]]
+        return RedirectResponse(random.choice(picks) if picks else "/discover", status_code=303)
+
+    @app.get("/discover/{feed}", response_class=HTMLResponse)
+    def discover_feed(request: Request, feed: str):
+        if feed not in discover_feeds.FEEDS:
+            raise HTTPException(404, "Unknown list")
+        pending = feeds_or_pending(request)
+        if pending:
+            return pending
+        rows = rare_systems() if feed == "systems" else catalog.notable.get(feed, [])
+        title, why = discover_feeds.FEEDS[feed]
+        return render(request, "discover_feed.html", "discover", feed=feed, rows=rows, f=catalog.notable,
+                      title=title, why=why)
 
     @app.get("/architecture", response_class=HTMLResponse)
     def architecture_page(request: Request, pattern: str = Query("", max_length=500),

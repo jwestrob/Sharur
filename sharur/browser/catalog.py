@@ -419,13 +419,10 @@ def load_background(store, catalog: Catalog, lock: threading.Lock) -> None:
             catalog.domains = _domains(store)
             catalog.vogs = _vogs(store)
         catalog.status = "finding notable proteins"
-        with lock:
-            notable = _notable(store)
-            from sharur.architecture import architecture, compact  # noqa: PLC0415
+        from sharur.browser import discover  # noqa: PLC0415
 
-            for row in notable["giants"][:60]:
-                row["architecture"] = compact([d.name for d in architecture(store, row["protein_id"])])
-        catalog.notable = notable
+        with lock:
+            catalog.notable = discover.compute(store, catalog)
         catalog.status = "ready"
     except Exception:  # pragma: no cover - logged and surfaced as status
         logger.exception("background catalog load failed")
@@ -477,41 +474,3 @@ def vog_description(text: str) -> str:
     """VOGdb consensus descriptions carry a source prefix (``REFSEQ ...``, ``sp|ACC|ENTRY ...``); drop it."""
     text = text[7:] if text.startswith("REFSEQ ") else text
     return _UNIPROT_HEADER.sub("", text).strip()
-
-
-def _notable(store) -> dict[str, list[dict[str, Any]]]:
-    giants = store.execute("""
-        WITH top AS (SELECT protein_id, bin_id, sequence_length FROM proteins
-                     ORDER BY sequence_length DESC, protein_id LIMIT 150)
-        SELECT top.protein_id, top.bin_id, top.sequence_length, COUNT(a.protein_id)
-        FROM top LEFT JOIN annotations a USING (protein_id)
-        GROUP BY ALL ORDER BY top.sequence_length DESC, top.protein_id""")
-    dark = store.execute("""
-        SELECT p.protein_id, p.bin_id, p.sequence_length FROM proteins p
-        ANTI JOIN annotations a USING (protein_id)
-        ORDER BY p.sequence_length DESC, p.protein_id LIMIT 150""")
-    repeats = store.execute("""
-        WITH d AS (
-            SELECT protein_id, COALESCE(NULLIF(name, ''), accession) AS domain, start_aa,
-                   -- annotation_id breaks ties between hits sharing a start, so runs are deterministic
-                   ROW_NUMBER() OVER (PARTITION BY protein_id ORDER BY start_aa, accession, annotation_id)
-                 - ROW_NUMBER() OVER (PARTITION BY protein_id, COALESCE(NULLIF(name, ''), accession)
-                                      ORDER BY start_aa, accession, annotation_id) AS island
-            FROM annotations WHERE LOWER(source) = 'pfam' AND start_aa IS NOT NULL
-        ), runs AS (
-            SELECT protein_id, domain, COUNT(*) AS run FROM d GROUP BY protein_id, domain, island
-        )
-        , best AS (
-            SELECT protein_id, domain, run,
-                   ROW_NUMBER() OVER (PARTITION BY protein_id ORDER BY run DESC, domain) AS pick
-            FROM runs
-        )
-        SELECT r.protein_id, p.bin_id, p.sequence_length, r.domain, r.run
-        FROM best r JOIN proteins p USING (protein_id)
-        WHERE r.pick = 1 AND r.run >= 6
-        ORDER BY r.run DESC, p.sequence_length DESC, r.protein_id LIMIT 150""")
-    return {
-        "giants": [{"protein_id": p, "bin_id": b, "length": n, "hits": h} for p, b, n, h in giants],
-        "dark": [{"protein_id": p, "bin_id": b, "length": n} for p, b, n in dark],
-        "repeats": [{"protein_id": p, "bin_id": b, "length": n, "domain": d, "run": r} for p, b, n, d, r in repeats],
-    }

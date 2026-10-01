@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% from "_discover.html" import giant_row, dark_row, repeat_row, fusion_row, island_row, system_row, clade_rows %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="/discover">Discover</a></div>
+<h1>{{ title }}</h1>
+<p class="lede">{{ why }}</p>
+{% if feed == 'clades' %}
+<div class="panel"><p class="count">Clades by {{ f.giant_clades.rank }} with three or more genomes; bars show proteins of {{ num(f.giant_clades.threshold) }} aa or more per genome. {{ num(f.giant_clades.total) }} such proteins in {{ num(f.giant_clades.genomes_with) }} genomes.</p>{{ clade_rows(f.giant_clades, 500) }}</div>
+{% else %}
+<div class="panel">
+  <div class="table-tools"><input type="search" data-filter="feed" placeholder="Filter rows" aria-label="Filter rows"><span class="count" data-count="feed"></span></div>
+  <div class="scroll"><table id="feed" data-table class="feed-table">
+  {% if feed == 'giants' %}{% set scale = rows[0].length if rows else 1 %}
+    <thead><tr><th data-sort="text">Protein</th><th>Architecture</th><th data-sort="num" class="num">Length</th></tr></thead>
+    <tbody>{% for p in rows %}{{ giant_row(p, scale) }}{% endfor %}</tbody>
+  {% elif feed == 'dark' %}{% set scale = rows[0].length if rows else 1 %}
+    <thead><tr><th data-sort="text">Protein</th><th></th><th data-sort="num" class="num">Length</th></tr></thead>
+    <tbody>{% for p in rows %}{{ dark_row(p, scale) }}{% endfor %}</tbody>
+  {% elif feed == 'repeats' %}{% set scale = (rows|map(attribute='length')|max) if rows else 1 %}
+    <thead><tr><th data-sort="text">Protein</th><th>Architecture</th><th data-sort="num" class="num">Run</th></tr></thead>
+    <tbody>{% for p in rows %}{{ repeat_row(p, scale) }}{% endfor %}</tbody>
+  {% elif feed == 'fusions' %}
+    <thead><tr><th data-sort="text">Domains</th><th data-sort="text">Clade</th><th data-sort="num">Genomes</th><th data-sort="text">Example</th></tr></thead>
+    <tbody>{% for x in rows %}{{ fusion_row(x) }}{% endfor %}</tbody>
+  {% elif feed == 'islands' %}
+    <thead><tr><th data-sort="text">Contig</th><th>Genes</th><th data-sort="num" class="num">Length</th><th data-sort="text">Where</th></tr></thead>
+    <tbody>{% for i in rows %}{{ island_row(i) }}{% endfor %}</tbody>
+  {% elif feed == 'systems' %}
+    <thead><tr><th data-sort="text">Kind</th><th data-sort="text">System</th><th>Genomes</th><th data-sort="num" class="num">n</th></tr></thead>
+    <tbody>{% for r in rows %}{{ system_row(r) }}{% endfor %}</tbody>
+  {% endif %}
+  </table></div>
+</div>
+{% endif %}
+{% endblock %}

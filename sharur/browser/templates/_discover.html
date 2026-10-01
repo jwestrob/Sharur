@@ -1,0 +1,55 @@
+{# Rows for the Discover feeds; each macro renders one table row. #}
+{% from "_macros.html" import bar, protein_link %}
+
+{% macro genome_sub(bin_id) -%}
+{% set g = catalog.by_bin.get(bin_id) %}<div class="sub">{% if g %}<a href="{{ url('genome', bin_id) }}">{{ g.label }}</a>{% else %}{{ bin_id }}{% endif %}</div>
+{%- endmacro %}
+
+{% macro partial_tag(p) -%}
+{% if p.partial %} <span class="tag warn" title="The gene runs off its contig, so the protein is longer than shown">runs off contig</span>{% endif %}
+{%- endmacro %}
+
+{% macro giant_row(p, scale) -%}
+<tr><td>{{ protein_link(p.protein_id) }}{{ genome_sub(p.bin_id) }}</td>
+<td class="mini-cell">{{ charts.mini_architecture(p.length, p.domains, scale, partial=p.partial) }}<div class="sub ellip" title="{{ p.architecture }}">{{ partial_tag(p) }} {{ p.architecture or 'no placed Pfam domains' }}</div></td>
+<td class="num" data-v="{{ p.length }}">{{ num(p.length) }} <span class="count">aa</span></td></tr>
+{%- endmacro %}
+
+{% macro dark_row(p, scale) -%}
+<tr><td>{{ protein_link(p.protein_id) }}{{ genome_sub(p.bin_id) }}</td>
+<td class="mini-cell">{{ charts.mini_architecture(p.length, [], scale, partial=p.partial) }}{% if p.partial %}<div class="sub">{{ partial_tag(p) }}</div>{% endif %}</td>
+<td class="num" data-v="{{ p.length }}">{{ num(p.length) }} <span class="count">aa</span></td></tr>
+{%- endmacro %}
+
+{% macro repeat_row(p, scale) -%}
+<tr><td>{{ protein_link(p.protein_id) }}{{ genome_sub(p.bin_id) }}</td>
+<td class="mini-cell">{{ charts.mini_architecture(p.length, p.domains, p.length, highlight=(p.lo, p.hi)) }}<div class="sub">{{ p.domain }} × {{ p.run }} in a row, aa {{ num(p.lo) }}–{{ num(p.hi) }}</div></td>
+<td class="num" data-v="{{ p.run }}">{{ p.run }}<span class="count"> × · {{ num(p.length) }} aa</span></td></tr>
+{%- endmacro %}
+
+{% macro fusion_row(f) -%}
+<tr><td class="fusion">{% for acc, name in f.domains %}<a class="chip" href="{{ url('domain', acc) }}" title="{{ acc }} · in {{ num(f.domain_proteins.get(acc, 0)) }} proteins across the dataset"><i style="--dot:{{ charts.color_for(name) }}"></i>{{ name }}</a>{% if not loop.last %}<span class="plus">+</span>{% endif %}{% endfor %}</td>
+<td><a href="{{ url('taxa', f.rank, f.clade) }}">{{ f.clade }}</a><div class="sub">{{ f.rank }}</div></td>
+<td data-v="{{ f.genomes }}" style="min-width:150px">{{ bar(f.share) }}<span class="count">{{ num(f.genomes) }} of {{ num(f.clade_size) }} genomes</span></td>
+<td>{{ protein_link(f.example) }}<div class="sub">example</div></td></tr>
+{%- endmacro %}
+
+{% macro island_row(i) -%}
+{% set flank = 3000 %}
+<tr><td><a class="mono" href="{{ url('contig', i.contig_id) }}?start={{ [1, i.start - flank]|max }}&span={{ i.end - i.start + 2 * flank }}" title="{{ i.contig_id }}">{{ short(i.contig_id) }}</a>{{ genome_sub(i.bin_id) }}</td>
+<td class="mini-cell">{{ charts.gene_arrows(i.strands) }}</td>
+<td class="num nowrap" data-v="{{ i.genes }}">{{ i.genes }} <span class="count">genes</span><div class="sub">{{ bp(i.end - i.start) }}</div></td>
+<td>{% if i.whole_contig %}<span class="tag warn" title="Every gene on this contig is unannotated">whole contig</span>{% elif i.at_edge %}<span class="tag" title="The stretch reaches a contig end and may continue">contig end</span>{% else %}<span class="count">{{ i.contig_genes }} genes on contig</span>{% endif %}</td></tr>
+{%- endmacro %}
+
+{% macro system_row(s) -%}
+<tr><td><span class="tag">{{ s.kind }}</span></td>
+<td>{% if s.kind == 'crispr' %}<a href="/crispr-cas/calls?subtype={{ quote(s.type, safe='') }}">CRISPR-Cas {{ s.type }}</a>{% else %}<a href="{{ url('system', s.kind, s.type) }}">{{ s.type }}</a>{% endif %}</td>
+<td>{% for b in s.genomes %}<a href="{{ url('genome', b) }}" title="{{ b }}">{{ s.labels[loop.index0] }}</a>{{ ', ' if not loop.last }}{% endfor %}</td>
+<td class="num" data-v="{{ s.genomes|length }}">{{ s.genomes|length }}</td></tr>
+{%- endmacro %}
+
+{% macro clade_rows(gc, limit) -%}
+{% set top = (gc.rows|map(attribute='per_genome')|max) if gc.rows else 1 %}
+<div class="bars">{% for r in gc.rows[:limit] %}<a class="label" href="{{ url('taxa', gc.rank, r.clade) }}">{{ r.clade }}</a>{{ bar(r.per_genome / top, charts.color_for(r.clade)) }}<span class="val" title="{{ num(r.giants) }} proteins of {{ num(gc.threshold) }} aa or more in {{ num(r.genomes) }} genomes; {{ pct(r.carriers) }} of genomes carry at least one">{{ '%.1f' % r.per_genome }}</span>{% endfor %}</div>
+{%- endmacro %}
