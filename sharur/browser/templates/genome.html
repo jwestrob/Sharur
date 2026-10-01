@@ -11,6 +11,8 @@
   {% if g.completeness is not none %}<div class="stat"><b>{{ num(g.completeness) }}%</b><span>complete · {{ num(g.contamination) }}% contam.</span></div>{% endif %}
 </div>
 
+{% set compare_with = g.bin_id %}{% include "_compare_form.html" %}
+
 <div class="panel">
   <h2>Contig landscape <span class="hint">every contig, longest first · longest {{ bp(longest_contig) }} · click one to open it</span></h2>
   {{ strip }}

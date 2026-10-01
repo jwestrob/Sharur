@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Function heatmap{% endblock %}
+{% block content %}
+{% set chosen_q = quote(chosen|join(','), safe=',') %}
+<div class="crumbs"><a href="/functions">Functions</a></div>
+<h1><span class="rank">Heatmap</span>Functions across the tree</h1>
+<p class="lede">Each cell is the share of genomes in a {{ rank }} carrying at least one protein with the label. Click a cell for those proteins.</p>
+
+<div class="panel heat-controls">
+  <div class="facet"><span>Presets</span>
+    {% for name, ids in presets %}<a class="chip" href="/heatmap?preset={{ quote(name, safe='') }}&rank={{ rank }}{{ '&small=1' if small }}"{% if ids == chosen %} style="border-color:var(--accent)"{% endif %}>{{ name }} <span class="count">{{ ids|length }}</span></a>{% endfor %}
+  </div>
+  <div class="facet"><span>Functions shown</span>
+    {% for f in chosen %}{% set d = PREDICATE_BY_ID.get(f) %}{% set rest = chosen|reject('equalto', f)|join(',') %}<a class="chip" href="/heatmap?functions={{ quote(rest, safe=',') }}&rank={{ rank }}{{ '&small=1' if small }}" title="Remove {{ f }}"><i style="--dot:{{ CATEGORY_COLORS.get(d.category, 'var(--ink-3)') if d else 'var(--ink-3)' }}"></i>{{ d.name if d else f }} ×</a>{% endfor %}
+    <form class="picker heat-add" autocomplete="off" data-current="{{ chosen|join(',') }}" data-rank="{{ rank }}" data-small="{{ 1 if small else 0 }}">
+      <input type="text" class="picker-input" placeholder="add a function…" aria-label="Add a function">
+      <div class="picker-list" role="listbox"></div>
+    </form>
+  </div>
+  <div class="table-tools heat-ranks">
+    <span class="count">Clades by:</span>
+    {% for r in ranks %}<a href="/heatmap?functions={{ chosen_q }}&rank={{ r }}{{ '&small=1' if small }}" {% if r == rank %}style="font-weight:700"{% endif %}>{{ r }}</a>{% endfor %}
+    <span class="count heat-toggle">{% if small %}<a href="/heatmap?functions={{ chosen_q }}&rank={{ rank }}">hide clades with fewer than 3 genomes</a>{% else %}{{ data.hidden }} clades with fewer than 3 genomes hidden · <a href="/heatmap?functions={{ chosen_q }}&rank={{ rank }}&small=1">show</a>{% endif %}</span>
+  </div>
+</div>
+
+{% if data.rows and data.clades %}
+<div class="panel">
+  <div class="scroll heat-scroll"><table class="heatmap">
+    <thead><tr><th class="heat-clade">{{ rank|capitalize }}</th>
+      {% for row in data.rows %}<th class="heat-fn"><a href="{{ url('function', row.id) }}" title="{{ row.name }} · {{ num(row.carriers) }} genomes"><span>{{ row.name }}</span></a></th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for clade, size in data.clades %}{% set j = loop.index0 %}
+      <tr><td class="heat-clade"><a href="{{ url('taxa', rank, clade) }}" title="{{ clade }}">{{ clade }}</a> <span class="count">{{ num(size) }}</span></td>
+      {% for row in data.rows %}{% set v = row.shares[j] %}
+        <td class="heat-cell"><a href="{{ url('function', row.id) }}?clade={{ quote(rank ~ ':' ~ clade, safe='') }}" style="--v:{{ '%.3f' % v }}" class="{{ 'hot' if v >= 0.55 else '' }}" title="{{ row.name }} in {{ clade }}: {{ pct(v) }} of {{ num(size) }} genomes">{{ (v * 100)|round|int if v > 0 else '' }}</a></td>
+      {% endfor %}</tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <div class="legend heat-legend"><span>0%</span><span class="heat-scale"></span><span>100% of genomes in the clade</span></div>
+</div>
+{% else %}<div class="panel"><p class="empty">Pick functions above, or start from a preset.</p></div>{% endif %}
+
+<script>
+(function () {
+  const form = document.querySelector(".heat-add");
+  if (!form) return;
+  const input = form.querySelector(".picker-input"), list = form.querySelector(".picker-list");
+  let timer = null;
+  function go(id) {
+    const current = form.dataset.current ? form.dataset.current.split(",") : [];
+    if (!current.includes(id)) current.push(id);
+    window.location = "/heatmap?functions=" + current.map(encodeURIComponent).join(",") + "&rank=" + form.dataset.rank +
+      (form.dataset.small === "1" ? "&small=1" : "");
+  }
+  form.addEventListener("submit", (e) => e.preventDefault());
+  input.addEventListener("input", () => {
+    clearTimeout(timer);
+    const q = input.value.trim();
+    if (q.length < 2) { list.classList.remove("open"); return; }
+    timer = setTimeout(() => {
+      fetch("/api/suggest?kind=function&q=" + encodeURIComponent(q)).then((r) => r.json()).then((rows) => {
+        list.innerHTML = "";
+        rows.forEach((r) => {
+          const a = document.createElement("a");
+          a.href = "#";
+          const name = document.createElement("span");
+          name.textContent = r.label;
+          const sub = document.createElement("span");
+          sub.className = "kind";
+          sub.textContent = r.sub;
+          a.append(name, sub);
+          a.addEventListener("click", (e) => { e.preventDefault(); go(r.sub); });
+          list.appendChild(a);
+        });
+        list.classList.toggle("open", rows.length > 0);
+      });
+    }, 120);
+  });
+  document.addEventListener("click", (e) => { if (!form.contains(e.target)) list.classList.remove("open"); });
+})();
+</script>
+{% endblock %}

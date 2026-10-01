@@ -46,7 +46,9 @@ def test_stage07_finds_reference_maps_beside_the_dataset(tmp_path, monkeypatch):
     dirs = module.reference_dirs(tmp_path / "data" / "my_dataset")
     assert dirs[0] == reference
     assert module.find_reference(dirs, "ko_list") == reference / "ko_list"
-    assert module.find_reference(dirs, "pfam_id_desc.tsv") is None
+    # a file missing beside the dataset falls through to later locations, never to the dataset's own reference dir
+    found = module.find_reference(dirs, "pfam_id_desc.tsv")
+    assert found is None or found.parent != reference
     override = tmp_path / "elsewhere"
     override.mkdir()
     monkeypatch.setenv("SHARUR_REFERENCE_DIR", str(override))

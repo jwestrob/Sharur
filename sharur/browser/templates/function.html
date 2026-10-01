@@ -6,6 +6,7 @@
 <h1><span class="rank">Function · <code>{{ predicate }}</code></span>{{ d.name if d else predicate }}</h1>
 <p class="lede">{{ d.description if d else '' }}{% if d and d.level == 'system' %} System-level: called only by validated system callers.{% endif %}</p>
 <p class="actions"><a class="btn" href="{{ url('stack', 'function', predicate) }}">Stack neighborhoods →</a> <a class="btn" href="/triage?source=family&kind=function&id={{ quote(predicate, safe='') }}">Triage carriers →</a></p>
+{% if restrict %}<div class="banner">Showing genomes and proteins in <b>{{ restrict[0] }}</b> only · <a href="{{ url('function', predicate) }}">show the whole dataset</a></div>{% endif %}
 <div class="stats">
   <div class="stat"><b>{{ num(carriers|length) }}</b><span>genomes ({{ pct(carriers|length / (catalog.genomes|length or 1)) }})</span></div>
   <div class="stat"><b>{{ num(carriers.values()|sum) }}</b><span>proteins</span></div>
