@@ -219,6 +219,13 @@ def register(app, ctx) -> None:
                        WHERE LOWER(a.source) IN ('vogdb', 'vog') AND a.accession = ?""", [ident])
                 name = catalog.vogs.get(ident, {}).get("name", ident)
                 back = ctx.url("vog", ident)
+            elif kind == "ko":
+                rows = ctx.store.execute(
+                    """SELECT DISTINCT a.protein_id, p.bin_id FROM annotations a JOIN proteins p USING (protein_id)
+                       WHERE LOWER(a.source) IN ('kofam', 'kegg') AND a.accession = ?""", [ident])
+                known = ctx.ko_names.get(ident) if getattr(ctx, "ko_names", None) else None
+                name = f"{ident} {known[0].split(',')[0].strip()}".strip() if known else ident
+                back = f"/search?q={ident}"
             elif kind == "function":
                 rows = ctx.store.execute(
                     """SELECT pp.protein_id, p.bin_id FROM protein_predicates pp JOIN proteins p USING (protein_id)

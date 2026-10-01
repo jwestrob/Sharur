@@ -1,0 +1,75 @@
+{# Protein-page context, loaded after the page by /protein/{id}/context. #}
+{% from "_macros.html" import bar, protein_link %}
+
+<div class="grid g3 pctx">
+  <div class="panel pctx-card">
+    <h2>Same architecture elsewhere</h2>
+    {% if same %}
+      {% if same.kind == 'architecture' %}
+        {% if same.estimated %}
+        <p class="pctx-lead">About <b>{{ num(same.estimated) }}</b> proteins carry exactly <span class="mono">{{ same.label }}</span>.</p>
+        <p class="count">{{ num(same.proteins) }} of {{ num(same.checked) }} proteins sampled from the {{ num(same.same_domains) }} with these domains match; the figures below describe that sample.</p>
+        {% else %}
+        <p class="pctx-lead">{% if same.others %}<b>{{ num(same.others) }}</b> other protein{{ 's' if same.others != 1 }} in <b>{{ num(same.genomes) }}</b> genome{{ 's' if same.genomes != 1 }} carr{{ 'y' if same.others != 1 else 'ies' }} exactly{% else %}This is the only protein with exactly{% endif %} <span class="mono">{{ same.label }}</span>.</p>
+        {% if same.same_domains and same.same_domains > same.proteins %}<p class="count">{{ num(same.same_domains) }} proteins carry these domains in any arrangement.</p>{% endif %}
+        {% endif %}
+      {% else %}
+        <p class="pctx-lead">{% if same.others %}<b>{{ num(same.others) }}</b> other protein{{ 's' if same.others != 1 }} in <b>{{ num(same.genomes) }}</b> genome{{ 's' if same.genomes != 1 }} share{{ 's' if same.others == 1 }}{% else %}This is the only protein with{% endif %} {{ ko }}{% if ko_symbol %} ({{ ko_symbol }}){% endif %}.</p>
+        <p class="count">No placed Pfam domains, so this compares by best KO.</p>
+      {% endif %}
+      {% if same.others and same.clades.rows %}
+      <div class="bars pctx-bars">{% for name, n in same.clades.rows %}<a class="label" href="{{ url('taxa', same.clades.rank, name) }}" title="{{ same.clades.rank }}">{{ name }}</a>{{ bar(n / same.clades.max, charts.color_for(name)) }}<span class="val">{{ num(n) }}</span>{% endfor %}</div>
+      <p class="count">Genomes by {{ same.clades.rank }}{% if same.clades.other %}; {{ num(same.clades.other) }} more elsewhere{% endif %}.</p>
+      {% endif %}
+      {% if same.lengths %}{% set L = same.lengths %}
+      <p class="pctx-len">This one: <b>{{ num(length) }} aa</b>{% if partial %} <span class="tag warn" title="The gene runs off its contig">runs off contig</span>{% endif %} · others {{ num(L.min) }}–{{ num(L.max) }} aa, median {{ num(L.median|round|int) }}.
+        {% if L.note == 'shorter' %}<span class="tag warn">shorter than {{ pct(1 - L.percentile) }} of them</span>{% elif L.note == 'longer' %}<span class="tag">longer than {{ pct(L.percentile) }} of them</span>{% endif %}</p>
+      {% if same.partial_others %}<p class="count">{{ num(same.partial_others) }} of the others run off their contigs.</p>{% endif %}
+      {% endif %}
+      <p class="actions pctx-actions">{% if same.kind == 'architecture' and pattern %}<a class="btn" href="/architecture?pattern={{ quote(pattern, safe='') }}">All of them →</a>{% elif ko %}<a class="btn" href="/search?q={{ quote(ko, safe='') }}">All of them →</a> <a class="btn" href="https://www.kegg.jp/entry/{{ ko }}" target="_blank" rel="noopener">KEGG ↗</a>{% endif %}</p>
+    {% else %}
+      <p class="empty">No placed Pfam domains or KO to compare by.</p>
+    {% endif %}
+  </div>
+
+  <div class="panel pctx-card">
+    <h2>In this genome</h2>
+    {% if paralogs %}
+      {% set tandem = paralogs|selectattr('tandem', 'equalto', 'adjacent')|list %}
+      <p class="pctx-lead"><b>{{ paralogs|length }}</b> other cop{{ 'ies' if paralogs|length != 1 else 'y' }}{% if tandem %}, {{ tandem|length }} right next to this one{% endif %}.</p>
+      <table class="pctx-table"><tbody>{% for p in paralogs[:12] %}
+        <tr><td>{{ protein_link(p.protein_id) }}<div class="sub">{{ p.why|join(' · ') }}</div></td>
+            <td class="num">{{ num(p.length) }} <span class="count">aa</span>{% if p.partial %}<div><span class="tag warn">runs off contig</span></div>{% endif %}</td>
+            <td>{% if p.tandem == 'adjacent' %}<span class="tag ok" title="Neighbouring gene on the same contig">adjacent</span>{% elif p.tandem == 'nearby' %}<span class="tag" title="Within three genes on the same contig">{{ p.gap }} genes away</span>{% elif p.contig_id == contig_id %}<span class="count">same contig</span>{% endif %}</td></tr>
+      {% endfor %}</tbody></table>
+      {% if paralogs|length > 12 %}<p class="count">and {{ paralogs|length - 12 }} more.</p>{% endif %}
+    {% elif ko or domains %}
+      <p class="pctx-lead">The only copy in this genome{% if ko and domains %} by KO and by Pfam domains{% elif ko %} by KO{% else %} by Pfam domains{% endif %}.</p>
+    {% else %}
+      <p class="empty">No KO or Pfam domains to look for copies by.</p>
+    {% endif %}
+  </div>
+
+  <div class="panel pctx-card">
+    <h2>Usual neighbours</h2>
+    {% if hood and hood.rows %}
+      <p class="pctx-lead">Within {{ hood.flank }} genes of {% if family.kind == 'ko' %}{{ family.id }}{% if family.symbol %} ({{ family.symbol }}){% endif %}{% else %}{{ family.name }}{% endif %} in {{ num(hood.sampled) }} genome{{ 's' if hood.sampled != 1 }}{% if hood.carriers > hood.sampled %} <span class="count">(one carrier each, of {{ num(hood.carriers) }})</span>{% endif %}:</p>
+      <div class="bars pctx-bars">{% for r in hood.rows %}
+        <a class="label" href="{{ url('domain', r.id) if r.kind == 'domain' else '/search?q=' ~ quote(r.id, safe='') }}" title="{{ r.id }}{{ ' · ' ~ r.definition if r.definition }}">{{ r.symbol or r.name }}</a>{{ bar(r.share, charts.color_for(r.name)) }}<span class="val" title="{{ num(r.carriers) }} of {{ num(hood.sampled) }} genomes; usually {{ r.side }} ({{ '%+g' % r.offset }} genes)">{{ pct(r.share) }} <span class="pctx-side">{{ '→' if r.side == 'downstream' else ('←' if r.side == 'upstream' else '↔') }}</span></span>
+      {% endfor %}</div>
+      <p class="count">Neighbours named by {{ hood.vocabulary }}; sides are relative to the carrier's direction. This is observed co-location; system names come from the curated callers.</p>
+      <p class="actions pctx-actions"><a class="btn" href="{{ url('stack', 'ko' if family.kind == 'ko' else 'domain', family.id) }}">Stack neighbourhoods →</a></p>
+    {% elif family %}
+      <p class="empty">No carriers of {{ family.id }} with genomic positions to compare.</p>
+    {% else %}
+      <p class="empty">No KO or Pfam domain to gather carriers by.</p>
+    {% endif %}
+  </div>
+</div>
+
+{% if minimap %}
+<div class="panel pctx-pos">
+  <h2>Position on contig <span class="hint">gene {{ num(position.index) }} of {{ num(position.count) }} · {{ bp(position.to_start) }} from the start · {{ bp(position.to_end) }} from the end · click to open the contig there</span></h2>
+  {{ minimap }}
+</div>
+{% endif %}

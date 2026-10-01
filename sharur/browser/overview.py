@@ -78,7 +78,7 @@ def highlights(catalog) -> list[dict[str, Any]]:
     feeds = catalog.notable or {}
     out = []
     giants = feeds.get("giants") or []
-    if giants:
+    if giants and giants[0].get("length"):     # proteins without a recorded length have nothing to show
         g = giants[0]
         out.append({"kind": "giant", "title": "Longest protein", "value": f"{g['length']:,} aa",
                     "protein_id": g["protein_id"], "bin_id": g["bin_id"], "domains": g.get("domains", []),

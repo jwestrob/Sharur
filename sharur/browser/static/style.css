@@ -755,3 +755,17 @@ svg.tree-fig.t-rect { max-width: none; }
 .hpill-warn i { background: var(--caution); } .hpill-fail i { background: var(--fail); }
 @media (max-width: 640px) { .health-check { grid-template-columns: 1fr; gap: 4px; } .health-pill { display: none; } }
 /* ---- end data health ------------------------------------------------------ */
+
+/* ---- protein page: context panels (architecture elsewhere, copies, usual neighbours) ---- */
+.pctx { margin-top: 18px; align-items: start; }
+.pctx > .panel { margin-top: 0; }
+.pctx-card h2 { margin-bottom: 8px; }
+.pctx-lead { margin: 0 0 8px; line-height: 1.45; }
+.pctx-lead .mono { font-size: 12px; overflow-wrap: anywhere; }
+.pctx-len { margin: 10px 0 4px; font-size: 13px; line-height: 1.6; }
+.pctx-bars { margin: 6px 0 4px; }
+.pctx-side { color: var(--ink-3); font-weight: 600; margin-left: 2px; }
+.pctx-table { width: 100%; }
+.pctx-table td { vertical-align: top; }
+.pctx-actions { margin: 10px 0 0; }
+.pctx-pos { margin-top: 18px; }

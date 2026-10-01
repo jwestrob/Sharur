@@ -55,6 +55,9 @@
   </div>
 </div>
 
+<div id="protein-context" data-context-url="{{ url('protein', c.protein_id) }}/context"><div class="panel"><p class="empty">Gathering this protein's context…</p></div></div>
+<script src="/static/protein_context.js?v={{ asset_version }}" defer></script>
+
 {% set note_kind = 'protein' %}{% set note_id = c.protein_id %}{% include "_notes.html" %}
 {% include "_insight_protein.html" %}
 {% if synteny %}{% include "_synteny_protein.html" %}{% endif %}
