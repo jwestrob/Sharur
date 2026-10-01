@@ -39,6 +39,7 @@ $ sharur [OPTIONS] COMMAND [ARGS]...
 * `verify-seal`: Recompute a dataset seal and report...
 * `build-vector-index`: Build mmap-ready FAISS sidecars and a...
 * `doctor`: Verify external tools, reference...
+* `adopt-astra-hmms`: Register databases installed through Astra...
 * `architecture`: Find proteins whose ordered domains match...
 * `import-coverage`: Import per-sample contig coverage into the...
 * `abundance`: Genome abundance per sample, or the share...
@@ -498,6 +499,26 @@ $ sharur doctor [OPTIONS]
 * `--strict`: Exit non-zero if any core tool/database is missing.
 * `--help`: Show this message and exit.
 
+### `sharur adopt-astra-hmms`
+
+Register databases installed through Astra in Aksha's registry.
+
+Aksha shares Astra's database storage but keeps its own registry, so
+Astra-installed databases stay on disk and unknown to `aksha search`.
+This marks each one installed at its existing directory (no download);
+the previous registry is kept as hmm_databases.json.bak.
+
+**Usage**:
+
+```console
+$ sharur adopt-astra-hmms [OPTIONS]
+```
+
+**Options**:
+
+* `--dry-run`: List what would be adopted; write nothing.
+* `--help`: Show this message and exit.
+
 ### `sharur architecture`
 
 Find proteins whose ordered domains match a pattern.
@@ -609,6 +630,8 @@ $ sharur browse [OPTIONS]
 * `--host TEXT`: Interface to bind; 127.0.0.1 keeps it on this machine.  [default: 127.0.0.1]
 * `-p, --port INTEGER`: [default: 8800]
 * `--share`: Require a random access token (printed in the link).
+* `--notes PATH`: Notes and flags database (default: browser_notes.sqlite beside the dataset).
+* `--assemblies PATH`: Directory of genome FASTAs named BIN_ID.fna (for CRISPR repeats and spacers); repeatable. Dataset folders are searched too.
 * `--help`: Show this message and exit.
 
 ### `sharur describe`
@@ -739,7 +762,7 @@ $ sharur-ingest [OPTIONS]
 * `--skip-quast / --with-quast`: Skip optional Stage 01 by default; use --with-quast to enable it  [default: skip-quast]
 * `--skip-dfast / --with-dfast`: Skip optional Stage 02 by default; use --with-dfast to enable it  [default: skip-dfast]
 * `--skip-prodigal / --no-skip-prodigal`: Skip standard Stage 03 (Prodigal)  [default: no-skip-prodigal]
-* `--skip-astra / --no-skip-astra`: Skip standard Stage 04 (Astra via 04_astra_scan.py)  [default: no-skip-astra]
+* `--skip-aksha, --skip-astra / --no-skip-aksha, --no-skip-astra`: Skip standard Stage 04 (Aksha HMM search via 04_astra_scan.py)  [default: no-skip-aksha]
 * `--skip-gecco / --with-gecco`: Skip optional Stage 05a by default; use --with-gecco to enable it  [default: skip-gecco]
 * `--skip-dbcan / --with-legacy-dbcan`: Skip deprecated Stage 05b by default; use --with-legacy-dbcan to enable it  [default: skip-dbcan]
 * `--enable-cazymes`: Run the optional Stage 07 dbCAN three-tool consensus classifier

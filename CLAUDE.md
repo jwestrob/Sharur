@@ -18,7 +18,7 @@ Detailed guides live in `docs/` and `.claude/skills/`. **Read the relevant doc b
 |-----------------|-----------|
 | Running a full 5-phase analysis pipeline | `docs/analysis_workflow.md` |
 | Writing manuscripts or compiling reports | `docs/manuscript_guide.md` |
-| Using tools (Astra, ELSA, ESM3, Foldseek, V2 atoms) | `docs/tools_reference.md` |
+| Using tools (Aksha, ELSA, ESM3, Foldseek, V2 atoms) | `docs/tools_reference.md` |
 | Making biological claims or interpreting annotations | `docs/biological_interpretation.md` |
 | Dispatching or working as a subagent | `docs/subagent_guide.md` |
 | Working with V2 predicate system | `docs/predicates_v2.md` |

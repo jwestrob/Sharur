@@ -30,7 +30,7 @@ Verification: EVERY specific number in a finding (totals AND breakdowns) needs a
 ## Reference Docs (READ ON DEMAND)
 When you encounter a domain-specific situation, read the relevant doc before acting:
   - docs/biological_interpretation.md — context-first protocol, MAG caveats, claim escalation, scientific rigor
-  - docs/tools_reference.md — Astra, ELSA, ESM3, Foldseek, V2 predicates
+  - docs/tools_reference.md — Aksha, ELSA, ESM3, Foldseek, V2 predicates
   - docs/manuscript_guide.md — findings schema, claim tracking, figure requirements
   - .claude/skills/hydrogenase.md — HydDB curation, Complex I FP detection, neighborhood validation
   - .claude/skills/synteny.md — ELSA query patterns, gene ID formats, cluster citing rules

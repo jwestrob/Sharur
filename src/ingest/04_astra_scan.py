@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """
-Stage 4: Functional Annotation with Astra/PyHMMer
+Stage 4: Functional Annotation with Aksha/PyHMMER
 Scan protein sequences against domain databases for functional annotation.
+
+Runs ``aksha search`` per database; the legacy ``astra`` CLI serves as a
+fallback (see sharur/hmm_search.py). Output paths keep the stage04_astra
+names so existing datasets and run ledgers resume unchanged.
 """
 
 import logging
@@ -10,7 +14,7 @@ import subprocess
 import time
 import shutil
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import pandas as pd
@@ -20,14 +24,17 @@ from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress
 
+from sharur.hmm_search import build_search_command, registration_problem, resolve_cli
+
 console = Console()
 logger = logging.getLogger(__name__)
 
 
-def run_single_astra_scan(database: str, protein_symlink_dir: Path, output_dir: Path, 
-                          threads: int, use_cutoffs: bool = True) -> Dict[str, Any]:
+def run_single_astra_scan(database: str, protein_symlink_dir: Path, output_dir: Path,
+                          threads: int, use_cutoffs: bool = True,
+                          cli: Optional[Tuple[str, str]] = None) -> Dict[str, Any]:
     """
-    Run astra search for a single database.
+    Run ``aksha search`` (or legacy ``astra search``) for a single database.
     
     Args:
         database: Database name (PFAM, KOFAM, etc.)
@@ -35,7 +42,8 @@ def run_single_astra_scan(database: str, protein_symlink_dir: Path, output_dir: 
         output_dir: Output directory for results
         threads: Number of threads to use
         use_cutoffs: Whether to use gathering cutoffs
-        
+        cli: (name, path) of the search CLI; resolved from PATH when omitted
+
     Returns:
         Dict containing execution results and statistics
     """
@@ -58,40 +66,22 @@ def run_single_astra_scan(database: str, protein_symlink_dir: Path, output_dir: 
     }
     
     try:
-        # Build astra search command
-        cmd = [
-            "astra", "search",
-            "--prot_in", str(protein_symlink_dir),
-            "--installed_hmms", database,
-            "--outdir", str(db_output_dir),
-            "--threads", str(threads)
-        ]
+        resolved = cli or resolve_cli()
+        if resolved is None:
+            result["error_message"] = "No HMM-search CLI on PATH: install Aksha (github.com/jwestrob/aksha)"
+            return result
+        tool = resolved[0]
+        result["cli"] = tool
+        problem = registration_problem(tool, database)
+        if problem:
+            result["error_message"] = problem
+            return result
 
-        # Add cutoffs for databases that support them
-        # PFAM and HydDB have GA (gathering) thresholds on all profiles.
-        # DefenseFinder has GA on all 1,000 profiles (but values are
-        # permissive — 32% at GA=20 — so load-time e-value filter is
-        # still needed as a safety net).
-        if use_cutoffs and database.upper() in ["PFAM", "HYDDB", "DEFENSEFINDER"]:
-            cmd.append("--cut_ga")
-        # DefenseFinder / TXSScan: also write MacSyFinder-compatible hmmsearch
-        # output so downstream validation can run MacSyFinder --previous-run
-        # for co-localization filtering.
-        if database.upper() in ("DEFENSEFINDER", "TXSSCAN"):
-            cmd.append("--write_macsyfinder")
-        # KOFAM requires --cascade to apply per-profile adaptive thresholds
-        # (--cut_ga alone uses a single global threshold which is wrong for KOFAM)
-        if use_cutoffs and database.upper() == "KOFAM":
-            cmd.extend(["--cut_ga", "--cascade"])
-        # VOGdb has NO GA thresholds (0/48,439 profiles); astra falls
-        # back to permissive defaults.  CANT-HYD and others likewise.
-        # Filtering is applied at load time in 07_build_knowledge_base.py
-        # via DEFAULT_EVALUE_THRESHOLDS.
-
-        console.print(f"Running astra search for {database}...")
+        cmd = build_search_command(tool, database, protein_symlink_dir, db_output_dir,
+                                   threads, use_cutoffs)
+        console.print(f"Running {tool} search for {database}...")
         console.print(f"Command: {' '.join(cmd)}")
 
-        # Execute astra search
         process_result = subprocess.run(
             cmd,
             capture_output=True,
@@ -99,9 +89,9 @@ def run_single_astra_scan(database: str, protein_symlink_dir: Path, output_dir: 
             # No timeout — KOFAM on large datasets can take hours
         )
 
-        astra_failed = process_result.returncode != 0
-        if astra_failed:
-            logger.warning(f"Astra returned non-zero exit code for {database}")
+        search_failed = process_result.returncode != 0
+        if search_failed:
+            logger.warning(f"{tool} returned non-zero exit code for {database}")
 
         # Find the results file — either the consolidated TSV or per-genome tmp_results
         hits_file = db_output_dir / f"{database}_hits_df.tsv"
@@ -127,10 +117,10 @@ def run_single_astra_scan(database: str, protein_symlink_dir: Path, output_dir: 
         except Exception as e:
             logger.warning(f"Failed to parse results statistics for {database}: {e}")
 
-        if astra_failed and result["total_hits"] > 0:
+        if search_failed and result["total_hits"] > 0:
             result["execution_status"] = "partial"
             result["error_message"] = (
-                f"Astra exited non-zero but {result['total_hits']:,} hits recovered "
+                f"{tool} exited non-zero but {result['total_hits']:,} hits recovered "
                 f"from tmp_results/"
             )
         else:
@@ -148,7 +138,7 @@ def _consolidate_tmp_results(db_output_dir: Path, database: str,
     """
     Merge per-genome TSVs from tmp_results/ into a single consolidated hits file.
 
-    Astra's --cascade mode (KOFAM) and some failure modes produce per-genome
+    The --cascade mode (KOFAM) and some failure modes produce per-genome
     result files in tmp_results/ without creating the consolidated {DB}_hits_df.tsv.
     This function merges them.
     """
@@ -200,7 +190,7 @@ def run_astra_scan(
     output_dir: Path = typer.Option(
         Path("data/stage04_astra"),
         "--output-dir", "-o",
-        help="Output directory for Astra scan results"
+        help="Output directory for HMM scan results"
     ),
     threads: int = typer.Option(
         8,
@@ -224,13 +214,20 @@ def run_astra_scan(
     )
 ) -> None:
     """
-    Run Astra functional annotation scans using PyHMMer.
-    
+    Run Aksha functional annotation scans using PyHMMER.
+
     Scans protein sequences from Prodigal against HMM domain databases
-    using the astra tool. Supports PFAM, KOFAM, and other installed databases.
+    with ``aksha search`` (legacy ``astra`` as a fallback). Supports PFAM,
+    KOFAM, and other installed databases.
     """
-    console.print("[bold blue]Stage 4: Astra Functional Annotation[/bold blue]")
-    
+    console.print("[bold blue]Stage 4: Aksha Functional Annotation[/bold blue]")
+    cli = resolve_cli()
+    if cli is None:
+        console.print("[red]Error: neither aksha nor astra is on PATH; install Aksha "
+                      "(github.com/jwestrob/aksha)[/red]")
+        raise typer.Exit(1)
+    console.print(f"HMM search CLI: {cli[0]} ({cli[1]})")
+
     # Validate inputs
     if not input_dir.exists():
         console.print(f"[red]Error: Input directory does not exist: {input_dir}[/red]")
@@ -288,7 +285,7 @@ def run_astra_scan(
     (output_dir / "logs").mkdir(exist_ok=True)
     
     # Process databases sequentially to avoid overwhelming the system
-    console.print("\n[bold yellow]Running Astra scans...[/bold yellow]")
+    console.print(f"\n[bold yellow]Running {cli[0]} scans...[/bold yellow]")
     
     start_time = time.time()
     results = []
@@ -302,7 +299,8 @@ def run_astra_scan(
                 protein_symlink_dir=protein_symlink_dir,
                 output_dir=output_dir,
                 threads=threads,
-                use_cutoffs=use_cutoffs
+                use_cutoffs=use_cutoffs,
+                cli=cli,
             )
             results.append(result)
             
@@ -354,6 +352,7 @@ def run_astra_scan(
             "databases": list(databases),
             "threads": threads,
             "use_cutoffs": bool(use_cutoffs),
+            "hmm_search_cli": cli[0],
             "protein_symlink_dir": str(protein_symlink_dir)
         },
         "summary": summary_stats,

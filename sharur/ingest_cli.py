@@ -224,7 +224,7 @@ def _build_tools_dag(
     if not skip_astra:
         add(
             "04",
-            "Astra annotation",
+            "HMM annotation (Aksha)",
             [
                 str(stage_dir / "04_astra_scan.py"),
                 "-i",
@@ -693,7 +693,11 @@ def run(
     skip_prodigal: Annotated[bool, typer.Option(help="Skip standard Stage 03 (Prodigal)")] = False,
     skip_astra: Annotated[
         bool,
-        typer.Option(help="Skip standard Stage 04 (Astra via 04_astra_scan.py)"),
+        typer.Option(
+            "--skip-aksha/--no-skip-aksha",
+            "--skip-astra/--no-skip-astra",
+            help="Skip standard Stage 04 (Aksha HMM search via 04_astra_scan.py)",
+        ),
     ] = False,
     skip_gecco: Annotated[
         bool,

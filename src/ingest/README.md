@@ -2,7 +2,7 @@
 
 ## Quick Start: Primary CLI
 
-Use `sharur-ingest` as the default way to run the Sharur ingest pipeline. Do not add manual Astra database overrides unless you are intentionally doing a specialized run.
+Use `sharur-ingest` as the default way to run the Sharur ingest pipeline. Do not add manual HMM database overrides unless you are intentionally doing a specialized run.
 
 ```bash
 sharur-ingest \
@@ -42,7 +42,7 @@ Resource profiles:
 | `--profile mps` | Stage 06 MPS under a cross-process exclusive lock; other stages local |
 | `--profile slurm` | Generate `slurm/*.sbatch`, local wrappers, logs, and dependency-linked `submit.sh` |
 
-The SLURM profile gives Astra a 72-hour allocation and Stage 06 one CUDA GPU. MinCED remains
+The SLURM profile gives Stage 04 (Aksha) a 72-hour allocation and Stage 06 one CUDA GPU. MinCED remains
 single-threaded and local. Bundle generation does not submit jobs unless
 `--submit-slurm` is supplied.
 
@@ -89,7 +89,7 @@ canonical embedding artifact.
 
 **ELSA synteny + genome browser (after Stage 06 + 07):**
 ```bash
-# Run ELSA with Sharur annotations (skips redundant Astra PFAM scan)
+# Run ELSA with Sharur annotations (skips a redundant PFAM scan)
 elsa synteny \
     --db data/$DATASET/sharur.duckdb \
     --embeddings data/$DATASET/embeddings/protein_embeddings.h5 \
@@ -102,7 +102,7 @@ elsa browser data/$DATASET/synteny/ --store data/$DATASET/synteny/store \
     --annotations-db data/$DATASET/sharur.duckdb
 ```
 
-The `--annotations-db` flag loads PFAM domains into the browser `genes` table and all annotation sources (KEGG, CAZy, DefenseFinder, etc.) into the browser `annotations_multi` table, eliminating the need for a separate Astra PFAM run.
+The `--annotations-db` flag loads PFAM domains into the browser `genes` table and all annotation sources (KEGG, CAZy, DefenseFinder, etc.) into the browser `annotations_multi` table, eliminating the need for a separate PFAM run.
 
 ---
 
@@ -114,7 +114,7 @@ The `--annotations-db` flag loads PFAM domains into the browser `genes` table an
 > do not. See the Stage 04 section below for details.
 
 > **WARNING: DO NOT use CRISPRCasFinder.**
-> CRISPRCasFinder is installed in Astra as an HMM database but it is NOT a standard pipeline
+> CRISPRCasFinder is installable through Aksha as an HMM database but it is NOT a standard pipeline
 > tool. It detects Cas protein domains (which DefenseFinder already handles better). For
 > CRISPR *array* detection (the repeat-spacer structures), use MinCED (Stage 05c).
 
@@ -132,7 +132,7 @@ Stage 00  Input Preparation       (validate + organize genome FASTAs)
    |
 Stage 03  Gene Calling            (Prodigal: genomes -> proteins + GFF)
    |
-   +---> Stage 04  Annotation    (Astra/PyHMMer: proteins -> HMM hits)
+   +---> Stage 04  Annotation    (Aksha/PyHMMER: proteins -> HMM hits)
    |
    +---> Stage 05c CRISPR Arrays (MinCED: genomes -> CRISPR array coords)
    |
@@ -257,7 +257,7 @@ python src/ingest/03_prodigal.py -i data/DATASET/stage00_prepared -o data/DATASE
 
 ### Stage 04: Functional Annotation (`04_astra_scan.py`)
 
-**What it does:** Runs Astra HMM searches against multiple domain databases. Processes databases sequentially (one at a time) to avoid resource contention. Each database produces a `{DATABASE}_hits_df.tsv` results file.
+**What it does:** Runs `aksha search` (legacy `astra` as a fallback) against multiple domain databases. Processes databases sequentially (one at a time) to avoid resource contention. Each database produces a `{DATABASE}_hits_df.tsv` results file.
 
 **Required inputs:** Stage 03 output directory (specifically the `genomes/all_protein_symlinks/` subdirectory).
 
@@ -309,7 +309,7 @@ replicon-local co-location caller to materialize named systems.
 
 > **DO NOT add VOGdb, CRISPRCasFinder, or CANT-HYD to the default database list.**
 > - VOGdb has no GA thresholds (0/48,439 profiles) and produces noisy results that require careful filtering.
-> - CRISPRCasFinder in Astra detects Cas protein domains, not CRISPR arrays. DefenseFinder is better for Cas proteins, and MinCED (Stage 05c) handles array detection.
+> - The CRISPRCasFinder HMMs detect Cas protein domains, not CRISPR arrays. DefenseFinder is better for Cas proteins, and MinCED (Stage 05c) handles array detection.
 > - CANT-HYD is specialized and only needed for specific hydrocarbon degradation analysis.
 > These databases can be added for specialized analyses, but they are not standard pipeline databases.
 
@@ -325,9 +325,10 @@ replicon-local co-location caller to materialize named systems.
 
 **Common errors:**
 - "Protein symlink directory not found" -- run Stage 03 first.
-- Astra not found -- ensure `astra` is on PATH (`which astra`). Installed via pyenv shim at `~/astra/`.
+- Aksha not found -- ensure `aksha` is on PATH (`which aksha`); `sharur doctor` also checks its compiled runtime.
 - KOFAM takes hours on large datasets (>100k proteins) -- this is normal, do not kill the process.
-- HMM database not found -- check `~/.config/Astra/` for installed databases.
+- HMM database not found -- `aksha initialize --show_installed`; files live in `~/.config/Astra/`. Databases installed
+  through Astra register with `sharur adopt-astra-hmms`.
 
 ---
 
@@ -555,8 +556,8 @@ MinCED is a Java-based tool. Known wrapper script location:
 ```
 Ensure this is on your PATH, or install via conda: `conda install -c bioconda minced`.
 
-### Astra not found
-Astra is installed at `~/astra/` and accessed via pyenv shim. Verify: `which astra`. Installed HMM databases live at `~/.config/Astra/`.
+### Aksha not found
+Install Aksha (github.com/jwestrob/aksha; see INSTALL.md) and verify with `which aksha` and `sharur doctor`. Stage 04 falls back to a legacy `astra` executable. HMM database files live at `~/.config/Astra/`; Aksha's registry of installed databases is in its own config directory.
 
 ### Typer List[str] options
 If you must override a `List[str]` option (like `--databases`), Typer requires **repeated flags**:
@@ -594,7 +595,7 @@ Reduce batch size in the embeddings script, or use CPU (10-20x slower but works)
 - Python 3.8+
 - DuckDB, Pandas, Biopython
 - Typer, Rich (CLI framework)
-- [Astra](https://github.com/Dreycey/Astra) (HMM search)
+- [Aksha](https://github.com/jwestrob/aksha) (HMM search; successor to Astra)
 - Prodigal (gene calling)
 - MinCED (CRISPR detection)
 
@@ -602,7 +603,7 @@ Reduce batch size in the embeddings script, or use CPU (10-20x slower but works)
 - PyTorch, Transformers (HuggingFace)
 - GPU recommended
 
-### Astra Installed Databases (`~/.config/Astra/`)
+### Installed HMM Databases (`~/.config/Astra/`)
 PFAM, KOFAM, VOGdb, HydDB, DefenseFinder, CRISPRCasFinder, CANT-HYD, dbCAN, padloc, TXSScan
 
 Note: Not all installed databases are used in the standard pipeline. Only PFAM, KOFAM, HydDB, DefenseFinder, and dbCAN are defaults. TXSScan is available as a non-default opt-in.

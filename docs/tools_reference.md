@@ -1,16 +1,17 @@
 # Tools Reference
 
-**Load this doc when:** Using Astra, ESM2/ESM3, Foldseek, ELSA, CAZyme/HydDB pipelines, V2 predicates, or hypothesis tracking.
+**Load this doc when:** Using Aksha, ESM2/ESM3, Foldseek, ELSA, CAZyme/HydDB pipelines, V2 predicates, or hypothesis tracking.
 
-## Astra Annotation Pipeline
+## Aksha Annotation Pipeline
 
-Astra manages pre-installed HMM databases for annotation searches.
+[Aksha](https://github.com/jwestrob/aksha), Astra's successor, manages pre-installed HMM
+databases for annotation searches. Stage 04 runs `aksha search` and falls back to a legacy
+`astra` executable; `SHARUR_HMM_SEARCH=astra` forces the fallback. `sharur doctor` reports the
+CLI, its compiled runtime, and which databases its registry lists as installed.
 
-**Location:** `~/astra/` (source), installed via pyenv shim
+**Database files** (`~/.config/Astra/`, the storage path Aksha inherits): PFAM, KOFAM, VOGdb, HydDB, DefenseFinder, CRISPRCasFinder, CANT-HYD, dbCAN, padloc, TXSScan
 
-**Installed databases** (`~/.config/Astra/`): PFAM, KOFAM, VOGdb, HydDB, DefenseFinder, CRISPRCasFinder, CANT-HYD, dbCAN, padloc, TXSScan
-
-**NEVER call `astra search` directly.** Use the stage 04 script, which knows the correct flags for each database:
+**NEVER call `aksha search` directly.** Use the stage 04 script, which knows the correct flags for each database:
 
 ```bash
 python src/ingest/04_astra_scan.py \
@@ -21,13 +22,14 @@ python src/ingest/04_astra_scan.py \
 
 `--force` only removes the specific database subdirectory being re-run, not other results. Multiple databases: `-d PFAM -d KOFAM -d HydDB`.
 
-**Why not raw `astra search`?** Each database needs different flags:
+**Why not raw `aksha search`?** Each database needs different flags:
 - PFAM/HydDB/DefenseFinder: `--cut_ga`
 - KOFAM: `--cut_ga --cascade` (adaptive per-profile thresholds)
 - DefenseFinder/TXSScan: `--write_macsyfinder` (for system validation)
 - VOGdb/CANT-HYD: no cutoffs (filtered at load time)
 
-The stage 04 script handles all of this automatically.
+The stage 04 script handles all of this automatically. If a database is installed through
+Astra and missing from Aksha's registry, stage 04 names the fix: `sharur adopt-astra-hmms`.
 
 **Notes:**
 - `--prot_in` expects a **directory** containing `.faa` files, not a single file
@@ -37,7 +39,7 @@ The stage 04 script handles all of this automatically.
 ### Secretion System Identification (TXSScan)
 **Validation:** Use the authoritative co-location engine below. Do not reconstruct systems
 from raw profile rows.
-**Requires:** TXSScan HMMs via Astra (`-d TXSScan` in stage 04), TXSScan models in `~/.macsyfinder/models/`
+**Requires:** TXSScan HMMs via Aksha (`-d TXSScan` in stage 04), TXSScan models in `~/.macsyfinder/models/`
 **Output:** replicon-provenanced `secretion_systems`, normalized `system_proteins`, and
 `txsscan_system` annotations in DuckDB. Inspect the live caller table for the exact systems
 emitted by the currently installed model definitions.
@@ -102,7 +104,7 @@ Python hash seeds.
 ### Requirements
 - MacSyFinder model XMLs at `~/.macsyfinder/models/defense-finder-models/` (installed by defense-finder)
 - Raw HMM hits loaded in DuckDB `annotations` table with `source='defensefinder'`
-- Astra `--write_macsyfinder` is NOT needed (engine reads from DuckDB, not hmmsearch files)
+- Aksha `--write_macsyfinder` is NOT needed (engine reads from DuckDB, not hmmsearch files)
 
 Schema-v5 migration quarantines pre-v5 named DefenseFinder/TXSScan calls and invalidates
 their affected semantic cache rows. Rerun Stage 07 (or the caller plus a V2 subset refresh)
@@ -110,7 +112,7 @@ before treating a migrated legacy database's system surface as available.
 
 ## Hydrogenase Classification
 **Script:** `scripts/classify_hydrogenases.py`
-**Requires:** HydDB HMMs via Astra, DIAMOND database (`data/reference/hyddb/HydDB_all.dmnd`)
+**Requires:** HydDB HMMs via Aksha, DIAMOND database (`data/reference/hyddb/HydDB_all.dmnd`)
 **Method:** Nearest HydDB reference by DIAMOND for proteins with a HydDB HMM hit (a Sharur procedure; HydDB's own classifier adds k-NN voting, non-hydrogenase screening, and gene-organization rules)
 **Output:** One row per protein in `hydrogenase_classifications` plus `hyddb_subgroup` labels; interpretations follow Søndergaard et al. 2016 Table 1 (`sharur/hydrogenase/subgroups.py`)
 **Curation:** Calls lacking the catalytic domain for their type carry `hyddb_needs_curation`; class disagreements carry `hyddb_class_conflict`

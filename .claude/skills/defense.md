@@ -74,7 +74,7 @@ for pred in defense_predicates:
 
 ### Step 2b: System-Level Defense Validation (CRITICAL)
 
-**Astra's DefenseFinder HMM hits have a ~72% false positive rate.** Most hits are superfamily
+**Raw DefenseFinder HMM hits have a ~72% false positive rate.** Most hits are superfamily
 matches (kinases, Rossmann folds, helicases) that are NOT part of real defense systems.
 Always prefer system-validated annotations (`source='defensefinder_system'`) over raw HMM
 hits (`source='defensefinder'`).

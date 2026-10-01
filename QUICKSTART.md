@@ -9,7 +9,7 @@ The standard ingest workflow starts from nucleotide assemblies (`.fna`, `.fa`, `
 - Use `sharur-ingest` as the default interface for new dataset ingestion.
 - Use the staged scripts in `src/ingest/` only when you need manual stage control, debugging, or rerunning one stage.
 
-- Run annotation through `src/ingest/04_astra_scan.py`, which supplies Sharur's per-database Astra settings.
+- Run annotation through `src/ingest/04_astra_scan.py`, which supplies Sharur's per-database Aksha search settings.
 - Load annotation rows through `src/ingest/07_build_knowledge_base.py`, the single DuckDB writer.
 - Keep `src/ingest/minced_crispr.py` in the standard pipeline; CRISPR array loci come from it.
 
@@ -20,14 +20,14 @@ If you only have pre-called proteins and no assemblies, see [Alternative: Protei
 ### Software
 - Python 3.10+ with Sharur installed: `pip install -e ".[embeddings]"`
 - Prodigal
-- [Astra](https://github.com/Dreycey/Astra)
+- [Aksha](https://github.com/jwestrob/aksha) (HMM search; see [INSTALL.md](INSTALL.md#aksha-hmm-search))
 - MinCED
 - Optional but recommended GPU access for Stage 06 embeddings
 
 If `sharur-ingest` is not available after install, refresh the editable install:
 `pip install -e ".[embeddings]"`
 
-### Astra databases
+### HMM databases (`aksha initialize --hmms NAME`)
 - Standard: `PFAM`, `KOFAM`, `HydDB`, `DefenseFinder`, `dbCAN`
 - Optional: `TXSScan`, `VOGdb`, `CANT-HYD`
 
@@ -402,14 +402,14 @@ python scripts/ingest_protein_fasta.py \
 
 Use this only when the standard assembly-based pipeline is impossible. It:
 - loads bins, contigs, and proteins
-- does not run Prodigal, Astra, or MinCED
+- does not run Prodigal, Aksha, or MinCED
 - does not replace Stage 04 or Stage 07
 - leaves annotation loading and downstream validation to you
 
 ## Common Mistakes
 
 - Reconstructing the standard pipeline manually when `sharur-ingest` would do the job
-- Running raw `astra search` commands instead of `src/ingest/04_astra_scan.py`
+- Running raw `aksha search` commands instead of `src/ingest/04_astra_scan.py`
 - Passing `--databases` as a space-separated list instead of repeated `-d` flags when overriding defaults
 - Skipping `minced_crispr.py` and then expecting CRISPR array loci in DuckDB
 - Treating legacy Stage `05b` dbCAN as the standard CAZyme path; standard ingest uses Stage 04 + Stage 07

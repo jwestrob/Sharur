@@ -144,3 +144,16 @@ def test_reads_add_coverage_stage_after_the_build(tmp_path):
     assert names.index("08_coverage.py") > names.index("07_build_knowledge_base.py")
     stage08 = next(command for command in plan if command[0].endswith("08_coverage.py"))
     assert stage08[stage08.index("--reads") + 1] == str(reads)
+
+
+def test_skip_aksha_and_legacy_skip_astra_both_drop_stage04(tmp_path):
+    from typer.testing import CliRunner
+
+    from sharur.ingest_cli import app
+
+    for flag in ("--skip-aksha", "--skip-astra"):
+        result = CliRunner().invoke(app, [
+            "--input-dir", "dummy_dataset", "--data-dir", str(tmp_path / "d"),
+            "--mode", "tools", "--dry-run", flag, "--skip-embeddings"])
+        assert result.exit_code == 0, result.output
+        assert "04_astra_scan.py" not in result.output

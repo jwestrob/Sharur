@@ -63,41 +63,58 @@ pip install -e ".[all,dev]"                     # full development environment
 
 ## External Tools (not in conda)
 
-### Astra annotation pipeline
+### Aksha HMM search
 
-Astra manages HMM databases for functional annotation.
+[Aksha](https://github.com/jwestrob/aksha) runs Stage 04's HMM searches and manages the HMM
+databases. It is the successor to Astra and accepts the same `search` flags; Stage 04 falls
+back to an `astra` executable when `aksha` is absent.
 
 ```bash
-# Astra is installed from source (not on conda/PyPI)
-cd ~/astra
-pip install -e .
+python -m pip install aksha          # once the PyPI release is published
+# or from source:
+git clone https://github.com/jwestrob/aksha && pip install -e aksha
 
-# Verify
-astra --help
+aksha --help
 ```
+
+Aksha's compiled runtime (`aksha-runtime`) currently ships for Linux x86-64 with Python 3.12;
+see Aksha's `release/INSTALL.md` for other platforms. `sharur doctor` reports whether the
+runtime imports.
 
 **Note:** `--prot_in` expects a **directory** containing `.faa` files, not a single file.
 
-#### Installing Astra HMM databases
+#### Installing HMM databases
 
 ```bash
 # List available and installed databases
-astra initialize --show_available
-astra initialize --show_installed
+aksha initialize --show_available
+aksha initialize --show_installed
 
 # Install the standard pipeline databases
-astra initialize --hmms PFAM
-astra initialize --hmms KOFAM
-astra initialize --hmms HydDB
-astra initialize --hmms DefenseFinder
-astra initialize --hmms dbCAN
+aksha initialize --hmms PFAM
+aksha initialize --hmms KOFAM
+aksha initialize --hmms HydDB
+aksha initialize --hmms DefenseFinder
+aksha initialize --hmms dbCAN
 ```
 
-Databases are stored at `~/.config/Astra/`. The standard pipeline (Stage 04) defaults to PFAM, KOFAM, HydDB, DefenseFinder, and dbCAN.
+Database files are stored at `~/.config/Astra/` (the `db_path` Aksha inherits from Astra).
+Aksha's registry of installed databases lives in its own config directory
+(`~/.config/Aksha/hmm_databases.json` on Linux). The standard pipeline (Stage 04) defaults to
+PFAM, KOFAM, HydDB, DefenseFinder, and dbCAN.
+
+**Moving from Astra.** Databases installed through Astra are already on disk; register them
+with Aksha instead of downloading them again:
+
+```bash
+aksha initialize --show_available     # creates Aksha's registry on first run
+sharur adopt-astra-hmms --dry-run     # list what will be registered
+sharur adopt-astra-hmms               # mark them installed (backup: hmm_databases.json.bak)
+```
 
 ### DefenseFinder co-location models
 
-The co-location validation engine (Stage 07) requires MacSyFinder model definitions in addition to the Astra HMM profiles. If you used `environment.yml`, `mdmparis-defense-finder` is already installed — just download the models:
+The co-location validation engine (Stage 07) requires MacSyFinder model definitions in addition to the DefenseFinder and TXSScan HMM profiles. If you used `environment.yml`, `mdmparis-defense-finder` is already installed — just download the models:
 
 ```bash
 defense-finder update
@@ -169,7 +186,7 @@ Sharur looks for `vog.annotations.tsv` (or `.gz`) in `$SHARUR_VOG_ANNOTATIONS`, 
 
 Stage 07 enriches annotation rows from `pfam_id_desc.tsv` and KOfam's `ko_list` when present. It
 looks in `$SHARUR_REFERENCE_DIR`, the `reference` directory beside the dataset directory (for
-`data/my_dataset`, `data/reference`), `./data/reference` and `~/.sharur/reference`; Astra's
+`data/my_dataset`, `data/reference`), `./data/reference` and `~/.sharur/reference`; the KOFAM install's
 `~/.config/Astra/ko_list` also serves.
 
 ### CoverM (optional)

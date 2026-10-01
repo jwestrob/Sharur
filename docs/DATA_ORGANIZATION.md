@@ -100,9 +100,9 @@ mkdir -p data/${NEW_ORGANISM}_production/{source,annotations,embeddings,structur
 |-------|----------|--------|-------|
 | Genome FASTA | Yes | `.fna`, `.fa`, `.fasta` | Standard Sharur ingest starts here |
 | Protein FASTA | Optional | `.faa` or `.faa.gz` | Fallback path only when assemblies are unavailable |
-| Astra databases | Yes | Installed locally | Standard: PFAM, KOFAM, HydDB, DefenseFinder, dbCAN |
+| Aksha HMM databases | Yes | Installed locally | Standard: PFAM, KOFAM, HydDB, DefenseFinder, dbCAN |
 | MinCED | Yes | Executable | Required for standard CRISPR array ingest |
-| Optional Astra DBs | Optional | Installed locally | TXSScan, VOGdb, CANT-HYD |
+| Optional Aksha DBs | Optional | Installed locally | TXSScan, VOGdb, CANT-HYD |
 
 ### 3. Ingestion Workflow
 
@@ -128,7 +128,7 @@ python scripts/ingest_protein_fasta.py \
   --output data/${NEW_ORGANISM}_production/sharur.duckdb
 ```
 
-That fallback path does not replace the standard stage pipeline, and it does not run Astra, MinCED, or Stage 07 for you.
+That fallback path does not replace the standard stage pipeline, and it does not run Aksha, MinCED, or Stage 07 for you.
 
 ### 4. Standard Naming Conventions
 
