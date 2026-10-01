@@ -20,6 +20,7 @@
   {% if tracks %}{% for source, n, t in tracks %}<div class="lane"><span class="lane-label">{{ SOURCE_LABELS.get(source, source) }} <span class="count">{{ n }}</span></span>{{ t }}</div>{% endfor %}
   {% else %}<p class="empty">No hits with coordinates. {% if not c.annotations %}This protein has no annotation hits at all.{% endif %}</p>{% endif %}
 </div>
+{% include "_sequence_properties_slot.html" %}
 
 <div class="panel">
   <h2>Genomic neighborhood <span class="hint">8 genes each side · color = dominant function category · click a gene</span></h2>

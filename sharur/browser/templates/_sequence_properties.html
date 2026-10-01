@@ -1,0 +1,42 @@
+{# Sequence properties fragment, fetched after the protein page renders (routes_sequence). #}
+<div class="panel" id="sequence-properties">
+  <h2>Sequence properties <span class="hint">computed from the sequence · same scale as the domain architecture</span></h2>
+  <div class="lane"><span class="lane-label">Hydropathy <span class="count">and segments</span></span>{{ profile }}</div>
+  <div class="legend seqp-legend">
+    <span><i class="seqp-key-line"></i>window mean</span><span><i class="seqp-key-band"></i>range per pixel</span>
+    <span><i class="seqp-key-threshold"></i>1.6</span>
+    <span><i class="seqp-key-tm"></i>hydrophobic segment ({{ a.segments|length }})</span>
+    <span><i class="seqp-key-lc"></i>low complexity ({{ a.low_complexity|length }})</span>
+    {% if a.n_terminal %}<span><i class="seqp-key-nterm"></i>N-terminal hydrophobic stretch</span>{% endif %}
+  </div>
+  <div class="stats seqp-stats">
+    <div class="stat"><b>{{ num(comp.length) }} aa</b><span>{% if comp.mass_kda >= 1000 %}{{ '%.2f' % (comp.mass_kda / 1000) }} MDa{% else %}{{ comp.mass_kda }} kDa{% endif %}</span></div>
+    <div class="stat"><b>{{ '%+d' % comp.net_charge }}</b><span>net charge (K + R − D − E) · {{ comp.charged }}% charged</span></div>
+    <div class="stat"><b>{{ a.segments|length }}</b><span>hydrophobic segments · {{ pct(tm_share) }} of length</span></div>
+    <div class="stat"><b>{{ pct(lc_share) }}</b><span>low complexity · {{ a.low_complexity|length }} region{{ 's' if a.low_complexity|length != 1 }}</span></div>
+    <div class="stat"><b>{{ comp.cysteines }}</b><span>cysteines</span></div>
+  </div>
+  <p class="note">
+    {% if comp.enriched %}Enriched over the average Swiss-Prot composition: {% for e in comp.enriched %}<b>{{ e.aa }}</b> {{ e.share }}% ({{ e.ratio }}×){{ ', ' if not loop.last else '. ' }}{% endfor %}{% endif %}
+    {% if a.n_terminal %}The N-terminus has a signal-peptide-like shape: a positive residue, then a hydrophobic stretch at aa {{ a.n_terminal.start }}–{{ a.n_terminal.end }} (heuristic; a signal peptide or a membrane anchor).{% endif %}
+    Hydrophobic segments are runs of 19-residue windows averaging at least 1.6 on the Kyte-Doolittle scale; low-complexity regions are SEG-like windows of low Shannon entropy.
+  </p>
+</div>
+{% if dot %}
+{% set s = a.self %}
+<div class="panel" id="self-similarity">
+  <h2>Self-similarity <span class="hint">{{ s.k }}-mer matches in a reduced alphabet · internal repeats run parallel to the diagonal</span></h2>
+  <div class="seqp-dot-wrap">{{ dot }}
+    <div class="seqp-dot-text">
+      {% if s.period %}{% set p = s.period %}
+      <div class="stats seqp-stats" style="margin-top:0">
+        <div class="stat"><b>{{ num(p.period) }} aa</b><span>strongest repeat offset</span></div>
+        <div class="stat"><b>aa {{ num(p.start) }}–{{ num(p.end) }}</b><span>densest repeat stretch · about {{ p.copies }} units</span></div>
+      </div>
+      <p class="note">{{ num(p.matches) }} matching {{ s.k }}-mer pairs sit at this offset (± 1), against a mean of {{ p.background }} per offset. Lines further from the diagonal mark repeats spaced further apart.</p>
+      {% else %}<p class="note">No offset between matching {{ s.k }}-mers stands out, so no tandem repeat period is called. Isolated off-diagonal marks show shared short words.</p>{% endif %}
+      <p class="note">Each pixel bins {{ '%.0f' % (a.length / s.bins) if s.bins < a.length else 1 }} residue{{ 's' if s.bins < a.length else '' }} per side; opacity follows the log of matches, and cells without a neighbour along the diagonal are left out. Words use a 10-letter alphabet (LVIM, C, A, G, ST, P, FYW, EDNQ, KR, H), so diverged copies still match. Pfam domains run along both axes.{% if s.skipped_kmers %} {{ num(s.skipped_kmers) }} {{ s.k }}-mers occurring more than 400 times (low complexity) are left out.{% endif %}</p>
+    </div>
+  </div>
+</div>
+{% endif %}

@@ -1,0 +1,12 @@
+{# Placeholder on the protein page; the fragment loads after the page (routes_sequence). #}
+<div id="sequence-properties-slot" data-url="{{ url('protein', c.protein_id) }}/properties"></div>
+<script>
+(function () {
+  const host = document.getElementById("sequence-properties-slot");
+  if (!host) return;
+  fetch(host.dataset.url, { credentials: "same-origin" })
+    .then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
+    .then((html) => { host.innerHTML = html; if (window.sharurAttachExports) window.sharurAttachExports(host); })
+    .catch(() => { host.innerHTML = ""; });
+})();
+</script>

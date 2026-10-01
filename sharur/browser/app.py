@@ -32,6 +32,7 @@ from sharur.browser import (
     routes_matrix,
     routes_protein_context,
     routes_search,
+    routes_sequence,
     routes_tree,
     routes_synteny,
     routes_systems,
@@ -185,6 +186,7 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
     routes_api.register(app, ctx)
     routes_synteny.register(app, ctx, templates)
     routes_protein_context.register(app, ctx)
+    routes_sequence.register(app, ctx)
 
     @app.middleware("http")
     async def require_token(request: Request, call_next):
