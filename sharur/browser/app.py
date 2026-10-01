@@ -16,7 +16,15 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Red
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from sharur.browser import charts, routes_compare, routes_crispr, routes_curation, routes_loci, routes_search
+from sharur.browser import (
+    charts,
+    routes_compare,
+    routes_crispr,
+    routes_curation,
+    routes_loci,
+    routes_search,
+    routes_systems,
+)
 from sharur.browser.routes_insight import register as register_insight
 from sharur.browser.catalog import (
     BIOLOGICAL,
@@ -142,6 +150,7 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
     app.state.ctx = ctx
     routes_loci.register(app, ctx)
     routes_curation.register(app, ctx)
+    routes_systems.register(app, ctx)
     routes_crispr.register(app, ctx, [Path(p) for p in assemblies or []])
 
     @app.middleware("http")
@@ -380,6 +389,8 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
             if counts:
                 out[pid] = counts.most_common(1)[0][0]
         return out
+
+    ctx.top_categories = _top_categories
 
     # ------------------------------------------------------------------ #
     # Functions

@@ -47,7 +47,7 @@
       {% if edge_text %}<dt>Position</dt><dd>{{ edge_text }}</dd>{% endif %}
       {% if c.hydrogenase_classification %}<dt>Hydrogenase</dt><dd>{{ c.hydrogenase_classification.outcome }}: {{ c.hydrogenase_classification.reference_label }}</dd>{% endif %}
     </dl>
-    {% if systems_here %}<h2 style="margin-top:14px">Part of</h2>{% for s in systems_here %}<a class="chip" href="{{ url('system', s.kind, s.type) }}">{{ s.type }} ({{ s.kind }})</a>{% endfor %}{% endif %}
+    {% if systems_here %}<h2 style="margin-top:14px">Part of</h2>{% for s in systems_here %}<a class="chip" href="{{ url('call', s.system_id) }}" title="This call in its genomic context">{{ s.type }} ({{ s.kind }})</a>{% endfor %}{% endif %}
     {% if nearby %}<h2 style="margin-top:14px">Pathway steps nearby</h2>
       <div class="bars">{% for m in nearby %}<a class="label" href="{{ url('pathway', m.module) }}" title="{{ m.name }}">{{ m.name }}</a>{{ bar(m.completeness) }}<span class="val">{{ m.steps_complete }}/{{ m.steps_total }}</span>{% endfor %}</div>
       <p class="note">Steps encoded within 10 genes.</p>{% endif %}

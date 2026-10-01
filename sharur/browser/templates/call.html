@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}{{ call.type }} · {{ gshort(call.bin_id) }}{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="/systems">Systems</a><span class="sep">›</span><a href="{{ url('system', call.kind, call.type) }}">{{ call.type }}</a>{% if g %}<span class="sep">›</span><a href="{{ url('genome', g.bin_id) }}">{{ gshort(g.bin_id) }}</a>{% endif %}</div>
+<h1><span class="rank">{{ call.kind }} system{% if g %} · {{ g.label }}{% endif %}</span>{{ call.type }}{% if call.subtype and call.subtype != call.type %} · {{ call.subtype }}{% endif %}</h1>
+<p class="lede mono" style="font-size:12px">{{ call.system_id }}</p>
+<div class="stats">
+  <div class="stat"><b>{{ members|length }}</b><span>system genes</span></div>
+  <div class="stat"><b>{{ bp(hi_member - lo_member + 1) }}</b><span>{{ num(lo_member) }}–{{ num(hi_member) }}</span></div>
+  <div class="stat"><b title="{{ contig }}">{{ short(contig) }}</b><span>contig{% if contig_length %} · {{ bp(contig_length) }}{% endif %}</span></div>
+  {% if g %}<div class="stat"><b><a href="{{ url('genome', g.bin_id) }}">{{ gshort(g.bin_id) }}</a></b><span>{{ g.label }}</span></div>{% endif %}
+</div>
+<p class="actions">
+  <a class="btn" href="{{ url('contig', contig) }}?start={{ viewer_start }}&span={{ viewer_span }}">Open in contig viewer</a>
+  <a class="btn" href="{{ url('system', call.kind, call.type) }}/loci">All {{ call.type }} calls as loci</a>
+  <a class="btn" href="/triage?source=system&kind={{ call.kind }}&id={{ quote(call.type, safe='') }}">Triage {{ call.type }} calls</a>
+</p>
+
+<div class="panel">
+  <h2>Genomic context <span class="hint">{{ num(lo) }}–{{ num(hi) }} bp · system genes outlined and labeled with their profile · click a gene</span></h2>
+  <form class="table-tools" method="get"><select name="flank" onchange="this.form.submit()">{% for f in flanks %}<option value="{{ f }}" {{ 'selected' if f == flank }}>±{{ (f / 1000)|int }} kb</option>{% endfor %}</select></form>
+  <div class="scroll">{{ track }}</div>
+  <div class="legend">{% for cat in categories %}<span><i style="background:{{ CATEGORY_COLORS.get(cat) }}"></i>{{ CATEGORY_LABELS.get(cat, cat) }}</span>{% endfor %}<span><i style="background:var(--gene);border:1.5px solid var(--ink)"></i>system gene</span><span><i style="background:var(--gene-dark);border:1px dashed var(--ink-3)"></i>no annotation</span></div>
+  {% if others or other_loci %}<p class="note">Also in this window:
+    {% for o in others %}<a class="chip" href="{{ o.url }}"><i style="--dot:{{ charts.OVERLAY_COLORS.get(o.kind, '#9aa3ad') }}"></i>{{ o.label }} ({{ o.kind }})</a>{% endfor %}
+    {% for o in other_loci %}<span class="chip"><i style="--dot:{{ charts.OVERLAY_COLORS.get(o.kind, '#9aa3ad') }}"></i>{{ o.label }} {{ num(o.start) }}–{{ num(o.end) }}</span>{% endfor %}</p>{% endif %}
+</div>
+
+<div class="panel">
+  <h2>System genes</h2>
+  <div class="scroll"><table>
+    <thead><tr><th class="num">#</th><th>Protein</th><th>Profile</th><th>Strand</th><th class="num">Length</th><th>Best hit</th></tr></thead>
+    <tbody>{% for m in members %}<tr><td class="num count">{{ m.position or loop.index }}</td>
+      <td><a class="mono" href="{{ url('protein', m.protein_id) }}" title="{{ m.protein_id }}">{{ short(m.protein_id) }}</a></td>
+      <td><b>{{ m.profile or '—' }}</b></td><td class="count">{{ m.strand }}</td><td class="num">{{ num(m.length_aa) }} aa</td><td>{{ m.annotation or '—' }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+  {% if flanking %}
+  <details style="margin-top:14px"><summary>Flanking genes ({{ flanking|length }})</summary>
+  <div class="scroll" style="margin-top:10px"><table>
+    <thead><tr><th class="num">Start</th><th>Protein</th><th>Strand</th><th class="num">Length</th><th>Category</th><th>Best hit</th></tr></thead>
+    <tbody>{% for f in flanking %}<tr><td class="num count">{{ num(f.start) }}</td>
+      <td><a class="mono" href="{{ url('protein', f.protein_id) }}" title="{{ f.protein_id }}">{{ short(f.protein_id) }}</a></td>
+      <td class="count">{{ f.strand }}</td><td class="num">{{ num(f.length_aa) }} aa</td>
+      <td>{% if f.category %}<span class="chip" style="margin:0"><i style="--dot:{{ f.color }}"></i>{{ CATEGORY_LABELS.get(f.category, f.category) }}</span>{% endif %}</td>
+      <td>{{ f.annotation or '—' }}</td></tr>{% endfor %}</tbody>
+  </table></div></details>
+  {% endif %}
+</div>
+
+{% set note_kind = 'system' %}{% set note_id = call.system_id %}{% include "_notes.html" %}
+{% endblock %}
