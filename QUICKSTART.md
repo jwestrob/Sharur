@@ -79,7 +79,17 @@ Execution profiles are explicit:
 - `--profile local`: bounded local CPU workers
 - `--profile mps`: local CPU stages plus one exclusively locked MPS Stage 06 process
 - `--profile slurm`: write a dependency-linked bundle under `data/my_dataset/slurm/`;
-  add `--submit-slurm` only when ready to submit it
+  add `--submit-slurm` only when ready to submit it. Each parallel stage runs as a full-node job
+  that passes `$SLURM_CPUS_ON_NODE` to its tool; sbatch scripts carry only the job name, log path,
+  GPU request and the partition and node exclusions you set, leaving memory and time to partition
+  defaults. Serial stages (input audit, MinCED) run inline from `submit.sh`. Set the partitions
+  and exclusions once per cluster:
+
+  ```bash
+  export SHARUR_SLURM_PARTITION=standard
+  export SHARUR_SLURM_GPU_PARTITION=gpu
+  export SHARUR_SLURM_EXCLUDE=node-a,node-b   # optional: nodes to avoid
+  ```
 
 The default plan skips optional QUAST, DFAST, GECCO, and the deprecated legacy dbCAN
 helper. Enable them deliberately with `--with-quast`, `--with-dfast`, `--with-gecco`,

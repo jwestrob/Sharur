@@ -10,7 +10,7 @@ import subprocess
 from pathlib import Path
 
 from sharur.ingest.dag import snapshot_path
-from sharur.ingest.resources import ResourceRequest, accelerator_lock
+from sharur.ingest.resources import ResourceRequest, accelerator_lock, expand_cpu_tokens
 from sharur.ops.ledger import RunLedger, StageAlreadyCompleteError
 
 
@@ -90,7 +90,7 @@ def execute_stage(
             resource,
             on_wait=lambda: ledger.heartbeat_stage(run_id, stage_id, attempt),
         ):
-            process = subprocess.Popen(command)
+            process = subprocess.Popen(expand_cpu_tokens(command))
             while True:
                 try:
                     return_code = process.wait(timeout=30)

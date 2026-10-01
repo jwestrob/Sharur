@@ -274,16 +274,21 @@ def render_slurm_script(
     request = node.resource
     if request is None:
         raise ValueError(f"Stage {node.stage_id} has no resource request")
-    lines = [
-        "#!/usr/bin/env bash",
-        f"#SBATCH --job-name=sharur-{node.stage_id}",
-        f"#SBATCH --cpus-per-task={request.cpus}",
-        f"#SBATCH --mem={request.memory_gb}G",
-        f"#SBATCH --time={request.walltime}",
-        f"#SBATCH --output={log_dir / (node.stage_id + '-%j.log')}",
+    # Full-node allocations: no CPU, memory or walltime directives; partition defaults
+    # govern memory and time, and stage commands use $SLURM_CPUS_ON_NODE.
+    partition = os.environ.get("SHARUR_SLURM_GPU_PARTITION" if request.gpus else "SHARUR_SLURM_PARTITION")
+    exclude = os.environ.get("SHARUR_SLURM_EXCLUDE")
+    lines = ["#!/usr/bin/env bash"]
+    if partition:
+        lines.append(f"#SBATCH -p {partition}")
+    lines += [
+        f"#SBATCH -J sharur-{node.stage_id}",
+        f"#SBATCH -o {log_dir / (node.stage_id + '-%j.log')}",
     ]
     if request.gpus:
         lines.append(f"#SBATCH --gres=gpu:{request.gpus}")
+    if exclude:
+        lines.append(f"#SBATCH --exclude={exclude}")
     lines.extend(["set -euo pipefail", shlex.join(runner_command), ""])
     return "\n".join(lines)
 
