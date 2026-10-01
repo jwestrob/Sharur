@@ -410,7 +410,8 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line-2); border-bottom-wid
 .fig-export { position: absolute; top: 12px; right: 14px; display: flex; gap: 6px; opacity: 0; transition: opacity .15s; z-index: 2; }
 .panel:hover > .fig-export { opacity: 1; }
 .fig-export button { height: 26px; font-size: 11.5px; padding: 0 9px; }
-html.export-light { --bg: #ffffff; --surface: #ffffff; --surface-2: #f3f2ed; --surface-3: #e9e7e0; --ink: #161b22;
+html.export-light.export-light { /* outranks both dark-token selectors */
+  --bg: #ffffff; --surface: #ffffff; --surface-2: #f3f2ed; --surface-3: #e9e7e0; --ink: #161b22;
                     --ink-2: #47505c; --ink-3: #7c8591; --line: #e3e0d8; --line-2: #d6d2c7; --accent: #0f7c6e;
                     --accent-soft: #dff1ec; --warn: #b4472f; --strip-a: #3f8f86; --strip-b: #87c2b9; --gene: #d9d5ca;
                     --gene-dark: #f1efe8; }
