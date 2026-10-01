@@ -65,6 +65,8 @@
   {% if a.is_genome or b.is_genome %}<p class="note">Metagenome-assembled genomes are incomplete, so a function missing from one genome is "not detected", which is weaker than absent. Check genome size and N50 above before reading much into a single difference.</p>{% endif %}
 </div>
 
+{% include "_gene_order.html" %}
+
 {% if result.functions %}
 <div class="grid g2">
   {{ diff_panel('Functions', result.functions[0], a, b, 'function', true) }}

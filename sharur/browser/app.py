@@ -19,6 +19,7 @@ from fastapi.templating import Jinja2Templates
 from sharur.browser import (
     charts,
     clade_content,
+    gene_order,
     genome_ring,
     routes_api,
     routes_compare,
@@ -1000,6 +1001,7 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
     routes_matrix.register(app, ctx)
     clade_content.register(templates, ctx)
     genome_ring.register(templates, ctx)
+    gene_order.register(templates, ctx)
     routes_tree.register(app, ctx)
     ctx.templates = templates
     routes_health.register(app, ctx)
