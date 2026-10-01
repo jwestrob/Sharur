@@ -1,0 +1,45 @@
+{# Gene content of a clade: frequency spectrum, core, signature and absent features. Needs rank, name, genomes. #}
+{% from "_macros.html" import bar %}
+{% set cc = clade_content(genomes, rank, name) if rank else none %}
+{% if cc %}
+{% set noun = 'KOs' if cc.kind == 'ko' else 'Pfam families' %}
+{% set kind_q = 'ko' if cc.kind == 'ko' else 'pfam' %}
+<div class="panel" id="gene-content">
+  <h2>Gene content <span class="hint">{{ noun }} across {{ num(cc.genomes) }} genomes{% if cc.median_completeness %} · median completeness {{ '%.0f' % cc.median_completeness }}%{% endif %}</span></h2>
+  <div class="cc-grid">
+    <div>
+      {% set top = (cc.spectrum|map(attribute='count')|max) or 1 %}
+      <svg class="cc-spectrum" viewBox="0 0 400 150" role="img" aria-label="Gene-content frequency spectrum">
+        {% for b in cc.spectrum %}{% set h = 110 * b.count / top %}
+        <g><title>{{ num(b.count) }} {{ noun }} in {{ '%.0f' % (b.lo * 100) }}–{{ '%.0f' % (b.hi * 100) }}% of genomes</title>
+        <rect x="{{ 8 + loop.index0 * 39 }}" y="{{ 118 - h }}" width="33" height="{{ h }}" rx="3" class="{{ 'cc-core' if loop.last else 'cc-bin' }}"/>
+        <text x="{{ 24.5 + loop.index0 * 39 }}" y="{{ 112 - h }}" class="cc-n">{{ num(b.count) }}</text></g>{% endfor %}
+        <text x="8" y="136" class="cc-axis">rare</text><text x="392" y="136" class="cc-axis" text-anchor="end">in every genome</text>
+        <text x="200" y="148" class="cc-axis" text-anchor="middle">share of genomes carrying each family</text>
+      </svg>
+    </div>
+    <div class="stats cc-stats">
+      <div class="stat"><b>{{ num(cc.observed) }}</b><span>{{ noun }} seen</span></div>
+      <div class="stat"{% if cc.deficit %} title="{{ cc.deficit }} genome{{ 's' if cc.deficit > 1 }} with mostly missing gene calls left out"{% endif %}><b>{{ num(cc.every) }}</b><span>in every genome{% if cc.deficit %} with gene calls{% endif %}</span></div>
+      {% if cc.consistent is not none %}<div class="stat" title="Present in at least half the genomes, with absences that genome completeness explains (Poisson-binomial, BH q ≥ 0.05; {{ cc.tested_genomes }} genomes with completeness{% if cc.deficit %}, {{ cc.deficit }} with missing gene calls left out{% endif %})"><b>{{ num(cc.consistent) }}</b><span>consistent with every genome, given completeness</span></div>{% endif %}
+      <div class="stat"><b>{{ num(cc.rare) }}</b><span>in ≤ 10% of genomes</span></div>
+    </div>
+  </div>
+  {% if cc.signature or cc.absent %}
+  <div class="grid g2 cc-lists">
+    <div>
+      <h3>Signature <span class="hint">in ≥ 75% here, ≤ 10% in the other {{ num(cc.rest) }} genomes</span></h3>
+      {% if cc.signature %}<table><tbody>{% for f in cc.signature %}<tr><td class="mono"><a href="{{ '/search?q=' ~ quote(f.id) if cc.kind == 'ko' else url('domain', f.id) }}">{{ f.label }}</a><div class="sub">{{ f.name }}</div></td><td style="min-width:130px">{{ bar(f['in']) }}<span class="count">{{ pct(f['in']) }} here · {{ pct(f.out) }} elsewhere</span></td></tr>{% endfor %}</tbody></table>
+      <p class="actions"><a class="btn" href="/matrix?a={{ quote(rank ~ ':' ~ name, safe='') }}&kind={{ kind_q }}&features={{ cc.signature|map(attribute='id')|join(',') }}">Open as matrix</a></p>
+      {% else %}<p class="empty">Nothing at these thresholds.</p>{% endif %}
+    </div>
+    <div>
+      <h3>Common elsewhere, rare here <span class="hint">in ≥ 75% of other genomes, ≤ 10% here</span></h3>
+      {% if cc.absent %}<table><tbody>{% for f in cc.absent %}<tr><td class="mono"><a href="{{ '/search?q=' ~ quote(f.id) if cc.kind == 'ko' else url('domain', f.id) }}">{{ f.label }}</a><div class="sub">{{ f.name }}</div></td><td style="min-width:130px">{{ bar(f['in']) }}<span class="count">{{ pct(f['in']) }} here · {{ pct(f.out) }} elsewhere</span></td></tr>{% endfor %}</tbody></table>
+      <p class="count">Missing annotations can mean gene loss, missing gene calls, or divergent homologs below annotation thresholds.</p>
+      {% else %}<p class="empty">Nothing at these thresholds.</p>{% endif %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endif %}

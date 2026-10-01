@@ -18,6 +18,7 @@ from fastapi.templating import Jinja2Templates
 
 from sharur.browser import (
     charts,
+    clade_content,
     routes_compare,
     routes_cctyper,
     routes_crispr,
@@ -975,6 +976,7 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
     ctx.background = background
     routes_compare.register(app, ctx)
     routes_matrix.register(app, ctx)
+    clade_content.register(templates, ctx)
     return app
 
 

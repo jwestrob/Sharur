@@ -580,3 +580,15 @@ svg.mini-fill { width: 100%; }
 .palette-list .kind { font-size: 11px; color: var(--ink-3); text-transform: uppercase; letter-spacing: .04em; }
 .palette-foot { display: flex; gap: 16px; padding: 8px 14px; border-top: 1px solid var(--line); color: var(--ink-3); font-size: 12px; }
 .palette-foot kbd { font: 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line-2); border-radius: 5px; margin-right: 3px; }
+
+/* clade gene content */
+.cc-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 18px; align-items: center; }
+@media (max-width: 900px) { .cc-grid { grid-template-columns: minmax(0, 1fr); } }
+.cc-spectrum { width: 100%; height: auto; max-height: 220px; }
+.cc-bin { fill: color-mix(in srgb, var(--accent) 55%, var(--surface)); }
+.cc-core { fill: var(--accent); }
+.cc-n { font-size: 9.5px; fill: var(--ink-3); text-anchor: middle; }
+.cc-axis { font-size: 10px; fill: var(--ink-3); }
+.cc-stats { margin: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.cc-lists { margin-top: 14px; }
+.cc-lists h3 { font-size: 13.5px; margin: 0 0 8px; }
