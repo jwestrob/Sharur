@@ -1,0 +1,41 @@
+{% set structures = insight.structures_for(c.protein_id) %}
+{% if structures %}
+<div class="panel" id="structure">
+  <h2>Structure <span class="hint">{{ structures|length }} model{{ 's' if structures|length != 1 }} · colored by pLDDT</span></h2>
+  <div class="grid g-side">
+    <div>
+      {% for s in structures %}
+      <div class="viewer-bar" style="margin-bottom:8px">
+        <span class="count"><b>{{ s.label }}</b>{% if s.plddt is not none %} · mean pLDDT {{ '%.1f' % s.plddt }}{% endif %}{% if s.ptm is not none %} · pTM {{ '%.2f' % s.ptm }}{% endif %}
+        {% if s.model_length and c.location.length_aa and s.model_length < c.location.length_aa - 5 %} · <span class="tag warn">partial model: {{ num(s.model_length) }} of {{ num(c.location.length_aa) }} aa</span>{% endif %}</span>
+        {% if structures|length > 1 %}<button type="button" data-structure="{{ s.key }}">Show</button>{% endif %}
+      </div>
+      {% endfor %}
+      <div class="mol" id="mol" data-first="{{ structures[0].key }}" aria-label="3D structure"><p class="empty" data-mol-status>Loading viewer…</p></div>
+      <div class="legend"><span><i style="background:#0053d6"></i>very high (&gt;90)</span><span><i style="background:#65cbf3"></i>confident (70–90)</span><span><i style="background:#ffdb13"></i>low (50–70)</span><span><i style="background:#ff7d45"></i>very low (&lt;50)</span></div>
+    </div>
+    <div>
+      {% set hits = structures[0].hits %}
+      <h2>Structural matches <span class="hint">Foldseek{% if hits %}, top {{ [hits|length, 10]|min }}{% endif %}</span></h2>
+      {% if hits %}<table><tbody>{% for h in hits[:10] %}<tr><td><span class="mono">{{ h.target[:32] }}</span><div class="sub">{{ h.description or h.taxon or h.database }}</div></td><td class="num">{{ evalue(h.evalue) }}</td></tr>{% endfor %}</tbody></table>
+      {% else %}<p class="empty">No Foldseek results recorded for this model.</p>{% endif %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<div class="panel" id="similar" data-similar-url="/api/similar/{{ quote(c.protein_id, safe='') }}">
+  <h2>Similar proteins <span class="hint">nearest neighbors by protein language model embedding</span></h2>
+  {% set sim_state = insight.similarity_state() %}
+  {% if sim_state == 'available' %}
+  <p class="empty" data-similar-status>Loading…</p>
+  <div class="scroll"><table data-similar-table hidden><thead><tr><th>Protein</th><th>Genome</th><th class="num">Length</th><th>Architecture · best hit</th><th class="num">Similarity</th></tr></thead><tbody></tbody></table></div>
+  {% elif sim_state == 'no_embeddings' %}
+  <p class="empty">This dataset has no protein embeddings.</p>
+  {% else %}
+  <p class="empty">Build the similarity index to enable this panel: <code>sharur build-vector-index --db data/{{ dataset }}/sharur.duckdb</code></p>
+  {% endif %}
+</div>
+
+{% set found = insight.findings_for_protein(c.protein_id) %}{% set subject = 'this protein' %}{% include "_insight_findings.html" %}
+<script src="/static/insight.js?v={{ asset_version }}" defer></script>

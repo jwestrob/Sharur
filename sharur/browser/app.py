@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import secrets
 import threading
-from types import SimpleNamespace
 from collections import Counter, defaultdict
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from urllib.parse import quote
 
@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from sharur.browser import charts, routes_compare, routes_curation, routes_loci
+from sharur.browser.routes_insight import register as register_insight
 from sharur.browser.catalog import (
     BIOLOGICAL,
     CATEGORY_LABELS,
@@ -853,6 +854,9 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
             return JSONResponse(_suggest(q.strip()))
         kinds = {k.strip() for k in kind.split(",")}
         return JSONResponse([r for r in _suggest(q.strip(), limit=200) if r["kind"] in kinds][:12])
+
+    register_insight(app, SimpleNamespace(store=store, lock=lock, catalog=catalog, templates=templates, render=render,
+                                          db_path=db_path, url=_url, describe_hit=describe_hit))
 
     @app.get("/api/status")
     def status():

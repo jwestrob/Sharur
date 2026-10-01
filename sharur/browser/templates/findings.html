@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Findings{% endblock %}
+{% block content %}
+<h1>Agent findings</h1>
+<p class="lede">{{ num(total) }} structured findings recorded for this dataset. Each lists the claims it makes and the queries that reproduce them; open one to rerun its checks against the database.</p>
+<div class="panel">
+  <form class="table-tools" method="get" action="/findings">
+    <input name="q" value="{{ q }}" placeholder="Search titles or IDs" style="flex:1">
+    <select name="category" onchange="this.form.submit()"><option value="">All categories</option>{% for c in categories %}<option value="{{ c }}" {{ 'selected' if c == category }}>{{ c|replace('_', ' ') }}</option>{% endfor %}</select>
+    <button>Search</button>
+  </form>
+  {% if rows %}
+  <div class="scroll"><table id="findings" data-table>
+    <thead><tr><th data-sort="text">Finding</th><th data-sort="text">Category</th><th data-sort="num" class="num">Genomes</th><th data-sort="num" class="num">Checks</th></tr></thead>
+    <tbody>{% for f in rows %}<tr><td><a href="{{ f.url }}"><b>{{ f.title }}</b></a><div class="sub">{{ f.id }} · {{ f.source }}</div></td>
+      <td>{{ f.category|replace('_', ' ') }}</td><td class="num">{{ num(f.n_genomes) if f.n_genomes is not none else '–' }}</td>
+      <td class="num" data-v="{{ f.verifications }}">{% if f.verifications %}<span class="tag ok">{{ f.verifications }}</span>{% else %}<span class="tag warn">none</span>{% endif %}</td></tr>{% endfor %}</tbody>
+  </table></div>
+  {% else %}<p class="empty">{% if total %}No findings match.{% else %}No <code>findings.jsonl</code> in the dataset directory or its subdirectories.{% endif %}</p>{% endif %}
+</div>
+{% endblock %}

@@ -61,4 +61,5 @@
   <h2>Largest proteins <span class="hint"><a href="{{ url('genome', g.bin_id) }}/proteins">all {{ num(g.proteins) }} proteins →</a></span></h2>
   <table><tbody>{% for pid, n, hits in largest %}<tr><td>{{ protein_link(pid) }}</td><td class="num">{{ num(n) }} aa</td><td>{% if hits %}<span class="tag">{{ hits }} hits</span>{% else %}<span class="tag warn">unannotated</span>{% endif %}</td></tr>{% endfor %}</tbody></table>
 </div>
+{% set found = insight.findings_for_genome(g.bin_id) %}{% set subject = 'this genome' %}{% include "_insight_findings.html" %}
 {% endblock %}
