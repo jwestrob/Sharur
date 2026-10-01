@@ -138,5 +138,5 @@ def test_write_results_replaces_earlier_calls(tmp_path):
     assert ct.write_results(path, result)["systems"] == 1
     conn = duckdb.connect(str(path), read_only=True)
     assert conn.execute("SELECT system_id, prediction FROM crispr_cas_systems").fetchall() == [
-        ("cctyper:c:1-900", "V-A")]
+        ("cctyper:g:c:1-900", "V-A")]
     assert conn.execute("SELECT COUNT(*) FROM system_proteins WHERE system_source = 'cctyper'").fetchone()[0] == 1

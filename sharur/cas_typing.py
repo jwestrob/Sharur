@@ -501,7 +501,7 @@ def link_arrays(operons: list[dict[str, Any]], arrays: list[dict[str, Any]],
     carry ``locus_id``, ``prediction`` and ``trusted``."""
     for op in operons:
         op["arrays"], op["distances"] = [], []
-        if op["prediction"] != "False":
+        if op["prediction"] != "False" and op.get("positioned", True):
             for arr in arrays:
                 if arr["contig_id"] != op["contig_id"]:
                     continue
@@ -603,10 +603,17 @@ def run_dataset(db_path: str | Path, *, cctyper_db: str | Path | None = None, wo
     conn = duckdb.connect(str(db_path), read_only=True)
     try:
         where, params = ("WHERE bin_id IN (SELECT UNNEST(?::VARCHAR[]))", [genomes]) if genomes else ("", [])
+        # Proteins without a genomic position (a contig shared across genomes, or
+        # stacked at coordinate 0) are typed alone, as cctyper treats protein-only input.
         rows = conn.execute(
-            f"""SELECT bin_id, protein_id, contig_id, start, end_coord, strand, sequence,
-                       ROW_NUMBER() OVER (PARTITION BY contig_id ORDER BY start, end_coord) AS pos
-                FROM proteins {where} ORDER BY bin_id""", params).fetchall()
+            f"""WITH p AS (
+                    SELECT *, COUNT(DISTINCT bin_id) OVER (PARTITION BY contig_id) AS n_bins,
+                           COUNT(*) OVER (PARTITION BY contig_id, start, end_coord) AS n_same
+                    FROM proteins {where})
+                SELECT bin_id, protein_id, contig_id, start, end_coord, strand, sequence,
+                       CASE WHEN n_bins > 1 OR (start = 0 AND n_same > 1) THEN protein_id ELSE contig_id END AS unit,
+                       ROW_NUMBER() OVER (PARTITION BY bin_id, contig_id ORDER BY start, end_coord, protein_id) AS pos
+                FROM p ORDER BY bin_id""", params).fetchall()
         arrays = load_arrays(conn, db_path.parent)
     finally:
         conn.close()
@@ -614,10 +621,10 @@ def run_dataset(db_path: str | Path, *, cctyper_db: str | Path | None = None, wo
         arrays = [a for a in arrays if a["genome_id"] in set(genomes)]
 
     by_bin: dict[str, list[tuple[str, str]]] = {}
-    gene: dict[str, tuple[str, str, int, int, int, int]] = {}
-    for bin_id, pid, contig, start, end, strand, seq, pos in rows:
+    gene: dict[str, tuple[str, str, str, int, int, int, int]] = {}
+    for bin_id, pid, contig, start, end, strand, seq, unit, pos in rows:
         by_bin.setdefault(bin_id, []).append((pid, seq))
-        gene[pid] = (bin_id, contig, start, end, 1 if strand in ("+", "1") else -1, pos)
+        gene[pid] = (bin_id, contig, unit, start, end, 1 if strand in ("+", "1") else -1, pos)
     del rows
 
     jobs = [(b, prots, str(root / PROFILES)) for b, prots in by_bin.items()]
@@ -626,13 +633,14 @@ def run_dataset(db_path: str | Path, *, cctyper_db: str | Path | None = None, wo
     with ProcessPoolExecutor(max_workers=workers) as pool:
         for done, (bin_id, hits) in enumerate(pool.map(_search_worker, jobs, chunksize=4), 1):
             kept = filter_hits(hits, data)
-            per_contig: dict[str, list[dict[str, Any]]] = {}
+            per_unit: dict[tuple[str, str], list[dict[str, Any]]] = {}
             for h in kept:
-                _, contig, start, end, strand, pos = gene[h["protein_id"]]
-                per_contig.setdefault(contig, []).append({**h, "start": start, "end": end, "strand": strand, "pos": pos})
-            for contig, contig_hits in sorted(per_contig.items()):
-                for op in type_contig(contig_hits, data):
-                    op.update(genome_id=bin_id, contig_id=contig)
+                _, contig, unit, start, end, strand, pos = gene[h["protein_id"]]
+                per_unit.setdefault((contig, unit), []).append(
+                    {**h, "start": start, "end": end, "strand": strand, "pos": pos})
+            for (contig, unit), unit_hits in sorted(per_unit.items()):
+                for op in type_contig(unit_hits, data):
+                    op.update(genome_id=bin_id, contig_id=contig, positioned=unit == contig)
                     systems.append(op)
             if progress:
                 progress(done, len(jobs))
@@ -648,7 +656,9 @@ def _fmt(value: Any) -> str:
 def system_rows(systems: list[dict[str, Any]]) -> list[tuple]:
     rows = []
     for op in sorted(systems, key=lambda o: (o["genome_id"], o["contig_id"], o["start"])):
-        sid = f"cctyper:{op['contig_id']}:{op['start']}-{op['end']}"
+        where = (f"{op['contig_id']}:{op['start']}-{op['end']}" if op.get("positioned", True)
+                 else op["genes"][0]["protein_id"])
+        sid = f"cctyper:{op['genome_id']}:{where}"
         op["system_id"] = sid
         rows.append((sid, op["genome_id"], op["contig_id"], int(op["start"]), int(op["end"]), op["status"],
                      op["joint_prediction"], op["prediction"], _fmt(op["best_type"]), float(op["best_score"]),
