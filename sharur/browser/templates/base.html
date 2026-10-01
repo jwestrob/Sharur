@@ -24,6 +24,7 @@
       <a href="/discover" class="{{ 'on' if section == 'discover' }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M15.5 8.5l-2 5-5 2 2-5z"/></svg>Discover</a>
     </nav>
     <div class="recent"><span class="recent-title">Recently viewed</span><div id="recent-list"></div></div>
+    {% set hr = health_report() if health_report is defined else none %}{% if hr %}{% set needs = hr.counts.fail + hr.counts.warn %}<a class="health-pill hpill-{{ hr.worst if needs else 'ok' }}" href="/health" title="{{ hr.counts.fail }} fail · {{ hr.counts.warn }} warn · {{ hr.counts.info }} info">{% if needs %}<i></i>{{ needs }} data check{{ 's' if needs != 1 }} need{{ 's' if needs == 1 }} care{% else %}<i></i>Data checks pass{% endif %}</a>{% endif %}
     <div class="rail-foot"><a href="#" id="whoami" title="Name shown on your flags and notes">Curating as <b id="whoami-name">…</b></a><br>{{ num(catalog.totals.genomes) }} genomes · {{ num(catalog.totals.proteins) }} proteins<br>Read-only view</div>
   </aside>
   <div class="main">

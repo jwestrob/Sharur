@@ -247,52 +247,29 @@ def poisson_binomial_cdf(probs: np.ndarray) -> np.ndarray:
     return np.minimum(np.cumsum(pmf), 1.0)
 
 
-DEFICIT = 0.5   # proteins per assembly kb (prokaryotes carry about 1), or half the completeness-implied count
-
-
 def assembly_kb(ctx) -> dict[str, float]:
-    """Assembly length per genome (kb) from uncompressed FASTA file sizes, cached.
+    """Assembly length per genome (kb) from the browser's assembly index, cached."""
+    from sharur.assemblies import assembly_kb as sizes  # noqa: PLC0415
 
-    A FASTA file holds about 1.3% newlines and headers beyond its bases.
-    """
     cached = getattr(ctx, "_assembly_kb", None)
     if cached is None:
-        import os  # noqa: PLC0415
-
-        cached = {}
-        for bin_id, path in getattr(getattr(ctx, "assemblies", None), "paths", {}).items():
-            if not str(path).endswith(".gz"):
-                try:
-                    cached[bin_id] = os.path.getsize(path) / 1013.0
-                except OSError:
-                    pass
+        cached = sizes(getattr(getattr(ctx, "assemblies", None), "paths", {}))
         ctx._assembly_kb = cached
     return cached
 
 
 def protein_deficits(genomes: list[Genome], reference: list[Genome], kb: dict[str, float] | None = None) -> set[str]:
-    """Genomes whose gene calls are mostly missing.
+    """Genomes whose gene calls are mostly missing (see :func:`sharur.assemblies.gene_call_deficits`).
 
-    With the assembly at hand: under ``DEFICIT`` proteins per kb. Otherwise:
-    under ``DEFICIT`` × the proteins its completeness implies, from the median
-    proteins-per-completeness of ``reference``. Completeness estimated on the
-    assembly says little about absences in such a genome.
+    Completeness estimated on the assembly says little about absences in such a genome.
     """
-    kb = kb or {}
+    from sharur.assemblies import gene_call_deficits  # noqa: PLC0415
 
-    def ratio(g: Genome) -> float | None:
-        return g.proteins / (g.completeness / 100.0) if g.completeness and g.proteins else None
-
-    ratios = [r for r in map(ratio, reference) if r]
-    per_complete = float(np.median(ratios)) if len(ratios) >= 5 else None
-    flagged = set()
-    for g in genomes:
-        if kb.get(g.bin_id):
-            if g.proteins < DEFICIT * kb[g.bin_id]:
-                flagged.add(g.bin_id)
-        elif per_complete and g.completeness and g.proteins < DEFICIT * per_complete * g.completeness / 100.0:
-            flagged.add(g.bin_id)
-    return flagged
+    everyone = {g.bin_id: g for g in [*genomes, *reference]}
+    flagged = gene_call_deficits({b: g.proteins for b, g in everyone.items()},
+                                 {b: g.completeness for b, g in everyone.items()}, kb,
+                                 reference=[g.bin_id for g in reference])
+    return flagged & {g.bin_id for g in genomes}
 
 
 def completeness_test(genomes: list[Genome], carriers_known: np.ndarray) -> dict[str, Any] | None:

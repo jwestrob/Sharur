@@ -25,6 +25,7 @@ from sharur.browser import (
     routes_cctyper,
     routes_crispr,
     routes_curation,
+    routes_health,
     routes_loci,
     routes_matrix,
     routes_search,
@@ -997,6 +998,8 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
     clade_content.register(templates, ctx)
     genome_ring.register(templates, ctx)
     routes_tree.register(app, ctx)
+    ctx.templates = templates
+    routes_health.register(app, ctx)
     return app
 
 
