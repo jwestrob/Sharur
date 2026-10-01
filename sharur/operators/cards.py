@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from sharur.architecture import architecture, compact
 from sharur.contig_context import EdgeContext, describe_edge, edge_context
 from sharur.operators.predicates_v2 import get_atoms, get_semantic_state
 from sharur.predicates.mappings import kegg_map
@@ -283,6 +284,7 @@ def card(store, protein_id: str, window: int = 5, max_per_source: int = 8) -> di
                          "top_annotation": best.get(nid, "")} for nid, gi, st, ln in neighbors]
 
     edge = edge_context(store, [pid]).get(pid)
+    domains = architecture(store, pid)
 
     return {
         "protein_id": pid,
@@ -291,6 +293,7 @@ def card(store, protein_id: str, window: int = 5, max_per_source: int = 8) -> di
                      "start": start, "end": end, "strand": strand, "gene_index": gene_index,
                      "length_aa": length, "gc": gc},
         "genome": genome,
+        "architecture": compact([d.name for d in domains]),
         "annotations": annotations,
         "annotations_truncated": truncated,
         "predicates": predicates,
@@ -323,6 +326,8 @@ def card_markdown(c: dict[str, Any]) -> str:
                 if genome.get("completeness") is not None else "")]
     if c.get("contig_edge"):
         lines.append("Contig position: " + describe_edge(EdgeContext(**c["contig_edge"])))
+    if c.get("architecture"):
+        lines.append(f"Pfam architecture: {c['architecture']}")
     lines.append("\n## Annotations")
     for source, hits in c["annotations"].items():
         shown = "; ".join(

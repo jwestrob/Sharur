@@ -22,7 +22,7 @@ Given a set of metagenome-assembled genomes (MAGs), Sharur:
 
 1. **Ingests** proteins, annotations (Pfam, KOfam, HydDB, VOGdb, CAZy, DefenseFinder, TXSScan), CRISPR arrays, biosynthetic gene clusters, and protein embeddings from the model of your choice into one database.
 2. **Computes predicates**: functional tags such as `nife_group3`, `sam_binding` or `crispr_associated`. Every mapping carries recorded evidence (GO, Pfam/KEGG text, ENZYME, KEGG BRITE and modules, HydDB, reviewed-protein consensus), and system-level claims come only from validated system callers. See [How predicates are built](docs/predicate_construction.md).
-3. **Exposes operators** for agents: predicate search, genomic neighborhoods, protein cards, predicate explanations, KEGG module completeness, embedding similarity, structure search, and export.
+3. **Exposes operators** for agents: predicate search, domain-architecture search, genomic neighborhoods, protein cards, predicate explanations, KEGG module completeness, embedding similarity, structure search, and export.
 4. **Records provenance**: [dataset seals](docs/concepts/seals.md), a capability preflight, and a stamp of the predicate maps behind every generation.
 
 ## Working with agents
@@ -89,6 +89,7 @@ b.why(protein_id, "sam_binding")                      # evidence paths for one p
 b.get_neighborhood(protein_id, window=10, all_annotations=True)
 b.modules(bins=[genome_id], min_completeness=0.75)    # KEGG module completeness
 b.locus_modules(protein_id, window=10)                # module steps co-encoded nearby
+b.search_architecture("Big_* {5,} . VWA")            # ordered-domain pattern search
 
 case = b.inspect(caller_or_protein_id, entity_type="system", upstream_orfs=4, downstream_orfs=8)
 similar = b.find_similar(protein_id, k=20)            # embedding similarity

@@ -1274,6 +1274,37 @@ def doctor(
         raise typer.Exit(code=1)
 
 
+@app.command(name="architecture")
+def architecture_search(
+    pattern: str = typer.Argument(..., help='Domain pattern, e.g. "Big_2{5,} . VWA" or "^ SP ( Cadherin | Big_2 )+"'),
+    db: str = typer.Option(DEFAULT_DB, "--db", "-d", help="Path to DuckDB database"),
+    source: list[str] = typer.Option(["pfam"], "--source", "-s", help="Annotation source(s); repeatable."),
+    bins: list[str] = typer.Option([], "--bin", "-b", help="Restrict to genome(s); repeatable."),
+    limit: int = typer.Option(50, "--limit", "-n", help="Records to show (the total is always counted)."),
+    max_overlap: float = typer.Option(0.5, "--max-overlap", help="Overlap (fraction of the shorter domain) "
+                                      "above which the weaker hit is dropped."),
+    output_format: BriefFormat = typer.Option(BriefFormat.markdown, "--format", "-f", help="markdown or json"),
+):
+    """Find proteins whose ordered domains match a pattern.
+
+    Tokens: domain names or accessions, globs (Big_*), '.' for any domain,
+    quantifiers (? * + {m} {m,} {m,n}; put a space before ? and *), groups
+    with alternatives ( A | B ), and anchors ^ (N-terminus) and $ (C-terminus).
+    """
+    from sharur.architecture import PatternError, architecture_markdown, search_architecture
+    from sharur.storage.duckdb_store import DuckDBStore
+
+    try:
+        with DuckDBStore(db, read_only=True) as store:
+            result = search_architecture(store, pattern, sources=tuple(source), bins=bins or None,
+                                         limit=limit, max_overlap=max_overlap)
+    except PatternError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(json.dumps(result, indent=2, default=str) if output_format == BriefFormat.json
+               else architecture_markdown(result))
+
+
 @app.command(name="describe")
 def describe(
     db: str = typer.Option(DEFAULT_DB, "--db", "-d", help="Path to DuckDB database"),

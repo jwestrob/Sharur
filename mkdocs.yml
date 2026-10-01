@@ -66,6 +66,7 @@ nav:
       - Working with agents: concepts/agents.md
   - Guides:
       - Interpreting annotations: biological_interpretation.md
+      - Domain-architecture search: guides/architecture-search.md
       - Cases and context comparison: cases_and_evidence.md
       - Structured findings: findings_spec.md
       - Tools (Astra, ELSA, ESM3, Foldseek): tools_reference.md

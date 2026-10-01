@@ -40,6 +40,7 @@ Module completeness follows KEGG's module definitions step by step. Genomes asse
 ```bash
 sharur search --help
 sharur neighborhood --help
+sharur architecture "Big_* {5,} . VWA" --db data/my_dataset/sharur.duckdb
 ```
 
 The same operations are available from Python:
@@ -51,7 +52,10 @@ b = Sharur("data/my_dataset/sharur.duckdb", read_only=True)
 hits = b.search_by_predicates(has=["nife_group3"])
 b.get_neighborhood(hits.records[0]["protein_id"], window=10)
 b.find_similar(hits.records[0]["protein_id"], k=20)
+b.search_architecture("TPR_* {10,}")          # ordered-domain patterns
 ```
+
+[Domain-architecture search](../guides/architecture-search.md) covers the pattern language.
 
 ## Before you report numbers
 

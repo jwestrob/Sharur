@@ -1249,6 +1249,24 @@ class Sharur:
 
         return genome_modules(self.store, bins=bins, modules=modules, min_completeness=min_completeness)
 
+    def search_architecture(self, pattern: str, *, sources: tuple[str, ...] = ("pfam",),
+                            bins: list[str] | None = None, limit: int | None = 100,
+                            max_overlap: float = 0.5) -> dict:
+        """Proteins whose ordered domains match a pattern, e.g. ``"Big_2{5,} . VWA"``.
+
+        See :mod:`sharur.architecture` for the pattern language.
+        """
+        from sharur.architecture import search_architecture
+
+        return search_architecture(self.store, pattern, sources=sources, bins=bins, limit=limit,
+                                   max_overlap=max_overlap)
+
+    def architecture(self, protein_id: str, sources: tuple[str, ...] = ("pfam",)) -> list[dict]:
+        """One protein's overlap-resolved domains, N- to C-terminal."""
+        from sharur.architecture import architecture
+
+        return [d.to_dict() for d in architecture(self.store, protein_id, sources)]
+
     def locus_modules(self, protein_id: str, window: int = 10) -> list[dict]:
         """KEGG module steps encoded near a protein (same contig, +/- window genes)."""
         from sharur.modules import locus_modules

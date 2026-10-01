@@ -39,6 +39,7 @@ $ sharur [OPTIONS] COMMAND [ARGS]...
 * `verify-seal`: Recompute a dataset seal and report...
 * `build-vector-index`: Build mmap-ready FAISS sidecars and a...
 * `doctor`: Verify external tools, reference...
+* `architecture`: Find proteins whose ordered domains match...
 * `describe`: What a dataset holds: annotation sources,...
 * `card`: Summarize one protein: context,...
 * `why`: Explain why a protein carries a predicate:...
@@ -491,6 +492,34 @@ $ sharur doctor [OPTIONS]
 **Options**:
 
 * `--strict`: Exit non-zero if any core tool/database is missing.
+* `--help`: Show this message and exit.
+
+### `sharur architecture`
+
+Find proteins whose ordered domains match a pattern.
+
+Tokens: domain names or accessions, globs (Big_*), '.' for any domain,
+quantifiers (? * + {m} {m,} {m,n}; put a space before ? and *), groups
+with alternatives ( A | B ), and anchors ^ (N-terminus) and $ (C-terminus).
+
+**Usage**:
+
+```console
+$ sharur architecture [OPTIONS] PATTERN
+```
+
+**Arguments**:
+
+* `PATTERN`: Domain pattern, e.g. "Big_2{5,} . VWA" or "^ SP ( Cadherin | Big_2 )+"  [required]
+
+**Options**:
+
+* `-d, --db TEXT`: Path to DuckDB database  [default: data/sharur.duckdb]
+* `-s, --source TEXT`: Annotation source(s); repeatable.  [default: pfam]
+* `-b, --bin TEXT`: Restrict to genome(s); repeatable.
+* `-n, --limit INTEGER`: Records to show (the total is always counted).  [default: 50]
+* `--max-overlap FLOAT`: Overlap (fraction of the shorter domain) above which the weaker hit is dropped.  [default: 0.5]
+* `-f, --format [markdown|json]`: markdown or json  [default: markdown]
 * `--help`: Show this message and exit.
 
 ### `sharur describe`
