@@ -4,6 +4,7 @@
 {% block content %}
 <div class="crumbs"><a href="/systems">Systems</a><span class="sep">›</span>{{ kind }}</div>
 <h1><span class="rank">{{ kind }} system</span>{{ system_type }}</h1>
+<p class="actions"><a class="btn" href="{{ url('system', kind, system_type) }}/loci">View every call as its locus →</a> <a class="btn" href="/triage?source=system&kind={{ kind }}&id={{ quote(system_type, safe='') }}">Triage calls →</a></p>
 <div class="stats">
   <div class="stat"><b>{{ num(total) }}</b><span>calls</span></div>
   <div class="stat"><b>{{ num(genomes) }}</b><span>genomes ({{ pct(genomes / (catalog.genomes|length or 1)) }})</span></div>

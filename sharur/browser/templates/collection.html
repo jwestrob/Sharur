@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Collection{% endblock %}
+{% block content %}
+<h1>Collection</h1>
+<p class="lede">Proteins and genomes you collected while browsing. The collection lives in this browser; export it, or hand it to an agent.</p>
+<div class="panel">
+  <div class="table-tools">
+    <form method="post" action="/api/fasta" id="fasta-form"><input type="hidden" name="ids"><button type="submit">Download protein FASTA</button></form>
+    <button type="button" id="copy-prompt" data-label="Copy agent prompt">Copy agent prompt</button>
+    <button type="button" id="clear-collection">Clear</button>
+    <span class="count" id="collection-count" style="margin-left:auto"></span>
+  </div>
+  <textarea id="agent-prompt" class="visually-hidden" readonly tabindex="-1"></textarea>
+  <div class="scroll"><table id="collection" data-table>
+    <thead><tr><th data-sort="text">Item</th><th data-sort="text">Genome</th><th data-sort="num" class="num">Size</th><th data-sort="text">Best hit</th><th></th></tr></thead>
+    <tbody></tbody>
+  </table></div>
+  <p class="empty" id="collection-empty">Nothing collected yet. Use “＋ Collect” on protein and genome pages.</p>
+</div>
+{% endblock %}

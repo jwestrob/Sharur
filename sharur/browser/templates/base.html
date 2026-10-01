@@ -17,9 +17,12 @@
       <a href="/pathways" class="{{ 'on' if section == 'pathways' }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="12" cy="18" r="2"/><path d="M7 6h10M6 8l5 8M18 8l-5 8"/></svg>Pathways</a>
       <a href="/domains" class="{{ 'on' if section == 'domains' }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="9" width="6" height="6" rx="2"/><rect x="9" y="9" width="9" height="6" rx="2"/><path d="M18 12h4"/></svg>Families</a>
       <a href="/systems" class="{{ 'on' if section == 'systems' }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/></svg>Systems</a>
+      <a href="/flags" class="{{ 'on' if section == 'flags' }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></svg>Flags &amp; notes</a>
+      <a href="/collection" class="{{ 'on' if section == 'collection' }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16l-1.5 12a2 2 0 0 1-2 1.8h-9a2 2 0 0 1-2-1.8z"/><path d="M9 7a3 3 0 0 1 6 0"/></svg>Collection <span class="badge" id="collection-badge"></span></a>
       <a href="/discover" class="{{ 'on' if section == 'discover' }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M15.5 8.5l-2 5-5 2 2-5z"/></svg>Discover</a>
     </nav>
-    <div class="rail-foot">{{ num(catalog.totals.genomes) }} genomes · {{ num(catalog.totals.proteins) }} proteins<br>Read-only view</div>
+    <div class="recent"><span class="recent-title">Recently viewed</span><div id="recent-list"></div></div>
+    <div class="rail-foot"><a href="#" id="whoami" title="Name shown on your flags and notes">Curating as <b id="whoami-name">…</b></a><br>{{ num(catalog.totals.genomes) }} genomes · {{ num(catalog.totals.proteins) }} proteins<br>Read-only view</div>
   </aside>
   <div class="main">
     <div class="topbar">
@@ -37,6 +40,11 @@
     </div>
   </div>
 </div>
+<div id="help" class="help" hidden><div class="panel"><h2>Keyboard</h2><dl class="kv">
+<dt><kbd>/</kbd></dt><dd>Search</dd><dt><kbd>j</kbd> <kbd>k</kbd></dt><dd>Next / previous row in a table, or item in triage</dd>
+<dt><kbd>Enter</kbd> <kbd>o</kbd></dt><dd>Open the selected row or triage item</dd><dt><kbd>[</kbd> <kbd>]</kbd></dt><dd>Previous / next gene on a protein page</dd>
+<dt><kbd>1</kbd>–<kbd>4</kbd></dt><dd>Toggle verified, suspicious, interesting, follow up (pages with a curation panel)</dd>
+<dt><kbd>n</kbd></dt><dd>Write a note</dd><dt><kbd>c</kbd></dt><dd>Add this protein or genome to the collection</dd><dt><kbd>?</kbd></dt><dd>This help</dd></dl></div></div>
 <script src="/static/app.js?v={{ asset_version }}"></script>
 </body>
 </html>

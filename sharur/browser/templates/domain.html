@@ -5,6 +5,7 @@
 <div class="crumbs"><a href="/domains">Pfam domains</a></div>
 <h1><span class="rank">Pfam · <a href="https://www.ebi.ac.uk/interpro/entry/pfam/{{ d.accession }}" target="_blank" rel="noopener">{{ d.accession }} ↗</a></span>{{ d.name }}</h1>
 <p class="lede">{{ d.description }}</p>
+<p class="actions"><a class="btn" href="{{ url('stack', 'domain', d.accession) }}">Stack neighborhoods →</a> <a class="btn" href="/triage?source=family&kind=domain&id={{ quote(d.accession, safe='') }}">Triage carriers →</a></p>
 <div class="stats">
   <div class="stat"><b>{{ num(d.genomes) }}</b><span>genomes ({{ pct(d.genomes / (catalog.genomes|length or 1)) }})</span></div>
   <div class="stat"><b>{{ num(d.proteins) }}</b><span>proteins</span></div>
@@ -43,4 +44,5 @@
 <div class="panel"><h2>Largest proteins with this domain</h2>
   <table><tbody>{% for pid, bin_id, n in examples %}<tr><td>{{ protein_link(pid) }}</td><td><span class="count">{{ catalog.by_bin[bin_id].label if bin_id in catalog.by_bin else '' }}</span></td><td class="num">{{ num(n) }} aa</td></tr>{% endfor %}</tbody></table>
 </div>
+{% set note_kind = 'domain' %}{% set note_id = d.accession %}{% include "_notes.html" %}
 {% endblock %}

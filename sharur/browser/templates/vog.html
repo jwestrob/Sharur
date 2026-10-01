@@ -6,6 +6,7 @@
 <h1><span class="rank">VOGdb · {{ v.accession }}</span>{{ v.name }}</h1>
 <p class="lede">{% for c in v.categories %}<span class="chip">{{ c }}</span>{% endfor %}
 {% if v.vogdb_species %}<span class="count">In VOGdb: {{ num(v.vogdb_proteins) }} viral proteins from {{ num(v.vogdb_species) }} virus species.</span>{% endif %}</p>
+<p class="actions"><a class="btn" href="{{ url('stack', 'vog', v.accession) }}">Stack neighborhoods →</a> <a class="btn" href="/triage?source=family&kind=vog&id={{ quote(v.accession, safe='') }}">Triage carriers →</a></p>
 <div class="stats">
   <div class="stat"><b>{{ num(v.genomes) }}</b><span>genomes ({{ pct(v.genomes / (catalog.genomes|length or 1)) }})</span></div>
   <div class="stat"><b>{{ num(v.proteins) }}</b><span>proteins</span></div>
@@ -38,4 +39,5 @@
   <div class="panel"><h2>Largest proteins with this VOG</h2>
     <table><tbody>{% for pid, bin_id, contig, s, e, n in examples %}<tr><td>{{ protein_link(pid) }}<div class="sub">{{ catalog.by_bin[bin_id].label if bin_id in catalog.by_bin else '' }}</div></td><td class="num">{{ num(n) }} aa</td></tr>{% endfor %}</tbody></table></div>
 </div>
+{% set note_kind = 'vog' %}{% set note_id = v.accession %}{% include "_notes.html" %}
 {% endblock %}

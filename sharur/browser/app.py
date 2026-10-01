@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import secrets
 import threading
+from types import SimpleNamespace
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
@@ -15,7 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Red
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from sharur.browser import charts
+from sharur.browser import charts, routes_curation, routes_loci
 from sharur.browser.catalog import (
     BIOLOGICAL,
     CATEGORY_LABELS,
@@ -91,7 +92,8 @@ def _evalue(x: Any) -> str:
     return f"{x:.1e}" if isinstance(x, float) else ("–" if x is None else str(x))
 
 
-def create_app(db_path: str | Path, *, token: str | None = None, background: bool = True) -> FastAPI:
+def create_app(db_path: str | Path, *, token: str | None = None, background: bool = True,
+               notes_path: str | Path | None = None) -> FastAPI:
     """Browser over one dataset, opened read-only."""
     from sharur.abundance import default_path  # noqa: PLC0415
 
@@ -131,6 +133,14 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
 
     def render(request: Request, template: str, section: str, /, **context: Any) -> HTMLResponse:
         return templates.TemplateResponse(request, template, {"section": section, **context})
+
+    # Feature modules register before the catch-all path routes below.
+    ctx = SimpleNamespace(store=store, lock=lock, catalog=catalog, render=render, url=_url,
+                          describe_hit=describe_hit, predicates=PREDICATE_BY_ID, db_path=Path(db_path),
+                          notes_path=Path(notes_path) if notes_path else None)
+    app.state.ctx = ctx
+    routes_loci.register(app, ctx)
+    routes_curation.register(app, ctx)
 
     @app.middleware("http")
     async def require_token(request: Request, call_next):
@@ -341,13 +351,17 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
                           "color": charts.CATEGORY_COLORS.get(category) if category else None})
         edge = c.get("contig_edge")
         genome = catalog.by_bin.get(c["genome"]["bin_id"])
+        order = [g["protein_id"] for g in genes]
+        here = order.index(protein_id) if protein_id in order else -1
+        prev_gene = order[here - 1] if here > 0 else None
+        next_gene = order[here + 1] if 0 <= here < len(order) - 1 else None
         systems_here = [s for s in catalog.systems if protein_id in s["proteins"]]
         return render(request, "protein.html", "taxa", c=c, g=genome, domains=domains,
                       track=charts.domain_track(c["location"]["length_aa"], domains),
                       hood=charts.neighborhood(genes, start_edge=hood.get("contig_start_in_window", False),
                                                end_edge=hood.get("contig_end_in_window", False)),
                       genes=genes, edge=edge, edge_text=describe_edge(EdgeContext(**edge)) if edge else "",
-                      nearby=nearby, systems_here=systems_here,
+                      nearby=nearby, systems_here=systems_here, prev_gene=prev_gene, next_gene=next_gene,
                       sequence=_sequence_view(sequence_rows[0][0] if sequence_rows else None))
 
     def _top_categories(ids: list[str]) -> dict[str, str]:

@@ -5,6 +5,7 @@
 <div class="crumbs"><a href="/functions">Functions</a>{% if d %}<span class="sep">›</span><a href="/functions#{{ d.category }}">{{ CATEGORY_LABELS.get(d.category, d.category) }}</a>{% endif %}{% if parent %}<span class="sep">›</span><a href="{{ url('function', parent.predicate_id) }}">{{ parent.name }}</a>{% endif %}</div>
 <h1><span class="rank">Function · <code>{{ predicate }}</code></span>{{ d.name if d else predicate }}</h1>
 <p class="lede">{{ d.description if d else '' }}{% if d and d.level == 'system' %} System-level: called only by validated system callers.{% endif %}</p>
+<p class="actions"><a class="btn" href="{{ url('stack', 'function', predicate) }}">Stack neighborhoods →</a> <a class="btn" href="/triage?source=family&kind=function&id={{ quote(predicate, safe='') }}">Triage carriers →</a></p>
 <div class="stats">
   <div class="stat"><b>{{ num(carriers|length) }}</b><span>genomes ({{ pct(carriers|length / (catalog.genomes|length or 1)) }})</span></div>
   <div class="stat"><b>{{ num(carriers.values()|sum) }}</b><span>proteins</span></div>
@@ -20,4 +21,5 @@
 <div class="panel"><h2>Example proteins <span class="hint">largest first</span></h2>
   <table><tbody>{% for pid, bin_id, n in examples %}<tr><td>{{ protein_link(pid) }}</td><td>{{ genome_link(bin_id) }}</td><td class="num">{{ num(n) }} aa</td><td><a href="{{ url('protein', pid) }}/why/{{ quote(predicate, safe='') }}">evidence</a></td></tr>{% endfor %}</tbody></table>
 </div>
+{% set note_kind = 'function' %}{% set note_id = predicate %}{% include "_notes.html" %}
 {% endblock %}

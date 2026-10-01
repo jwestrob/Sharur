@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Triage · {{ title }}{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="{{ back }}">Back</a></div>
+<h1><span class="rank">Triage</span>{{ title }}</h1>
+{% if item %}
+<div class="triage-bar">
+  <div class="bar" style="flex:1"><i style="width:{{ '%.2f' % ((i + 1) / total * 100) }}%"></i></div>
+  <span class="count">{{ num(i + 1) }} / {{ num(total) }}</span>
+  <a class="btn {{ 'off' if i == 0 }}" href="{{ base }}&i={{ i - 1 }}" data-key="prev">← <kbd>k</kbd></a>
+  <a class="btn {{ 'off' if i + 1 >= total }}" href="{{ base }}&i={{ i + 1 }}" data-key="next"><kbd>j</kbd> →</a>
+</div>
+<div class="panel">
+  <h2><span class="tag">{{ item.kind }}</span> <a href="{{ item.url }}">{{ item.label }}</a></h2>
+  <dl class="kv" style="margin-bottom:12px">{% for k, v in item.facts %}<dt>{{ k }}</dt><dd>{% if k == 'Genome' and v %}<a href="{{ url('genome', v) }}">{{ v }}</a>{% else %}{{ v }}{% endif %}</dd>{% endfor %}</dl>
+  {% if item.svg %}<div class="stack-svg">{{ item.svg }}</div>
+  <div class="legend">{% for key, color, n in item.legend %}<span><i style="background:{{ color }}"></i>{{ key }}</span>{% endfor %}</div>{% endif %}
+</div>
+{% set note_kind = item.kind %}{% set note_id = item.entity %}{% include "_notes.html" %}
+<p class="note">Keys: {% for f, (name, icon) in FLAGS.items() %}<kbd>{{ loop.index }}</kbd> {{ name }} · {% endfor %}<kbd>n</kbd> note · <kbd>j</kbd>/<kbd>k</kbd> next/previous · <kbd>o</kbd> open item</p>
+{% else %}
+<div class="panel"><p class="empty">Nothing to review here.</p></div>
+{% endif %}
+{% endblock %}

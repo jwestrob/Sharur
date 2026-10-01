@@ -6,6 +6,8 @@
 <div class="crumbs">{% if g %}{% for r, n in g.lineage if n != 'Unclassified' and r in ('class', 'order', 'family') %}<a href="{{ url('taxa', r, n) }}">{{ n }}</a><span class="sep">›</span>{% endfor %}<a href="{{ url('genome', g.bin_id) }}">{{ g.bin_id }}</a>{% endif %}</div>
 <h1><span class="rank">Protein{% if g %} · {{ g.label }}{% endif %}</span>{{ short(c.protein_id) }}</h1>
 <p class="lede mono" style="font-size:12px">{{ c.protein_id }}</p>
+<p class="actions">{% if prev_gene %}<a class="btn" href="{{ url('protein', prev_gene) }}" data-key="prev-gene" title="Previous gene ([)">← gene</a>{% endif %}{% if next_gene %}<a class="btn" href="{{ url('protein', next_gene) }}" data-key="next-gene" title="Next gene (])">gene →</a>{% endif %}
+<button type="button" data-collect="protein" data-id="{{ c.protein_id }}">＋ Collect</button></p>
 <div class="stats">
   <div class="stat"><b>{{ num(loc.length_aa) }} aa</b><span>length</span></div>
   <div class="stat"><b>{{ domains|length }}</b><span>placed domains</span></div>
@@ -51,6 +53,8 @@
       <p class="note">Steps encoded within 10 genes.</p>{% endif %}
   </div>
 </div>
+
+{% set note_kind = 'protein' %}{% set note_id = c.protein_id %}{% include "_notes.html" %}
 
 {% if sequence %}
 <div class="panel" id="sequence">

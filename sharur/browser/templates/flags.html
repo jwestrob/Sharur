@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Flags and notes{% endblock %}
+{% block content %}
+<h1>Flags and notes</h1>
+<p class="lede">Curator judgments recorded in this browser. They live in <code class="mono">{{ notes_path }}</code>, beside the dataset, and travel with it when you share or archive it.</p>
+<div class="entries" style="margin-bottom:18px">
+  {% for f, (name, icon) in FLAGS.items() %}
+  <a class="entry" href="/flags?flag={{ f }}"><span class="ico flag-{{ f }}">{{ icon }}</span><b>{{ name }}</b><span>{{ num(counts[f]) }} items · <span class="link" onclick="event.preventDefault(); location.href='/triage?source=flags&flag={{ f }}'">triage →</span></span></a>
+  {% endfor %}
+</div>
+<div class="panel">
+  <form class="table-tools" method="get" action="/flags">
+    <select name="flag" onchange="this.form.submit()"><option value="">All flags and notes</option>{% for f, (name, icon) in FLAGS.items() %}<option value="{{ f }}" {{ 'selected' if f == flag }}>{{ name }}</option>{% endfor %}</select>
+    <select name="kind" onchange="this.form.submit()"><option value="">All kinds</option>{% for k in KINDS %}<option value="{{ k }}" {{ 'selected' if k == kind }}>{{ k }}</option>{% endfor %}</select>
+    <select name="author" onchange="this.form.submit()"><option value="">Everyone</option>{% for a in authors %}<option value="{{ a }}" {{ 'selected' if a == author }}>{{ a }}</option>{% endfor %}</select>
+    <span style="margin-left:auto" class="count">{{ num(total) }} entries · <a href="/flags.tsv?flag={{ flag }}&kind={{ kind }}&author={{ quote(author) }}">TSV</a> · <a href="/flags.jsonl?flag={{ flag }}&kind={{ kind }}&author={{ quote(author) }}">JSONL</a></span>
+  </form>
+  <div class="scroll"><table id="flags" data-table>
+    <thead><tr><th data-sort="text">When</th><th data-sort="text">Item</th><th data-sort="text">Flag or note</th><th data-sort="text">By</th></tr></thead>
+    <tbody>{% for r in rows %}<tr><td class="count" style="white-space:nowrap">{{ r.created_at[:16]|replace('T', ' ') }}</td>
+      <td><span class="tag">{{ r.kind }}</span> <a href="{{ r.url }}">{{ r.label }}</a></td>
+      <td>{% if r.flag %}<span class="tag flag-{{ r.flag }}">{{ FLAGS[r.flag][1] }} {{ FLAGS[r.flag][0] }}</span>{% else %}{{ r.text }}{% endif %}</td>
+      <td class="count">{{ r.author }}</td></tr>{% else %}<tr><td colspan="4" class="empty">Nothing yet. Flag or annotate any protein, genome, system call, family or clade.</td></tr>{% endfor %}</tbody>
+  </table></div>
+</div>
+{% endblock %}

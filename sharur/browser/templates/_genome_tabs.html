@@ -1,5 +1,6 @@
 <div class="crumbs"><a href="/taxa">All genomes</a>{% for r, n in g.lineage if n != 'Unclassified' %}<span class="sep">›</span><a href="{{ url('taxa', r, n) }}">{{ n }}</a>{% endfor %}</div>
 <h1><span class="rank">Genome · {{ g.label }}</span>{{ g.bin_id }}</h1>
+<p class="actions"><button type="button" data-collect="genome" data-id="{{ g.bin_id }}">＋ Collect</button> <a class="btn" href="#curation">Flags &amp; notes</a></p>
 <nav class="tabs">
   <a href="{{ url('genome', g.bin_id) }}" class="{{ 'on' if tab == 'overview' }}">Overview</a>
   <a href="{{ url('genome', g.bin_id) }}/contigs" class="{{ 'on' if tab == 'contigs' }}">Contigs <span>{{ num(g.contigs) }}</span></a>

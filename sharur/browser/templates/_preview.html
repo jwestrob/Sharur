@@ -1,0 +1,8 @@
+<div class="preview-card">
+  <div class="preview-kind">{{ kind }}</div>
+  <b class="preview-title">{{ title }}</b>
+  {% if sub %}<div class="sub">{{ sub }}</div>{% endif %}
+  <dl class="kv" style="margin-top:8px">{% for k, v in facts %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endfor %}</dl>
+  {% if chips %}<div style="margin-top:8px">{% for c in chips %}<span class="chip">{{ c }}</span>{% endfor %}</div>{% endif %}
+  {% if flags %}<div style="margin-top:4px">{% for f, who in flags.items() %}<span class="tag flag-{{ f }}">{{ f|replace('_', ' ') }} · {{ who|length }}</span> {% endfor %}</div>{% endif %}
+</div>

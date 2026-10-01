@@ -23,4 +23,5 @@
   <table><tbody>{% for g, v in genomes %}<tr><td>{{ genome_link(g.bin_id) }}</td><td class="count">{{ g.label }}</td><td style="width:40%"><div class="cell-bar">{{ bar(v, '#59a14f' if v >= 1 else None) }}<span class="count">{{ pct(v) }}</span></div></td></tr>{% endfor %}</tbody></table>
 </div>
 <p class="note"><code>{{ d.definition }}</code></p>
+{% set note_kind = 'module' %}{% set note_id = d.module %}{% include "_notes.html" %}
 {% endblock %}

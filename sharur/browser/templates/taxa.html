@@ -60,4 +60,5 @@
     {% endfor %}
     </tbody></table></div>
 </div>
+{% if rank %}{% set note_kind = 'clade' %}{% set note_id = rank ~ ':' ~ name %}{% include "_notes.html" %}{% endif %}
 {% endblock %}
