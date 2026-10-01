@@ -1,0 +1,33 @@
+{% macro bar(share, color=None, marker=None) -%}
+<div class="bar" {% if color %}style="--bar:{{ color }}"{% endif %}><i style="width:{{ '%.2f' % (share * 100) }}%"></i>{% if marker is not none %}<em style="left:{{ '%.2f' % (marker * 100) }}%"></em>{% endif %}</div>
+{%- endmacro %}
+
+{% macro prevalence_table(rows, rank, base_url) -%}
+<div class="table-tools">
+  <span class="count">Share of genomes in each {{ rank }} (clades with ≥ 3 genomes)</span>
+  <span style="margin-left:auto" class="count">By:
+  {% for r in ['phylum', 'class', 'order', 'family', 'genus'] %}<a href="{{ base_url }}?rank={{ r }}" {% if r == rank %}style="font-weight:700"{% endif %}>{{ r }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</span>
+</div>
+<div class="bars">
+{% for r in rows %}
+  <a class="label" href="{{ url('taxa', rank, r.taxon) }}">{{ r.taxon }}</a>
+  {{ bar(r.share) }}
+  <span class="val">{{ pct(r.share) }} <span class="count">of {{ num(r.genomes) }}</span></span>
+{% endfor %}
+</div>
+{%- endmacro %}
+
+{% macro protein_link(pid) -%}<a class="mono" href="{{ url('protein', pid) }}" title="{{ pid }}">{{ short(pid) }}</a>{%- endmacro %}
+
+{% macro child_list(items, rank) -%}
+{% set top = items[0].value if items else 1 %}
+<div class="bars">
+{% for c in items[:18] %}<a class="label" href="{{ c.url }}">{{ c.name }}</a>{{ bar(c.value / top, charts.color_for(c.name)) }}<span class="val">{{ num(c.value) }}</span>{% endfor %}
+</div>
+{% if items|length > 18 %}<p class="note">{{ items|length - 18 }} more {{ rank }} groups in the treemap.</p>{% endif %}
+{%- endmacro %}
+
+{% macro label_chip(p, href) -%}
+{% set d = PREDICATE_BY_ID.get(p) %}<a class="chip" href="{{ href }}" title="{{ p }}{{ ': ' + d.description if d else '' }}"><i style="--dot:{{ CATEGORY_COLORS.get(d.category, 'var(--ink-3)') if d else 'var(--ink-3)' }}"></i>{{ d.name if d else p }}</a>
+{%- endmacro %}
+{% macro genome_link(bin_id) -%}<a class="ellip" href="{{ url('genome', bin_id) }}" title="{{ bin_id }}">{{ bin_id }}</a>{%- endmacro %}

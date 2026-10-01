@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% from "_macros.html" import protein_link, genome_link %}
+{% block title %}Domain patterns{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="/discover">Discover</a></div>
+<h1>Domain-architecture search</h1>
+<form action="/architecture" method="get" class="table-tools"><input name="pattern" value="{{ pattern }}" style="flex:1" placeholder="e.g. TPR_* {10,}"><button>Search</button></form>
+<p class="note">Tokens: domain names or accessions, globs (<code>Big_*</code>), <code>.</code> for any domain, repeats (<code>+ {3,} {2,5}</code>; a space before <code>?</code> and <code>*</code>), groups <code>( A | B )</code>, anchors <code>^</code> and <code>$</code>.</p>
+{% if error %}<div class="banner" style="border-color:var(--warn)">{{ error }}</div>{% endif %}
+{% if result %}
+<div class="panel"><h2>{{ num(result.total) }} proteins match {% if result.total > result.records|length %}<span class="hint">showing {{ result.records|length }}</span>{% endif %}</h2>
+  <div class="table-tools"><input data-filter="arch" placeholder="Filter…"><span class="count" data-count="arch"></span></div>
+  <div class="scroll"><table id="arch" data-table><thead><tr><th data-sort="text">Protein</th><th data-sort="text">Genome</th><th data-sort="num" class="num">Length</th><th data-sort="text">Architecture</th></tr></thead>
+  <tbody>{% for r in result.records %}<tr><td>{{ protein_link(r.protein_id) }}</td><td><span class="count">{{ catalog.by_bin[r.bin_id].label if r.bin_id in catalog.by_bin else '' }}</span></td><td class="num">{{ num(r.length_aa) }}</td><td>{{ r.architecture }}</td></tr>{% endfor %}</tbody></table></div>
+</div>
+{% endif %}
+{% endblock %}

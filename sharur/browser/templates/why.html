@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}{{ predicate }} · {{ protein_id }}{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="{{ url('protein', protein_id) }}">{{ protein_id }}</a></div>
+<h1><span class="rank">Evidence</span>{{ result.definition.name if result.definition else predicate }}</h1>
+<p class="lede">{% if result.present %}<span class="tag ok">present</span>{% else %}<span class="tag warn">absent</span>{% endif %}
+{{ result.definition.description if result.definition else '' }} <a href="{{ url('function', predicate) }}">Where else does it occur? →</a></p>
+{% for p in result.paths %}
+<div class="panel">
+  <h2>{{ p.source_db }} · {{ p.accession }} {{ p.annotation or '' }} <span class="hint">{{ p.relation }} · {{ p.facet }}</span></h2>
+  {% set m = p.mapping or {} %}
+  <dl class="kv">
+    {% if m.kind %}<dt>Mapping</dt><dd>{{ m.kind }}{% if m.via and m.via != predicate %} via <code>{{ m.via }}</code>{% endif %}</dd>{% endif %}
+    {% if m.evidence %}<dt>Evidence</dt><dd><code>{{ m.evidence }}</code></dd>{% endif %}
+    {% if m.chain %}<dt>Is-a chain</dt><dd>{% for step in m.chain %}<a href="{{ url('function', step) }}">{{ step }}</a>{% if not loop.last %} › {% endif %}{% endfor %}</dd>{% endif %}
+  </dl>
+</div>
+{% else %}
+<div class="panel"><p class="empty">No annotation on this protein supports this label.</p></div>
+{% endfor %}
+{% endblock %}

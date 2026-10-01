@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% from "_macros.html" import bar, protein_link, label_chip %}
+{% block title %}{{ c.protein_id }}{% endblock %}
+{% block content %}
+{% set loc = c.location %}
+<div class="crumbs">{% if g %}{% for r, n in g.lineage if n != 'Unclassified' and r in ('class', 'order', 'family') %}<a href="{{ url('taxa', r, n) }}">{{ n }}</a><span class="sep">›</span>{% endfor %}<a href="{{ url('genome', g.bin_id) }}">{{ g.bin_id }}</a>{% endif %}</div>
+<h1><span class="rank">Protein{% if g %} · {{ g.label }}{% endif %}</span>{{ short(c.protein_id) }}</h1>
+<p class="lede mono" style="font-size:12px">{{ c.protein_id }}</p>
+<div class="stats">
+  <div class="stat"><b>{{ num(loc.length_aa) }} aa</b><span>length</span></div>
+  <div class="stat"><b>{{ domains|length }}</b><span>placed domains</span></div>
+  <div class="stat"><b>{{ loc.strand }} strand</b><span>{{ num(loc.start) }}–{{ num(loc.end) }}</span></div>
+  {% if edge %}<div class="stat"><b>{% if edge.edge_status in ('truncated', 'contig_edge') %}<span class="tag warn">{{ edge.edge_status|replace('_', ' ') }}</span>{% else %}<span class="tag ok">{{ edge.edge_status|replace('_', ' ') }}</span>{% endif %}</b><span>{{ edge.genes_to_start }} genes from contig start · {{ edge.genes_to_end }} from end</span></div>{% endif %}
+</div>
+
+<div class="panel">
+  <h2>Domain architecture <span class="hint">{{ c.architecture or 'no placed Pfam domains' }}</span></h2>
+  {% if domains %}{{ track }}{% else %}<p class="empty">No Pfam domains with coordinates. {% if not c.annotations %}This protein has no annotation hits at all.{% endif %}</p>{% endif %}
+</div>
+
+<div class="panel">
+  <h2>Genomic neighborhood <span class="hint">8 genes each side · color = dominant function category · click a gene</span></h2>
+  {{ hood }}
+  <div class="legend">{% for cat, color in CATEGORY_COLORS.items() if genes|selectattr('category', 'equalto', cat)|list %}<span><i style="background:{{ color }}"></i>{{ CATEGORY_LABELS.get(cat, cat) }}</span>{% endfor %}<span><i style="background:var(--gene-dark);border:1px dashed var(--ink-3)"></i>no annotation</span><span><i style="background:var(--gene);border:1.5px solid var(--warn)"></i>runs off contig end</span></div>
+  <div class="scroll" style="margin-top:12px"><table><tbody>
+  {% for n in genes %}<tr{% if n.is_anchor %} style="background:var(--accent-soft)"{% endif %}><td class="num count">{{ n.number }}</td><td>{% if n.category %}<span class="chip" style="margin:0"><i style="--dot:{{ n.color }}"></i>{{ CATEGORY_LABELS.get(n.category, n.category) }}</span>{% endif %}</td><td>{{ n.annotation or '—' }}</td><td class="num count">{{ num(n.length_aa) }} aa · {{ n.strand }}</td><td class="num">{% if n.is_anchor %}<b class="mono">{{ short(n.protein_id) }}</b>{% else %}{{ protein_link(n.protein_id) }}{% endif %}</td></tr>{% endfor %}
+  </tbody></table></div>
+</div>
+
+<div class="grid g-side">
+  <div class="panel">
+    <h2>Functional labels <span class="hint">click a label for the evidence behind it</span></h2>
+    {% if catalog.map_state != 'current' %}<p class="note" style="margin-top:-6px">These labels were computed {{ 'before maps were stamped' if catalog.map_state == 'unstamped' else 'with older maps' }}; some may predate the current evidence rules.</p>{% endif %}
+    {% for facet, values in c.predicates.items() if values %}
+    <div class="facet"><span>{{ facet|replace('_', ' ') }}</span>
+      {% for p, ev in values.items() %}{{ label_chip(p, url('protein', c.protein_id) ~ '/why/' ~ quote(p, safe='')) }}{% endfor %}
+    </div>
+    {% else %}<p class="empty">No functional labels.</p>{% endfor %}
+  </div>
+  <div class="panel">
+    <h2>Context</h2>
+    <dl class="kv">
+      <dt>Genome</dt><dd>{% if g %}<a href="{{ url('genome', g.bin_id) }}">{{ g.bin_id }}</a>{% endif %}</dd>
+      <dt>Contig</dt><dd class="mono">{{ loc.contig_id }}</dd>
+      {% if edge_text %}<dt>Position</dt><dd>{{ edge_text }}</dd>{% endif %}
+      {% if c.hydrogenase_classification %}<dt>Hydrogenase</dt><dd>{{ c.hydrogenase_classification.outcome }}: {{ c.hydrogenase_classification.reference_label }}</dd>{% endif %}
+    </dl>
+    {% if systems_here %}<h2 style="margin-top:14px">Part of</h2>{% for s in systems_here %}<a class="chip" href="{{ url('system', s.kind, s.type) }}">{{ s.type }} ({{ s.kind }})</a>{% endfor %}{% endif %}
+    {% if nearby %}<h2 style="margin-top:14px">Pathway steps nearby</h2>
+      <div class="bars">{% for m in nearby %}<a class="label" href="{{ url('pathway', m.module) }}" title="{{ m.name }}">{{ m.name }}</a>{{ bar(m.completeness) }}<span class="val">{{ m.steps_complete }}/{{ m.steps_total }}</span>{% endfor %}</div>
+      <p class="note">Steps encoded within 10 genes.</p>{% endif %}
+  </div>
+</div>
+
+<div class="panel">
+  <details {% if (c.annotations|length) < 4 %}open{% endif %}><summary>Annotation hits ({{ c.annotations.values()|map('length')|sum }})</summary>
+  <div class="scroll" style="margin-top:10px"><table>
+    <thead><tr><th>Source</th><th>Accession</th><th>Name</th><th>Description</th><th class="num">E-value</th></tr></thead>
+    <tbody>{% for src, hits in c.annotations.items() %}{% for h in hits %}<tr><td><span class="tag">{{ src }}</span></td><td class="mono">{{ h.accession }}</td><td>{{ h.name }}</td><td class="count">{{ h.description or '' }}</td><td class="num count">{{ evalue(h.evalue) }}</td></tr>{% endfor %}{% endfor %}</tbody>
+  </table></div></details>
+</div>
+{% endblock %}

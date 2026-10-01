@@ -1,0 +1,5 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ what }}</h1>
+<div class="panel"><p class="empty">{% if missing %}Not available for this dataset{% if what == 'Pathway summaries' %} (build KEGG modules with <code>sharur setup-kegg</code>){% endif %}.{% else %}Still being computed ({{ catalog.status }}). Reload in a few seconds.{% endif %}</p></div>
+{% endblock %}

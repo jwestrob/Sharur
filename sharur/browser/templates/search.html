@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}Search{% endblock %}
+{% block content %}
+<h1>Results for “{{ q }}”</h1>
+{% if results %}
+<div class="panel flush"><table><tbody>{% for r in results %}<tr><td><span class="tag">{{ r.kind }}</span></td><td><a href="{{ r.url }}">{{ r.label }}</a></td><td class="count">{{ r.sub }}</td></tr>{% endfor %}</tbody></table></div>
+{% else %}<div class="panel"><p class="empty">Nothing matched. Try a taxon (e.g. a genus), a function such as <code>hydrogenase</code>, a pathway name, or <a href="/architecture?pattern={{ quote(q, safe='') }}">search “{{ q }}” as a domain pattern</a>.</p></div>{% endif %}
+{% endblock %}

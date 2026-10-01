@@ -50,6 +50,7 @@ embeddings = [
 ops = [
     "fastapi>=0.110.0",
     "uvicorn>=0.27.0",
+    "jinja2>=3.1",
 ]
 visualization = [
     "matplotlib>=3.7.0",
@@ -81,6 +82,7 @@ all = [
     "scipy>=1.10.0",
     "fastapi>=0.110.0",
     "uvicorn>=0.27.0",
+    "jinja2>=3.1",
     "matplotlib>=3.7.0",
     "dna-features-viewer>=3.1.0",
     "plotly>=5.15.0",

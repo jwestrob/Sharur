@@ -34,17 +34,18 @@ def db(tmp_path):
 
 @pytest.fixture
 def client(db):
-    return TestClient(create_app(db))
+    return TestClient(create_app(db, background=False))
 
 
-def test_home_and_navigation(client):
+def test_overview_and_search(client):
     home = client.get("/")
-    assert home.status_code == 200 and "3 proteins in 1 genomes" in home.text
-    protein = client.get("/go", params={"q": "bin|1_c1_2"}, follow_redirects=False)
+    assert home.status_code == 200 and "3 proteins" in home.text
+    protein = client.get("/search", params={"q": "bin|1_c1_2"}, follow_redirects=False)
     assert protein.status_code == 303 and protein.headers["location"] == "/protein/bin%7C1_c1_2"
-    assert client.get("/go", params={"q": "bin|1"}, follow_redirects=False).headers["location"] == "/genome/bin%7C1"
-    assert client.get("/go", params={"q": "ABC_tran"}, follow_redirects=False).headers["location"].startswith(
-        "/architecture?pattern=")
+    assert client.get("/search", params={"q": "bin|1"}, follow_redirects=False).headers["location"] == "/genome/bin%7C1"
+    suggestions = client.get("/api/suggest", params={"q": "Archaea"}).json()
+    assert {"kind": "taxon", "label": "Archaea", "sub": "domain", "url": "/taxa/domain/Archaea"} in suggestions
+    assert "Nothing matched" in client.get("/search", params={"q": "zzzz"}).text
 
 
 def test_protein_page_escapes_and_omits_sequences(client):
@@ -53,6 +54,7 @@ def test_protein_page_escapes_and_omits_sequences(client):
     assert "ABC &lt;transporter&gt;" in page.text and "<transporter>" not in page.text
     assert "MKTAYIAKQ" not in page.text
     assert 'aria-label="Domain architecture"' in page.text and 'aria-label="Gene neighborhood"' in page.text
+    assert "ABC transporter" in page.text  # functional label shown by name
     assert "/protein/bin%7C1_c1_2/why/abc_transporter" in page.text
     assert client.get("/protein/missing").status_code == 404
 
@@ -61,16 +63,19 @@ def test_why_genome_predicate_and_pattern_pages(client):
     why = client.get("/protein/bin%7C1_c1_2/why/abc_transporter")
     assert why.status_code == 200 and "PF00005" in why.text
     genome = client.get("/genome/bin%7C1")
-    assert genome.status_code == 200 and "3 proteins" in genome.text and "91.5" in genome.text
-    predicate = client.get("/predicate/abc_transporter")
-    assert "bin|1_c1_2" in predicate.text
+    assert genome.status_code == 200 and "Contig landscape" in genome.text and "91.5" in genome.text
+    assert client.get("/genome/bin%7C1/proteins").status_code == 200
+    function = client.get("/function/abc_transporter")
+    assert function.status_code == 200 and "bin|1_c1_2" in function.text
+    for page in ("/taxa", "/taxa/domain/Archaea", "/genomes", "/functions", "/systems", "/discover", "/pathways"):
+        assert client.get(page).status_code == 200, page
     pattern = client.get("/architecture", params={"pattern": "ABC_tran"})
     assert "1 proteins match" in pattern.text
     assert "Unbalanced" in client.get("/architecture", params={"pattern": "( ABC_tran"}).text
 
 
 def test_token_is_exchanged_for_a_cookie(db):
-    client = TestClient(create_app(db, token="s3cret"))
+    client = TestClient(create_app(db, token="s3cret", background=False))
     assert client.get("/").status_code == 401
     exchanged = client.get("/?token=s3cret", follow_redirects=False)
     assert exchanged.status_code == 303 and "token" not in exchanged.headers["location"]

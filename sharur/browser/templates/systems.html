@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% from "_macros.html" import bar %}
+{% block title %}Systems{% endblock %}
+{% block content %}
+<h1>Systems</h1>
+<p class="lede">Multi-gene systems called by validated, purpose-built callers, and mobile-element regions. Bars show the share of genomes carrying at least one.</p>
+<div class="grid g2">
+{% for kind, rows in kinds.items() %}
+  <div class="panel"><h2>{{ kind|capitalize }} systems <span class="hint">{{ num(rows|sum(attribute='count')) }} calls · {{ rows|length }} types</span></h2>
+    <div class="table-tools"><input data-filter="k{{ loop.index }}" placeholder="Filter…"><span class="count" data-count="k{{ loop.index }}"></span></div>
+    <div class="scroll" style="max-height:620px;overflow-y:auto"><table id="k{{ loop.index }}" data-table>
+      <thead><tr><th data-sort="text">Type</th><th data-sort="num" class="num">Calls</th><th data-sort="num">Genomes</th></tr></thead>
+      <tbody>{% for r in rows %}<tr><td><a href="{{ url('system', kind, r.type) }}">{{ r.type }}</a></td><td class="num">{{ num(r.count) }}</td><td data-v="{{ r.share }}"><div class="cell-bar">{{ bar(r.share, '#e15759' if kind == 'defense' else '#4e79a7') }}<span class="count">{{ pct(r.share) }}</span></div></td></tr>{% endfor %}</tbody>
+    </table></div>
+  </div>
+{% endfor %}
+</div>
+{% if loci %}
+<div class="panel"><h2>Mobile-element regions</h2>
+  <div class="bars">{% for l in loci %}<a class="label" href="{{ url('loci', l.type) }}">{{ l.type }} <span class="count">{{ num(l.count) }}</span></a>{{ bar(l.share, '#d37295') }}<span class="val">{{ pct(l.share) }} of genomes</span>{% endfor %}</div>
+</div>
+{% endif %}
+{% endblock %}

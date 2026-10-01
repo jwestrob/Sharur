@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% from "_macros.html" import prevalence_table, protein_link, genome_link %}
+{% block title %}{{ system_type }}{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="/systems">Systems</a><span class="sep">›</span>{{ kind }}</div>
+<h1><span class="rank">{{ kind }} system</span>{{ system_type }}</h1>
+<div class="stats">
+  <div class="stat"><b>{{ num(total) }}</b><span>calls</span></div>
+  <div class="stat"><b>{{ num(genomes) }}</b><span>genomes ({{ pct(genomes / (catalog.genomes|length or 1)) }})</span></div>
+  <div class="stat"><b>{{ subtypes|length }}</b><span>subtypes</span></div>
+</div>
+<div class="grid g-side">
+  <div class="panel"><h2>Across the tree</h2>{{ prevalence_table(prevalence, rank, url('system', kind, system_type)) }}</div>
+  <div class="panel"><h2>Subtypes</h2>{% for s, n in subtypes %}<span class="chip">{{ s }} <span class="count">{{ n }}</span></span>{% endfor %}</div>
+</div>
+<div class="panel"><h2>Calls {% if total > members|length %}<span class="hint">first {{ members|length }} of {{ num(total) }}</span>{% endif %}</h2>
+  <div class="table-tools"><input data-filter="calls" placeholder="Filter…"><span class="count" data-count="calls"></span></div>
+  <div class="scroll"><table id="calls" data-table><thead><tr><th data-sort="text">Genome</th><th data-sort="text">Subtype</th><th data-sort="num" class="num">Genes</th><th>Proteins</th></tr></thead>
+  <tbody>{% for m in members %}<tr><td>{{ genome_link(m.bin_id) }}</td><td>{{ m.subtype or '' }}</td><td class="num">{{ m.genes or m.proteins|length }}</td><td>{% for p in m.proteins[:4] %}{{ protein_link(p) }}{% if not loop.last %}<br>{% endif %}{% endfor %}{% if m.proteins|length > 4 %}<br><span class="count">+{{ m.proteins|length - 4 }}</span>{% endif %}</td></tr>{% endfor %}</tbody></table></div>
+</div>
+{% endblock %}

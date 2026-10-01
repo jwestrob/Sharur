@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% from "_macros.html" import protein_link, genome_link %}
+{% block title %}Discover{% endblock %}
+{% block content %}
+<h1>Discover</h1>
+<p class="lede">Starting points for finding something unusual. Search domain architectures below, or browse the extremes of the dataset.</p>
+<div class="panel">
+  <h2>Domain-architecture search <span class="hint">e.g. <code>TPR_* {10,}</code>, <code>^ . * VWA_2 $</code>, <code>Big_* {3,} . ( VWA | VWA_2 )</code></span></h2>
+  <form action="/architecture" method="get" class="table-tools"><input name="pattern" style="flex:1" placeholder="Domain pattern"><button>Search</button></form>
+</div>
+<div class="grid g3 discover">
+  <div class="panel"><h2>Giant proteins</h2>
+    <table><tbody>{% for p in notable.giants[:40] %}<tr><td>{{ protein_link(p.protein_id) }} <span class="count">· {{ catalog.by_bin[p.bin_id].label if p.bin_id in catalog.by_bin else '' }}</span><br><span class="count">{{ p.architecture or ('no placed domains' if p.architecture is defined else '') }}</span></td><td class="num">{{ num(p.length) }}</td></tr>{% endfor %}</tbody></table></div>
+  <div class="panel"><h2>Largest with no annotation</h2>
+    <table><tbody>{% for p in notable.dark[:40] %}<tr><td>{{ protein_link(p.protein_id) }}<br><span class="count ellip">{{ catalog.by_bin[p.bin_id].label if p.bin_id in catalog.by_bin else p.bin_id }}</span></td><td class="num">{{ num(p.length) }}</td></tr>{% endfor %}</tbody></table></div>
+  <div class="panel"><h2>Longest domain repeats</h2>
+    <table><tbody>{% for p in notable.repeats[:40] %}<tr><td>{{ protein_link(p.protein_id) }}<br><span class="count">{{ p.domain }} × {{ p.run }}</span></td><td class="num">{{ num(p.length) }}</td></tr>{% endfor %}</tbody></table></div>
+</div>
+{% endblock %}

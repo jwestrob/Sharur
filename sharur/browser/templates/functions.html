@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% from "_macros.html" import bar %}
+{% block title %}Functions{% endblock %}
+{% block content %}
+<h1>Functions</h1>
+<p class="lede">Evidence-backed functional labels and how widely they occur. Bars show the share of genomes carrying at least one protein with the label.</p>
+
+{% if variable %}
+<div class="panel">
+  <h2>What varies between genomes <span class="hint">specific labels carried by some genomes and missing from others</span></h2>
+  <div class="bars">
+  {% for r in variable %}
+    <a class="label" href="{{ url('function', r.id) }}">{{ r.name }}</a>{{ bar(r.share, CATEGORY_COLORS.get(r.category)) }}<span class="val">{{ pct(r.share) }}</span>
+  {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<div class="panel">
+  <h2>By category</h2>
+  <div class="cols">
+  {% for category, rows in groups %}
+    <div class="group" id="{{ category }}">
+      <div class="facet"><span><i style="display:inline-block;width:9px;height:9px;border-radius:50%;background:{{ CATEGORY_COLORS.get(category, 'var(--ink-3)') }};margin-right:6px"></i>{{ CATEGORY_LABELS.get(category, category) }} · {{ rows|length }}</span></div>
+      {% for r in rows[:12] %}<div style="display:flex;justify-content:space-between;gap:10px;font-size:13px;padding:2px 0"><a href="{{ url('function', r.id) }}" class="ellip" style="max-width:200px">{{ r.name }}</a><span class="count">{{ pct(r.share) }}</span></div>{% endfor %}
+      {% if rows|length > 12 %}<details><summary class="count" style="font-weight:500">{{ rows|length - 12 }} more</summary>{% for r in rows[12:] %}<div style="display:flex;justify-content:space-between;gap:10px;font-size:13px;padding:2px 0"><a href="{{ url('function', r.id) }}" class="ellip" style="max-width:200px">{{ r.name }}</a><span class="count">{{ pct(r.share) }}</span></div>{% endfor %}</details>{% endif %}
+    </div>
+  {% endfor %}
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Search all labels</h2>
+  <div class="table-tools"><input data-filter="fn" placeholder="Filter functions…"><span class="count" data-count="fn"></span></div>
+  <div class="scroll" style="max-height:520px;overflow-y:auto"><table id="fn" data-table>
+  <thead><tr><th data-sort="text">Function</th><th data-sort="text">Category</th><th data-sort="num">Genomes</th><th data-sort="num" class="num">Proteins</th></tr></thead>
+  <tbody>
+  {% for category, rows in groups %}{% for r in rows %}
+    <tr><td><a href="{{ url('function', r.id) }}">{{ r.name }}</a> <span class="count mono">{{ r.id }}</span>{% if r.level == 'system' %} <span class="tag">system</span>{% endif %}</td>
+    <td data-v="{{ category }}"><span class="chip"><i style="--dot:{{ CATEGORY_COLORS.get(category, '#999') }}"></i>{{ CATEGORY_LABELS.get(category, category) }}</span></td>
+    <td data-v="{{ r.share }}"><div class="cell-bar">{{ bar(r.share, CATEGORY_COLORS.get(category)) }}<span class="count">{{ pct(r.share) }}</span></div></td>
+    <td class="num">{{ num(r.proteins) }}</td></tr>
+  {% endfor %}{% endfor %}
+  </tbody></table></div>
+</div>
+{% endblock %}

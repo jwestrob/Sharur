@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Pathways{% endblock %}
+{% block content %}
+<h1>Pathways</h1>
+<p class="lede">KEGG modules present in at least one genome. Dark bars: share of genomes with the module ≥ 75% complete; light: partly present.</p>
+<div class="table-tools"><input data-filter="mods" placeholder="Filter pathways…"><span class="count" data-count="mods"></span></div>
+<div class="panel flush"><div class="scroll"><table id="mods" data-table>
+  <thead><tr><th data-sort="text">Module</th><th data-sort="text">Name</th><th data-sort="text">Group</th><th data-sort="num">Genomes ≥ 75% complete</th></tr></thead>
+  <tbody>{% for group, rows in groups %}{% for r in rows %}<tr><td><a href="{{ url('pathway', r.module) }}">{{ r.module }}</a></td><td>{{ r.name }}</td><td class="count">{{ group }} · {{ r.subclass }}</td>
+    <td data-v="{{ r.complete }}"><div class="cell-bar"><div class="bar"><i style="width:{{ '%.2f' % ((r.complete + r.partial) * 100) }}%;opacity:.3"></i><i style="width:{{ '%.2f' % (r.complete * 100) }}%"></i></div><span class="count">{{ pct(r.complete) }}</span></div></td></tr>{% endfor %}{% endfor %}</tbody>
+</table></div></div>
+{% endblock %}

@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% from "_macros.html" import bar, protein_link %}
+{% block title %}{{ g.bin_id }}{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="/taxa">All genomes</a>{% for r, n in g.lineage if n != 'Unclassified' %}<span class="sep">›</span><a href="{{ url('taxa', r, n) }}">{{ n }}</a>{% endfor %}</div>
+<h1><span class="rank">Genome · {{ g.label }}</span>{{ g.bin_id }}</h1>
+<div class="stats">
+  <div class="stat"><b>{{ bp(g.length) }}</b><span>assembled</span></div>
+  <div class="stat"><b>{{ num(g.contigs) }}</b><span>contigs · N50 {{ bp(g.n50) }}</span></div>
+  <div class="stat"><b>{{ num(g.proteins) }}</b><span>proteins</span></div>
+  <div class="stat"><b>{{ pct(g.annotated / (g.proteins or 1)) }}</b><span>with an annotation hit</span></div>
+  {% if g.completeness is not none %}<div class="stat"><b>{{ num(g.completeness) }}%</b><span>complete · {{ num(g.contamination) }}% contam.</span></div>{% endif %}
+</div>
+
+<div class="panel">
+  <h2>Contig landscape <span class="hint">every contig, longest first · longest {{ bp(longest_contig) }}</span></h2>
+  {{ strip }}
+  <p class="note">A genome in a few long pieces reads as a handful of wide blocks; a fragmented one as a fine comb, where genes near contig ends may have lost their neighbors.</p>
+</div>
+
+<div class="grid g-side">
+  <div class="panel">
+    <h2>Function profile <span class="hint">share of proteins per category · marker = dataset average</span></h2>
+    <div class="bars">
+    {% for p in profile %}
+      <a class="label" href="/functions#{{ p.category }}">{{ p.label }}</a>
+      {{ bar(p.genome, CATEGORY_COLORS.get(p.category), p.dataset) }}
+      <span class="val">{{ pct(p.genome) }}</span>
+    {% endfor %}
+    </div>
+  </div>
+  <div class="panel">
+    <h2>Systems and elements</h2>
+    {% if systems or loci %}
+      {% for s in systems %}<a class="chip" href="{{ url('system', s.kind, s.type) }}"><i style="--dot:{{ '#e15759' if s.kind == 'defense' else '#4e79a7' }}"></i>{{ s.type }}{% if s.subtype and s.subtype != s.type %} · {{ s.subtype }}{% endif %}</a>{% endfor %}
+      {% if loci %}<p class="note">{{ loci|selectattr('type', 'equalto', 'prophage')|list|length }} prophage regions · {{ loci|selectattr('type', 'equalto', 'island')|list|length }} islands</p>{% endif %}
+    {% else %}<p class="empty">No validated systems or mobile-element calls.</p>{% endif %}
+    {% if abundance %}
+    <h2 style="margin-top:16px">Abundance</h2>
+    <div class="bars">{% for a in abundance %}<span class="label">{{ a.sample_id }}</span>{{ bar(a.relative_abundance or 0) }}<span class="val">{{ pct(a.relative_abundance, 2) }}</span>{% endfor %}</div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Pathways at least half complete <span class="hint">KEGG modules</span></h2>
+  {% if modules %}
+  <div class="scroll"><table id="modules" data-table>
+    <thead><tr><th data-sort="text">Module</th><th data-sort="text">Name</th><th data-sort="text">Group</th><th data-sort="num">Completeness</th></tr></thead>
+    <tbody>{% for m in modules %}<tr><td><a href="{{ url('pathway', m.module) }}">{{ m.module }}</a></td><td>{{ m.name }}</td><td class="count">{{ m['class'] }}</td>
+      <td data-v="{{ m.completeness }}"><div class="cell-bar">{{ bar(m.completeness, '#59a14f' if m.completeness >= 1 else None) }}<span class="count">{{ pct(m.completeness) }}</span></div></td></tr>{% endfor %}</tbody>
+  </table></div>
+  {% elif catalog.module_completeness is none %}<p class="empty">Pathway summaries are still being computed, or KEGG modules are not built (sharur setup-kegg).</p>
+  {% else %}<p class="empty">No module is at least half complete.</p>{% endif %}
+</div>
+
+<div class="panel">
+  <h2>Largest proteins <span class="hint"><a href="{{ url('genome', g.bin_id) }}/proteins">all {{ num(g.proteins) }} proteins →</a></span></h2>
+  <table><tbody>{% for pid, n, hits in largest %}<tr><td>{{ protein_link(pid) }}</td><td class="num">{{ num(n) }} aa</td><td>{% if hits %}<span class="tag">{{ hits }} hits</span>{% else %}<span class="tag warn">unannotated</span>{% endif %}</td></tr>{% endfor %}</tbody></table>
+</div>
+{% endblock %}

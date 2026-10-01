@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% from "_macros.html" import bar, genome_link %}
+{% block title %}{{ d.name }}{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="/pathways">Pathways</a><span class="sep">›</span>{{ d.module_class }}</div>
+<h1><span class="rank">KEGG module · {{ d.module }}</span>{{ d.name }}</h1>
+<div class="stats">
+  <div class="stat"><b>{{ num(complete) }}</b><span>genomes ≥ 75% complete</span></div>
+  <div class="stat"><b>{{ num(partial) }}</b><span>genomes with any step</span></div>
+  <div class="stat"><b>{{ steps|length }}</b><span>steps</span></div>
+</div>
+<div class="grid g2">
+  <div class="panel"><h2>Which steps are found <span class="hint">among genomes with any step</span></h2>
+    <div class="bars">{% for s in steps %}<span class="label">Step {{ s.index }}</span>{{ bar(s.share, '#59a14f') }}<span class="val">{{ pct(s.share) }}{% if s.missing and s.share < 0.8 %} <span class="count">· missing {{ s.missing[0][0] }}</span>{% endif %}</span>{% endfor %}</div>
+    <p class="note">A step absent in most genomes that carry the rest may be encoded by an unrecognized or divergent gene, or missing from fragmented assemblies.</p>
+  </div>
+  <div class="panel"><h2>Across the tree <span class="hint">mean completeness per {{ rank }}</span></h2>
+    <div class="table-tools"><span class="count" style="margin-left:auto">By: {% for r in ['class', 'order', 'family', 'genus'] %}<a href="?rank={{ r }}" {% if r == rank %}style="font-weight:700"{% endif %}>{{ r }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</span></div>
+    <div class="bars">{% for cl in clades %}<a class="label" href="{{ url('taxa', rank, cl.taxon) }}">{{ cl.taxon }}</a>{{ bar(cl.mean) }}<span class="val">{{ pct(cl.mean) }} <span class="count">n={{ cl.genomes }}</span></span>{% endfor %}</div>
+  </div>
+</div>
+<div class="panel"><h2>Most complete genomes</h2>
+  <table><tbody>{% for g, v in genomes %}<tr><td>{{ genome_link(g.bin_id) }}</td><td class="count">{{ g.label }}</td><td style="width:40%"><div class="cell-bar">{{ bar(v, '#59a14f' if v >= 1 else None) }}<span class="count">{{ pct(v) }}</span></div></td></tr>{% endfor %}</tbody></table>
+</div>
+<p class="note"><code>{{ d.definition }}</code></p>
+{% endblock %}

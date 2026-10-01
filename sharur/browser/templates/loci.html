@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% from "_macros.html" import genome_link %}
+{% block title %}{{ locus_type }}{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="/systems">Systems</a></div>
+<h1><span class="rank">Mobile-element regions</span>{{ locus_type }}</h1>
+<div class="grid g-side">
+  <div class="panel"><h2>Regions {% if total > members|length %}<span class="hint">first {{ members|length }} of {{ num(total) }}</span>{% endif %}</h2>
+    <div class="table-tools"><input data-filter="loci" placeholder="Filter…"><span class="count" data-count="loci"></span></div>
+    <div class="scroll"><table id="loci" data-table><thead><tr><th data-sort="text">Genome</th><th data-sort="text">Contig</th><th data-sort="num" class="num">Start</th><th data-sort="num" class="num">Length</th></tr></thead>
+    <tbody>{% for l in members %}<tr><td>{{ genome_link(l.bin_id or '') }}</td><td class="mono count"><span class="ellip">{{ l.contig_id }}</span></td><td class="num">{{ num(l.start) }}</td><td class="num">{{ bp((l.end or 0) - (l.start or 0)) }}</td></tr>{% endfor %}</tbody></table></div>
+  </div>
+  <div class="panel"><h2>Most regions</h2><table><tbody>{% for b, n in per_genome %}<tr><td>{{ genome_link(b or '') }}</td><td class="num">{{ n }}</td></tr>{% endfor %}</tbody></table></div>
+</div>
+{% endblock %}

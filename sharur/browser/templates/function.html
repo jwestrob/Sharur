@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% from "_macros.html" import bar, prevalence_table, protein_link, genome_link %}
+{% block title %}{{ d.name if d else predicate }}{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="/functions">Functions</a>{% if d %}<span class="sep">›</span><a href="/functions#{{ d.category }}">{{ CATEGORY_LABELS.get(d.category, d.category) }}</a>{% endif %}{% if parent %}<span class="sep">›</span><a href="{{ url('function', parent.predicate_id) }}">{{ parent.name }}</a>{% endif %}</div>
+<h1><span class="rank">Function · <code>{{ predicate }}</code></span>{{ d.name if d else predicate }}</h1>
+<p class="lede">{{ d.description if d else '' }}{% if d and d.level == 'system' %} System-level: called only by validated system callers.{% endif %}</p>
+<div class="stats">
+  <div class="stat"><b>{{ num(carriers|length) }}</b><span>genomes ({{ pct(carriers|length / (catalog.genomes|length or 1)) }})</span></div>
+  <div class="stat"><b>{{ num(carriers.values()|sum) }}</b><span>proteins</span></div>
+  {% if children %}<div class="stat"><b>{{ children|length }}</b><span>more specific labels</span></div>{% endif %}
+</div>
+{% if children %}<div class="panel"><h2>More specific</h2>{% for ch in children %}<a class="chip" href="{{ url('function', ch.predicate_id) }}">{{ ch.name }}</a>{% endfor %}</div>{% endif %}
+<div class="grid g-side">
+  <div class="panel"><h2>Across the tree</h2>{{ prevalence_table(prevalence, rank, url('function', predicate)) }}</div>
+  <div class="panel"><h2>Most copies</h2>
+    <table><tbody>{% for g, n in top_genomes %}<tr><td>{{ genome_link(g.bin_id) }}<br><span class="count">{{ g.label }}</span></td><td class="num">{{ n }}</td></tr>{% endfor %}</tbody></table>
+  </div>
+</div>
+<div class="panel"><h2>Example proteins <span class="hint">largest first</span></h2>
+  <table><tbody>{% for pid, bin_id, n in examples %}<tr><td>{{ protein_link(pid) }}</td><td>{{ genome_link(bin_id) }}</td><td class="num">{{ num(n) }} aa</td><td><a href="{{ url('protein', pid) }}/why/{{ quote(predicate, safe='') }}">evidence</a></td></tr>{% endfor %}</tbody></table>
+</div>
+{% endblock %}

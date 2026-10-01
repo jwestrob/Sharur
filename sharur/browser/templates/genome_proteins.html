@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% from "_macros.html" import protein_link %}
+{% block title %}Proteins · {{ g.bin_id }}{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="{{ url('genome', g.bin_id) }}">{{ g.bin_id }}</a></div>
+<h1>Proteins</h1>
+<div class="panel">
+  <div class="table-tools"><input data-filter="proteins" placeholder="Filter by ID, contig or annotation…"><span class="count" data-count="proteins"></span></div>
+  <div class="scroll"><table id="proteins" data-table>
+    <thead><tr><th data-sort="text">Protein</th><th data-sort="text">Contig</th><th data-sort="num" class="num">Start</th><th data-sort="num" class="num">Length</th><th data-sort="text">Best hit</th><th data-sort="num" class="num">Hits</th></tr></thead>
+    <tbody>{% for pid, contig, start, length, top, hits in rows %}<tr><td>{{ protein_link(pid) }}</td><td><span class="mono ellip count">{{ contig }}</span></td><td class="num">{{ num(start) }}</td><td class="num">{{ num(length) }}</td><td>{{ top or '' }}</td><td class="num">{{ hits }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+</div>
+{% endblock %}

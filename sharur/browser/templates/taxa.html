@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% from "_macros.html" import bar, genome_link, child_list %}
+{% block title %}{{ name or 'Tree of life' }}{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="/taxa">All genomes</a>{% for r, n in lineage[:-1] %}<span class="sep">›</span><a href="{{ url('taxa', r, n) }}">{{ n }}</a>{% endfor %}</div>
+<h1>{% if rank %}<span class="rank">{{ rank }}</span>{{ name }}{% else %}Tree of life{% endif %}</h1>
+<p class="lede">{{ num(genomes|length) }} genomes{% if child_rank and children|length > 1 %} across {{ children|length }} {{ child_rank }} groups{% endif %}.
+{% if enriched %} Below: functions this clade carries more often than the rest of the dataset.{% endif %}</p>
+<div class="stats">
+  <div class="stat"><b>{{ num(genomes|length) }}</b><span>genomes</span></div>
+  <div class="stat"><b>{{ bp(median_size) }}</b><span>median genome size</span></div>
+  <div class="stat"><b>{{ num(median_proteins|round|int) }}</b><span>median proteins</span></div>
+  <div class="stat"><b>{{ num(genomes|sum(attribute='contigs')) }}</b><span>contigs</span></div>
+</div>
+
+{% if tree %}
+<div class="grid g-side">
+  <div class="panel"><h2>{{ child_rank|capitalize }} <span class="hint">sized by genome count · click to go deeper</span></h2>{{ tree }}</div>
+  <div class="panel"><h2>{{ child_rank|capitalize }} groups</h2>{{ child_list(children, child_rank) }}</div>
+</div>
+{% endif %}
+
+<div class="grid g2">
+  {% if enriched %}
+  <div class="panel">
+    <h2>Distinctive functions <span class="hint">share of genomes: this clade vs. the rest (marker)</span></h2>
+    <div class="bars">
+    {% for e in enriched %}
+      <a class="label" href="{{ url('function', e.predicate) }}" title="{{ CATEGORY_LABELS.get(e.category, e.category) }}">{{ e.name }}</a>
+      {{ bar(e.inside, CATEGORY_COLORS.get(e.category), e.outside) }}
+      <span class="val">{{ pct(e.inside) }} <span class="count">vs {{ pct(e.outside) }}</span></span>
+    {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+  {% if systems %}
+  <div class="panel">
+    <h2>Most common systems <span class="hint">share of genomes carrying one</span></h2>
+    <div class="bars">
+    {% for s in systems %}
+      <a class="label" href="{{ url('system', s.kind, s.type) }}">{{ s.type }} <span class="count">{{ s.kind }}</span></a>
+      {{ bar(s.share) }}<span class="val">{{ pct(s.share) }}</span>
+    {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2>Genomes</h2>
+  <div class="table-tools"><input data-filter="genomes" placeholder="Filter genomes…"><span class="count" data-count="genomes"></span></div>
+  <div class="scroll"><table id="genomes" data-table>
+    <thead><tr><th data-sort="text">Genome</th><th data-sort="text">Lineage</th><th data-sort="num" class="num">Size</th><th data-sort="num" class="num">Contigs</th><th data-sort="num" class="num">N50</th><th data-sort="num" class="num">Proteins</th><th data-sort="num" class="num">Annotated</th>{% if genomes[0].completeness is not none %}<th data-sort="num" class="num">Completeness</th>{% endif %}</tr></thead>
+    <tbody>
+    {% for g in genomes[:2000] %}
+      <tr><td>{{ genome_link(g.bin_id) }}</td><td><span class="ellip count">{{ g.taxonomy.order }} › {{ g.taxonomy.family }} › {{ g.taxonomy.genus }}</span></td>
+      <td class="num" data-v="{{ g.length }}">{{ bp(g.length) }}</td><td class="num">{{ num(g.contigs) }}</td><td class="num" data-v="{{ g.n50 }}">{{ bp(g.n50) }}</td>
+      <td class="num">{{ num(g.proteins) }}</td><td class="num" data-v="{{ g.annotated / (g.proteins or 1) }}">{{ pct(g.annotated / (g.proteins or 1)) }}</td>
+      {% if genomes[0].completeness is not none %}<td class="num">{{ num(g.completeness) }}</td>{% endif %}</tr>
+    {% endfor %}
+    </tbody></table></div>
+</div>
+{% endblock %}
