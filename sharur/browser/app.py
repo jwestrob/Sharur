@@ -26,6 +26,7 @@ from sharur.browser import (
     routes_crispr,
     routes_curation,
     routes_health,
+    routes_landscape,
     routes_loci,
     routes_matrix,
     routes_protein_context,
@@ -1002,6 +1003,7 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
     routes_tree.register(app, ctx)
     ctx.templates = templates
     routes_health.register(app, ctx)
+    routes_landscape.register(app, ctx)
     return app
 
 

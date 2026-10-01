@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Functional landscape{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="/taxa">Tree of life</a></div>
+<h1><span class="rank">Functional landscape</span>Genomes by what they encode</h1>
+<p class="lede">Each point is a genome, placed by the {{ in_text }} it carries: genomes with similar repertoires sit together. Hover for details, click to open a genome, drag a box to select genomes for the matrix or a comparison.</p>
+
+<form class="panel land-controls" action="/landscape" method="get" autocomplete="off">
+  <label><span>Features</span><select name="kind" data-land-kind>{% for k, label in KINDS.items() %}<option value="{{ k }}" {{ 'selected' if k == kind }}>{{ label }}</option>{% endfor %}</select></label>
+  <label><span>Colour by</span><select name="color" data-land-rank><option value="">auto</option>{% for r in ['phylum', 'class', 'order', 'family', 'genus'] %}<option value="{{ r }}" {{ 'selected' if r == color }}>{{ r }}</option>{% endfor %}</select></label>
+  <label class="land-search"><span>Highlight</span><input type="search" name="q" value="{{ q }}" placeholder="genome or clade, e.g. Woesearchaeales" data-land-search aria-label="Highlight genomes or clades"></label>
+  <span class="count land-matches" data-land-matches></span>
+</form>
+
+<div class="land-layout">
+  <div class="panel land-map">
+    <div class="land-wrap" id="land" data-kind="{{ kind }}" data-color="{{ color }}">
+      <canvas class="land-canvas" aria-label="Genomes placed by functional content"></canvas>
+      <div class="land-tip" hidden></div>
+      <p class="empty land-status" data-land-status>Placing genomes… computed once, in a few seconds.</p>
+    </div>
+    <div class="land-selection" data-land-selection hidden>
+      <b data-land-selected></b>
+      <a class="btn" data-land-open="matrix" href="#">Presence/absence matrix</a>
+      <a class="btn" data-land-open="compare" href="#">Compare with…</a>
+      <button type="button" data-land-clear>Clear</button>
+      <span class="count" data-land-limit></span>
+    </div>
+    <div class="legend land-legend">
+      <span><i class="land-dot"></i>complete genome</span><span><i class="land-dot land-small"></i>less complete</span><span><i class="land-dot land-hollow"></i>under 70% complete</span>
+      <span class="count">Drag to select · Shift-drag adds · Enter in Highlight selects the matches</span>
+    </div>
+  </div>
+  <aside class="panel land-side">
+    <h2>Clades <span class="hint" data-land-rank-label></span></h2>
+    <div class="land-clades" data-land-clades></div>
+    <h2 style="margin-top:16px">Axes</h2>
+    <div class="land-axes" data-land-axes></div>
+    <p class="count land-method" data-land-method></p>
+  </aside>
+</div>
+<script src="/static/landscape.js?v={{ asset_version }}"></script>
+{% endblock %}

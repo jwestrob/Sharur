@@ -769,3 +769,41 @@ svg.tree-fig.t-rect { max-width: none; }
 .pctx-table td { vertical-align: top; }
 .pctx-actions { margin: 10px 0 0; }
 .pctx-pos { margin-top: 18px; }
+/* ---- functional landscape -------------------------------------------------- */
+.land-controls { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: end; }
+.land-controls label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--ink-2); }
+.land-controls label > span { font-weight: 600; }
+.land-controls select, .land-controls input { height: 34px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: 9px;
+  background: var(--surface); color: var(--ink); }
+.land-search { flex: 1; min-width: 220px; }
+.land-matches { padding-bottom: 8px; }
+.land-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 18px; margin-top: 18px; align-items: start; }
+.land-layout > .panel { margin-top: 0; }
+@media (max-width: 1100px) { .land-layout { grid-template-columns: minmax(0, 1fr); } }
+.land-wrap { position: relative; min-height: 380px; }
+.land-canvas { display: block; cursor: crosshair; touch-action: none; }
+.land-status { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; }
+.land-tip { position: absolute; z-index: 5; max-width: 260px; padding: 8px 10px; border-radius: 8px; pointer-events: none;
+  background: var(--surface); border: 1px solid var(--line-2); box-shadow: 0 6px 20px rgba(0, 0, 0, .14); font-size: 12px; }
+.land-tip b { display: block; overflow-wrap: anywhere; }
+.land-selection { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; padding: 8px 10px;
+  border: 1px solid var(--accent); border-radius: 10px; background: var(--accent-soft); }
+.land-selection .btn.disabled { opacity: .45; pointer-events: none; }
+.land-legend .land-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--ink-3);
+  margin-right: 5px; vertical-align: -1px; }
+.land-legend .land-small { width: 5px; height: 5px; vertical-align: 1px; }
+.land-legend .land-hollow { background: transparent; border: 1.5px solid var(--ink-3); width: 7px; height: 7px; }
+.land-clades { display: flex; flex-wrap: wrap; gap: 6px; }
+.land-chip { cursor: pointer; font: inherit; }
+.land-rest { display: inline-flex; align-items: center; gap: 6px; }
+.land-swatch { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+.land-axis + .land-axis { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.land-axis h3 { font-size: 13px; margin: 0 0 2px; }
+.land-axis p { margin: 0 0 6px; }
+.land-load { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 4px 0; }
+.land-load .chip { font-size: 11.5px; padding: 2px 8px; }
+.land-end { width: 44px; flex: none; }
+.land-method { margin-top: 14px; }
+.land-status[hidden], .land-selection[hidden], .land-tip[hidden] { display: none; }
+.nb-table { width: 100%; }
+.nb-lede { margin: 0 0 8px; }

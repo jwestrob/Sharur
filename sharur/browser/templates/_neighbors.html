@@ -1,0 +1,12 @@
+{% from "_macros.html" import bar %}
+<p class="count nb-lede">{{ num(own) }} {{ kind_label }} here · Jaccard similarity of feature sets (shared ÷ either).</p>
+{% if rows %}
+<div class="scroll"><table class="nb-table"><thead><tr><th>Genome</th><th>Lineage</th><th style="min-width:150px">Similarity</th><th class="num">Shared</th></tr></thead>
+<tbody>{% for r in rows %}{% set n = r.genome %}<tr>
+  <td><a href="{{ url('genome', n.bin_id) }}" title="{{ n.bin_id }}">{{ gshort(n.bin_id) }}</a></td>
+  <td><span class="sub">{{ r.lineage }}</span>{% if r.differs_at %} <span class="tag warn" title="A different {{ r.differs_at }} with a similar repertoire: shared ecology, gene transfer, or similar annotation depth. Worth a look before reading biology into it.">different {{ r.differs_at }}</span>{% endif %}</td>
+  <td data-v="{{ r.similarity }}">{{ bar(r.similarity) }}<span class="count">{{ '%.0f' % (r.similarity * 100) }}%</span></td>
+  <td class="num count">{{ num(r.shared) }} <span class="count">of {{ num(r.features) }}</span></td>
+</tr>{% endfor %}</tbody></table></div>
+{% else %}<p class="empty">No other genome shares these features.</p>{% endif %}
+<p class="note"><a href="/landscape?q={{ quote(g.bin_id, safe='') }}&kind={{ kind }}">See this genome on the functional landscape →</a></p>

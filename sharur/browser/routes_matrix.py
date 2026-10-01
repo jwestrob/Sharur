@@ -208,7 +208,8 @@ class Group:
 
 
 def resolve_group(ctx, token: str) -> Group | None:
-    """A genome id, ``rank:name``, a taxon name at any rank (broadest wins), or ``all``."""
+    """A genome id, ``rank:name``, ``genomes:ID1,ID2,...``, a taxon name at any rank (broadest wins), or ``all``."""
+    from sharur.browser.routes_compare import genome_set  # noqa: PLC0415
     from sharur.browser.routes_search import resolve_scope  # noqa: PLC0415
 
     catalog = ctx.catalog
@@ -219,6 +220,9 @@ def resolve_group(ctx, token: str) -> Group | None:
         return Group("all", "All genomes", None, list(catalog.genomes))
     if token in catalog.by_bin:
         return Group(token, token, None, [catalog.by_bin[token]])
+    selected = genome_set(catalog, token)
+    if selected is not None:
+        return Group(token, f"{len(selected)} selected genomes", None, selected) if selected else None
     if ":" in token:
         rank, name = token.split(":", 1)
         if rank in RANKS:
@@ -598,7 +602,7 @@ def _tsv(result: dict[str, Any]) -> str:
 def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     """Add /matrix and /matrix.tsv. ``ctx``: store, lock, catalog, render, url, ko_names, cctyper_systems."""
     sets = FeatureSets(ctx)
-    ctx.feature_sets = sets   # shared with the taxonomy tree
+    ctx.feature_sets = sets   # shared with the taxonomy tree, functional landscape and clade pages
 
     def compute(a: str, b: str, kind: str, features: str, module: str, pick: str, n: int, order: str,
                 min_completeness: float) -> tuple[list[Group], dict[str, Any] | None, str]:
