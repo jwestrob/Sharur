@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% from "_macros.html" import protein_link, genome_link %}
+{% block title %}{{ s.title }}{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="/findings">Findings</a><span class="sep">›</span>{{ s.source }}</div>
+<h1><span class="rank">Finding · {{ s.id }}{% if s.category %} · {{ s.category|replace('_', ' ') }}{% endif %}</span>{{ s.title }}</h1>
+{% if f.description %}<p class="lede">{{ f.description }}</p>{% endif %}
+
+<div class="panel" id="verification" data-verify-url="/api/finding/{{ quote(s.id, safe='') }}/verify">
+  <div class="viewer-bar"><h2 style="margin:0">Verification <span class="hint">{{ verification|length }} claim{{ 's' if verification|length != 1 }}</span></h2>
+    {% if verification %}<button type="button" data-verify>Re-run checks</button>{% endif %}</div>
+  {% if verification %}
+  <table><tbody>{% for v in verification %}<tr data-check="{{ loop.index0 }}">
+    <td style="width:50%"><b>{{ v.claim }}</b><details><summary class="count" style="font-weight:500">query</summary><pre class="query">{{ v.query }}</pre></details></td>
+    <td><span class="count">expected</span> <code>{{ v.expected }}</code><div class="check-result"></div></td>
+  </tr>{% endfor %}</tbody></table>
+  <p class="note">Checks run read-only: one SELECT statement, file-reading functions refused, 10 s timeout. Python or shell checks are listed and skipped.</p>
+  {% else %}<p class="empty">This finding records no verification queries, so its numbers cannot be rechecked here.</p>{% endif %}
+</div>
+
+<div class="grid g2">
+  <div class="panel"><h2>Proteins referenced <span class="hint">{{ proteins|length }}</span></h2>
+    {% if proteins %}<table><tbody>{% for p in proteins %}<tr><td>{{ protein_link(p) }}</td></tr>{% endfor %}</tbody></table>{% else %}<p class="empty">None found in the database.</p>{% endif %}</div>
+  <div class="panel"><h2>Genomes referenced <span class="hint">{{ genomes|length }}</span></h2>
+    {% if genomes %}<table><tbody>{% for b in genomes %}<tr><td>{{ genome_link(b) }}<div class="sub">{{ catalog.by_bin[b].label if b in catalog.by_bin else '' }}</div></td></tr>{% endfor %}</tbody></table>{% else %}<p class="empty">None found.</p>{% endif %}
+    {% if systems %}<h2 style="margin-top:14px">Systems</h2>{% for t in systems %}<span class="chip">{{ t }}</span>{% endfor %}{% endif %}</div>
+</div>
+{% if evidence %}<div class="panel"><details><summary>Evidence payload</summary><pre class="query" style="max-height:480px">{{ evidence }}</pre></details></div>{% endif %}
+<script src="/static/insight.js?v={{ asset_version }}" defer></script>
+{% endblock %}

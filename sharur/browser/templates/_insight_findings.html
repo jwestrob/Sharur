@@ -1,0 +1,9 @@
+{% if found %}
+<div class="panel insight-findings">
+  <h2>Agent findings <span class="hint">{{ found|length }} finding{{ 's' if found|length != 1 }} reference {{ subject }}</span></h2>
+  <table><tbody>{% for f in found %}<tr>
+    <td><a href="{{ f.url }}"><b>{{ f.title }}</b></a><div class="sub">{{ f.id }}{% if f.category %} · {{ f.category|replace('_', ' ') }}{% endif %}{% if f.phase %} · {{ f.phase }}{% endif %}</div></td>
+    <td class="num">{% if f.verifications %}<span class="tag ok">{{ f.verifications }} check{{ 's' if f.verifications != 1 }}</span>{% else %}<span class="tag warn">no checks</span>{% endif %}</td>
+  </tr>{% endfor %}</tbody></table>
+</div>
+{% endif %}

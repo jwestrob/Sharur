@@ -6,6 +6,7 @@ import secrets
 import threading
 from collections import Counter, defaultdict
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from urllib.parse import quote
 
@@ -16,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from sharur.browser import charts
+from sharur.browser.routes_insight import register as register_insight
 from sharur.browser.catalog import (
     BIOLOGICAL,
     CATEGORY_LABELS,
@@ -821,6 +823,9 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
     @app.get("/api/suggest")
     def suggest(q: str = Query("", max_length=200)):
         return JSONResponse(_suggest(q.strip()) if len(q.strip()) >= 2 else [])
+
+    register_insight(app, SimpleNamespace(store=store, lock=lock, catalog=catalog, templates=templates, render=render,
+                                          db_path=db_path, url=_url, describe_hit=describe_hit))
 
     @app.get("/api/status")
     def status():

@@ -60,4 +60,5 @@
     {% endfor %}
     </tbody></table></div>
 </div>
+{% set found = insight.findings_for_clade(rank, name) %}{% set subject = 'genomes in this clade' %}{% include "_insight_findings.html" %}
 {% endblock %}

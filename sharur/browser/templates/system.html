@@ -18,4 +18,5 @@
   <div class="scroll"><table id="calls" data-table><thead><tr><th data-sort="text">Genome</th><th data-sort="text">Subtype</th><th data-sort="num" class="num">Genes</th><th>Proteins</th></tr></thead>
   <tbody>{% for m in members %}<tr><td>{{ genome_link(m.bin_id) }}</td><td>{{ m.subtype or '' }}</td><td class="num">{{ m.genes or m.proteins|length }}</td><td>{% for p in m.proteins[:4] %}{{ protein_link(p) }}{% if not loop.last %}<br>{% endif %}{% endfor %}{% if m.proteins|length > 4 %}<br><span class="count">+{{ m.proteins|length - 4 }}</span>{% endif %}</td></tr>{% endfor %}</tbody></table></div>
 </div>
+{% set found = insight.findings_for_system(system_type) %}{% set subject = 'this system type' %}{% include "_insight_findings.html" %}
 {% endblock %}
