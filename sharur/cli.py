@@ -1557,6 +1557,59 @@ def setup_kegg(
     typer.echo("Regenerate predicates for existing datasets to apply it.")
 
 
+@app.command(name="cas-type")
+def cas_type(
+    db: Path = typer.Option(Path(DEFAULT_DB), "--db", "-d", help="Dataset DuckDB."),
+    cctyper_db: Path | None = typer.Option(None, "--cctyper-db", help="CCTyper database directory "
+                                           "(default: $SHARUR_CCTYPER_DB, then Aksha's CCTyper install)."),
+    workers: int = typer.Option(0, "--workers", "-w", help="Parallel genome searches (default: all CPUs)."),
+    genome: list[str] = typer.Option([], "--genome", "-g", help="Type only these genomes; repeatable."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Report the calls and leave the dataset unchanged."),
+):
+    """Subtype CRISPR-Cas systems with CRISPRCasTyper's profiles and scoring.
+
+    Searches the CCTyper Cas profiles against every genome's proteins, groups
+    hits into operons, scores subtypes, classifies array repeats and links
+    operons to arrays within 10 kb. Calls go to ``crispr_cas_systems``,
+    ``crispr_array_types`` and ``system_proteins`` (source ``cctyper``),
+    replacing earlier calls from this caller.
+    """
+    from collections import Counter  # noqa: PLC0415
+
+    from sharur.cas_typing import run_dataset, system_rows, write_results  # noqa: PLC0415
+
+    if not db.is_file():
+        typer.echo(f"DuckDB file does not exist: {db}", err=True)
+        raise typer.Exit(1)
+
+    def progress(done: int, total: int) -> None:
+        if done == total or done % 250 == 0:
+            typer.echo(f"  searched {done}/{total} genomes", err=True)
+
+    try:
+        result = run_dataset(db, cctyper_db=cctyper_db, workers=workers or None, genomes=genome or None,
+                             progress=progress)
+    except FileNotFoundError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    systems = result["systems"]
+    status = Counter(op["status"] for op in systems)
+    typer.echo(f"{result['genomes']} genomes: {len(systems)} Cas operons "
+               + ", ".join(f"{k} {v}" for k, v in sorted(status.items())))
+    named = Counter(op["joint_prediction"] for op in systems if op["status"] in ("crispr_cas", "cas"))
+    if named:
+        typer.echo("Subtypes: " + ", ".join(f"{k} {v}" for k, v in named.most_common()))
+    arrays = result["arrays"]
+    typer.echo(f"{len(arrays)} arrays: {sum(a['prediction'] != 'Unknown' for a in arrays)} with a repeat subtype, "
+               f"{sum(a['near_cas'] for a in arrays)} linked to Cas operons")
+    if dry_run:
+        system_rows(systems)
+        return
+    counts = write_results(db, result)
+    typer.echo(f"Wrote {counts['systems']} systems, {counts['arrays']} array types and "
+               f"{counts['members']} member proteins to {db}. Re-seal the dataset when its writes are done.")
+
+
 # ------------------------------------------------------------------ #
 # Main entry point
 # ------------------------------------------------------------------ #

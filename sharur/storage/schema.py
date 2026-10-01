@@ -1,6 +1,6 @@
 """DuckDB schema for Sharur."""
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS bins (
@@ -296,6 +296,50 @@ CREATE TABLE IF NOT EXISTS system_proteins (
 CREATE INDEX IF NOT EXISTS idx_system_proteins_protein ON system_proteins(protein_id);
 CREATE INDEX IF NOT EXISTS idx_system_proteins_system ON system_proteins(system_id);
 CREATE INDEX IF NOT EXISTS idx_system_proteins_source ON system_proteins(system_source);
+
+-- CRISPR-Cas subtype calls (CRISPRCasTyper scoring on Sharur genes and arrays)
+CREATE TABLE IF NOT EXISTS crispr_cas_systems (
+    system_id VARCHAR PRIMARY KEY,
+    genome_id VARCHAR,
+    contig_id VARCHAR,
+    start INTEGER,
+    end_coord INTEGER,
+    status VARCHAR,                 -- crispr_cas | crispr_cas_putative | cas | cas_putative
+    prediction VARCHAR,             -- joint operon + array call
+    prediction_cas VARCHAR,         -- operon call (subtype, Ambiguous, Hybrid(...), False)
+    best_type VARCHAR,              -- top-scoring subtype(s), comma-joined
+    best_score DOUBLE,
+    complete_interference VARCHAR,
+    complete_adaptation VARCHAR,
+    strand_interference VARCHAR,
+    strand_adaptation VARCHAR,
+    genes_count INTEGER,
+    protein_ids VARCHAR,
+    profile_names VARCHAR,
+    crispr_locus_ids VARCHAR,
+    crispr_distances VARCHAR,
+    caller VARCHAR,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_crispr_cas_systems_genome ON crispr_cas_systems(genome_id);
+
+-- Repeat-subtype predictions and trust statistics for CRISPR array loci
+CREATE TABLE IF NOT EXISTS crispr_array_types (
+    locus_id VARCHAR PRIMARY KEY,
+    genome_id VARCHAR,
+    contig_id VARCHAR,
+    repeat_length INTEGER,
+    n_repeats INTEGER,
+    subtype VARCHAR,                -- most probable repeat subtype
+    probability DOUBLE,
+    prediction VARCHAR,             -- subtype, or Unknown below the probability cutoff
+    repeat_identity DOUBLE,
+    spacer_identity DOUBLE,
+    spacer_sem DOUBLE,
+    trusted BOOLEAN,
+    near_cas BOOLEAN,
+    caller VARCHAR
+);
 
 -- Refs for expand() pagination
 CREATE TABLE IF NOT EXISTS refs (

@@ -68,7 +68,7 @@ def test_schema_version_table_has_correct_data(fresh_conn):
 
 def test_schema_version_constant():
     """SCHEMA_VERSION constant matches latest migration."""
-    assert SCHEMA_VERSION == max(version for version, _, _ in MIGRATIONS) == 8
+    assert SCHEMA_VERSION == max(version for version, _, _ in MIGRATIONS) == 9
 
 
 def test_duckdb_store_runs_migrations():
