@@ -134,6 +134,7 @@ packages = ["sharur"]
 "src/ingest/04_astra_scan.py" = "sharur/ingest/stages/04_astra_scan.py"
 "src/ingest/06_esm2_embeddings.py" = "sharur/ingest/stages/06_esm2_embeddings.py"
 "src/ingest/07_build_knowledge_base.py" = "sharur/ingest/stages/07_build_knowledge_base.py"
+"src/ingest/08_coverage.py" = "sharur/ingest/stages/08_coverage.py"
 "src/ingest/dbcan_cazyme.py" = "sharur/ingest/stages/dbcan_cazyme.py"
 "src/ingest/gecco_bgc.py" = "sharur/ingest/stages/gecco_bgc.py"
 "src/ingest/minced_crispr.py" = "sharur/ingest/stages/minced_crispr.py"

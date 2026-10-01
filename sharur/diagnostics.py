@@ -64,6 +64,7 @@ TOOLS: tuple[ToolSpec, ...] = (
     ToolSpec("gecco", ("gecco",), ("--version",), False, "BGC detection"),
     ToolSpec("run_dbcan", ("run_dbcan",), ("--version",), False, "CAZyme annotation"),
     ToolSpec("foldseek", ("foldseek",), ("version",), False, "structural homology search"),
+    ToolSpec("coverm", ("coverm",), ("--version",), False, "per-sample read coverage (stage 08)"),
     ToolSpec(
         "defense-finder",
         ("defense-finder", "defense_finder"),

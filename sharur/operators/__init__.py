@@ -1261,6 +1261,31 @@ class Sharur:
         return search_architecture(self.store, pattern, sources=sources, bins=bins, limit=limit,
                                    max_overlap=max_overlap)
 
+    def _abundance_sidecar(self):
+        from sharur.abundance import default_path
+
+        return default_path(self.store.db_path)
+
+    def abundance(self, samples: list[str] | None = None, bins: list[str] | None = None) -> list[dict]:
+        """Genome abundance per sample from the abundance sidecar (``sharur import-coverage``)."""
+        from sharur.abundance import genome_abundance
+
+        return genome_abundance(self._abundance_sidecar(), sample_ids=samples, bins=bins)
+
+    def feature_abundance(self, predicate: str | None = None, annotation: str | None = None,
+                          samples: list[str] | None = None) -> dict:
+        """Share of each sample's mapped reads in genomes carrying a predicate or annotation."""
+        from sharur.abundance import feature_abundance
+
+        return feature_abundance(self.store, self._abundance_sidecar(), predicate=predicate,
+                                 annotation=annotation, sample_ids=samples)
+
+    def coverage_outliers(self, bin_id: str, min_log2: float = 1.0) -> dict:
+        """Contigs whose depth departs from their genome's median contig depth."""
+        from sharur.abundance import coverage_outliers
+
+        return coverage_outliers(self._abundance_sidecar(), bin_id, min_log2=min_log2)
+
     def architecture(self, protein_id: str, sources: tuple[str, ...] = ("pfam",)) -> list[dict]:
         """One protein's overlap-resolved domains, N- to C-terminal."""
         from sharur.architecture import architecture

@@ -1305,6 +1305,94 @@ def architecture_search(
                else architecture_markdown(result))
 
 
+@app.command(name="import-coverage")
+def import_coverage_command(
+    paths: list[Path] = typer.Argument(..., exists=True, dir_okay=False, help="CoverM contig table(s) or long TSV/CSV."),
+    db: Path = typer.Option(Path(DEFAULT_DB), "--db", "-d", help="Core DuckDB (validation and sidecar location)."),
+    fmt: str = typer.Option("coverm", "--format", help="coverm (contig table) or long (sample_id, contig_id, ...)."),
+    samples_file: Path | None = typer.Option(None, "--samples", help="TSV/CSV with sample_id and metadata columns."),
+    sidecar: Path | None = typer.Option(None, "--sidecar", help="Default: abundance.duckdb beside --db."),
+    allow_unknown: bool = typer.Option(False, "--allow-unknown-contigs",
+                                       help="Keep matching rows when some contigs are absent from the dataset."),
+):
+    """Import per-sample contig coverage into the abundance sidecar (the core database is unchanged)."""
+    from sharur.abundance import default_path, import_coverage
+    from sharur.storage.duckdb_store import DuckDBStore
+
+    if fmt not in ("coverm", "long"):
+        typer.echo("--format must be coverm or long", err=True)
+        raise typer.Exit(1)
+    target = sidecar or default_path(db)
+    try:
+        with DuckDBStore(str(db), read_only=True) as store:
+            result = import_coverage(store, target, list(paths), fmt=fmt, sample_metadata=samples_file,
+                                     allow_unknown_contigs=allow_unknown)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"Imported {result['rows']:,} contig rows for {len(result['samples'])} samples into {target}"
+               + (f" ({result['unknown_contigs']:,} unknown contigs skipped)" if result["unknown_contigs"] else ""))
+
+
+@app.command(name="abundance")
+def abundance_command(
+    db: Path = typer.Option(Path(DEFAULT_DB), "--db", "-d", help="Core DuckDB."),
+    sample: list[str] = typer.Option([], "--sample", help="Sample(s); repeatable (default: all)."),
+    bins: list[str] = typer.Option([], "--bin", "-b", help="Genome(s); repeatable."),
+    predicate: str | None = typer.Option(None, "--predicate", "-p",
+                                         help="Share of reads in genomes carrying this predicate."),
+    annotation: str | None = typer.Option(None, "--annotation", "-a",
+                                          help="Share of reads in genomes carrying this accession or name."),
+    top: int = typer.Option(10, "--top", "-n", help="Genomes shown per sample (markdown)."),
+    sidecar: Path | None = typer.Option(None, "--sidecar", help="Default: abundance.duckdb beside --db."),
+    output_format: BriefFormat = typer.Option(BriefFormat.markdown, "--format", "-f", help="markdown or json"),
+):
+    """Genome abundance per sample, or the share of reads in genomes carrying a feature."""
+    from sharur.abundance import (
+        default_path,
+        feature_abundance,
+        feature_abundance_markdown,
+        genome_abundance,
+        genome_abundance_markdown,
+    )
+    from sharur.storage.duckdb_store import DuckDBStore
+
+    target = sidecar or default_path(db)
+    try:
+        if predicate or annotation:
+            with DuckDBStore(str(db), read_only=True) as store:
+                result = feature_abundance(store, target, predicate=predicate, annotation=annotation,
+                                           sample_ids=sample or None)
+            text = feature_abundance_markdown(result)
+        else:
+            result = genome_abundance(target, sample_ids=sample or None, bins=bins or None)
+            text = genome_abundance_markdown(result, top=top)
+    except (FileNotFoundError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(json.dumps(result, indent=2, default=str) if output_format == BriefFormat.json else text)
+
+
+@app.command(name="coverage-outliers")
+def coverage_outliers_command(
+    bin_id: str = typer.Argument(..., help="Genome (bin) ID."),
+    db: Path = typer.Option(Path(DEFAULT_DB), "--db", "-d", help="Core DuckDB."),
+    min_log2: float = typer.Option(1.0, "--min-log2", help="Minimum |log2(contig depth / genome median)|."),
+    sidecar: Path | None = typer.Option(None, "--sidecar", help="Default: abundance.duckdb beside --db."),
+    output_format: BriefFormat = typer.Option(BriefFormat.markdown, "--format", "-f", help="markdown or json"),
+):
+    """Contigs whose depth departs from their genome's median in most samples (possible binning errors)."""
+    from sharur.abundance import coverage_outliers, coverage_outliers_markdown, default_path
+
+    try:
+        result = coverage_outliers(sidecar or default_path(db), bin_id, min_log2=min_log2)
+    except FileNotFoundError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(json.dumps(result, indent=2, default=str) if output_format == BriefFormat.json
+               else coverage_outliers_markdown(result))
+
+
 @app.command(name="describe")
 def describe(
     db: str = typer.Option(DEFAULT_DB, "--db", "-d", help="Path to DuckDB database"),

@@ -40,6 +40,9 @@ $ sharur [OPTIONS] COMMAND [ARGS]...
 * `build-vector-index`: Build mmap-ready FAISS sidecars and a...
 * `doctor`: Verify external tools, reference...
 * `architecture`: Find proteins whose ordered domains match...
+* `import-coverage`: Import per-sample contig coverage into the...
+* `abundance`: Genome abundance per sample, or the share...
+* `coverage-outliers`: Contigs whose depth departs from their...
 * `describe`: What a dataset holds: annotation sources,...
 * `card`: Summarize one protein: context,...
 * `why`: Explain why a protein carries a predicate:...
@@ -522,6 +525,73 @@ $ sharur architecture [OPTIONS] PATTERN
 * `-f, --format [markdown|json]`: markdown or json  [default: markdown]
 * `--help`: Show this message and exit.
 
+### `sharur import-coverage`
+
+Import per-sample contig coverage into the abundance sidecar (the core database is unchanged).
+
+**Usage**:
+
+```console
+$ sharur import-coverage [OPTIONS] PATHS...
+```
+
+**Arguments**:
+
+* `PATHS...`: CoverM contig table(s) or long TSV/CSV.  [required]
+
+**Options**:
+
+* `-d, --db PATH`: Core DuckDB (validation and sidecar location).  [default: data/sharur.duckdb]
+* `--format TEXT`: coverm (contig table) or long (sample_id, contig_id, ...).  [default: coverm]
+* `--samples PATH`: TSV/CSV with sample_id and metadata columns.
+* `--sidecar PATH`: Default: abundance.duckdb beside --db.
+* `--allow-unknown-contigs`: Keep matching rows when some contigs are absent from the dataset.
+* `--help`: Show this message and exit.
+
+### `sharur abundance`
+
+Genome abundance per sample, or the share of reads in genomes carrying a feature.
+
+**Usage**:
+
+```console
+$ sharur abundance [OPTIONS]
+```
+
+**Options**:
+
+* `-d, --db PATH`: Core DuckDB.  [default: data/sharur.duckdb]
+* `--sample TEXT`: Sample(s); repeatable (default: all).
+* `-b, --bin TEXT`: Genome(s); repeatable.
+* `-p, --predicate TEXT`: Share of reads in genomes carrying this predicate.
+* `-a, --annotation TEXT`: Share of reads in genomes carrying this accession or name.
+* `-n, --top INTEGER`: Genomes shown per sample (markdown).  [default: 10]
+* `--sidecar PATH`: Default: abundance.duckdb beside --db.
+* `-f, --format [markdown|json]`: markdown or json  [default: markdown]
+* `--help`: Show this message and exit.
+
+### `sharur coverage-outliers`
+
+Contigs whose depth departs from their genome's median in most samples (possible binning errors).
+
+**Usage**:
+
+```console
+$ sharur coverage-outliers [OPTIONS] BIN_ID
+```
+
+**Arguments**:
+
+* `BIN_ID`: Genome (bin) ID.  [required]
+
+**Options**:
+
+* `-d, --db PATH`: Core DuckDB.  [default: data/sharur.duckdb]
+* `--min-log2 FLOAT`: Minimum |log2(contig depth / genome median)|.  [default: 1.0]
+* `--sidecar PATH`: Default: abundance.duckdb beside --db.
+* `-f, --format [markdown|json]`: markdown or json  [default: markdown]
+* `--help`: Show this message and exit.
+
 ### `sharur describe`
 
 What a dataset holds: annotation sources, curated callers, genome metadata, predicate state.
@@ -657,6 +727,7 @@ $ sharur-ingest [OPTIONS]
 * `--pipeline-depth INTEGER RANGE`: Maximum ordered V2 transform chunks in flight during Stage 07  [default: 2; x>=1]
 * `--skip-crispr / --no-skip-crispr`: Skip standard Stage 05c (CRISPR arrays via minced_crispr.py)  [default: no-skip-crispr]
 * `--skip-embeddings / --no-skip-embeddings`: Skip Stage 06 post-build embeddings (06_esm2_embeddings.py)  [default: no-skip-embeddings]
+* `--reads PATH`: TSV of sample_id, read1[, read2 | interleaved]: adds optional Stage 08 per-sample coverage with CoverM (abundance.duckdb sidecar)
 * `--embedding-model TEXT`: Hugging Face protein encoder for Stage 06 (default: facebook/esm2_t6_8M_UR50D)
 * `--profile TEXT`: Execution profile: auto, local (CPU), mps, or slurm  [default: auto]
 * `--resume / --no-resume`: Reuse only ledger-verified stages with matching signatures and outputs  [default: resume]

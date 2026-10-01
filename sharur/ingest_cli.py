@@ -111,6 +111,7 @@ def _build_tools_dag(
     skip_crispr: bool,
     skip_embeddings: bool,
     embedding_model: str | None = None,
+    reads: Path | None = None,
     enable_cazymes: bool,
     pipeline_depth: int = 2,
 ) -> IngestDAG:
@@ -362,6 +363,28 @@ def _build_tools_dag(
             ],
             dependencies=("06",),
             outputs=(stages.stage06 / "protein_embeddings.index.json",),
+        )
+
+    if reads is not None:
+        request = profile.request("08")
+        add(
+            "08",
+            "Read coverage (CoverM)",
+            [
+                str(stage_dir / "08_coverage.py"),
+                "--data-dir",
+                str(data_dir),
+                "--db",
+                str(output),
+                "--reads",
+                str(reads),
+                "--threads",
+                str(request.cpus),
+                "--force",
+            ],
+            dependencies=("07",),
+            outputs=(data_dir / "stage08_coverage" / "processing_manifest.json",),
+            inputs=(reads,),
         )
 
     dag = IngestDAG(nodes)
@@ -709,6 +732,14 @@ def run(
         bool,
         typer.Option(help="Skip Stage 06 post-build embeddings (06_esm2_embeddings.py)"),
     ] = False,
+    reads: Annotated[
+        Path | None,
+        typer.Option(
+            "--reads",
+            help="TSV of sample_id, read1[, read2 | interleaved]: adds optional Stage 08 "
+                 "per-sample coverage with CoverM (abundance.duckdb sidecar)",
+        ),
+    ] = None,
     embedding_model: Annotated[
         str | None,
         typer.Option(
@@ -832,6 +863,7 @@ def run(
             skip_crispr=skip_crispr,
             skip_embeddings=skip_embeddings,
             embedding_model=embedding_model,
+            reads=reads,
             enable_cazymes=enable_cazymes,
             pipeline_depth=pipeline_depth,
         )

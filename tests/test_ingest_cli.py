@@ -127,3 +127,20 @@ def test_embedding_model_reaches_stage06(tmp_path):
         command for command in plan or [] if command[0].endswith("06_esm2_embeddings.py")
     )
     assert stage06[stage06.index("--model") + 1] == "facebook/esm2_t33_650M_UR50D"
+
+
+def test_reads_add_coverage_stage_after_the_build(tmp_path):
+    reads = tmp_path / "reads.tsv"
+    reads.write_text("sample_id\tread1\n")
+    plan = ingest.run(
+        input_dir=Path("dummy_dataset"),
+        data_dir=tmp_path / "dataset",
+        output=tmp_path / "dataset" / "sharur.duckdb",
+        mode="tools",
+        reads=reads,
+        dry_run=True,
+    )
+    names = [command[0].rsplit("/", 1)[-1] for command in plan or []]
+    assert names.index("08_coverage.py") > names.index("07_build_knowledge_base.py")
+    stage08 = next(command for command in plan if command[0].endswith("08_coverage.py"))
+    assert stage08[stage08.index("--reads") + 1] == str(reads)

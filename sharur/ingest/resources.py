@@ -64,6 +64,7 @@ _STAGES = (
     "07",
     "06",
     "06i",
+    "08",
 )
 
 
@@ -129,6 +130,7 @@ def _local_profile(*, mps: bool = False) -> ResourceProfile:
                 memory_gb=48,
                 walltime="24:00:00",
             ),
+            "08": ResourceRequest(workers, 32, "48:00:00"),
         }
     )
     return ResourceProfile(
@@ -168,6 +170,7 @@ def _slurm_profile() -> ResourceProfile:
             "24:00:00",
             executor="slurm",
         ),
+        "08": ResourceRequest(16, 64, "48:00:00", executor="slurm"),
     }
     return ResourceProfile(
         name="slurm",

@@ -106,6 +106,7 @@ Operator results expose `result.records`, `result.raw`, `result.status`, and `re
 
 - **Embeddings and similarity**: protein embeddings plus FAISS indexes for similarity search (`embeddings`, `vectors` extras). Similarity search works with any model's per-protein vectors: `sharur-ingest --embedding-model` selects any Hugging Face protein encoder (ESM-2 8M by default), and embeddings computed elsewhere load directly, as an HDF5 file with `protein_ids` and `embeddings` datasets indexed by `sharur build-vector-index --embeddings FILE`.
 - **Synteny**: ELSA embedding-based conserved gene blocks, exposed through a run-scoped `synteny.duckdb` sidecar.
+- **Abundance**: per-sample read coverage (CoverM, `sharur-ingest --reads` or `sharur import-coverage`) for genome and function abundance across samples, in an `abundance.duckdb` sidecar.
 - **Structure**: ESM3 structure prediction and Foldseek remote homology (`structure` extra).
 - **Campaign scale**: `sharur-ops`, `sharur-query`, `sharur-atlas`, `sharur-review` (below).
 - **Reports and figures**: PDF reports and publication-quality neighborhood and domain figures.

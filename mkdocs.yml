@@ -67,6 +67,7 @@ nav:
   - Guides:
       - Interpreting annotations: biological_interpretation.md
       - Domain-architecture search: guides/architecture-search.md
+      - Abundance across samples: guides/abundance.md
       - Cases and context comparison: cases_and_evidence.md
       - Structured findings: findings_spec.md
       - Tools (Astra, ELSA, ESM3, Foldseek): tools_reference.md
