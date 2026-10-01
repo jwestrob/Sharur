@@ -99,8 +99,12 @@ def render_stack(rows: list[dict[str, Any]], *, member_label: str = "system gene
     """One SVG per row on a shared bp scale; returns markup and the family legend."""
     if not rows:
         return Markup(""), []
-    lo = min(g["x1"] for r in rows for g in r["genes"])
-    hi = max(g["x2"] for r in rows for g in r["genes"])
+    # a few very long loci (giant proteins, wide flanks) would squeeze every other row: take the shared
+    # window from the 10th-90th percentile of row extents and clip what falls outside
+    lefts = sorted(min(g["x1"] for g in r["genes"]) for r in rows)
+    rights = sorted(max(g["x2"] for g in r["genes"]) for r in rows)
+    k = len(rows) // 10
+    lo, hi = min(lefts[k], 0), max(rights[len(rows) - 1 - k], 1)
     span = max(1, hi - lo)
     pad = 14
     scale = (WIDTH - 2 * pad) / span
@@ -109,14 +113,20 @@ def render_stack(rows: list[dict[str, Any]], *, member_label: str = "system gene
     out = []
     for r in rows:
         parts = [f'<line x1="0" y1="22" x2="{WIDTH}" y2="22" class="backbone-line"/>']
-        if r["left_edge"]:
+        if r["left_edge"] and min(g["x1"] for g in r["genes"]) >= lo:
             x = pad + (min(g["x1"] for g in r["genes"]) - lo) * scale - 6
             parts.append(f'<line x1="{x:.1f}" y1="6" x2="{x:.1f}" y2="38" class="contig-end"/>')
-        if r["right_edge"]:
+        if r["right_edge"] and max(g["x2"] for g in r["genes"]) <= hi:
             x = pad + (max(g["x2"] for g in r["genes"]) - lo) * scale + 6
             parts.append(f'<line x1="{x:.1f}" y1="6" x2="{x:.1f}" y2="38" class="contig-end"/>')
+        if min(g["x1"] for g in r["genes"]) < lo:
+            parts.append(f'<text x="2" y="26" class="axis">…</text>')
+        if max(g["x2"] for g in r["genes"]) > hi:
+            parts.append(f'<text x="{WIDTH - 10}" y="26" class="axis">…</text>')
         for g in r["genes"]:
-            x1, x2 = pad + (g["x1"] - lo) * scale, pad + (g["x2"] - lo) * scale
+            if g["x2"] < lo or g["x1"] > hi:
+                continue
+            x1, x2 = pad + (max(g["x1"], lo) - lo) * scale, pad + (min(g["x2"], hi) - lo) * scale
             head = min(8.0, (x2 - x1) * 0.45)
             y, h = 22, 11 if (g["member"] or g["anchor"]) else 8
             if g["strand"] == "-":
