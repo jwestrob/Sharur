@@ -284,6 +284,10 @@ FEEDS = {
              "The longest proteins with no hit in any annotation source."),
     "repeats": ("Longest domain repeats",
                 "Proteins with the longest uninterrupted runs of one Pfam domain; the run is outlined."),
+    "synteny": ("Shared gene order across distant lineages",
+                "Syntenic clusters carried by ten genomes or fewer in different classes or phyla, with at least four "
+                "genes per locus. The arrangement is observed; whether it moved between lineages or was lost "
+                "elsewhere is a hypothesis."),
     "systems": ("Rare systems",
                 "Curated system types called in three genomes or fewer."),
 }

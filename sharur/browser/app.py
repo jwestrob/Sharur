@@ -29,6 +29,7 @@ from sharur.browser import (
     routes_matrix,
     routes_search,
     routes_tree,
+    routes_synteny,
     routes_systems,
 )
 from sharur.browser.routes_insight import register as register_insight
@@ -178,6 +179,7 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
     routes_crispr.register(app, ctx, [Path(p) for p in assemblies or []])
     routes_cctyper.register(app, ctx)
     routes_api.register(app, ctx)
+    routes_synteny.register(app, ctx, templates)
 
     @app.middleware("http")
     async def require_token(request: Request, call_next):
@@ -637,10 +639,15 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
                           missing=catalog.ready.is_set())
         return None
 
+    def synteny_rows() -> list[dict[str, Any]] | None:
+        rows = getattr(ctx, "synteny_patchy", None)
+        return rows() if rows else None
+
     @app.get("/discover", response_class=HTMLResponse)
     def discover(request: Request):
         return feeds_or_pending(request) or render(request, "discover.html", "discover", f=catalog.notable,
-                                                   rare=rare_systems(), feeds=discover_feeds.FEEDS)
+                                                   rare=rare_systems(), feeds=discover_feeds.FEEDS,
+                                                   synteny=synteny_rows())
 
     @app.get("/discover/random")
     def discover_random():
@@ -655,12 +662,13 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
 
     @app.get("/discover/{feed}", response_class=HTMLResponse)
     def discover_feed(request: Request, feed: str):
-        if feed not in discover_feeds.FEEDS:
+        if feed not in discover_feeds.FEEDS or (feed == "synteny" and not hasattr(ctx, "synteny")):
             raise HTTPException(404, "Unknown list")
         pending = feeds_or_pending(request)
         if pending:
             return pending
-        rows = rare_systems() if feed == "systems" else catalog.notable.get(feed, [])
+        rows = rare_systems() if feed == "systems" else (synteny_rows() or []) if feed == "synteny" \
+            else catalog.notable.get(feed, [])
         title, why = discover_feeds.FEEDS[feed]
         return render(request, "discover_feed.html", "discover", feed=feed, rows=rows, f=catalog.notable,
                       title=title, why=why)

@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% from "_synteny.html" import cluster_link, spread_text, spread_chips, lineage_row %}
+{% block title %}Synteny{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="/discover">Discover</a></div>
+<h1>Synteny</h1>
+<p class="lede">Clusters of loci that keep the same gene order across genomes. Open a cluster to see its loci side by side; protein pages list the clusters each protein belongs to.</p>
+{% if run.stale %}<div class="banner">These clusters were built on an earlier version of this dataset; {{ pct(run.resolved) }} of sampled genes match its current proteins.</div>{% endif %}
+
+<div class="stats">
+  <div class="stat"><b>{{ num(summary.clusters if summary else run.cluster_count) }}</b><span>clusters</span></div>
+  <div class="stat"><b>{{ num(summary.pairs if summary else run.singleton_count) }}</b><span>single-block pairs</span></div>
+  <div class="stat"><b>{{ num(run.locus_count) }}</b><span>loci</span></div>
+  <div class="stat"><b>{{ num(run.member_count) }}</b><span>genes in clusters · of {{ num(run.gene_count) }}</span></div>
+</div>
+
+<div class="panel">
+  <h2>Find</h2>
+  <form class="table-tools" action="/synteny" method="get"><input name="q" value="{{ q }}" style="flex:1" placeholder="Protein or genome ID" aria-label="Protein or genome ID"><button>Search</button></form>
+  {% if q and genome_hits is none %}<p class="empty">No protein or genome named {{ q }}.</p>{% endif %}
+  {% if genome_hits is not none %}
+    <p class="count">{{ num(genome_hits|length) }} clusters with a locus in <a href="{{ url('genome', q) }}">{{ q }}</a>{{ ' (first 200)' if genome_hits|length >= 200 }}</p>
+    <div class="scroll"><table id="syn-genome" data-table><thead><tr><th data-sort="text">Cluster</th><th data-sort="num" class="num">Genomes</th><th data-sort="num" class="num">Loci</th><th data-sort="num" class="num">Blocks</th></tr></thead>
+    <tbody>{% for c in genome_hits %}<tr><td>{{ cluster_link(c) }}</td><td class="num">{{ num(c.genomes) }}</td><td class="num">{{ num(c.loci) }}</td><td class="num">{{ num(c.blocks) }}</td></tr>{% endfor %}</tbody></table></div>
+  {% endif %}
+</div>
+
+{% if summary %}
+{% set lineage_head %}<thead><tr><th data-sort="text">Cluster</th><th data-sort="num" class="num">Genomes</th><th data-sort="num" class="num" title="Median genes per locus">Genes</th><th data-sort="num" class="num">Phyla</th><th data-sort="num" class="num">Classes</th><th>Where</th></tr></thead>{% endset %}
+<div class="panel" id="patchy">
+  <h2>Few genomes, distant lineages <span class="hint">{{ num(summary.patchy_total) }} clusters</span></h2>
+  <p class="feed-why">Gene order shared by {{ patchy_max }} genomes or fewer that sit in different classes or phyla, with at least {{ patchy_genes }} genes per locus: candidates for transfer between lineages, or for losses everywhere else. The arrangement is observed; its history is a hypothesis.</p>
+  <div class="scroll"><table id="syn-patchy" data-table>{{ lineage_head }}<tbody>{% for r in summary.patchy %}{{ lineage_row(r) }}{% endfor %}</tbody></table></div>
+</div>
+<div class="panel" id="widespread">
+  <h2>Widespread across lineages <span class="hint">{{ num(summary.lineage_total) }} clusters span two or more classes</span></h2>
+  <p class="feed-why">Gene order kept across the most phyla and classes.</p>
+  <div class="scroll"><table id="syn-widespread" data-table>{{ lineage_head }}<tbody>{% for r in summary.widespread %}{{ lineage_row(r) }}{% endfor %}</tbody></table></div>
+</div>
+<div class="panel" id="largest">
+  <h2>Largest clusters <span class="hint">by genomes</span></h2>
+  <div class="scroll"><table id="syn-largest" data-table><thead><tr><th data-sort="text">Cluster</th><th data-sort="num" class="num">Genomes</th><th data-sort="num" class="num">Loci</th><th data-sort="num" class="num">Blocks</th><th>Where</th></tr></thead>
+  <tbody>{% for r in summary.largest %}<tr><td>{{ cluster_link(r) }}</td><td class="num">{{ num(r.genomes) }}</td><td class="num">{{ num(r.loci) }}</td><td class="num">{{ num(r.blocks) }}</td><td class="count">{{ spread_text(r.spread) if r.spread else '' }}</td></tr>{% endfor %}</tbody></table></div>
+</div>
+{% elif summary_error %}<div class="panel"><p class="empty">Summaries failed: {{ summary_error }}</p></div>
+{% else %}<div class="panel"><p class="empty">Preparing cluster summaries; reload in a moment.</p></div>{% endif %}
+
+<div class="panel">
+  <details><summary>Run</summary>
+  <dl class="kv" style="margin-top:10px">
+    <dt>Label</dt><dd>{{ run.run_label }}</dd>
+    <dt>Created</dt><dd>{{ run.created_at }}</dd>
+    {% if run.version %}<dt>Version</dt><dd>{{ run.version }}</dd>{% endif %}
+    <dt>Status</dt><dd>{{ run.status }}</dd>
+  </dl>
+  {% if run.parameters %}<div class="scroll" style="margin-top:10px"><table><thead><tr><th>Parameter</th><th>Value</th></tr></thead><tbody>{% for k, v in run.parameters %}<tr><td class="mono">{{ k }}</td><td class="mono">{{ v }}</td></tr>{% endfor %}</tbody></table></div>{% endif %}
+  </details>
+</div>
+{% endblock %}

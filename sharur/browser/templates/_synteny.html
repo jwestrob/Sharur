@@ -1,0 +1,21 @@
+{# Shared pieces for synteny pages. #}
+{% macro cluster_link(c) -%}
+<a href="{{ url('synteny', 'cluster', c.source_cluster_id|string) }}" title="{{ c.cluster_key }}">{{ 'Cluster' if c.kind in (none, 'cluster') else 'Pair' }} {{ c.source_cluster_id }}</a>
+{%- endmacro %}
+
+{% macro spread_text(s) -%}
+{% if s %}{% if s.lca %}within {{ s.lca[0] }} <a href="{{ url('taxa', s.lca[0], s.lca[1]) }}">{{ s.lca[1] }}</a>{% else %}across domains{% endif %}{% if s.rank %} · {{ s.distinct[s.rank] }} {{ s.rank }}{{ ' groups' if s.distinct[s.rank] != 1 }}{% endif %}{% endif %}
+{%- endmacro %}
+
+{% macro spread_chips(s, limit=4) -%}
+{% if s and s.clades %}{% for name, n in s.clades[:limit] %}<span class="chip syn-chip" title="{{ s.rank }}"><i style="--dot:{{ charts.color_for(name) }}"></i>{{ name }} <span class="count">{{ n }}</span></span>{% endfor %}{% if s.clades|length > limit %}<span class="count">+{{ s.clades|length - limit }}</span>{% endif %}{% endif %}
+{%- endmacro %}
+
+{% macro lineage_row(r) -%}
+<tr><td>{{ cluster_link(r) }}</td>
+<td class="num" data-v="{{ r.genomes }}">{{ num(r.genomes) }}</td>
+<td class="num" data-v="{{ r.median_genes or 0 }}">{{ '%g' % r.median_genes if r.median_genes is not none else '–' }}</td>
+<td class="num" data-v="{{ r.phyla or 0 }}">{{ r.phyla if r.phyla is not none else '–' }}</td>
+<td class="num" data-v="{{ r.classes or 0 }}">{{ r.classes if r.classes is not none else '–' }}</td>
+<td class="syn-spread">{{ spread_chips(r.spread) }}</td></tr>
+{%- endmacro %}

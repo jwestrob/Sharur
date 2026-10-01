@@ -723,3 +723,6 @@ svg.tree-fig.t-rect { max-width: none; }
 .tree-shares { display: grid; gap: 7px; margin-top: 10px; }
 .tree-share { display: grid; grid-template-columns: minmax(0, 1fr) 70px auto; gap: 8px; align-items: center; font-size: 12.5px; }
 .tree-share-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* ---- synteny ---------------------------------------------------------------- */
+.syn-spread .chip, .syn-chip { margin: 1px 4px 1px 0; }
+.syn-table td { vertical-align: middle; }
