@@ -1,0 +1,64 @@
+{# Gene order between two genomes (both sides genomes). Needs a, b. #}
+{% set go = gene_order(a, b) if a and b and a.is_genome and b.is_genome else none %}
+{% if go %}
+<div class="panel go-panel" id="gene-order">
+  <h2>Gene order <span class="hint">genes matched by shared KEGG ortholog, else identical Pfam architecture · unannotated genes are not compared</span></h2>
+  <div class="stats go-stats">
+    <div class="stat"><b>{{ num(go.shared) }}</b><span>shared families{% if go.skipped_families %} · {{ go.skipped_families }} large ones left out{% endif %}</span></div>
+    <div class="stat"><b>{{ num(go.unique_pairs) }}</b><span>single-copy matches</span></div>
+    <div class="stat"><b>{{ num(go.blocks|length) }}</b><span>collinear blocks of ≥ 3 genes</span></div>
+    <div class="stat"><b>{{ num(go.longest) }}</b><span>genes in the longest block</span></div>
+    <div class="stat"><b>{{ pct(go.share_a) }}</b><span>of {{ a.label }}'s placed genes in blocks</span></div>
+  </div>
+  <div class="go-grid">
+    <div class="go-plot">{{ go.plot }}</div>
+    <div class="go-side">
+      <div class="legend"><span><i class="go-key same"></i>same strand</span><span><i class="go-key flip"></i>opposite strand</span><span><i class="go-key multi"></i>multi-copy family</span><span><i class="go-key block"></i>collinear block</span></div>
+      <p class="note">Each dot pairs a gene of {{ a.label }} (across) with one of {{ b.label }} (down). Contigs run longest first; conserved gene order shows as diagonal runs, inversions as runs sloping the other way.</p>
+      <div class="go-pick" hidden><b>Selected pair</b><div class="go-pick-body"></div></div>
+      <p class="count">Click a dot to see its pair.</p>
+    </div>
+  </div>
+</div>
+{% if go.ribbons %}
+<div class="panel" id="collinear-blocks">
+  <h2>Largest collinear blocks <span class="hint">{{ a.label }} above, {{ b.label }} below · matched genes share a colour</span></h2>
+  {% for r in go.ribbons %}{% set blk = r.block %}
+  <div class="go-ribbon">
+    <div class="go-ribbon-head"><b>{{ blk.size }} genes</b>{% if blk.reverse %} <span class="tag">inverted</span>{% endif %}
+      <a class="mono" href="{{ r.link_a }}" title="{{ blk.contig_a }}">{{ short(blk.contig_a) }}</a> ↔ <a class="mono" href="{{ r.link_b }}" title="{{ blk.contig_b }}">{{ short(blk.contig_b) }}</a></div>
+    {{ r.svg }}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+<script>
+(function () {
+  const panel = document.getElementById("gene-order");
+  if (!panel) return;
+  const box = panel.querySelector(".go-pick"), body = panel.querySelector(".go-pick-body");
+  const labels = {{ [a.label, b.label]|tojson }};
+  panel.querySelector("svg.dotplot").addEventListener("click", (e) => {
+    const dot = e.target.closest("circle.dp-dot");
+    if (!dot) return;
+    panel.querySelectorAll("circle.dp-dot.on").forEach((d) => d.classList.remove("on"));
+    dot.classList.add("on");
+    body.innerHTML = "";
+    [[labels[0], dot.dataset.a], [labels[1], dot.dataset.b]].forEach(([label, pid]) => {
+      const row = document.createElement("div");
+      const link = document.createElement("a");
+      link.href = "/protein/" + encodeURIComponent(pid);
+      link.className = "mono";
+      link.textContent = pid;
+      row.append(label + ": ", link);
+      body.append(row);
+    });
+    const fam = document.createElement("div");
+    fam.className = "count";
+    fam.textContent = dot.dataset.f;
+    body.append(fam);
+    box.hidden = false;
+  });
+})();
+</script>
+{% endif %}

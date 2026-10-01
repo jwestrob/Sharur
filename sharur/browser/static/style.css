@@ -807,3 +807,32 @@ svg.tree-fig.t-rect { max-width: none; }
 .land-status[hidden], .land-selection[hidden], .land-tip[hidden] { display: none; }
 .nb-table { width: 100%; }
 .nb-lede { margin: 0 0 8px; }
+
+/* ---------- gene order between two genomes ---------- */
+.go-stats { margin: 6px 0 14px; }
+.go-grid { display: grid; grid-template-columns: minmax(0, 640px) minmax(0, 1fr); gap: 22px; align-items: start; }
+@media (max-width: 960px) { .go-grid { grid-template-columns: minmax(0, 1fr); } }
+svg.dotplot { width: 100%; height: auto; max-width: 640px; }
+.dp-frame { fill: var(--surface-2); stroke: var(--line-2); }
+.dp-grid { stroke: var(--line-2); stroke-width: .6; }
+.dp-band { fill: var(--surface-3); opacity: .5; }
+.dp-block { fill: none; stroke: var(--accent); stroke-width: 1.4; opacity: .55; }
+.dp-dot { cursor: pointer; }
+.dp-dot.same { fill: var(--accent); }
+.dp-dot.flip { fill: var(--warn); }
+.dp-dot.multi { opacity: .45; }
+.dp-dot.on { stroke: var(--ink); stroke-width: 1.5; }
+.dp-axis { font-size: 11px; fill: var(--ink-3); }
+.go-key { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
+.go-key.same { background: var(--accent); }
+.go-key.flip { background: var(--warn); }
+.go-key.multi { background: var(--ink-3); opacity: .5; }
+.go-key.block { border-radius: 2px; height: 3px; background: var(--accent); }
+.go-pick { margin: 12px 0; padding: 10px 12px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--surface-2); }
+.go-ribbon + .go-ribbon { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 10px; }
+.go-ribbon-head { display: flex; gap: 10px; align-items: center; font-size: 13px; margin-bottom: 4px; flex-wrap: wrap; }
+svg.ribbon { width: 100%; height: auto; display: block; }
+.rb-link { opacity: .28; }
+.rb-gene { fill: var(--gene); stroke: var(--surface); stroke-width: .6; }
+.rb-gene.on { stroke: var(--ink-3); }
+/* ---------- end gene order ---------- */
