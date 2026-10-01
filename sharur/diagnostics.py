@@ -238,6 +238,18 @@ def check_kegg_map() -> Check:
     return Check("KEGG predicate map", OK, detail, False, purpose)
 
 
+def check_duckdb() -> Check:
+    """The installed DuckDB is not a release known to return wrong query results."""
+    import duckdb
+
+    from sharur.storage.duckdb_store import duckdb_version_problem
+
+    problem = duckdb_version_problem()
+    if problem:
+        return Check("duckdb", MISSING, problem, True, "query engine")
+    return Check("duckdb", OK, duckdb.__version__, True, "query engine")
+
+
 def check_api_keys() -> list[Check]:
     if os.environ.get("ESM_API_KEY"):
         detail, status = "set", OK
@@ -248,7 +260,7 @@ def check_api_keys() -> list[Check]:
 
 def run_all_checks() -> list[Check]:
     """Run every diagnostic and return the flat list of results."""
-    results: list[Check] = [check_ingest_entrypoint()]
+    results: list[Check] = [check_ingest_entrypoint(), check_duckdb()]
     results.extend(check_tool(spec) for spec in TOOLS)
     results.extend(check_reference_dbs())
     results.append(check_kegg_map())

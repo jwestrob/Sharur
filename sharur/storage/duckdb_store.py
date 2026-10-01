@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -16,6 +17,32 @@ from .schema import SCHEMA
 
 if TYPE_CHECKING:
     import pandas as pd
+
+
+# DuckDB releases known to return wrong results for queries Sharur users run.
+# 1.2.1: with more than one thread, an ordered window (ROW_NUMBER, running SUM/COUNT)
+# combined with an unordered SUM/MAX over the same PARTITION BY returns NULL or
+# wrong values for a nondeterministic subset of rows (fixed in 1.2.2).
+KNOWN_BAD_DUCKDB = {
+    "1.2.1": "multithreaded window queries mixing ordered and whole-partition aggregates "
+             "return NULL/wrong values (fixed in 1.2.2)",
+}
+_warned_bad_duckdb = False
+
+
+def duckdb_version_problem(version: str | None = None) -> str | None:
+    """Why the installed DuckDB is unsafe for Sharur, or None when it is fine."""
+    version = version or duckdb.__version__
+    problem = KNOWN_BAD_DUCKDB.get(version)
+    return f"DuckDB {version}: {problem}; upgrade with `pip install -U duckdb`" if problem else None
+
+
+def _warn_if_bad_duckdb() -> None:
+    global _warned_bad_duckdb
+    problem = duckdb_version_problem()
+    if problem and not _warned_bad_duckdb:
+        _warned_bad_duckdb = True
+        warnings.warn(problem, RuntimeWarning, stacklevel=3)
 
 
 class DuckDBStore:
@@ -69,6 +96,7 @@ class DuckDBStore:
     def conn(self) -> duckdb.DuckDBPyConnection:
         """Lazy connection initialization."""
         if self._conn is None:
+            _warn_if_bad_duckdb()
             if self.db_path:
                 self._conn = duckdb.connect(
                     str(self.db_path),
