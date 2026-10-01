@@ -57,6 +57,14 @@ b.search_architecture("TPR_* {10,}")          # ordered-domain patterns
 
 [Domain-architecture search](../guides/architecture-search.md) covers the pattern language.
 
+## In a web browser
+
+```bash
+sharur browse --db data/my_dataset/sharur.duckdb
+```
+
+The same cards, neighborhoods and evidence as linked pages; see [Browsing a dataset](../guides/browser.md).
+
 ## Before you report numbers
 
 Read [Interpreting annotations](../biological_interpretation.md). It lists the known annotation traps, keyed on what you observe, and the rules for naming systems and pathways.

@@ -1393,6 +1393,32 @@ def coverage_outliers_command(
                else coverage_outliers_markdown(result))
 
 
+@app.command(name="browse")
+def browse_command(
+    db: Path = typer.Option(Path(DEFAULT_DB), "--db", "-d", help="Dataset DuckDB (opened read-only)."),
+    host: str = typer.Option("127.0.0.1", "--host", help="Interface to bind; 127.0.0.1 keeps it on this machine."),
+    port: int = typer.Option(8800, "--port", "-p"),
+    share: bool = typer.Option(False, "--share", help="Require a random access token (printed in the link)."),
+):
+    """Browse a dataset in a web browser: protein cards, neighborhoods, evidence, genomes, searches."""
+    import secrets  # noqa: PLC0415
+
+    import uvicorn  # noqa: PLC0415
+
+    from sharur.browser import create_app  # noqa: PLC0415
+
+    if not db.is_file():
+        typer.echo(f"DuckDB file does not exist: {db}", err=True)
+        raise typer.Exit(1)
+    loopback = host in ("127.0.0.1", "localhost", "::1")
+    token = secrets.token_urlsafe(16) if share or not loopback else None
+    shown_host = "localhost" if loopback else host
+    typer.echo(f"Sharur browser: http://{shown_host}:{port}/" + (f"?token={token}" if token else ""))
+    if not loopback and not share:
+        typer.echo("Binding beyond this machine: access requires the token in the link above.")
+    uvicorn.run(create_app(db, token=token), host=host, port=port, log_level="warning")
+
+
 @app.command(name="describe")
 def describe(
     db: str = typer.Option(DEFAULT_DB, "--db", "-d", help="Path to DuckDB database"),

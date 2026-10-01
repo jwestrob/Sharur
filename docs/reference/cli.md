@@ -43,6 +43,7 @@ $ sharur [OPTIONS] COMMAND [ARGS]...
 * `import-coverage`: Import per-sample contig coverage into the...
 * `abundance`: Genome abundance per sample, or the share...
 * `coverage-outliers`: Contigs whose depth departs from their...
+* `browse`: Browse a dataset in a web browser: protein...
 * `describe`: What a dataset holds: annotation sources,...
 * `card`: Summarize one protein: context,...
 * `why`: Explain why a protein carries a predicate:...
@@ -590,6 +591,24 @@ $ sharur coverage-outliers [OPTIONS] BIN_ID
 * `--min-log2 FLOAT`: Minimum |log2(contig depth / genome median)|.  [default: 1.0]
 * `--sidecar PATH`: Default: abundance.duckdb beside --db.
 * `-f, --format [markdown|json]`: markdown or json  [default: markdown]
+* `--help`: Show this message and exit.
+
+### `sharur browse`
+
+Browse a dataset in a web browser: protein cards, neighborhoods, evidence, genomes, searches.
+
+**Usage**:
+
+```console
+$ sharur browse [OPTIONS]
+```
+
+**Options**:
+
+* `-d, --db PATH`: Dataset DuckDB (opened read-only).  [default: data/sharur.duckdb]
+* `--host TEXT`: Interface to bind; 127.0.0.1 keeps it on this machine.  [default: 127.0.0.1]
+* `-p, --port INTEGER`: [default: 8800]
+* `--share`: Require a random access token (printed in the link).
 * `--help`: Show this message and exit.
 
 ### `sharur describe`

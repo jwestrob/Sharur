@@ -71,6 +71,7 @@ sharur card PROTEIN_ID --db data/my_dataset/sharur.duckdb # one protein: context
 sharur why PROTEIN_ID nad_binding --db data/my_dataset/sharur.duckdb   # the evidence behind one predicate
 sharur modules --db data/my_dataset/sharur.duckdb --bin GENOME_ID --min-completeness 0.75
 sharur preflight --db data/my_dataset/sharur.duckdb --format json      # typed capability brief
+sharur browse --db data/my_dataset/sharur.duckdb                       # read-only website: cards, neighborhoods, evidence
 ```
 
 ### Use the operators
