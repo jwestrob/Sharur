@@ -316,3 +316,14 @@ h2 .hint { overflow-wrap: anywhere; }
                                                        text-overflow: ellipsis; white-space: nowrap; }
 td .sub { color: var(--ink-3); font-size: 12.5px; line-height: 1.4; white-space: nowrap; overflow: hidden;
           text-overflow: ellipsis; }
+
+/* ---------- sequence ---------- */
+.sequence { font: 13px/1.75 var(--mono); background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px;
+            padding: 12px 14px; max-height: 420px; overflow: auto; user-select: text; }
+.seq-line { display: flex; gap: 14px; white-space: nowrap; }
+.seq-pos { color: var(--ink-3); min-width: 4.5ch; text-align: right; user-select: none; flex: none; }
+.seq-blocks span { margin-right: 1ch; letter-spacing: .04em; }
+.seq-blocks span:nth-child(odd) { color: var(--ink); }
+.seq-blocks span:nth-child(even) { color: var(--ink-2); }
+button.done { border-color: var(--ok); color: var(--ok); }
+.visually-hidden { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }

@@ -52,6 +52,24 @@
   </div>
 </div>
 
+{% if sequence %}
+<div class="panel" id="sequence">
+  <div class="viewer-bar" style="margin-bottom:10px">
+    <h2 style="margin:0">Sequence <span class="hint">{{ num(sequence.length) }} aa · {{ '%.1f' % sequence.kda }} kDa (average mass)</span></h2>
+    <span class="viewer-buttons">
+      <button type="button" data-copy="seq-raw" data-label="Copy sequence">Copy sequence</button>
+      <button type="button" data-copy="seq-fasta" data-label="Copy FASTA">Copy FASTA</button>
+      <a class="btn" href="/fasta/{{ quote(c.protein_id, safe='') }}" download>Download FASTA</a>
+    </span>
+  </div>
+  <textarea id="seq-raw" class="visually-hidden" readonly aria-hidden="true" tabindex="-1">{{ sequence.raw }}</textarea>
+  <textarea id="seq-fasta" class="visually-hidden" readonly aria-hidden="true" tabindex="-1">&gt;{{ c.protein_id }}{% if g %} genome={{ g.bin_id }}{% endif %}
+{% for start, blocks in sequence.lines %}{{ blocks|join('') }}
+{% endfor %}</textarea>
+  <div class="sequence" aria-label="Amino-acid sequence">{% for start, blocks in sequence.lines %}<div class="seq-line"><span class="seq-pos">{{ start }}</span><span class="seq-blocks">{% for b in blocks %}<span>{{ b }}</span>{% endfor %}</span></div>{% endfor %}</div>
+</div>
+{% endif %}
+
 <div class="panel">
   <details {% if (c.annotations|length) < 4 %}open{% endif %}><summary>Annotation hits ({{ c.annotations.values()|map('length')|sum }})</summary>
   <div class="scroll" style="margin-top:10px"><table>

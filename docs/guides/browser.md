@@ -19,7 +19,7 @@ Browse without knowing an identifier. The left rail offers five ways in:
 
 Genome pages draw the contig landscape (click a contig to open it in the contig viewer: genes on both strands colored by function, with prophages, islands and systems marked above, and controls to pan and zoom), compare the genome's function profile with the dataset average, and list its pathways, systems and largest proteins. Protein pages draw the domain architecture to scale and the gene neighborhood colored by function category, with each label linking to its evidence.
 
-The search box suggests taxa, functions, pathways, systems, genomes and proteins as you type (press `/` to focus it). Pages contain no sequences.
+The search box suggests taxa, functions, pathways, systems, genomes and proteins as you type (press `/` to focus it). Protein pages show the amino-acid sequence with copy and FASTA download buttons; the CLI, Python API and agent-facing cards stay sequence-free.
 
 ## Sharing
 

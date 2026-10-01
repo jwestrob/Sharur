@@ -11,7 +11,7 @@ from urllib.parse import quote
 
 import numpy as np
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -69,6 +69,23 @@ def _gshort(bin_id: str, limit: int = 32) -> str:
     return bin_id if len(bin_id) <= limit else bin_id[:11] + "…" + bin_id[-(limit - 12):]
 
 
+_RESIDUE_MASS = {  # average residue masses (Da), water added once per chain
+    "A": 71.0788, "R": 156.1875, "N": 114.1038, "D": 115.0886, "C": 103.1388, "E": 129.1155, "Q": 128.1307,
+    "G": 57.0519, "H": 137.1411, "I": 113.1594, "L": 113.1594, "K": 128.1741, "M": 131.1926, "F": 147.1766,
+    "P": 97.1167, "S": 87.0782, "T": 101.1051, "W": 186.2132, "Y": 163.1760, "V": 99.1326,
+}
+
+
+def _sequence_view(sequence: str | None) -> dict[str, Any] | None:
+    """Sequence split into numbered 60-residue lines of 10-residue blocks, with simple stats."""
+    if not sequence:
+        return None
+    seq = sequence.strip().rstrip("*").upper()
+    lines = [(i + 1, [seq[j:j + 10] for j in range(i, min(i + 60, len(seq)), 10)]) for i in range(0, len(seq), 60)]
+    mass = sum(_RESIDUE_MASS.get(a, 110.0) for a in seq) + 18.015
+    return {"raw": seq, "lines": lines, "length": len(seq), "kda": mass / 1000}
+
+
 def _evalue(x: Any) -> str:
     return f"{x:.1e}" if isinstance(x, float) else ("–" if x is None else str(x))
 
@@ -91,7 +108,9 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
     templates.env.globals.update(url=_url, bp=_bp, num=_num, pct=_pct, evalue=_evalue, quote=quote, short=_short, gshort=_gshort,
                                  PREDICATE_BY_ID=PREDICATE_BY_ID,
                                  charts=charts, CATEGORY_LABELS=CATEGORY_LABELS, dataset=dataset_name,
-                                 catalog=catalog, CATEGORY_COLORS=charts.CATEGORY_COLORS)
+                                 catalog=catalog, CATEGORY_COLORS=charts.CATEGORY_COLORS,
+                                 # static assets change with the package; bust browser caches on upgrade
+                                 asset_version=int(max(f.stat().st_mtime for f in (HERE / "static").iterdir())))
 
     app = FastAPI(title="Sharur browser", docs_url=None, redoc_url=None, openapi_url=None)
     app.mount("/static", StaticFiles(directory=str(HERE / "static")), name="static")
@@ -253,6 +272,18 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
     # Protein
     # ------------------------------------------------------------------ #
 
+    @app.get("/fasta/{protein_id:path}")
+    def protein_fasta(protein_id: str):
+        with lock:
+            rows = store.execute("SELECT bin_id, sequence FROM proteins WHERE protein_id = ?", [protein_id])
+        if not rows or not rows[0][1]:
+            raise HTTPException(404, "Protein or sequence not found")
+        bin_id, seq = rows[0]
+        seq = seq.strip().rstrip("*")
+        body = f">{protein_id} genome={bin_id}\n" + "\n".join(seq[i:i + 60] for i in range(0, len(seq), 60)) + "\n"
+        filename = "".join(c if c.isalnum() or c in "._-" else "_" for c in protein_id)[:120] + ".faa"
+        return PlainTextResponse(body, headers={"Content-Disposition": f'inline; filename="{filename}"'})
+
     @app.get("/protein/{protein_id:path}/why/{predicate}", response_class=HTMLResponse)
     def why_page(request: Request, protein_id: str, predicate: str):
         from sharur.operators.cards import why  # noqa: PLC0415
@@ -278,6 +309,7 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
             if not c.get("found"):
                 raise HTTPException(404, "Protein not found")
             domains = [d.to_dict() for d in architecture(store, protein_id)]
+            sequence_rows = store.execute("SELECT sequence FROM proteins WHERE protein_id = ?", [protein_id])
             hood = get_neighborhood(store, protein_id, window=8).raw or {}
             ids = [g["protein_id"] for g in hood.get("proteins", [])]
             categories = _top_categories(ids)
@@ -301,7 +333,8 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
                       hood=charts.neighborhood(genes, start_edge=hood.get("contig_start_in_window", False),
                                                end_edge=hood.get("contig_end_in_window", False)),
                       genes=genes, edge=edge, edge_text=describe_edge(EdgeContext(**edge)) if edge else "",
-                      nearby=nearby, systems_here=systems_here)
+                      nearby=nearby, systems_here=systems_here,
+                      sequence=_sequence_view(sequence_rows[0][0] if sequence_rows else None))
 
     def _top_categories(ids: list[str]) -> dict[str, str]:
         """Most specific biological category per protein, for neighborhood colors."""

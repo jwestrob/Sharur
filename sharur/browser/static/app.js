@@ -61,6 +61,31 @@
     });
   }
 
+  // ---- copy buttons --------------------------------------------------------
+  document.querySelectorAll("[data-copy]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const source = document.getElementById(button.dataset.copy);
+      if (!source) return;
+      const text = source.value;
+      let ok = false;
+      if (navigator.clipboard && window.isSecureContext) {
+        // a pending permission prompt can leave writeText unsettled; never let the button hang
+        const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 700));
+        try { await Promise.race([navigator.clipboard.writeText(text), timeout]); ok = true; } catch (e) { ok = false; }
+      }
+      if (!ok) {  // plain-http sharing: fall back to a selection copy
+        source.classList.remove("visually-hidden");
+        source.select();
+        try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+        source.classList.add("visually-hidden");
+        window.getSelection().removeAllRanges();
+      }
+      button.textContent = ok ? "Copied ✓" : "Copy failed";
+      button.classList.toggle("done", ok);
+      setTimeout(() => { button.textContent = button.dataset.label; button.classList.remove("done"); }, 1600);
+    });
+  });
+
   // ---- tables -------------------------------------------------------------
   document.querySelectorAll("table[data-table]").forEach((table) => {
     const body = table.tBodies[0];

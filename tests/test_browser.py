@@ -48,11 +48,18 @@ def test_overview_and_search(client):
     assert "Nothing matched" in client.get("/search", params={"q": "zzzz"}).text
 
 
-def test_protein_page_escapes_and_omits_sequences(client):
+def test_protein_page_escapes_html_and_offers_the_sequence(client):
     page = client.get("/protein/bin%7C1_c1_2")
     assert page.status_code == 200
     assert "ABC &lt;transporter&gt;" in page.text and "<transporter>" not in page.text
-    assert "MKTAYIAKQ" not in page.text
+    # the sequence is shown in 10-residue blocks and held once, unbroken, for the copy button
+    assert SEQ[:10] in page.text and f'id="seq-raw" class="visually-hidden" readonly aria-hidden="true" tabindex="-1">{SEQ}<' in page.text
+    assert "Copy FASTA" in page.text and "/fasta/bin%7C1_c1_2" in page.text
+    fasta = client.get("/fasta/bin%7C1_c1_2")
+    lines = fasta.text.splitlines()
+    assert fasta.status_code == 200 and lines[0] == ">bin|1_c1_2 genome=bin|1"
+    assert "".join(lines[1:]) == SEQ and all(len(line) <= 60 for line in lines[1:])
+    assert client.get("/fasta/missing").status_code == 404
     assert 'aria-label="Domain architecture"' in page.text and 'aria-label="Gene neighborhood"' in page.text
     assert "ABC transporter" in page.text  # functional label shown by name
     assert "/protein/bin%7C1_c1_2/why/abc_transporter" in page.text
