@@ -13,6 +13,13 @@
 <p class="actions"><a class="btn" href="{{ url('contig', a.contig_id) }}?start={{ [1, a.start - 20000]|max }}&span=50000">Open in contig viewer</a>
 {% if detail.spacers %}<a class="btn" href="{{ url('crispr', a.locus_id) }}/spacers.fasta">Download spacers (FASTA)</a>{% endif %}
 <span class="count">{{ a.contig_id }}:{{ num(a.start) }}–{{ num(a.end) }}</span></p>
+{% if typing or cas_calls %}
+<div class="panel">
+  <h2>CRISPRCasTyper <span class="hint">repeat subtype from the consensus repeat · linked Cas operons from <code>sharur cas-type</code></span></h2>
+  {% if typing %}<p>Repeat subtype <b>{{ typing.prediction }}</b>{% if typing.prediction == 'Unknown' and typing.subtype %} (closest {{ typing.subtype }}){% endif %} · probability {{ '%.2f'|format(typing.probability or 0) }} · {{ 'trusted array' if typing.trusted else 'untrusted array' }}{% if typing.repeat_identity is not none %} · repeat identity {{ typing.repeat_identity }}%, spacer identity {{ typing.spacer_identity }}%{% endif %}</p>{% endif %}
+  {% for c in cas_calls %}<a class="chip" href="{{ url('cas-system', c.system_id) }}"><i style="--dot:{{ charts.OVERLAY_COLORS.crispr }}"></i>{% if c.confident %}{{ c.prediction }}{% else %}Cas candidate (putative){% endif %} · {{ c.genes_count }} genes</a>{% endfor %}
+</div>
+{% endif %}
 
 <div class="panel">
   <h2>Genomic context <span class="hint">{{ num(lo) }}–{{ num(hi) }} bp · Cas-domain genes highlighted · click a gene</span></h2>

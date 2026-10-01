@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}{{ call.prediction if call.confident else 'Cas candidate' }} · {{ gshort(call.bin_id or '') }}{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="/systems">Systems</a><span class="sep">›</span>{% if call.confident %}<a href="/crispr-cas/calls?subtype={{ quote(call.prediction, safe='') }}">{{ call.prediction }}</a>{% else %}<a href="/crispr-cas/calls?status={{ call.status }}">candidates</a>{% endif %}{% if g %}<span class="sep">›</span><a href="{{ url('genome', g.bin_id) }}">{{ gshort(g.bin_id) }}</a>{% endif %}</div>
+<h1><span class="rank">{{ 'CRISPR-Cas system' if call.confident else 'Cas operon candidate' }}{% if g %} · {{ g.label }}{% endif %}</span>{% if call.confident %}{{ call.prediction }}{% else %}Unnamed ({{ call.prediction_cas }}){% endif %}</h1>
+<p class="lede mono" style="font-size:12px">{{ call.system_id }} · {{ status_label }} · {{ call.caller }}</p>
+<div class="stats">
+  <div class="stat"><b>{{ call.prediction_cas }}</b><span>operon call{% if call.prediction != call.prediction_cas %} · joint {{ call.prediction }}{% endif %}</span></div>
+  <div class="stat"><b>{{ call.best_type }}</b><span>top-scoring subtype · score {{ call.best_score }}</span></div>
+  <div class="stat"><b>{{ call.complete_interference }}</b><span>interference genes · adaptation {{ call.complete_adaptation }}</span></div>
+  <div class="stat"><b>{{ call.genes_count }}</b><span>operon genes · {{ bp(call.end - call.start + 1) }}</span></div>
+  <div class="stat"><b>{{ arrays|length }}</b><span>linked arrays{% if call.distances %} · {{ call.distances|join(', ') }} bp away{% endif %}</span></div>
+</div>
+<p class="actions"><a class="btn" href="{{ url('contig', call.contig_id) }}?start={{ lo }}&span={{ hi - lo + 1 }}">Open in contig viewer</a>
+<span class="count">{{ call.contig_id }}:{{ num(call.start) }}–{{ num(call.end) }}</span></p>
+
+<div class="panel">
+  <h2>Genomic context <span class="hint">{{ num(lo) }}–{{ num(hi) }} bp · operon genes highlighted and labeled with their profile's gene · click a gene or array</span></h2>
+  <div class="scroll">{{ context }}</div>
+  <div class="legend"><span><i class="lg-array"></i>CRISPR array</span><span><i class="lg-cas"></i>operon gene</span><span><i style="background:var(--gene)"></i>other gene</span><span><i style="background:var(--gene-dark);border:1px dashed var(--ink-3)"></i>no annotation</span>{% if at_contig_start %}<span class="edge">window reaches the contig start</span>{% endif %}{% if at_contig_end %}<span class="edge">window reaches the contig end</span>{% endif %}</div>
+  <form class="table-tools" style="margin-top:10px" method="get"><select name="flank" onchange="this.form.submit()">{% for f in [3000, 8000, 20000, 60000] %}<option value="{{ f }}" {{ 'selected' if f == flank }}>±{{ (f / 1000)|int }} kb</option>{% endfor %}</select></form>
+</div>
+
+<div class="panel">
+  <h2>Operon genes</h2>
+  <div class="scroll"><table>
+    <thead><tr><th class="num">Start</th><th>Protein</th><th>Gene</th><th>Profile</th><th class="num">Score</th><th>Strand</th><th class="num">Length</th></tr></thead>
+    <tbody>{% for m in members %}<tr><td class="num count">{{ num(m.start) }}</td>
+      <td><a class="mono" href="{{ url('protein', m.protein_id) }}" title="{{ m.protein_id }}">{{ short(m.protein_id) }}</a></td>
+      <td><b>{{ m.cas_name }}</b></td><td class="mono">{{ m.profile }}</td><td class="num">{{ '%.1f'|format(m.score) if m.score is not none else '—' }}</td>
+      <td class="count">{{ m.strand }}</td><td class="num">{{ num(m.length_aa) }} aa</td></tr>{% endfor %}</tbody>
+  </table></div>
+</div>
+
+{% if arrays %}
+<div class="panel">
+  <h2>Linked CRISPR arrays</h2>
+  <div class="scroll"><table>
+    <thead><tr><th>Array</th><th class="num">Span</th><th class="num">Distance</th><th>Repeat subtype</th><th class="num">Probability</th><th>Trusted</th></tr></thead>
+    <tbody>{% for a in arrays %}<tr><td><a href="{{ url('crispr', a.locus_id) }}">{{ a.locus_id }}</a></td><td class="num">{{ num(a.start) }}–{{ num(a.end) }}</td><td class="num">{{ bp(a.distance|int) if a.distance else '0 bp' }}</td>
+      <td>{{ a.typing.prediction if a.typing else '—' }}</td><td class="num">{{ '%.2f'|format(a.typing.probability) if a.typing and a.typing.probability is not none else '—' }}</td><td>{{ ('yes' if a.typing.trusted else 'no') if a.typing else '—' }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+</div>
+{% endif %}
+
+{% set note_kind = 'system' %}{% set note_id = call.system_id %}{% include "_notes.html" %}
+{% endblock %}

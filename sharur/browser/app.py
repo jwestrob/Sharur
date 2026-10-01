@@ -19,6 +19,7 @@ from fastapi.templating import Jinja2Templates
 from sharur.browser import (
     charts,
     routes_compare,
+    routes_cctyper,
     routes_crispr,
     routes_curation,
     routes_loci,
@@ -152,6 +153,7 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
     routes_curation.register(app, ctx)
     routes_systems.register(app, ctx)
     routes_crispr.register(app, ctx, [Path(p) for p in assemblies or []])
+    routes_cctyper.register(app, ctx)
 
     @app.middleware("http")
     async def require_token(request: Request, call_next):
@@ -298,6 +300,7 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
                                 "class": d.module_class.split(";")[-1].strip()})
         systems = [s for s in catalog.systems if s["bin_id"] == bin_id]
         loci = [l for l in catalog.loci if l["bin_id"] == bin_id]
+        cas_calls = [c for c in ctx.cctyper_systems() if c["bin_id"] == bin_id]
         abundance = []
         if sidecar.is_file():
             from sharur.abundance import genome_abundance  # noqa: PLC0415
@@ -306,7 +309,8 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
         return render(request, "genome.html", "taxa", g=genome,
                       strip=charts.contig_strip(contigs, lambda c: _url("contig", c)),
                       longest_contig=max(lengths) if lengths else 0, largest=largest, profile=profile,
-                      modules=modules, systems=systems, loci=loci, abundance=abundance)
+                      modules=modules, systems=systems, loci=loci, abundance=abundance,
+                      cas_calls=cas_calls)
 
     # ------------------------------------------------------------------ #
     # Protein
@@ -549,13 +553,13 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
         for kind_name in ("array + Cas", "Cas genes only", "array only"):
             members = [l for l in cas if l["kind"] == kind_name]
             if members:
-                crispr.append({"label": f"CRISPR-Cas loci: {kind_name}",
+                crispr.append({"label": f"Cas-domain loci: {kind_name}",
                                "url": "/crispr-cas?kind=" + quote(kind_name), "count": len(members),
                                "share": len({l["bin_id"] for l in members}) / n})
         return render(request, "systems.html", "systems",
                       kinds={k: sorted(v, key=lambda r: -r["count"]) for k, v in kinds.items()},
                       loci=[{"type": t, "count": locus_counts[t], "share": len(b) / n} for t, b in loci.items()],
-                      crispr=crispr)
+                      crispr=crispr, cctyper=ctx.cctyper_summary())
 
     @app.get("/system/{kind}/{system_type:path}", response_class=HTMLResponse)
     def system_page(request: Request, kind: str, system_type: str, rank: str = Query("class")):

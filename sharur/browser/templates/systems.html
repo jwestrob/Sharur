@@ -14,8 +14,18 @@
     </table></div>
   </div>
 {% endfor %}
+{% if cctyper and cctyper.total %}
+  <div class="panel"><h2>CRISPR-Cas subtypes <span class="hint">{{ num(cctyper.subtypes|sum(attribute='count')) }} calls · CRISPRCasTyper scoring (<code>sharur cas-type</code>)</span></h2>
+    <div class="scroll" style="max-height:620px;overflow-y:auto"><table data-table>
+      <thead><tr><th data-sort="text">Subtype</th><th data-sort="num" class="num">Calls</th><th data-sort="num">Genomes</th></tr></thead>
+      <tbody>{% for r in cctyper.subtypes %}<tr><td><a href="/crispr-cas/calls?subtype={{ quote(r.subtype, safe='') }}">{{ r.subtype }}</a></td><td class="num">{{ num(r.count) }}</td><td data-v="{{ r.share }}"><div class="cell-bar">{{ bar(r.share, charts.OVERLAY_COLORS.crispr) }}<span class="count">{{ pct(r.share) }}</span></div></td></tr>{% endfor %}</tbody>
+    </table></div>
+    {% if cctyper.putative %}<h2 style="margin-top:14px">Candidates <span class="hint">putative, unnamed</span></h2>
+    <div class="scroll"><table><tbody>{% for r in cctyper.putative %}<tr><td><a href="/crispr-cas/calls?status={{ r.status }}">{{ r.label }}</a></td><td class="num">{{ num(r.count) }}</td><td><div class="cell-bar">{{ bar(r.share, '#9aa3ad') }}<span class="count">{{ pct(r.share) }}</span></div></td></tr>{% endfor %}</tbody></table></div>{% endif %}
+  </div>
+{% endif %}
 {% if crispr %}
-  <div class="panel"><h2>CRISPR-Cas <span class="hint">arrays and Cas-domain gene clusters, each shown in genomic context</span></h2>
+  <div class="panel"><h2>CRISPR arrays and Cas-domain evidence <span class="hint">arrays and Cas-domain gene clusters, each shown in genomic context</span></h2>
     <div class="scroll"><table>
       <thead><tr><th>Type</th><th class="num">Count</th><th>Genomes</th></tr></thead>
       <tbody>{% for r in crispr %}<tr><td><a href="{{ r.url }}">{{ r.label }}</a></td><td class="num">{{ num(r.count) }}</td><td><div class="cell-bar">{{ bar(r.share, charts.OVERLAY_COLORS.crispr) }}<span class="count">{{ pct(r.share) }}</span></div></td></tr>{% endfor %}</tbody>

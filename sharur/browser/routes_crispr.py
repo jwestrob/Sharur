@@ -387,6 +387,8 @@ def register(app, ctx, assembly_dirs: list[Path] | None = None) -> None:
         spacer_lengths = [s["length"] for s in detail["spacers"]]
         g = catalog.by_bin.get(a["bin_id"])
         duplicates = Counter(s["seq"] for s in detail["spacers"])
+        typing = getattr(ctx, "cctyper_array_types", dict)().get(locus_id)
+        cas_calls = getattr(ctx, "cctyper_systems_for_array", lambda _: [])(locus_id)
         return ctx.render(
             request, "crispr.html", "systems", a=a, g=g, detail=detail, genes=genes, cas=cas, nearest=nearest,
             context=context_svg(genes, neighbors, lo, hi), array=array_svg(detail["repeats"], detail["spacers"],
@@ -394,7 +396,7 @@ def register(app, ctx, assembly_dirs: list[Path] | None = None) -> None:
             lo=lo, hi=hi, flank=flank, spacer_lengths=spacer_lengths,
             repeated_spacers=sum(1 for n in duplicates.values() if n > 1),
             at_contig_start=lo <= 1, at_contig_end=bool(detail["contig_length"]) and hi >= detail["contig_length"],
-            spacer_color=_spacer_color)
+            spacer_color=_spacer_color, typing=typing, cas_calls=cas_calls)
 
     # ------------------------------------------------------------------ #
     # CRISPR-Cas loci: arrays and Cas-domain genes merged along each contig
@@ -516,3 +518,5 @@ def register(app, ctx, assembly_dirs: list[Path] | None = None) -> None:
 
     ctx.crispr_arrays = arrays
     ctx.cas_loci = cas_loci
+    ctx.genes_near = genes_near
+    ctx.locus_row_svg = locus_row_svg

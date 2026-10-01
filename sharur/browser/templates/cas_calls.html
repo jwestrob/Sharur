@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}CRISPR-Cas · {{ title }}{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="/systems">Systems</a><span class="sep">›</span><a href="/crispr-cas/calls">CRISPR-Cas subtypes</a></div>
+<h1><span class="rank">{{ 'CRISPR-Cas candidates' if status else 'CRISPR-Cas subtype' }} · genomic context</span>{{ title }}</h1>
+<p class="lede">{% if status %}Cas operons the CRISPRCasTyper scoring leaves unnamed ({{ title }}). Their genes carry Cas profile hits; the subtype stays open.{% else %}Cas operons typed by CRISPRCasTyper's subtype scoring (<code>sharur cas-type</code>), each drawn with the arrays linked within 10 kb. Members are labeled with their profile's gene.{% endif %}</p>
+<div class="panel">
+  <form class="table-tools" method="get" action="/crispr-cas/calls">
+    {% if status %}<input type="hidden" name="status" value="{{ status }}">{% else %}
+    <select name="subtype" onchange="this.form.submit()"><option value="">All subtypes ({{ num(confident_total) }})</option>{% for k, n in subtypes %}<option value="{{ k }}" {{ 'selected' if k == subtype }}>{{ k }} ({{ num(n) }})</option>{% endfor %}</select>{% endif %}
+    <select name="flank" onchange="this.form.submit()">{% for f in [0, 3000, 8000, 15000] %}<option value="{{ f }}" {{ 'selected' if f == flank }}>±{{ (f / 1000)|int }} kb flank</option>{% endfor %}</select>
+    <span class="count" style="margin-left:auto">page {{ page }} of {{ pages }} · {{ num(total) }} calls</span>
+  </form>
+  <div class="legend" style="margin:0 0 12px"><span><i class="lg-array"></i>linked CRISPR array</span><span><i class="lg-cas"></i>operon gene (profile hit)</span><span><i style="background:var(--gene)"></i>other gene</span><span><i style="background:var(--gene-dark);border:1px dashed var(--ink-3)"></i>no annotation</span></div>
+  <div class="stack">
+  {% for s, svg, flipped in rows %}
+    <div class="stack-item">
+      <div class="stack-label">
+        <a href="{{ url('cas-system', s.system_id) }}" title="{{ s.bin_id }}">{{ gshort(s.bin_id or '') }}</a>
+        <span class="sub">{{ s.lineage }} · {{ s.prediction if s.confident else s.prediction_cas }} · {{ s.genes_count }} genes{% if s.arrays %} · {{ s.arrays|length }} array{{ 's' if s.arrays|length > 1 }}{% endif %}{% if flipped %} · reversed{% endif %}</span>
+      </div>
+      <div class="stack-svg">{{ svg }}</div>
+    </div>
+  {% else %}<p class="empty">No calls of this kind.</p>{% endfor %}
+  </div>
+  {% if pages > 1 %}<div class="pager">{% if page > 1 %}<a class="btn" href="?subtype={{ quote(subtype) }}&status={{ status }}&flank={{ flank }}&page={{ page - 1 }}">← Previous</a>{% endif %}<span class="count">Page {{ page }} of {{ pages }}</span>{% if page < pages %}<a class="btn" href="?subtype={{ quote(subtype) }}&status={{ status }}&flank={{ flank }}&page={{ page + 1 }}">Next →</a>{% endif %}</div>{% endif %}
+  <p class="note">Candidates: {% for st, n in statuses.items() if st.endswith('_putative') %}<a href="/crispr-cas/calls?status={{ st }}">{{ status_labels[st] }} ({{ num(n) }})</a>{{ ' · ' if not loop.last }}{% else %}none{% endfor %}. Domain evidence without a caller: <a href="/crispr-cas">Cas-domain loci</a>.</p>
+</div>
+{% endblock %}

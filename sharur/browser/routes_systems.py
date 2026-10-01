@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from sharur.browser import charts
 
@@ -23,6 +23,8 @@ def register(app, ctx) -> None:
     @app.get("/call/{system_id:path}", response_class=HTMLResponse)
     def system_call(request: Request, system_id: str, flank: int = Query(10000, ge=1000, le=100000)):
         call = next((s for s in catalog.systems if s["system_id"] == system_id), None)
+        if call is None and system_id.startswith("cctyper:"):
+            return RedirectResponse(ctx.url("cas-system", system_id), status_code=307)
         if call is None:
             raise HTTPException(404, "System call not found")
         with ctx.lock:
