@@ -39,6 +39,7 @@ $ sharur [OPTIONS] COMMAND [ARGS]...
 * `verify-seal`: Recompute a dataset seal and report...
 * `build-vector-index`: Build mmap-ready FAISS sidecars and a...
 * `doctor`: Verify external tools, reference...
+* `health`: Check a dataset for problems that distort...
 * `adopt-astra-hmms`: Register databases installed through Astra...
 * `architecture`: Find proteins whose ordered domains match...
 * `import-coverage`: Import per-sample contig coverage into the...
@@ -499,6 +500,24 @@ $ sharur doctor [OPTIONS]
 **Options**:
 
 * `--strict`: Exit non-zero if any core tool/database is missing.
+* `--help`: Show this message and exit.
+
+### `sharur health`
+
+Check a dataset for problems that distort analyses: missing gene calls, unplaced genes,
+annotation gaps, completeness, stale labels, seal drift.
+
+**Usage**:
+
+```console
+$ sharur health [OPTIONS]
+```
+
+**Options**:
+
+* `-d, --db PATH`: Dataset DuckDB (opened read-only).  [default: data/sharur.duckdb]
+* `-f, --format [markdown|json]`: markdown or json  [default: markdown]
+* `--strict`: Exit non-zero when any check fails.
 * `--help`: Show this message and exit.
 
 ### `sharur adopt-astra-hmms`

@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Data health{% endblock %}
+{% block content %}
+{% set c = report.counts %}
+<h1><span class="rank">Dataset</span>Data health</h1>
+<p class="lede">Checks for the problems that quietly distort analyses: missing gene calls, genes without a position, annotation gaps, completeness, stale labels, seal drift. The same report runs in a terminal with <code>sharur health --db {{ report.db_path }}</code>.</p>
+<p class="actions"><a class="btn" href="/health?refresh=1" title="Run every check again">Recheck</a><span class="count">{{ report.findings|length }} checks in {{ '%.1f' % report.seconds }} s</span></p>
+
+<div class="stats health-stats">
+  {% for status, label in [('fail', 'fix before analysing'), ('warn', 'need care'), ('info', 'worth knowing'), ('ok', 'all clear')] %}
+  <div class="stat hstat-{{ status }}"><b>{{ c[status] }}</b><span>{{ label }}</span></div>
+  {% endfor %}
+</div>
+
+{% for area, findings in report.by_area() %}
+<div class="panel health-area">
+  <h2>{{ area }}</h2>
+  {% for f in findings %}
+  <div class="health-check hcheck-{{ f.status }}" id="{{ f.key }}">
+    <span class="tag hstatus-{{ f.status }}">{{ f.status }}</span>
+    <div class="health-body">
+      <b>{{ f.title }}</b>
+      <p>{{ code_html(f.summary) }}</p>
+      {% if f.examples and f.status != 'ok' %}<div class="health-examples">{% for e in f.examples %}{% set href = example_href(e) %}{% if href %}<a class="chip mono" href="{{ href }}" title="{{ e.id }}">{{ short(e.id) if e.kind == 'protein' else e.id }}{% if e.note %} <span class="count">{{ e.note }}</span>{% endif %}</a>{% else %}<span class="chip">{{ e.id }}{% if e.note %} <span class="count">{{ e.note }}</span>{% endif %}</span>{% endif %}{% endfor %}</div>{% endif %}
+      {% if f.table %}<div class="scroll"><table class="health-table"><thead><tr>{% for col in f.table.columns %}<th>{{ col }}</th>{% endfor %}</tr></thead>
+        <tbody>{% for row in f.table.rows %}<tr>{% for cell in row %}<td{% if cell is number %} class="num"{% endif %}>{{ num(cell) if cell is number else cell }}</td>{% endfor %}</tr>{% endfor %}</tbody></table></div>{% endif %}
+      {% if f.fix and f.status != 'ok' %}<p class="health-fix">{{ code_html(f.fix) }}</p>{% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endfor %}
+{% endblock %}

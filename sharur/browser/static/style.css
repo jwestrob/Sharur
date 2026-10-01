@@ -540,3 +540,33 @@ svg.mini { display: block; max-width: 100%; height: auto; }
 svg.mini-fill { width: 100%; }
 .feed-table .nowrap, .feed-table td.num { white-space: nowrap; }
 .feed-table td.num .tag { margin-top: 3px; }
+
+/* ---- data health (/health and the rail pill) ---------------------------- */
+:root { --caution: #9a6410; --fail: #b4472f; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --caution: #e2b04a; --fail: #ef8f78; } }
+:root[data-theme="dark"] { --caution: #e2b04a; --fail: #ef8f78; }
+.health-stats .stat b { font-variant-numeric: tabular-nums; }
+.hstat-fail::before { background: var(--fail); } .hstat-warn::before { background: var(--caution); }
+.hstat-info::before { background: var(--ink-3); } .hstat-ok::before { background: var(--ok); }
+.health-area h2 { margin-bottom: 4px; }
+.health-check { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 12px; padding: 12px 0;
+  border-top: 1px solid var(--line); }
+.health-area h2 + .health-check { border-top: 0; }
+.health-check .tag { justify-self: start; margin-top: 2px; text-transform: uppercase; letter-spacing: .04em; }
+.hstatus-fail { background: color-mix(in srgb, var(--fail) 16%, transparent); color: var(--fail); }
+.hstatus-warn { background: color-mix(in srgb, var(--caution) 18%, transparent); color: var(--caution); }
+.hstatus-info { background: var(--surface-2); color: var(--ink-3); }
+.hstatus-ok { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+.health-body p { margin: 4px 0 0; color: var(--ink-2); max-width: 90ch; }
+.health-body .health-fix { color: var(--ink-3); font-size: 12.5px; }
+.health-body .health-fix::before { content: "Fix · "; font-weight: 700; color: var(--ink-2); }
+.health-examples { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.health-examples .chip { font-size: 11.5px; }
+.health-table { margin-top: 8px; max-width: 820px; }
+.health-pill { display: flex; align-items: center; gap: 8px; margin: 12px 12px 0; padding: 7px 10px; border-radius: 9px;
+  font-size: 12px; font-weight: 600; color: var(--ink-2); border: 1px solid var(--line); text-decoration: none; }
+.health-pill i { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none; }
+.health-pill:hover { border-color: var(--accent); color: var(--ink); }
+.hpill-warn i { background: var(--caution); } .hpill-fail i { background: var(--fail); }
+@media (max-width: 640px) { .health-check { grid-template-columns: 1fr; gap: 4px; } .health-pill { display: none; } }
+/* ---- end data health ------------------------------------------------------ */

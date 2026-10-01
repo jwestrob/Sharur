@@ -28,6 +28,8 @@ from fastapi import HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from markupsafe import Markup
 
+from sharur.assemblies import ASSEMBLY_SUFFIXES as _SUFFIXES
+from sharur.assemblies import find_assemblies
 from sharur.browser import charts
 from sharur.crispr import annotate_repeats, parse_minced_text
 
@@ -35,7 +37,6 @@ CONTEXT_BP = 15000
 CAS_LABELS = {"cas_domain", "crispr_associated", "cas_nuclease", "crispr_adaptation", "crispr_accessory",
               "crispr_class1", "crispr_class2"}
 _CAS_NAME = re.compile(r"^(Cas|cas|Csm|Cmr|Csx|Csa|Csb|Csc|Csd|Cse|Csf|Csn|Cpf|Csy|Cst|Csh|Cmx|DinG_cas|CRISPR)")
-_SUFFIXES = (".fna", ".fa", ".fasta", ".fas", ".fna.gz", ".fa.gz", ".fasta.gz")
 
 
 # --------------------------------------------------------------------------- #
@@ -47,25 +48,7 @@ class Assemblies:
     """Find a genome's assembly FASTA and read single contigs (small LRU cache)."""
 
     def __init__(self, dataset_dir: Path, extra: list[Path] | None = None):
-        self.paths: dict[str, Path] = {}
-        dirs = list(extra or []) + [dataset_dir / "stage00_prepared" / "genomes", dataset_dir / "genomes_fna",
-                                    dataset_dir / "genomes_fna_new", dataset_dir / "source", dataset_dir / "assemblies"]
-        manifest = dataset_dir / "stage00_prepared" / "processing_manifest.json"
-        if manifest.is_file():
-            try:
-                for entry in json.loads(manifest.read_text()).get("genomes", []):
-                    if entry.get("genome_id") and entry.get("output_path") and Path(entry["output_path"]).is_file():
-                        self.paths.setdefault(entry["genome_id"], Path(entry["output_path"]))
-            except (ValueError, OSError):
-                pass
-        for d in dirs:
-            if not d.is_dir():
-                continue
-            for f in d.iterdir():
-                for suffix in _SUFFIXES:
-                    if f.name.endswith(suffix):
-                        self.paths.setdefault(f.name[: -len(suffix)], f)
-                        break
+        self.paths: dict[str, Path] = find_assemblies(dataset_dir, extra)
         self._cache: OrderedDict[tuple[str, str], str] = OrderedDict()
         self._lock = threading.Lock()
 

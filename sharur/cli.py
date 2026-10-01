@@ -1274,6 +1274,28 @@ def doctor(
         raise typer.Exit(code=1)
 
 
+@app.command(name="health")
+def health_command(
+    db: Path = typer.Option(Path(DEFAULT_DB), "--db", "-d", help="Dataset DuckDB (opened read-only)."),
+    output_format: BriefFormat = typer.Option(BriefFormat.markdown, "--format", "-f", help="markdown or json"),
+    strict: bool = typer.Option(False, "--strict", help="Exit non-zero when any check fails."),
+):
+    """Check a dataset for problems that distort analyses: missing gene calls, unplaced genes,
+    annotation gaps, completeness, stale labels, seal drift."""
+    from sharur.health import run_checks  # noqa: PLC0415
+
+    if not db.is_file():
+        typer.echo(f"DuckDB file does not exist: {db}", err=True)
+        raise typer.Exit(1)
+    report = run_checks(db)
+    if output_format == BriefFormat.json:
+        typer.echo(json.dumps(report.to_dict(), indent=2, default=str))
+    else:
+        typer.echo(report.to_markdown())
+    if strict and report.worst == "fail":
+        raise typer.Exit(code=1)
+
+
 @app.command("adopt-astra-hmms")
 def adopt_astra_hmms(
     dry_run: bool = typer.Option(False, "--dry-run", help="List what would be adopted; write nothing."),

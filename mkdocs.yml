@@ -69,6 +69,7 @@ nav:
       - Domain-architecture search: guides/architecture-search.md
       - Abundance across samples: guides/abundance.md
       - CRISPR-Cas subtypes: guides/crispr-cas.md
+      - Dataset health: guides/health.md
       - Browsing a dataset: guides/browser.md
       - Cases and context comparison: cases_and_evidence.md
       - Structured findings: findings_spec.md

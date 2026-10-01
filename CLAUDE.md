@@ -255,6 +255,11 @@ KEGG build (`sharur setup-kegg`; KEGG data stays on the user's machine).
 For an existing dataset, run `sharur preflight --db data/DATASET/sharur.duckdb` to inspect
 the typed live capability contract. Use `--format json` for agents and automation.
 
+Run `sharur health --db data/DATASET/sharur.duckdb` before comparing genomes: it reports
+genomes whose gene calls are mostly missing, genes without a genomic position, annotation
+gaps, mixed strand encodings and missing completeness, each with exact counts and a fix
+(`docs/guides/health.md`). Treat absences in flagged genomes as missing data.
+
 After dataset writes are complete, use `sharur seal --db data/DATASET/sharur.duckdb` to
 record the canonical state and `sharur verify-seal data/DATASET/dataset.seal.json` before
 resuming or archiving it. Use `--full` for a content seal of large canonical artifacts.
