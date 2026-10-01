@@ -540,3 +540,7 @@ svg.mini { display: block; max-width: 100%; height: auto; }
 svg.mini-fill { width: 100%; }
 .feed-table .nowrap, .feed-table td.num { white-space: nowrap; }
 .feed-table td.num .tag { margin-top: 3px; }
+
+/* ---- synteny ---------------------------------------------------------------- */
+.syn-spread .chip, .syn-chip { margin: 1px 4px 1px 0; }
+.syn-table td { vertical-align: middle; }

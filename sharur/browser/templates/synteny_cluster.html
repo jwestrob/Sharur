@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% from "_synteny.html" import spread_text %}
+{% from "_macros.html" import bar %}
+{% block title %}Syntenic cluster {{ c.source_cluster_id }}{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="/synteny">Synteny</a></div>
+<h1><span class="rank">Syntenic cluster</span>{{ c.source_cluster_id }}</h1>
+<p class="lede mono" style="font-size:12px">{{ c.cluster_key }}</p>
+{% if run.stale %}<div class="banner">Built on an earlier version of this dataset; {{ pct(run.resolved) }} of sampled genes match its current proteins.</div>{% endif %}
+
+<div class="stats">
+  <div class="stat"><b>{{ num(c.genome_support) }}</b><span>genomes</span></div>
+  <div class="stat"><b>{{ num(c.locus_count) }}</b><span>loci</span></div>
+  <div class="stat"><b>{{ '%g' % median_genes if median_genes is not none else '–' }}</b><span>median genes per locus</span></div>
+  <div class="stat"><b>{{ num(c.size) }}</b><span>pairwise blocks</span></div>
+  <div class="stat"><b>{% if taxa.lca %}{{ taxa.lca[1] }}{% else %}–{% endif %}</b><span>{% if taxa.lca %}shared {{ taxa.lca[0] }}{% else %}no shared rank{% endif %}</span></div>
+</div>
+
+{% if taxa.clades %}
+<div class="panel">
+  <h2>Where it occurs <span class="hint">{{ spread_text(taxa) }}</span></h2>
+  {% set top = taxa.clades[0][1] %}
+  <div class="bars">{% for name, n in taxa.clades[:12] %}<a class="label" href="{{ base }}?rank={{ taxa.rank }}&clade={{ quote(name, safe='') }}&flank={{ flank }}" title="Show only {{ name }}">{{ name }}</a>{{ bar(n / top, charts.color_for(name)) }}<span class="val">{{ num(n) }}</span>{% endfor %}</div>
+  {% if taxa.clades|length > 12 %}<p class="count">and {{ taxa.clades|length - 12 }} more {{ taxa.rank }} groups</p>{% endif %}
+</div>
+{% endif %}
+
+<div class="panel">
+  <form class="table-tools" method="get" action="{{ base }}">
+    <select name="flank" onchange="this.form.submit()">{% for n in [0, 2, 4, 8] %}<option value="{{ n }}" {{ 'selected' if n == flank }}>±{{ n }} genes</option>{% endfor %}</select>
+    <input type="hidden" name="rank" value="{{ rank }}"><input type="hidden" name="clade" value="{{ clade }}">
+    {% if clade %}<span class="chip">{{ rank }}: {{ clade }} <a href="{{ base }}?flank={{ flank }}" title="Clear">✕</a></span>{% endif %}
+    <span class="count" style="margin-left:auto">{{ num(total) }} loci{% if reference %} · aligned on <b>{{ reference }}</b>{% endif %} · page {{ page }} of {{ pages }}</span>
+  </form>
+  <div class="legend" style="margin:0 0 12px">{% for key, color, n in legend %}<span><i style="background:{{ color }}"></i>{{ key }} <span class="count">{{ n }}</span></span>{% endfor %}<span><i style="background:var(--gene-dark);border:1px dashed var(--ink-3)"></i>no annotation</span><span><i style="background:transparent;border-left:2px dashed var(--warn)"></i>contig end</span></div>
+  <p class="count" style="margin:0 0 10px">Cluster genes are outlined; rows are ordered by taxonomy and turned so the aligned gene points right.</p>
+  <div class="stack">
+  {% for row, svg in rows %}
+    <div class="stack-item" data-entity="protein" data-id="{{ row.anchor }}">
+      <div class="stack-label">
+        <a href="{{ url('contig', row.contig) }}?start={{ [1, (row.locus.start_bp or 1) - 3000]|max }}&span={{ ((row.locus.end_bp or 0) - (row.locus.start_bp or 0)) + 6000 }}" title="Open this locus on its contig">{{ gshort(row.bin_id) }}</a>
+        <span class="sub">{{ row.genome_label }} · {{ row.title }}{% if row.flipped %} · reversed{% endif %}</span>
+      </div>
+      <div class="stack-svg">{{ svg }}</div>
+    </div>
+  {% else %}<p class="empty">No loci to draw on this page.</p>{% endfor %}
+  </div>
+  {% if pages > 1 %}<div class="pager">{% if page > 1 %}<a class="btn" href="{{ base }}?flank={{ flank }}&rank={{ rank }}&clade={{ quote(clade) }}&page={{ page - 1 }}">← Previous</a>{% endif %}<span class="count">Page {{ page }} of {{ pages }}</span>{% if page < pages %}<a class="btn" href="{{ base }}?flank={{ flank }}&rank={{ rank }}&clade={{ quote(clade) }}&page={{ page + 1 }}">Next →</a>{% endif %}</div>{% endif %}
+</div>
+{% endblock %}

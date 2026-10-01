@@ -1,0 +1,15 @@
+<div class="panel" id="synteny" data-synteny-url="/synteny/protein/{{ quote(c.protein_id, safe='') }}">
+  <h2>Synteny <span class="hint">clusters of conserved gene order this protein belongs to</span></h2>
+  <div data-synteny-body><p class="empty">Loading…</p></div>
+</div>
+<script>
+(function () {
+  const panel = document.getElementById("synteny");
+  if (!panel) return;
+  const body = panel.querySelector("[data-synteny-body]");
+  fetch(panel.dataset.syntenyUrl)
+    .then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
+    .then((html) => { body.innerHTML = html; })
+    .catch(() => { body.innerHTML = '<p class="empty">Synteny lookup failed; reload to retry.</p>'; });
+})();
+</script>

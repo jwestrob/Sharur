@@ -49,6 +49,14 @@
     {% if f.fusions %}<table class="feed-table"><tbody>{% for x in f.fusions[:8] %}{{ fusion_row(x) }}{% endfor %}</tbody></table>{% else %}<p class="empty">No clade-specific fusions at these thresholds.</p>{% endif %}
   </section>
 
+  {% if synteny %}{% from "_synteny.html" import lineage_row %}
+  <section class="panel feed feed-wide" id="synteny">
+    <header><h2>{{ feeds.synteny[0] }}</h2><a href="/discover/synteny">All {{ num(synteny|length) }} →</a></header>
+    <p class="feed-why">{{ feeds.synteny[1] }} <a href="/synteny">All synteny →</a></p>
+    <table class="feed-table"><thead><tr><th>Cluster</th><th class="num">Genomes</th><th class="num" title="Median genes per locus">Genes</th><th class="num">Phyla</th><th class="num">Classes</th><th>Where</th></tr></thead><tbody>{% for r in synteny[:8] %}{{ lineage_row(r) }}{% endfor %}</tbody></table>
+  </section>
+  {% endif %}
+
   <section class="panel feed feed-wide" id="islands">
     <header><h2>{{ feeds.islands[0] }}</h2><a href="/discover/islands">All {{ num(f.islands|length) }} →</a></header>
     <p class="feed-why">{{ feeds.islands[1] }}</p>

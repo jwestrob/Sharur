@@ -57,6 +57,7 @@
 
 {% set note_kind = 'protein' %}{% set note_id = c.protein_id %}{% include "_notes.html" %}
 {% include "_insight_protein.html" %}
+{% if synteny %}{% include "_synteny_protein.html" %}{% endif %}
 
 {% if sequence %}
 <div class="panel" id="sequence">

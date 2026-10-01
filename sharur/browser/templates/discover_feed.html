@@ -26,6 +26,9 @@
   {% elif feed == 'islands' %}
     <thead><tr><th data-sort="text">Contig</th><th>Genes</th><th data-sort="num" class="num">Length</th><th data-sort="text">Where</th></tr></thead>
     <tbody>{% for i in rows %}{{ island_row(i) }}{% endfor %}</tbody>
+  {% elif feed == 'synteny' %}{% from "_synteny.html" import lineage_row %}
+    <thead><tr><th data-sort="text">Cluster</th><th data-sort="num" class="num">Genomes</th><th data-sort="num" class="num">Genes</th><th data-sort="num" class="num">Phyla</th><th data-sort="num" class="num">Classes</th><th>Where</th></tr></thead>
+    <tbody>{% for r in rows %}{{ lineage_row(r) }}{% endfor %}</tbody>
   {% elif feed == 'systems' %}
     <thead><tr><th data-sort="text">Kind</th><th data-sort="text">System</th><th>Genomes</th><th data-sort="num" class="num">n</th></tr></thead>
     <tbody>{% for r in rows %}{{ system_row(r) }}{% endfor %}</tbody>

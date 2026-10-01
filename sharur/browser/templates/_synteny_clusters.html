@@ -1,0 +1,13 @@
+{% from "_synteny.html" import cluster_link, spread_text %}
+{% if clusters %}
+<div class="scroll"><table class="syn-table">
+  <thead><tr><th>Cluster</th><th>Role</th><th class="num">Genomes</th><th class="num">Loci</th><th>Taxonomic spread</th></tr></thead>
+  <tbody>{% for c in clusters %}<tr>
+    <td>{{ cluster_link(c) }}</td>
+    <td><span class="tag{{ ' ok' if c.role == 'anchor' }}" title="{{ 'Matched in the conserved gene order' if c.role == 'anchor' else 'Inside a conserved locus' }}">{{ c.role }}</span></td>
+    <td class="num">{{ num(c.genomes) }}</td>
+    <td class="num">{{ num(c.loci) }}</td>
+    <td class="count">{{ spread_text(c.spread) if c.spread else '' }}</td>
+  </tr>{% endfor %}</tbody>
+</table></div>
+{% else %}<p class="empty">This protein sits in no syntenic cluster.</p>{% endif %}
