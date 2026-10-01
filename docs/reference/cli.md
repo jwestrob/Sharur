@@ -50,6 +50,8 @@ $ sharur [OPTIONS] COMMAND [ARGS]...
 * `why`: Explain why a protein carries a predicate:...
 * `modules`: KEGG module completeness per genome, or...
 * `setup-kegg`: Fetch KEGG data and build the KO ->...
+* `import-quality`: Fill genome completeness and contamination...
+* `cas-type`: Subtype CRISPR-Cas systems with...
 
 ### `sharur overview`
 
@@ -734,6 +736,55 @@ $ sharur setup-kegg [OPTIONS]
 * `--inputs PATH`: Build from KEGG files already on disk (list/ko as ko_list.tsv, brite/<id>.json, modules.txt) instead of fetching, e.g. from a licensed KEGG copy.
 * `--kofam-ko-list PATH`: KOfam ko_list (downloaded when absent).  [default: data/reference/ko_list]
 * `--report PATH`: TSV of proposed pairs without evidence.
+* `--help`: Show this message and exit.
+
+### `sharur import-quality`
+
+Fill genome completeness and contamination from a CheckM, CheckM2 or GTDB table.
+
+**Usage**:
+
+```console
+$ sharur import-quality [OPTIONS] TABLE
+```
+
+**Arguments**:
+
+* `TABLE`: CheckM2 quality_report.tsv, CheckM --tab_table output, or GTDB ar53/bac120 metadata (.tsv or .tsv.gz).  [required]
+
+**Options**:
+
+* `-d, --db PATH`: Dataset DuckDB.  [default: data/sharur.duckdb]
+* `--id-column TEXT`: Genome column (default: detected).
+* `--completeness-column TEXT`: Completeness column, percent (default: detected; CheckM2 preferred).
+* `--contamination-column TEXT`
+* `--overwrite`: Replace completeness values already stored.
+* `--dry-run`: Report matches and leave the dataset unchanged.
+* `--help`: Show this message and exit.
+
+### `sharur cas-type`
+
+Subtype CRISPR-Cas systems with CRISPRCasTyper's profiles and scoring.
+
+Searches the CCTyper Cas profiles against every genome's proteins, groups
+hits into operons, scores subtypes, classifies array repeats and links
+operons to arrays within 10 kb. Calls go to ``crispr_cas_systems``,
+``crispr_array_types`` and ``system_proteins`` (source ``cctyper``),
+replacing earlier calls from this caller.
+
+**Usage**:
+
+```console
+$ sharur cas-type [OPTIONS]
+```
+
+**Options**:
+
+* `-d, --db PATH`: Dataset DuckDB.  [default: data/sharur.duckdb]
+* `--cctyper-db PATH`: CCTyper database directory (default: $SHARUR_CCTYPER_DB, then Aksha's CCTyper install).
+* `-w, --workers INTEGER`: Parallel genome searches (default: all CPUs).  [default: 0]
+* `-g, --genome TEXT`: Type only these genomes; repeatable.
+* `--dry-run`: Report the calls and leave the dataset unchanged.
 * `--help`: Show this message and exit.
 
 

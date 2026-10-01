@@ -138,3 +138,14 @@ def test_scoped_search(client):
     clade = client.get("/search", params={"q": "transporter in Archaea"})
     assert "bin|1_c1_2" in clade.text and "Search within domain" in clade.text
     assert "No protein here matches" in client.get("/search", params={"q": "rubisco in bin|1"}).text
+
+
+def test_matrix_pages(client):
+    assert client.get("/matrix").status_code == 200
+    page = client.get("/matrix", params={"a": "bin|1", "kind": "pfam", "features": "PF00005"})
+    assert page.status_code == 200 and 'id="matrix-data"' in page.text and "ABC_tran" in page.text
+    tsv = client.get("/matrix.tsv", params={"a": "domain:Archaea", "kind": "pfam", "features": "PF00005"})
+    assert tsv.status_code == 200 and tsv.text.splitlines()[1].startswith("bin|1\t") and tsv.text.rstrip().endswith("1")
+    assert client.get("/matrix", params={"a": "no such clade"}).status_code == 404
+    # one genome: no variable features, a clear message
+    assert "No features to show" in client.get("/matrix", params={"a": "bin|1", "kind": "pfam"}).text

@@ -490,3 +490,25 @@ pre.query { font: 12px/1.5 var(--mono); background: var(--surface-2); border: 1p
 @media (max-width: 640px) { .lane { grid-template-columns: 1fr; } .lane-label { padding-top: 0; } }
 a.ext { text-decoration: none; font-size: 11px; color: var(--ink-3); }
 a.ext:hover { color: var(--accent); }
+
+/* presence/absence matrix */
+:root { --mx-empty: #f1efe9; --mx-hatch: #d9d4c8; --mx-1: #8fd3c7; --mx-2: #2fa894; --mx-3: #0b5c52; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --mx-empty: #1b2229; --mx-hatch: #3a434d; --mx-1: #2c6f66; --mx-2: #3fb3a0; --mx-3: #8ce6d8; } }
+:root[data-theme="dark"] { --mx-empty: #1b2229; --mx-hatch: #3a434d; --mx-1: #2c6f66; --mx-2: #3fb3a0; --mx-3: #8ce6d8; }
+.matrix-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px 14px; align-items: end; }
+.matrix-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--ink-2); }
+.matrix-form label > span:first-child { font-weight: 600; }
+.matrix-form input[type="number"], .matrix-form input[type="text"]:not(.picker-input), .matrix-form select {
+  height: 34px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--surface); color: var(--ink); }
+.matrix-form .wide { grid-column: span 2; }
+.matrix-submit { display: flex; gap: 10px; align-items: center; }
+@media (max-width: 640px) { .matrix-form .wide { grid-column: auto; } }
+.matrix-wrap { position: relative; overflow: auto; max-height: 82vh; }
+.matrix-canvas { display: block; }
+.matrix-tip { position: absolute; z-index: 5; max-width: 300px; padding: 8px 10px; border-radius: 8px; pointer-events: none;
+  background: var(--surface); border: 1px solid var(--line-2); box-shadow: 0 6px 20px rgba(0, 0, 0, .12); font-size: 12px; }
+.matrix-tip .feat { margin-top: 4px; color: var(--ink); }
+.matrix-legend .mx-cell { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: -2px; margin-right: 4px; }
+.mx-empty { background: var(--mx-empty); border: 1px solid var(--line); }
+.mx-hatch { background: repeating-linear-gradient(135deg, var(--mx-empty) 0 3px, var(--mx-hatch) 3px 5px); }
+.mx-comp { background: var(--accent); }

@@ -44,6 +44,7 @@
   <span><i style="background:var(--cmp-a)"></i>{{ side_link(a) }} <span class="count">· {{ a.kind }}{% if not a.is_genome %} · {{ num(st_a.genomes) }} genomes{% endif %}</span></span>
   <span><i style="background:var(--cmp-b)"></i>{{ side_link(b) }} <span class="count">· {{ b.kind }}{% if not b.is_genome %} · {{ num(st_b.genomes) }} genomes{% endif %}</span></span>
   <a class="count" href="/compare?a={{ quote(b.key, safe='') }}&b={{ quote(a.key, safe='') }}">swap ⇄</a>
+  <a class="count" href="/matrix?a={{ quote(a.key, safe='') }}&b={{ quote(b.key, safe='') }}">genome-by-genome matrix ▦</a>
 </div>
 
 <div class="panel">

@@ -23,6 +23,7 @@ from sharur.browser import (
     routes_crispr,
     routes_curation,
     routes_loci,
+    routes_matrix,
     routes_search,
     routes_systems,
 )
@@ -160,7 +161,7 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
     # Feature modules register before the catch-all path routes below.
     ctx = SimpleNamespace(store=store, lock=lock, catalog=catalog, render=render, url=_url,
                           describe_hit=describe_hit, predicates=PREDICATE_BY_ID, db_path=Path(db_path),
-                          notes_path=Path(notes_path) if notes_path else None)
+                          notes_path=Path(notes_path) if notes_path else None, ko_names=ko_names)
     app.state.ctx = ctx
     routes_loci.register(app, ctx)
     routes_curation.register(app, ctx)
@@ -939,6 +940,7 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
 
     ctx.background = background
     routes_compare.register(app, ctx)
+    routes_matrix.register(app, ctx)
     return app
 
 

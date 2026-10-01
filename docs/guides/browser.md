@@ -25,6 +25,27 @@ VOG descriptions and categories come from VOGdb's `vog.annotations.tsv`, found i
 
 The search box suggests taxa, functions, pathways, systems, genomes and proteins as you type (press `/` to focus it). Protein pages show the amino-acid sequence with copy and FASTA download buttons; the CLI, Python API and agent-facing cards stay sequence-free.
 
+## Presence/absence matrix
+
+`/matrix` draws genomes as rows and features as columns: KEGG orthologs, Pfam families, KEGG modules (cells hold completeness), curated systems, or function labels. Open it from any clade page, from **Compare** (*genome-by-genome matrix*), or from a pathway page (*Steps across genomes*), which lays out the module's KOs step by step.
+
+- **One clade.** *Most variable* shows the features carried by about half the genomes, clustered so co-inherited sets sit together. *Absences beyond incompleteness* shows the most common features whose absences exceed what genome completeness explains.
+- **Two clades.** The largest differences in prevalence, each with a two-sided Fisher's exact p and a Benjamini-Hochberg q across every feature either clade carries. Related genomes share features by descent, so these values rank features and overstate independent evidence.
+- **Rows** sort by taxonomy, by clustering (Jaccard distance on the shown features), or by completeness. A colour strip marks the first rank that splits the clade, and a bar shows each genome's completeness.
+- **Cells** open the genome's hits for that feature. **Download TSV** saves the matrix with completeness and lineage.
+
+**Completeness and absences.** Genome completeness comes from DFAST_QC at ingest, or from a CheckM, CheckM2 or GTDB table:
+
+```bash
+sharur import-quality checkm2/quality_report.tsv --db data/my_dataset/sharur.duckdb
+sharur import-quality ar53_metadata.tsv.gz --db data/my_dataset/sharur.duckdb   # GTDB; CheckM2 columns preferred
+```
+
+Absences in genomes below 70% complete are hatched. For KOs, Pfam families and function labels in at least half of a clade, the matrix asks whether incompleteness explains the absences. If every genome carried the feature and reported it with probability equal to its completeness, the carrier count would follow a Poisson-binomial distribution. The table reports the expected and observed carriers, with q from the distribution's lower tail.
+
+Absences beyond incompleteness have three sources: gene loss, gene calls missing from the dataset, and annotation thresholds that miss divergent homologs. Genomes with under 0.5 proteins per kb of assembly have most of their gene calls missing. They are marked in red and left out of the test. Without an assembly file, the cutoff is half the proteins their completeness implies.
+
+
 ## Similar proteins, structures and findings
 
 - **Similar proteins** on protein pages come from the dataset's persistent embedding index. Build it once with `sharur build-vector-index --db data/my_dataset/sharur.duckdb`; the panel loads after the page and shows the nearest neighbors with their genome, architecture and best hit. For ESM-2 mean-pooled embeddings, cosine values crowd near 1, so the ranking carries more information than the score. `$SHARUR_BROWSE_EMBEDDINGS` points the browser at an embedding file elsewhere.

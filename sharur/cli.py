@@ -1557,6 +1557,47 @@ def setup_kegg(
     typer.echo("Regenerate predicates for existing datasets to apply it.")
 
 
+@app.command(name="import-quality")
+def import_quality_command(
+    table: Path = typer.Argument(..., help="CheckM2 quality_report.tsv, CheckM --tab_table output, or GTDB "
+                                 "ar53/bac120 metadata (.tsv or .tsv.gz)."),
+    db: Path = typer.Option(Path(DEFAULT_DB), "--db", "-d", help="Dataset DuckDB."),
+    id_column: str | None = typer.Option(None, "--id-column", help="Genome column (default: detected)."),
+    completeness_column: str | None = typer.Option(None, "--completeness-column",
+                                                   help="Completeness column, percent (default: detected; "
+                                                        "CheckM2 preferred)."),
+    contamination_column: str | None = typer.Option(None, "--contamination-column"),
+    overwrite: bool = typer.Option(False, "--overwrite", help="Replace completeness values already stored."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Report matches and leave the dataset unchanged."),
+):
+    """Fill genome completeness and contamination from a CheckM, CheckM2 or GTDB table."""
+    import duckdb  # noqa: PLC0415
+
+    from sharur.quality import import_quality, read_quality_table  # noqa: PLC0415
+
+    if not db.is_file():
+        typer.echo(f"DuckDB file does not exist: {db}", err=True)
+        raise typer.Exit(1)
+    try:
+        values, columns = read_quality_table(table, id_column=id_column, completeness_column=completeness_column,
+                                             contamination_column=contamination_column)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    conn = duckdb.connect(str(db), read_only=dry_run)
+    try:
+        result = import_quality(conn, values, overwrite=overwrite, dry_run=dry_run)
+    finally:
+        conn.close()
+    typer.echo(f"{table.name}: {len(values):,} genomes (columns {columns['id']}, {columns['completeness']}"
+               + (f", {columns['contamination']}" if columns["contamination"] else "") + ")")
+    typer.echo(f"{result['matched']:,} of {result['bins']:,} dataset genomes matched; "
+               f"{result['updated']:,} {'would be ' if dry_run else ''}updated"
+               + (f" (median completeness {result['median_completeness']:.1f}%)" if result["median_completeness"] else ""))
+    if not dry_run and result["updated"]:
+        typer.echo("Re-seal the dataset when its writes are done.")
+
+
 @app.command(name="cas-type")
 def cas_type(
     db: Path = typer.Option(Path(DEFAULT_DB), "--db", "-d", help="Dataset DuckDB."),

@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% from "_macros.html" import bar %}
+{% block title %}Presence/absence matrix{% endblock %}
+{% block content %}
+{% set two = result and result.groups and result.groups|length == 2 %}
+{% set qs = 'a=' ~ quote(a, safe='') ~ '&b=' ~ quote(b, safe='') ~ '&kind=' ~ kind ~ '&features=' ~ quote(features, safe=',') ~ '&module=' ~ quote(module, safe='') ~ '&pick=' ~ pick ~ '&n=' ~ n ~ '&min_completeness=' ~ min_completeness %}
+<div class="crumbs"><a href="/taxa">Tree of life</a></div>
+<h1><span class="rank">Presence/absence</span>{% if groups %}{{ groups[0].label }}{% if groups|length > 1 %} <span class="vs">vs</span> {{ groups[1].label }}{% endif %}{% else %}Genomes × features{% endif %}</h1>
+<p class="lede">Each row is a genome, each column a feature; cells show copies (or module completeness). Completeness sits beside each row, and absences in genomes below 70% complete are hatched: they weigh less.</p>
+
+<form class="panel matrix-form" action="/matrix" method="get" autocomplete="off">
+  <label><span>Genomes</span><span class="picker"><input type="text" name="a" class="group-input picker-input" value="{{ a }}" placeholder="clade, genome or 'all' (e.g. EX4484-52)" required><span class="picker-list" role="listbox"></span></span></label>
+  <label><span>Compare with <i class="count">optional</i></span><span class="picker"><input type="text" name="b" class="group-input picker-input" value="{{ b }}" placeholder="a second clade or genome"><span class="picker-list" role="listbox"></span></span></label>
+  <label><span>Features</span><select name="kind">{% for k, label in KINDS.items() %}<option value="{{ k }}" {{ 'selected' if k == kind }}>{{ label }}</option>{% endfor %}</select></label>
+  <label><span>Columns</span><select name="pick">
+    <option value="" {{ 'selected' if not pick }}>Automatic</option>
+    <option value="variable" {{ 'selected' if pick == 'variable' }}>Most variable (one group)</option>
+    <option value="absences" {{ 'selected' if pick == 'absences' }}>Absences beyond incompleteness (one group)</option>
+  </select></label>
+  <label><span>How many</span><input type="number" name="n" value="{{ n }}" min="5" max="150" step="5"></label>
+  <label><span>Rows ordered by</span><select name="order">{% for o, label in [('taxonomy', 'Taxonomy'), ('cluster', 'Clustering (Jaccard)'), ('completeness', 'Completeness')] %}<option value="{{ o }}" {{ 'selected' if o == order }}>{{ label }}</option>{% endfor %}</select></label>
+  <label><span>Min. completeness %</span><input type="number" name="min_completeness" value="{{ '%g' % min_completeness }}" min="0" max="100" step="5"></label>
+  <label class="wide"><span>KEGG module <i class="count">KOs in step order</i></span><input type="text" name="module" value="{{ module }}" placeholder="M00001"></label>
+  <label class="wide"><span>Or these features <i class="count">IDs, comma-separated</i></span><input type="text" name="features" value="{{ features }}" placeholder="K00001, K00002 · PF00005 · defense:CBASS"></label>
+  <div class="wide matrix-submit"><button type="submit">Show matrix</button>{% if payload %}<a class="btn" href="/matrix.tsv?{{ qs }}&order={{ order }}">Download TSV</a>{% endif %}</div>
+</form>
+
+{% if message %}<div class="panel"><p class="empty">{{ message }}</p></div>{% endif %}
+{% if result and result.notes %}{% for note in result.notes %}<div class="banner">{{ note }}</div>{% endfor %}{% endif %}
+
+{% if payload %}
+<div class="stats">
+  {% for grp in result.groups %}<div class="stat"><b>{{ num(grp.n) }}</b><span>genomes · {% if grp.rank %}<a href="{{ url('taxa', grp.rank, grp.label) }}">{{ grp.label }}</a>{% else %}{{ grp.label }}{% endif %}</span></div>{% endfor %}
+  <div class="stat"><b>{{ result.features|length }}</b><span>{{ KINDS[kind]|lower }} · {{ {'variable': 'most variable', 'absences': 'absences beyond incompleteness', 'differential': 'largest differences', 'module': 'module ' ~ module, 'explicit': 'chosen'}[result.pick] }}</span></div>
+  <div class="stat"><b>{{ result.color_rank }}</b><span>colour strip rank</span></div>
+</div>
+{% if result.missing_completeness %}<div class="banner">{{ num(result.missing_completeness) }} of {{ num(result.genomes|length) }} genomes have no completeness estimate{% if result.missing_completeness == result.genomes|length %}, so absences can't be weighed against incompleteness. Fill it with <code>sharur import-quality</code> (CheckM, CheckM2 or GTDB tables){% endif %}.</div>{% endif %}
+
+{% if result.deficit %}<div class="banner warn">{{ result.deficit|length }} genome{{ 's' if result.deficit|length > 1 }} carr{{ 'y' if result.deficit|length > 1 else 'ies' }} under 0.5 proteins per kb of assembly (or, without an assembly, under half what completeness implies), so gene calls are likely missing: {% for b in result.deficit[:8] %}<a href="{{ url('genome', b) }}">{{ b }}</a>{{ ', ' if not loop.last }}{% endfor %}{{ '…' if result.deficit|length > 8 }}. {{ 'They are' if result.deficit|length > 1 else 'It is' }} marked in red and left out of the incompleteness test.</div>{% endif %}
+<div class="panel">
+  <div class="matrix-wrap" id="matrix">
+    <canvas class="matrix-canvas" aria-label="Presence/absence matrix"></canvas>
+    <div class="matrix-tip" hidden></div>
+  </div>
+  <div class="legend matrix-legend">
+    <span><i class="mx-cell" style="background:var(--mx-1)"></i>1 copy</span><span><i class="mx-cell" style="background:var(--mx-2)"></i>2</span><span><i class="mx-cell" style="background:var(--mx-3)"></i>3+</span>
+    {% if kind == 'module' %}<span>module cells: shade = completeness; present at ≥ 75%</span>{% endif %}
+    <span><i class="mx-cell mx-empty"></i>not detected</span><span><i class="mx-cell mx-hatch"></i>not detected, genome &lt; 70% complete</span>
+    <span><i class="mx-cell mx-comp"></i>completeness (bar)</span><span class="count">Colour strip: {{ result.color_rank }}. Click a cell for the genome's hits.</span>
+  </div>
+</div>
+<script type="application/json" id="matrix-data">{{ payload|tojson }}</script>
+
+<div class="panel">
+  <h2>Features <span class="hint">{% if two %}share of genomes carrying each feature; Fisher's exact test treats genomes as independent, so related genomes inflate significance: use it to rank{% else %}share of genomes carrying each feature{% endif %}</span></h2>
+  <div class="scroll"><table>
+    <thead><tr><th>Feature</th><th>Name</th>
+      {% for grp in result.groups %}<th>{{ grp.label }}</th><th class="num">Copies</th>{% endfor %}
+      {% if two %}<th class="num">Δ share</th><th class="num">p</th><th class="num">q</th>{% endif %}
+      {% if result.tested %}<th title="If every genome carried the feature and reported it with probability equal to its completeness">Absences vs incompleteness</th>{% endif %}
+    </tr></thead>
+    <tbody>{% for f in result.features %}<tr>
+      <td class="mono"><a href="{{ feature_url(f.id) }}">{{ f.id }}</a>{% set ext = external_url(kind, f.id) %}{% if ext %} <a class="ext" href="{{ ext }}" target="_blank" rel="noopener">↗</a>{% endif %}{% if f.get('step') is not none %} <span class="count">step {{ f.step + 1 }}</span>{% endif %}</td>
+      <td>{{ f.name }}</td>
+      {% for e in f.groups %}<td style="min-width:120px">{{ bar(e.share) }}<span class="count">{{ e.carriers }}/{{ e.n }}</span></td><td class="num count">{{ '%g' % e.median if e.median is not none else '–' }}</td>{% endfor %}
+      {% if two %}<td class="num">{{ '%+.0f' % (f.delta * 100) }} pts</td><td class="num count">{{ pval(f.fisher_p) }}</td><td class="num count">{{ pval(f.fisher_q) }}</td>{% endif %}
+      {% if result.tested %}<td class="count">{% for e in f.groups %}{% if e.get('p') is not none %}<div>{% if result.groups|length > 1 %}{{ result.groups[loop.index0].label }}: {% endif %}{{ e.observed }} of {{ '%.0f' % e.expected }} expected · q {{ pval(e.q) }} · {% if e.q < ALPHA %}<b>beyond incompleteness</b>{% else %}incompleteness explains{% endif %}</div>{% endif %}{% endfor %}</td>{% endif %}
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  {% if result.tested %}<p class="count" style="margin-top:8px">Absences vs incompleteness, for features in at least half of a group: if every genome carried the feature and each reported it with probability equal to its completeness, the carrier count would follow a Poisson-binomial distribution. p is its lower tail at the observed count; q adjusts p across every feature tested in the group (Benjamini-Hochberg). Absences beyond incompleteness come from gene loss, gene calls missing from the dataset, or annotation thresholds that miss divergent homologs; check the genomes before calling a loss. Multi-copy features are detected more easily than this assumes.</p>{% endif %}
+</div>
+{% elif not message and not groups %}
+<div class="panel"><p class="empty">Choose a clade or genome above. Two groups show their largest differences; one group shows its most variable features, or those whose absences exceed what incompleteness explains. A KEGG module lays its KOs out step by step.</p></div>
+{% endif %}
+<script src="/static/matrix.js?v={{ asset_version }}"></script>
+{% endblock %}
