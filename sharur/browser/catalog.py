@@ -90,6 +90,7 @@ class Catalog:
     module_ids: list[str] = field(default_factory=list)
     ko_sets: dict[str, set[str]] = field(default_factory=dict)
     notable: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    domains: dict[str, dict[str, Any]] = field(default_factory=dict)  # Pfam accession -> summary
     ready: threading.Event = field(default_factory=threading.Event)
     status: str = "loading"
     map_state: str = "unknown"
@@ -363,6 +364,9 @@ def load_background(store, catalog: Catalog, lock: threading.Lock) -> None:
                     if module_kos[m] & present:
                         matrix[genome.index, j] = evaluate(definitions[m], present, definitions).completeness
             catalog.modules, catalog.module_ids, catalog.module_completeness = definitions, ids, matrix
+        catalog.status = "summarizing Pfam domains"
+        with lock:
+            catalog.domains = _domains(store)
         catalog.status = "finding notable proteins"
         with lock:
             notable = _notable(store)
@@ -383,6 +387,17 @@ def _kos(definition) -> set[str]:
     from sharur.modules import kos_in  # noqa: PLC0415
 
     return kos_in(definition.tree)
+
+
+def _domains(store) -> dict[str, dict[str, Any]]:
+    rows = store.execute("""
+        SELECT split_part(a.accession, '.', 1) AS acc, ANY_VALUE(NULLIF(a.name, '')), ANY_VALUE(NULLIF(a.description, '')),
+               COUNT(DISTINCT a.protein_id), COUNT(DISTINCT p.bin_id), COUNT(*)
+        FROM annotations a JOIN proteins p USING (protein_id)
+        WHERE LOWER(a.source) = 'pfam' GROUP BY 1""")
+    return {acc: {"accession": acc, "name": name or acc, "description": desc or "", "proteins": proteins,
+                  "genomes": genomes, "hits": hits}
+            for acc, name, desc, proteins, genomes, hits in rows}
 
 
 def _notable(store) -> dict[str, list[dict[str, Any]]]:

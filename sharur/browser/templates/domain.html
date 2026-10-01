@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% from "_macros.html" import bar, prevalence_table, protein_link, genome_link, label_chip %}
+{% block title %}{{ d.name }}{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="/domains">Pfam domains</a></div>
+<h1><span class="rank">Pfam · <a href="https://www.ebi.ac.uk/interpro/entry/pfam/{{ d.accession }}" target="_blank" rel="noopener">{{ d.accession }} ↗</a></span>{{ d.name }}</h1>
+<p class="lede">{{ d.description }}</p>
+<div class="stats">
+  <div class="stat"><b>{{ num(d.genomes) }}</b><span>genomes ({{ pct(d.genomes / (catalog.genomes|length or 1)) }})</span></div>
+  <div class="stat"><b>{{ num(d.proteins) }}</b><span>proteins</span></div>
+  <div class="stat"><b>{{ num(d.hits) }}</b><span>domain hits{% if d.hits > d.proteins %} · {{ '%.1f' % (d.hits / d.proteins) }} per protein{% endif %}</span></div>
+  <div class="stat"><b>{{ labels|length }}</b><span>functional labels mapped</span></div>
+</div>
+
+<div class="grid g-side">
+  <div class="panel">
+    <h2>Functional labels from this family <span class="hint">each with the evidence that ships it</span></h2>
+    {% if labels %}
+    <table><tbody>{% for p, ev in labels %}<tr><td style="white-space:nowrap">{{ label_chip(p, url('function', p)) }}</td><td class="mono count" style="overflow-wrap:anywhere">{{ ev }}</td></tr>{% endfor %}</tbody></table>
+    <p class="note"><code>go:</code> GO annotation of the family · <code>text:</code> stated in its Pfam name or description · <code>swissprot:</code> agreement among reviewed proteins · <code>enzyme:</code> named ENZYME entry. See <a href="https://github.com/jwestrob/Sharur/blob/main/docs/predicate_construction.md">how predicates are built</a>.</p>
+    {% else %}<p class="empty">No functional label maps from this family; it is reported as an observed domain only.</p>{% endif %}
+  </div>
+  <div class="panel"><h2>Protein lengths</h2>{{ histogram }}</div>
+</div>
+
+<div class="grid g2">
+  <div class="panel">
+    <h2>Architectures <span class="hint">{{ 'from ' ~ num(sampled) ~ ' sampled proteins' if sampled < d.proteins else 'all proteins' }}</span></h2>
+    <div class="bars">{% set top = architectures[0][1] if architectures else 1 %}{% for arch, n, pattern in architectures %}
+      <a class="label" href="/architecture?pattern={{ quote(pattern, safe='') }}" title="Find every protein with exactly this architecture" style="max-width:420px">{{ arch }}</a>{{ bar(n / top) }}<span class="val">{{ num(n) }}</span>{% endfor %}</div>
+  </div>
+  <div class="panel">
+    <h2>Partner domains <span class="hint">share of proteins also carrying</span></h2>
+    <div class="bars">{% for (acc, name), n in partners %}<a class="label" href="{{ url('domain', acc) }}">{{ name }}</a>{{ bar(n / (sampled or 1)) }}<span class="val">{{ pct(n / (sampled or 1)) }}</span>{% else %}<span class="empty">Usually alone.</span>{% endfor %}</div>
+  </div>
+</div>
+
+<div class="grid g-side">
+  <div class="panel"><h2>Across the tree</h2>{{ prevalence_table(prevalence, rank, url('domain', d.accession)) }}</div>
+  <div class="panel"><h2>Most copies</h2>
+    <table><tbody>{% for g, n in top_genomes %}<tr><td>{{ genome_link(g.bin_id) }}<br><span class="count">{{ g.label }}</span></td><td class="num">{{ n }}</td></tr>{% endfor %}</tbody></table></div>
+</div>
+<div class="panel"><h2>Largest proteins with this domain</h2>
+  <table><tbody>{% for pid, bin_id, n in examples %}<tr><td>{{ protein_link(pid) }}</td><td><span class="count">{{ catalog.by_bin[bin_id].label if bin_id in catalog.by_bin else '' }}</span></td><td class="num">{{ num(n) }} aa</td></tr>{% endfor %}</tbody></table>
+</div>
+{% endblock %}

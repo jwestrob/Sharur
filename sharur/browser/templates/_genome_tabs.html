@@ -1,0 +1,7 @@
+<div class="crumbs"><a href="/taxa">All genomes</a>{% for r, n in g.lineage if n != 'Unclassified' %}<span class="sep">›</span><a href="{{ url('taxa', r, n) }}">{{ n }}</a>{% endfor %}</div>
+<h1><span class="rank">Genome · {{ g.label }}</span>{{ g.bin_id }}</h1>
+<nav class="tabs">
+  <a href="{{ url('genome', g.bin_id) }}" class="{{ 'on' if tab == 'overview' }}">Overview</a>
+  <a href="{{ url('genome', g.bin_id) }}/contigs" class="{{ 'on' if tab == 'contigs' }}">Contigs <span>{{ num(g.contigs) }}</span></a>
+  <a href="{{ url('genome', g.bin_id) }}/proteins" class="{{ 'on' if tab == 'proteins' }}">Proteins <span>{{ num(g.proteins) }}</span></a>
+</nav>

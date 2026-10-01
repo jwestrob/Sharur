@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% from "_macros.html" import protein_link %}
+{% block title %}{{ short(contig_id) }}{% endblock %}
+{% block content %}
+<div class="crumbs">{% if g %}<a href="{{ url('genome', g.bin_id) }}">{{ g.bin_id }}</a><span class="sep">›</span><a href="{{ url('genome', g.bin_id) }}/contigs">Contigs</a>{% endif %}</div>
+<h1><span class="rank">Contig · {{ bp(length) }} · {{ num(total_genes) }} genes</span>{{ short(contig_id) }}</h1>
+<div class="panel">
+  <div class="viewer-bar">
+    <span class="count">{{ num(start) }} – {{ num(end) }} bp · {{ genes|length }} genes in view</span>
+    <span class="viewer-buttons">
+      {% set base = url('contig', contig_id) %}
+      <a class="btn {{ 'off' if start <= 1 }}" href="{{ base }}?start={{ [1, start - span // 2]|max }}&span={{ span }}" title="Back">←</a>
+      <a class="btn" href="{{ base }}?start={{ [1, start + span // 4]|max }}&span={{ [2000, span // 2]|max }}" title="Zoom in">＋</a>
+      <a class="btn" href="{{ base }}?start={{ [1, start - span // 2]|max }}&span={{ span * 2 }}" title="Zoom out">－</a>
+      <a class="btn" href="{{ base }}?start=1&span={{ length }}" title="Whole contig">⤢</a>
+      <a class="btn {{ 'off' if end >= length }}" href="{{ base }}?start={{ start + span // 2 }}&span={{ span }}" title="Forward">→</a>
+    </span>
+  </div>
+  {{ overview }}
+  <div class="scroll" style="margin-top:14px">{{ track }}</div>
+  <div class="legend">{% for cat, color in CATEGORY_COLORS.items() if genes|selectattr('category', 'equalto', cat)|list %}<span><i style="background:{{ color }}"></i>{{ CATEGORY_LABELS.get(cat, cat) }}</span>{% endfor %}<span><i style="background:var(--gene-dark);border:1px dashed var(--ink-3)"></i>no annotation</span></div>
+</div>
+<div class="panel">
+  <h2>Genes in view</h2>
+  <div class="table-tools"><input data-filter="genes" placeholder="Filter genes…"><span class="count" data-count="genes"></span></div>
+  <div class="scroll"><table id="genes" data-table>
+    <thead><tr><th data-sort="num" class="num">Start</th><th data-sort="text">Strand</th><th data-sort="text">Category</th><th data-sort="text">Best hit</th><th data-sort="num" class="num">Length</th><th data-sort="text">Protein</th></tr></thead>
+    <tbody>{% for n in genes %}<tr><td class="num">{{ num(n.start) }}</td><td class="count">{{ n.strand }}</td>
+      <td>{% if n.category %}<span class="chip" style="margin:0"><i style="--dot:{{ n.color }}"></i>{{ CATEGORY_LABELS.get(n.category, n.category) }}</span>{% endif %}</td>
+      <td>{{ n.annotation or '—' }}</td><td class="num">{{ num(n.length_aa) }} aa</td><td><a class="mono" href="{{ url('protein', n.protein_id) }}" title="{{ n.protein_id }}">{{ ('gene ' ~ n.protein_id[contig_id|length:].lstrip('_')) if n.protein_id.startswith(contig_id) else short(n.protein_id) }}</a></td></tr>{% endfor %}</tbody>
+  </table></div>
+</div>
+{% endblock %}

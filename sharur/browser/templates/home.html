@@ -2,15 +2,17 @@
 {% from "_macros.html" import bar, protein_link, genome_link, child_list %}
 {% block title %}Overview{% endblock %}
 {% block content %}
-<h1>{{ dataset }}</h1>
-<p class="lede">{{ num(catalog.totals.genomes) }} genomes and {{ num(catalog.totals.proteins) }} proteins. Start from the tree of life, a function, a pathway or a system, or let the discovery lists point you at something unusual.</p>
-<div class="stats">
-  <div class="stat"><b>{{ num(catalog.totals.genomes) }}</b><span>genomes</span></div>
-  <div class="stat"><b>{{ bp(catalog.totals.bases) }}</b><span>assembled sequence</span></div>
-  <div class="stat"><b>{{ num(catalog.totals.proteins) }}</b><span>proteins</span></div>
-  <div class="stat"><b>{{ pct(catalog.totals.annotated / (catalog.totals.proteins or 1)) }}</b><span>with an annotation hit</span></div>
-  <div class="stat"><b>{{ num(catalog.systems|length) }}</b><span>validated systems</span></div>
-</div>
+<section class="hero">
+  <h1>{{ dataset }}</h1>
+  <p class="lede">{{ num(catalog.totals.genomes) }} genomes and {{ num(catalog.totals.proteins) }} proteins. Start from the tree of life, a function, a pathway, a Pfam domain or a system, or let the discovery lists point you at something unusual.</p>
+  <div class="stats">
+    <div class="stat"><b>{{ num(catalog.totals.genomes) }}</b><span>genomes</span></div>
+    <div class="stat"><b>{{ bp(catalog.totals.bases) }}</b><span>assembled sequence</span></div>
+    <div class="stat"><b>{{ num(catalog.totals.proteins) }}</b><span>proteins</span></div>
+    <div class="stat"><b>{{ pct(catalog.totals.annotated / (catalog.totals.proteins or 1)) }}</b><span>with an annotation hit</span></div>
+    <div class="stat"><b>{{ num(catalog.systems|length) }}</b><span>validated systems</span></div>
+  </div>
+</section>
 
 <div class="grid g-side">
   <div class="panel"><h2>Who is here <span class="hint">genomes by {{ child_rank }} · click to explore</span></h2>{{ tree }}</div>
@@ -21,6 +23,7 @@
   <a class="entry" href="/taxa"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v6M12 9l-6 5M12 9l6 5"/></svg></span><b>Tree of life</b><span>Walk from phylum to genus; see what makes each clade distinctive.</span></a>
   <a class="entry" href="/functions"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span><b>Functions</b><span>{{ num(catalog.predicates|length) }} evidence-backed functional labels and where they occur.</span></a>
   <a class="entry" href="/pathways"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><path d="M7 6h10"/></svg></span><b>Pathways</b><span>KEGG modules: how complete, in whom, and which steps go missing.</span></a>
+  <a class="entry" href="/domains"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="9" width="6" height="6" rx="2"/><rect x="9" y="9" width="9" height="6" rx="2"/><path d="M18 12h4"/></svg></span><b>Pfam domains</b><span>{{ num(catalog.domains|length) if catalog.domains else 'All' }} families: where they occur, their architectures and partners.</span></a>
   <a class="entry" href="/systems"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/></svg></span><b>Systems</b><span>{% for k, n in systems.items() %}{{ num(n) }} {{ k }}{% if not loop.last %}, {% endif %}{% endfor %}{% for k, n in loci.items() %}, {{ num(n) }} {{ k }}{% endfor %}.</span></a>
   <a class="entry" href="/discover"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M15.5 8.5l-2 5-5 2 2-5z"/></svg></span><b>Discover</b><span>Giant proteins, large unannotated proteins, long domain repeats.</span></a>
 </div>

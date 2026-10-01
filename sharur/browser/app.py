@@ -25,6 +25,7 @@ from sharur.browser.catalog import (
     load_background,
     load_catalog,
 )
+from sharur.predicates.mappings.pfam_map import PFAM_EVIDENCE, PFAM_TO_PREDICATES
 from sharur.predicates.vocabulary import PREDICATE_BY_ID
 from sharur.storage.duckdb_store import DuckDBStore
 
@@ -166,6 +167,29 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
     # Genome
     # ------------------------------------------------------------------ #
 
+    @app.get("/genome/{bin_id:path}/contigs", response_class=HTMLResponse)
+    def genome_contigs(request: Request, bin_id: str):
+        genome = catalog.by_bin.get(bin_id)
+        if genome is None:
+            raise HTTPException(404, "Genome not found")
+        with lock:
+            rows = store.execute(
+                """WITH p AS (SELECT protein_id, contig_id FROM proteins WHERE bin_id = ?),
+                        ann AS (SELECT DISTINCT a.protein_id FROM annotations a JOIN p USING (protein_id))
+                   SELECT c.contig_id, c.length, COUNT(p.protein_id), COUNT(ann.protein_id)
+                   FROM contigs c LEFT JOIN p USING (contig_id) LEFT JOIN ann USING (protein_id)
+                   WHERE c.bin_id = ? GROUP BY 1, 2 ORDER BY 2 DESC""", [bin_id, bin_id])
+        features: dict[str, list[str]] = defaultdict(list)
+        for l in catalog.loci:
+            if l["bin_id"] == bin_id:
+                features[l["contig_id"]].append(l["type"])
+        contig_of = _protein_contigs([p for s in catalog.systems if s["bin_id"] == bin_id for p in s["proteins"]])
+        for s in catalog.systems:
+            if s["bin_id"] == bin_id:
+                for contig in {contig_of.get(p) for p in s["proteins"]} - {None}:
+                    features[contig].append(s["type"])
+        return render(request, "genome_contigs.html", "taxa", g=genome, rows=rows, features=features)
+
     @app.get("/genome/{bin_id:path}/proteins", response_class=HTMLResponse)
     def genome_proteins(request: Request, bin_id: str):
         genome = catalog.by_bin.get(bin_id)
@@ -187,7 +211,8 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
         if genome is None:
             raise HTTPException(404, "Genome not found")
         with lock:
-            lengths = [r[0] for r in store.execute("SELECT length FROM contigs WHERE bin_id = ?", [bin_id])]
+            contigs = store.execute("SELECT contig_id, length FROM contigs WHERE bin_id = ?", [bin_id])
+            lengths = [n for _, n in contigs]
             largest = store.execute(
                 """WITH top AS (SELECT protein_id, sequence_length FROM proteins WHERE bin_id = ?
                                 ORDER BY sequence_length DESC LIMIT 12)
@@ -214,7 +239,8 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
             from sharur.abundance import genome_abundance  # noqa: PLC0415
 
             abundance = genome_abundance(sidecar, bins=[bin_id])
-        return render(request, "genome.html", "taxa", g=genome, strip=charts.contig_strip(lengths),
+        return render(request, "genome.html", "taxa", g=genome,
+                      strip=charts.contig_strip(contigs, lambda c: _url("contig", c)),
                       longest_contig=max(lengths) if lengths else 0, largest=largest, profile=profile,
                       modules=modules, systems=systems, loci=loci, abundance=abundance)
 
@@ -484,6 +510,8 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
             return _url("function", q)
         if q in catalog.modules:
             return _url("pathway", q)
+        if q.split(".")[0].upper() in catalog.domains:
+            return _url("domain", q.split(".")[0].upper())
         with lock:
             if store.execute("SELECT 1 FROM proteins WHERE protein_id = ?", [q]):
                 return _url("protein", q)
@@ -509,6 +537,11 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
         for module, d in catalog.modules.items():
             if needle in module.lower() or needle in d.name.lower():
                 add("pathway", d.name, module, _url("pathway", module))
+        for d in catalog.domains.values():
+            if needle == d["accession"].lower() or needle in d["name"].lower():
+                add("domain", d["name"], f'{d["accession"]} · {d["genomes"]:,} genomes', _url("domain", d["accession"]))
+                if sum(1 for o in out if o["kind"] == "domain") >= 8:
+                    break
         for kind, system_type in sorted({(s["kind"], s["type"]) for s in catalog.systems}):
             if needle in str(system_type).lower():
                 add("system", system_type, kind, _url("system", kind, system_type))
@@ -524,6 +557,141 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
         exact_first = sorted(out, key=lambda o: (o["label"].lower() != needle,
                                                  not o["label"].lower().startswith(needle)))
         return exact_first[:limit]
+
+    # ------------------------------------------------------------------ #
+    # Pfam domains
+    # ------------------------------------------------------------------ #
+
+    @app.get("/domains", response_class=HTMLResponse)
+    def domains(request: Request, q: str = Query("", max_length=200), sort: str = Query("genomes"),
+                page: int = Query(1, ge=1)):
+        if not catalog.domains:
+            return render(request, "pending.html", "domains", what="Pfam domains", missing=catalog.ready.is_set())
+        n = len(catalog.genomes) or 1
+        rows = list(catalog.domains.values())
+        needle = q.strip().lower()
+        if needle:
+            rows = [r for r in rows if needle in r["name"].lower() or needle in r["accession"].lower()
+                    or needle in r["description"].lower()]
+        key = {"genomes": lambda r: -r["genomes"], "proteins": lambda r: -r["proteins"],
+               "name": lambda r: r["name"].lower(), "rare": lambda r: (r["genomes"], r["name"].lower()),
+               "patchy": lambda r: abs(r["genomes"] / n - 0.5)}.get(sort, lambda r: -r["genomes"])
+        rows.sort(key=key)
+        per_page = 100
+        pages = max(1, (len(rows) + per_page - 1) // per_page)
+        page = min(page, pages)
+        shown = rows[(page - 1) * per_page: page * per_page]
+        mapped = {r["accession"]: PFAM_TO_PREDICATES.get(r["accession"], []) for r in shown}
+        return render(request, "domains.html", "domains", rows=shown, total=len(rows), q=q, sort=sort, page=page,
+                      pages=pages, n=n, mapped=mapped, families=len(catalog.domains))
+
+    @app.get("/domain/{accession}", response_class=HTMLResponse)
+    def domain_page(request: Request, accession: str, rank: str = Query("class")):
+        from sharur.architecture import compact, resolve  # noqa: PLC0415
+        from sharur.architecture import _hits as architecture_hits  # noqa: PLC0415
+
+        acc = accession.split(".")[0]
+        summary = catalog.domains.get(acc)
+        if summary is None:
+            raise HTTPException(404, "Pfam family not found in this dataset")
+        rank = rank if rank in RANKS else "class"
+        with lock:
+            per_genome = store.execute(
+                """SELECT p.bin_id, COUNT(DISTINCT a.protein_id) FROM annotations a JOIN proteins p USING (protein_id)
+                   WHERE LOWER(a.source) = 'pfam' AND split_part(a.accession, '.', 1) = ? GROUP BY 1""", [acc])
+            carriers_ids = [r[0] for r in store.execute(
+                """SELECT DISTINCT protein_id FROM annotations
+                   WHERE LOWER(source) = 'pfam' AND split_part(accession, '.', 1) = ?
+                   ORDER BY hash(protein_id) LIMIT 2500""", [acc])]
+            lengths = [r[0] for r in store.execute(
+                """SELECT p.sequence_length FROM proteins p JOIN (SELECT DISTINCT protein_id FROM annotations
+                   WHERE LOWER(source) = 'pfam' AND split_part(accession, '.', 1) = ?) c USING (protein_id)""", [acc])]
+            hits = architecture_hits(store, ["pfam"], "AND a.protein_id IN (SELECT UNNEST(?::VARCHAR[]))",
+                                     [carriers_ids]) if carriers_ids else {}
+            examples = store.execute(
+                """SELECT p.protein_id, p.bin_id, p.sequence_length FROM proteins p
+                   JOIN (SELECT DISTINCT protein_id FROM annotations
+                         WHERE LOWER(source) = 'pfam' AND split_part(accession, '.', 1) = ?) c USING (protein_id)
+                   ORDER BY p.sequence_length DESC LIMIT 12""", [acc])
+        carriers = {catalog.by_bin[b].index: n for b, n in per_genome if b in catalog.by_bin}
+        architectures: Counter = Counter()
+        patterns: dict[str, str] = {}
+        partners: Counter = Counter()
+        for pid, protein_hits in hits.items():
+            resolved = resolve(protein_hits)
+            names = [d.name for d in resolved]
+            key = compact(names)
+            architectures[key] += 1
+            if key not in patterns:
+                runs: list[list[Any]] = []
+                for n in names:
+                    if runs and runs[-1][0] == n:
+                        runs[-1][1] += 1
+                    else:
+                        runs.append([n, 1])
+                patterns[key] = "^ " + " ".join(n if k == 1 else f"{n} {{{k}}}" for n, k in runs) + " $"
+            for other in {d.accession.split(".")[0]: d.name for d in resolved if d.accession.split(".")[0] != acc}.items():
+                partners[other] += 1
+        sampled = len(hits)
+        labels = sorted(PFAM_EVIDENCE.get(acc, {}).items())
+        return render(request, "domain.html", "domains", d=summary, carriers=carriers,
+                      prevalence=[r for r in catalog.prevalence_by(carriers, rank) if r["genomes"] >= 3][:30],
+                      rank=rank, architectures=[(a, n, patterns[a]) for a, n in architectures.most_common(12)],
+                      partners=partners.most_common(16),
+                      sampled=sampled, labels=labels, examples=examples,
+                      histogram=charts.histogram(lengths, "Protein length (aa)"),
+                      top_genomes=sorted(((catalog.genomes[i], n) for i, n in carriers.items()), key=lambda x: -x[1])[:10])
+
+    # ------------------------------------------------------------------ #
+    # Genome browser
+    # ------------------------------------------------------------------ #
+
+    def _protein_contigs(protein_ids: list[str]) -> dict[str, str]:
+        if not protein_ids:
+            return {}
+        with lock:
+            return dict(store.execute("SELECT protein_id, contig_id FROM proteins WHERE protein_id IN "
+                                      "(SELECT UNNEST(?::VARCHAR[]))", [list(set(protein_ids))]))
+
+    @app.get("/contig/{contig_id:path}", response_class=HTMLResponse)
+    def contig_page(request: Request, contig_id: str, start: int = Query(1, ge=1), span: int = Query(0, ge=0)):
+        with lock:
+            info = store.execute("SELECT bin_id, length FROM contigs WHERE contig_id = ?", [contig_id])
+            if not info:
+                raise HTTPException(404, "Contig not found")
+            bin_id, length = info[0]
+            genes = store.execute(
+                """WITH p AS (SELECT protein_id, start, end_coord, strand, sequence_length FROM proteins
+                              WHERE contig_id = ?),
+                        best AS (SELECT a.protein_id, ARG_MIN(COALESCE(NULLIF(a.name, ''), a.accession),
+                                                              COALESCE(a.evalue, 1)) AS top
+                                 FROM annotations a JOIN p USING (protein_id) GROUP BY 1)
+                   SELECT p.protein_id, p.start, p.end_coord, p.strand, p.sequence_length, best.top
+                   FROM p LEFT JOIN best USING (protein_id) ORDER BY p.start""", [contig_id])
+            categories = _top_categories([g[0] for g in genes])
+        length = max(length or 0, max((g[2] for g in genes), default=0))
+        span = span or min(length, 60000)
+        span = max(2000, min(span, length))
+        start = max(1, min(start, max(1, length - span + 1)))
+        end = start + span - 1
+        window = [{"protein_id": pid, "start": s, "end": e, "strand": st, "length_aa": n, "annotation": top,
+                   "category": categories.get(pid), "color": charts.CATEGORY_COLORS.get(categories.get(pid))}
+                  for pid, s, e, st, n, top in genes if e >= start and s <= end]
+        members = {g[0] for g in genes}
+        overlays = [{"label": l["type"], "start": l["start"], "end": l["end"], "kind": "locus"}
+                    for l in catalog.loci if l["contig_id"] == contig_id]
+        positions = {g[0]: (g[1], g[2]) for g in genes}
+        for s in catalog.systems:
+            inside = [positions[p] for p in s["proteins"] if p in members]
+            if inside:
+                overlays.append({"label": s["type"], "start": min(a for a, _ in inside),
+                                 "end": max(b for _, b in inside), "kind": s["kind"]})
+        genome = catalog.by_bin.get(bin_id)
+        return render(request, "contig.html", "taxa", contig_id=contig_id, g=genome, length=length, start=start,
+                      end=end, span=span, genes=window, total_genes=len(genes),
+                      overview=charts.contig_overview(length, start, end, [(g[1], g[2]) for g in genes],
+                                                      _url("contig", contig_id), span),
+                      track=charts.contig_track(window, overlays, start, end))
 
     @app.get("/api/suggest")
     def suggest(q: str = Query("", max_length=200)):

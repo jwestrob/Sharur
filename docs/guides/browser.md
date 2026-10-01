@@ -14,9 +14,10 @@ Browse without knowing an identifier. The left rail offers five ways in:
 | **Functions** | The labels that vary most between genomes, every label by category, and a page per label with its prevalence across the tree and example proteins |
 | **Pathways** | KEGG modules with the share of genomes carrying each; a page per module with completeness by clade and how often each step is found |
 | **Systems** | Defense and secretion system types and mobile-element regions, with their distribution across the tree |
+| **Domains** | Every Pfam family with its genome prevalence; a page per family with the functional labels it maps to and their evidence, its architectures and partner domains, protein lengths, and where it occurs across the tree |
 | **Discover** | Giant proteins with their domain architecture, the largest unannotated proteins, the longest domain repeats, and domain-pattern search |
 
-Genome pages draw the contig landscape, compare the genome's function profile with the dataset average, and list its pathways, systems and largest proteins. Protein pages draw the domain architecture to scale and the gene neighborhood colored by function category, with each label linking to its evidence.
+Genome pages draw the contig landscape (click a contig to open it in the contig viewer: genes on both strands colored by function, with prophages, islands and systems marked above, and controls to pan and zoom), compare the genome's function profile with the dataset average, and list its pathways, systems and largest proteins. Protein pages draw the domain architecture to scale and the gene neighborhood colored by function category, with each label linking to its evidence.
 
 The search box suggests taxa, functions, pathways, systems, genomes and proteins as you type (press `/` to focus it). Pages contain no sequences.
 

@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% from "_macros.html" import bar %}
+{% block title %}Pfam domains{% endblock %}
+{% block content %}
+<h1>Pfam domains</h1>
+<p class="lede">{{ num(families) }} Pfam families have hits in this dataset. Open a family for where it occurs, the architectures it sits in, its partner domains, and the functional labels it maps to with their evidence.</p>
+<div class="panel">
+  <form class="table-tools" method="get" action="/domains">
+    <input name="q" value="{{ q }}" placeholder="Name, accession or description (e.g. hydrogenase, PF00005, VWA)" style="flex:1">
+    <select name="sort" onchange="this.form.submit()">
+      {% for key, label in [('genomes', 'Most widespread'), ('patchy', 'Patchiest (near 50% of genomes)'), ('rare', 'Rarest'), ('proteins', 'Most proteins'), ('name', 'Name')] %}<option value="{{ key }}" {{ 'selected' if sort == key }}>{{ label }}</option>{% endfor %}
+    </select>
+    <button>Search</button>
+  </form>
+  <p class="count">{{ num(total) }} families{% if q %} matching “{{ q }}”{% endif %} · page {{ page }} of {{ pages }}</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Family</th><th>Description</th><th>Genomes</th><th class="num">Proteins</th><th>Maps to</th></tr></thead>
+    <tbody>{% for r in rows %}<tr>
+      <td><a href="{{ url('domain', r.accession) }}"><b>{{ r.name }}</b></a><br><span class="count mono">{{ r.accession }}</span></td>
+      <td class="count" style="max-width:340px">{{ r.description }}</td>
+      <td style="min-width:150px"><div class="cell-bar">{{ bar(r.genomes / n) }}<span class="count">{{ pct(r.genomes / n) }}</span></div></td>
+      <td class="num">{{ num(r.proteins) }}</td>
+      <td>{% for p in mapped[r.accession][:3] %}{% set d = PREDICATE_BY_ID.get(p) %}<span class="chip"><i style="--dot:{{ CATEGORY_COLORS.get(d.category, 'var(--ink-3)') if d else 'var(--ink-3)' }}"></i>{{ d.name if d else p }}</span>{% endfor %}{% if mapped[r.accession]|length > 3 %}<span class="count">+{{ mapped[r.accession]|length - 3 }}</span>{% endif %}</td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  <div class="pager">{% if page > 1 %}<a class="btn" href="?q={{ quote(q) }}&sort={{ sort }}&page={{ page - 1 }}">← Previous</a>{% endif %}<span class="count">Page {{ page }} of {{ pages }}</span>{% if page < pages %}<a class="btn" href="?q={{ quote(q) }}&sort={{ sort }}&page={{ page + 1 }}">Next →</a>{% endif %}</div>
+</div>
+{% endblock %}

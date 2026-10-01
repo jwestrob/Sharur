@@ -2,8 +2,7 @@
 {% from "_macros.html" import protein_link %}
 {% block title %}Proteins · {{ g.bin_id }}{% endblock %}
 {% block content %}
-<div class="crumbs"><a href="{{ url('genome', g.bin_id) }}">{{ g.bin_id }}</a></div>
-<h1>Proteins</h1>
+{% set tab = 'proteins' %}{% include "_genome_tabs.html" %}
 <div class="panel">
   <div class="table-tools"><input data-filter="proteins" placeholder="Filter by ID, contig or annotation…"><span class="count" data-count="proteins"></span></div>
   <div class="scroll"><table id="proteins" data-table>

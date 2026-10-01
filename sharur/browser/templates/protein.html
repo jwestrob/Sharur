@@ -56,7 +56,7 @@
   <details {% if (c.annotations|length) < 4 %}open{% endif %}><summary>Annotation hits ({{ c.annotations.values()|map('length')|sum }})</summary>
   <div class="scroll" style="margin-top:10px"><table>
     <thead><tr><th>Source</th><th>Accession</th><th>Name</th><th>Description</th><th class="num">E-value</th></tr></thead>
-    <tbody>{% for src, hits in c.annotations.items() %}{% for h in hits %}<tr><td><span class="tag">{{ src }}</span></td><td class="mono">{{ h.accession }}</td><td>{{ h.name }}</td><td class="count">{{ h.description or '' }}</td><td class="num count">{{ evalue(h.evalue) }}</td></tr>{% endfor %}{% endfor %}</tbody>
+    <tbody>{% for src, hits in c.annotations.items() %}{% for h in hits %}<tr><td><span class="tag">{{ src }}</span></td><td class="mono">{% if src == 'pfam' and h.accession.split('.')[0] in catalog.domains %}<a href="{{ url('domain', h.accession.split('.')[0]) }}">{{ h.accession }}</a>{% else %}{{ h.accession }}{% endif %}</td><td>{{ h.name }}</td><td class="count">{{ h.description or '' }}</td><td class="num count">{{ evalue(h.evalue) }}</td></tr>{% endfor %}{% endfor %}</tbody>
   </table></div></details>
 </div>
 {% endblock %}

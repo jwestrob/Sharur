@@ -9,13 +9,15 @@ from urllib.parse import quote
 from markupsafe import Markup
 
 # Categorical palette: distinct in light and dark themes, assigned in fixed order.
-PALETTE = ["#4e79a7", "#f28e2b", "#59a14f", "#e15759", "#76b7b2", "#edc948",
-           "#b07aa1", "#ff9da7", "#9c755f", "#86bcb6", "#d37295", "#a0cbe8"]
+# Hues at matched lightness and chroma, so no category shouts over another.
+PALETTE = ["#5b8def", "#e0895c", "#4fb38d", "#d9667e", "#9a7fe0", "#d9ae45",
+           "#45aec4", "#c97aa4", "#88a85a", "#d1834c", "#6f93c4", "#b48cd6"]
 CATEGORY_COLORS = {
-    "metabolism": "#59a14f", "enzyme": "#4e79a7", "transport": "#76b7b2", "binding": "#edc948",
-    "info_processing": "#b07aa1", "regulation": "#9c755f", "envelope": "#f28e2b", "stress": "#e15759",
-    "mobile": "#d37295", "viral": "#ff9da7", "cazy": "#86bcb6", "division": "#a0cbe8", "structure": "#bab0ac",
+    "metabolism": "#4fb38d", "enzyme": "#5b8def", "transport": "#45aec4", "binding": "#d9ae45",
+    "info_processing": "#9a7fe0", "regulation": "#b0896a", "envelope": "#e0895c", "stress": "#d9667e",
+    "mobile": "#c97aa4", "viral": "#e88fa8", "cazy": "#88a85a", "division": "#6f93c4", "structure": "#9aa3ad",
 }
+OVERLAY_COLORS = {"prophage": "#c97aa4", "island": "#d9ae45", "defense": "#d9667e", "secretion": "#5b8def"}
 
 
 def _e(value: Any) -> str:
@@ -88,20 +90,128 @@ def treemap(items: list[dict[str, Any]], height: int = 320) -> Markup:
 # --------------------------------------------------------------------------- #
 
 
-def contig_strip(lengths: list[int], width: int = 1000, height: int = 28) -> Markup:
-    """All contigs of a genome, longest first, as one proportional strip."""
-    total = sum(lengths)
+def contig_strip(contigs: list[tuple[str, int]], url_for, width: int = 1000, height: int = 34) -> Markup:
+    """All contigs of a genome, longest first, as one proportional strip; each links to its viewer."""
+    total = sum(n for _, n in contigs)
     if not total:
         return Markup("")
     x, parts = 0.0, []
-    for i, length in enumerate(sorted(lengths, reverse=True)):
+    for i, (contig, length) in enumerate(sorted(contigs, key=lambda c: -c[1])):
         w = length / total * width
         shade = "var(--strip-a)" if i % 2 == 0 else "var(--strip-b)"
-        parts.append(f'<rect x="{x:.2f}" y="0" width="{max(w, 0.3):.2f}" height="{height}" fill="{shade}">'
-                     f'<title>{length:,} bp</title></rect>')
+        parts.append(f'<a href="{_e(url_for(contig))}"><rect x="{x:.2f}" y="0" width="{max(w, 0.35):.2f}" '
+                     f'height="{height}" fill="{shade}"><title>{_e(contig)} · {length:,} bp</title></rect></a>')
         x += w
     return Markup(f'<svg class="strip" viewBox="0 0 {width} {height}" preserveAspectRatio="none" '
                   f'role="img" aria-label="Contigs by length">{"".join(parts)}</svg>')
+
+
+def contig_overview(length: int, start: int, end: int, genes: list[tuple[int, int]], base_url: str,
+                    span: int, width: int = 1000) -> Markup:
+    """Whole contig with gene density ticks and the visible window; click a segment to jump there."""
+    if not length:
+        return Markup("")
+    scale = width / length
+    ticks = "".join(f'<rect x="{s * scale:.1f}" y="10" width="{max((e - s) * scale, .6):.1f}" height="10" '
+                    f'class="ov-gene"/>' for s, e in genes)
+    segments = []
+    n = 40
+    for k in range(n):
+        seg_start = int(k * length / n) + 1
+        target = max(1, min(seg_start - span // 2 + int(length / n / 2), max(1, length - span + 1)))
+        segments.append(f'<a href="{_e(base_url)}?start={target}&amp;span={span}"><rect x="{k * width / n:.1f}" '
+                        f'y="0" width="{width / n:.1f}" height="30" class="ov-hit"><title>Jump to '
+                        f'{seg_start:,} bp</title></rect></a>')
+    window = (f'<rect x="{(start - 1) * scale:.1f}" y="1" width="{max((end - start + 1) * scale, 3):.1f}" '
+              f'height="28" rx="4" class="ov-window"/>')
+    return Markup(f'<svg class="overview" viewBox="0 0 {width} 30" preserveAspectRatio="none" role="img" '
+                  f'aria-label="Contig overview">{ticks}{window}{"".join(segments)}</svg>')
+
+
+def contig_track(genes: list[dict[str, Any]], overlays: list[dict[str, Any]], start: int, end: int,
+                 width: int = 1200) -> Markup:
+    """Genes in the window on two strand lanes, with feature bands above."""
+    span = max(1, end - start + 1)
+    scale = (width - 20) / span
+    lanes: list[int] = []
+    bands = []
+    for o in sorted(overlays, key=lambda o: o["start"] or 0):
+        if o["end"] is None or o["start"] is None or o["end"] < start or o["start"] > end:
+            continue
+        x1, x2 = 10 + (max(o["start"], start) - start) * scale, 10 + (min(o["end"], end) - start) * scale
+        for lane, free in enumerate(lanes):
+            if x1 >= free:
+                lanes[lane] = int(x2 + 70)
+                break
+        else:
+            lane = len(lanes)
+            lanes.append(int(x2 + 70))
+        y = 4 + lane * 18
+        color = OVERLAY_COLORS.get(o["label"], OVERLAY_COLORS.get(o["kind"], "#9aa3ad"))
+        bands.append(f'<g><title>{_e(o["label"])} {o["start"]:,}–{o["end"]:,}</title><rect x="{x1:.1f}" y="{y}" '
+                     f'width="{max(x2 - x1, 3):.1f}" height="14" rx="4" fill="{color}" opacity=".85"/>'
+                     f'<text x="{x1 + 4:.1f}" y="{y + 11}" class="band-label">{_e(o["label"])}</text></g>')
+    top = 8 + len(lanes) * 18
+    axis_y = top + 6
+    ticks = []
+    step = next(s for s in (500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 250000, 500000, 10**6, 10**7) if span / s <= 12)
+    first = ((start + step - 1) // step) * step
+    for pos in range(first, end + 1, step):
+        x = 10 + (pos - start) * scale
+        ticks.append(f'<line x1="{x:.1f}" y1="{axis_y}" x2="{x:.1f}" y2="{axis_y + 112}" class="grid-line"/>'
+                     f'<text x="{x + 3:.1f}" y="{axis_y + 10}" class="axis">{pos / 1000:,.0f} kb</text>')
+    parts = []
+    for g in genes:
+        x1, x2 = 10 + (max(g["start"], start) - start) * scale, 10 + (min(g["end"], end) - start) * scale
+        forward = g["strand"] != "-"
+        y = axis_y + (36 if forward else 76)
+        h = 13
+        head = min(9.0, (x2 - x1) * 0.45)
+        if forward:
+            points = f"{x1:.1f},{y - h} {x2 - head:.1f},{y - h} {x2:.1f},{y} {x2 - head:.1f},{y + h} {x1:.1f},{y + h}"
+        else:
+            points = f"{x2:.1f},{y - h} {x1 + head:.1f},{y - h} {x1:.1f},{y} {x1 + head:.1f},{y + h} {x2:.1f},{y + h}"
+        cls = "gene" if g.get("annotation") else "gene dark"
+        fill = f' style="fill:{g["color"]}"' if g.get("color") else ""
+        label = (g.get("annotation") or "").split(" (")[0]
+        text = ""
+        if label and x2 - x1 > 6.2 * len(label) + 12:
+            text = f'<text x="{(x1 + x2) / 2:.1f}" y="{y + 4}" class="gene-label">{_e(label)}</text>'
+        parts.append(f'<a href="/protein/{quote(g["protein_id"], safe="")}"><g><title>{_e(label or "no annotation")}'
+                     f' · {g["length_aa"]} aa · {g["start"]:,}–{g["end"]:,} ({g["strand"]})</title>'
+                     f'<polygon class="{cls}" points="{points}"{fill}/>{text}</g></a>')
+    height = axis_y + 100
+    strands = (f'<text x="{width - 6}" y="{axis_y + 26}" class="axis" text-anchor="end">+ strand</text>'
+               f'<text x="{width - 6}" y="{axis_y + 98}" class="axis" text-anchor="end">− strand</text>')
+    return Markup(f'<svg class="contig-track" viewBox="0 0 {width} {height}" role="img" aria-label="Contig genes">'
+                  f'{"".join(ticks)}{"".join(bands)}<line x1="10" y1="{axis_y + 56}" x2="{width - 10}" '
+                  f'y2="{axis_y + 56}" class="backbone-line"/>{"".join(parts)}{strands}</svg>')
+
+
+def histogram(values: list[float], label: str, bins: int = 24, width: int = 420, height: int = 210) -> Markup:
+    """Log-free histogram with median marker."""
+    if not values:
+        return Markup("")
+    values = sorted(values)
+    hi = values[int(len(values) * 0.99) - 1] if len(values) > 100 else values[-1]
+    hi = max(hi, 1)
+    counts = [0] * bins
+    for v in values:
+        counts[min(bins - 1, int(v / hi * bins))] += 1
+    top = max(counts) or 1
+    bw = (width - 20) / bins
+    bars = "".join(f'<rect x="{10 + i * bw:.1f}" y="{height - 24 - c / top * (height - 40):.1f}" '
+                   f'width="{bw - 2:.1f}" height="{c / top * (height - 40):.1f}" rx="2" class="hist-bar">'
+                   f'<title>{int(i * hi / bins):,}–{int((i + 1) * hi / bins):,}: {c:,}</title></rect>'
+                   for i, c in enumerate(counts))
+    median = values[len(values) // 2]
+    mx = 10 + min(median / hi, 1) * (width - 20)
+    return Markup(f'<svg class="hist" viewBox="0 0 {width} {height}" role="img" aria-label="{_e(label)}">{bars}'
+                  f'<line x1="{mx:.1f}" y1="8" x2="{mx:.1f}" y2="{height - 22}" class="median"/>'
+                  f'<text x="{mx + 4:.1f}" y="16" class="axis">median {median:,.0f}</text>'
+                  f'<text x="10" y="{height - 6}" class="axis">0</text>'
+                  f'<text x="{width - 10}" y="{height - 6}" class="axis" text-anchor="end">{hi:,.0f}</text>'
+                  f'<text x="{width / 2}" y="{height - 6}" class="axis" text-anchor="middle">{_e(label)}</text></svg>')
 
 
 # --------------------------------------------------------------------------- #
@@ -120,8 +230,9 @@ def domain_track(length: int | None, domains: list[dict[str, Any]], width: int =
         x = pad + (d["start_aa"] - 1) * scale
         w = max(3.0, (d["end_aa"] - d["start_aa"] + 1) * scale)
         color = color_for(d["name"])
-        boxes.append(f'<g><title>{_e(d["name"])} ({_e(d["accession"])}) aa {d["start_aa"]}–{d["end_aa"]}</title>'
-                     f'<rect x="{x:.1f}" y="14" width="{w:.1f}" height="22" rx="5" fill="{color}"/></g>')
+        boxes.append(f'<a href="/domain/{quote(d["accession"].split(".")[0], safe="")}"><g class="dom">'
+                     f'<title>{_e(d["name"])} ({_e(d["accession"])}) aa {d["start_aa"]}–{d["end_aa"]}</title>'
+                     f'<rect x="{x:.1f}" y="14" width="{w:.1f}" height="22" rx="6" fill="{color}"/></g></a>')
         text_w = 6.6 * len(d["name"]) + 6
         for lane, free in enumerate(lanes):
             if x >= free:

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% from "_macros.html" import bar %}
+{% block title %}Contigs · {{ g.bin_id }}{% endblock %}
+{% block content %}
+{% set tab = 'contigs' %}{% include "_genome_tabs.html" %}
+<div class="panel">
+  <div class="table-tools"><input data-filter="contigs" placeholder="Filter contigs or features…"><span class="count" data-count="contigs"></span></div>
+  <div class="scroll"><table id="contigs" data-table>
+    <thead><tr><th data-sort="text">Contig</th><th data-sort="num" class="num">Length</th><th data-sort="num" class="num">Genes</th><th data-sort="num">Annotated</th><th data-sort="text">Features</th></tr></thead>
+    <tbody>{% for contig, length, genes, annotated in rows %}<tr>
+      <td><a class="mono" href="{{ url('contig', contig) }}" title="{{ contig }}">{{ short(contig) }}</a></td>
+      <td class="num" data-v="{{ length }}">{{ bp(length) }}</td><td class="num">{{ num(genes) }}</td>
+      <td data-v="{{ annotated / (genes or 1) }}"><div class="cell-bar">{{ bar(annotated / (genes or 1)) }}<span class="count">{{ pct(annotated / (genes or 1)) }}</span></div></td>
+      <td>{% for f in features.get(contig, [])|unique %}<span class="chip"><i style="--dot:{{ charts.OVERLAY_COLORS.get(f, '#d9667e') }}"></i>{{ f }}</span>{% endfor %}</td></tr>{% endfor %}</tbody>
+  </table></div>
+</div>
+{% endblock %}

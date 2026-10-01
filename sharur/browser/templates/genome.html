@@ -2,8 +2,7 @@
 {% from "_macros.html" import bar, protein_link %}
 {% block title %}{{ g.bin_id }}{% endblock %}
 {% block content %}
-<div class="crumbs"><a href="/taxa">All genomes</a>{% for r, n in g.lineage if n != 'Unclassified' %}<span class="sep">›</span><a href="{{ url('taxa', r, n) }}">{{ n }}</a>{% endfor %}</div>
-<h1><span class="rank">Genome · {{ g.label }}</span>{{ g.bin_id }}</h1>
+{% set tab = 'overview' %}{% include "_genome_tabs.html" %}
 <div class="stats">
   <div class="stat"><b>{{ bp(g.length) }}</b><span>assembled</span></div>
   <div class="stat"><b>{{ num(g.contigs) }}</b><span>contigs · N50 {{ bp(g.n50) }}</span></div>
@@ -13,9 +12,9 @@
 </div>
 
 <div class="panel">
-  <h2>Contig landscape <span class="hint">every contig, longest first · longest {{ bp(longest_contig) }}</span></h2>
+  <h2>Contig landscape <span class="hint">every contig, longest first · longest {{ bp(longest_contig) }} · click one to open it</span></h2>
   {{ strip }}
-  <p class="note">A genome in a few long pieces reads as a handful of wide blocks; a fragmented one as a fine comb, where genes near contig ends may have lost their neighbors.</p>
+  <p class="note">A genome in a few long pieces reads as a handful of wide blocks; a fragmented one as a fine comb, where genes near contig ends may have lost their neighbors. <a href="{{ url('genome', g.bin_id) }}/contigs">Browse contigs →</a></p>
 </div>
 
 <div class="grid g-side">

@@ -67,7 +67,8 @@ def test_why_genome_predicate_and_pattern_pages(client):
     assert client.get("/genome/bin%7C1/proteins").status_code == 200
     function = client.get("/function/abc_transporter")
     assert function.status_code == 200 and "bin|1_c1_2" in function.text
-    for page in ("/taxa", "/taxa/domain/Archaea", "/genomes", "/functions", "/systems", "/discover", "/pathways"):
+    for page in ("/taxa", "/taxa/domain/Archaea", "/genomes", "/functions", "/systems", "/discover", "/pathways",
+                 "/domains", "/domains?q=abc&sort=rare", "/genome/bin%7C1/contigs"):
         assert client.get(page).status_code == 200, page
     pattern = client.get("/architecture", params={"pattern": "ABC_tran"})
     assert "1 proteins match" in pattern.text
@@ -80,3 +81,17 @@ def test_token_is_exchanged_for_a_cookie(db):
     exchanged = client.get("/?token=s3cret", follow_redirects=False)
     assert exchanged.status_code == 303 and "token" not in exchanged.headers["location"]
     assert client.get("/").status_code == 200
+
+
+def test_domain_and_contig_pages(client):
+    domain = client.get("/domain/PF00005")
+    assert domain.status_code == 200 and "ABC_tran" in domain.text and "Functional labels from this family" in domain.text
+    assert "abc_transporter" in domain.text or "ABC transporter" in domain.text
+    assert client.get("/domain/PF99999").status_code == 404
+    assert client.get("/search", params={"q": "PF00005"}, follow_redirects=False).headers["location"] == "/domain/PF00005"
+    contig = client.get("/contig/bin%7C1_c1")
+    assert contig.status_code == 200 and 'aria-label="Contig genes"' in contig.text and "gene 2" in contig.text
+    assert client.get("/contig/bin%7C1_c1", params={"start": 500, "span": 2000}).status_code == 200
+    assert client.get("/contig/missing").status_code == 404
+    genome = client.get("/genome/bin%7C1")
+    assert "/contig/bin%7C1_c1" in genome.text  # contig landscape links to the viewer
