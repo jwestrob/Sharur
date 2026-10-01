@@ -4,7 +4,6 @@
 {% block content %}
 <h1>Systems</h1>
 <p class="lede">Multi-gene systems called by validated, purpose-built callers, and mobile-element regions. Bars show the share of genomes carrying at least one.</p>
-<p class="actions"><a class="btn" href="/crispr-cas">CRISPR-Cas loci in genomic context →</a> <a class="btn" href="/crispr">CRISPR arrays →</a></p>
 <div class="grid g2">
 {% for kind, rows in kinds.items() %}
   <div class="panel"><h2>{{ kind|capitalize }} systems <span class="hint">{{ num(rows|sum(attribute='count')) }} calls · {{ rows|length }} types</span></h2>
@@ -15,6 +14,15 @@
     </table></div>
   </div>
 {% endfor %}
+{% if crispr %}
+  <div class="panel"><h2>CRISPR-Cas <span class="hint">arrays and Cas-domain gene clusters, each shown in genomic context</span></h2>
+    <div class="scroll"><table>
+      <thead><tr><th>Type</th><th class="num">Count</th><th>Genomes</th></tr></thead>
+      <tbody>{% for r in crispr %}<tr><td><a href="{{ r.url }}">{{ r.label }}</a></td><td class="num">{{ num(r.count) }}</td><td><div class="cell-bar">{{ bar(r.share, charts.OVERLAY_COLORS.crispr) }}<span class="count">{{ pct(r.share) }}</span></div></td></tr>{% endfor %}</tbody>
+    </table></div>
+    <p class="note">Cas genes are named from their domains; a named CRISPR-Cas subtype needs a system caller.</p>
+  </div>
+{% endif %}
 </div>
 {% if loci %}
 <div class="panel"><h2>Mobile-element regions</h2>

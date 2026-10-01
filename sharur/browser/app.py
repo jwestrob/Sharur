@@ -531,11 +531,26 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
         loci = defaultdict(set)
         locus_counts = Counter()
         for l in catalog.loci:
+            if "crispr" in (l["type"] or "").lower():
+                continue  # CRISPR has its own panel
             loci[l["type"]].add(l["bin_id"])
             locus_counts[l["type"]] += 1
+        crispr = []
+        arrays = ctx.crispr_arrays()
+        if arrays:
+            crispr.append({"label": "CRISPR arrays", "url": "/crispr", "count": len(arrays),
+                           "share": len({a["bin_id"] for a in arrays}) / n})
+        cas = ctx.cas_loci()
+        for kind_name in ("array + Cas", "Cas genes only", "array only"):
+            members = [l for l in cas if l["kind"] == kind_name]
+            if members:
+                crispr.append({"label": f"CRISPR-Cas loci: {kind_name}",
+                               "url": "/crispr-cas?kind=" + quote(kind_name), "count": len(members),
+                               "share": len({l["bin_id"] for l in members}) / n})
         return render(request, "systems.html", "systems",
                       kinds={k: sorted(v, key=lambda r: -r["count"]) for k, v in kinds.items()},
-                      loci=[{"type": t, "count": locus_counts[t], "share": len(b) / n} for t, b in loci.items()])
+                      loci=[{"type": t, "count": locus_counts[t], "share": len(b) / n} for t, b in loci.items()],
+                      crispr=crispr)
 
     @app.get("/system/{kind}/{system_type:path}", response_class=HTMLResponse)
     def system_page(request: Request, kind: str, system_type: str, rank: str = Query("class")):

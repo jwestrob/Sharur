@@ -515,3 +515,4 @@ def register(app, ctx, assembly_dirs: list[Path] | None = None) -> None:
                           genomes=len({l["bin_id"] for l in loci}), arrays_total=len(arrays()))
 
     ctx.crispr_arrays = arrays
+    ctx.cas_loci = cas_loci
