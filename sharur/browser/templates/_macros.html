@@ -30,4 +30,4 @@
 {% macro label_chip(p, href) -%}
 {% set d = PREDICATE_BY_ID.get(p) %}<a class="chip" href="{{ href }}" title="{{ p }}{{ ': ' + d.description if d else '' }}"><i style="--dot:{{ CATEGORY_COLORS.get(d.category, 'var(--ink-3)') if d else 'var(--ink-3)' }}"></i>{{ d.name if d else p }}</a>
 {%- endmacro %}
-{% macro genome_link(bin_id) -%}<a class="ellip" href="{{ url('genome', bin_id) }}" title="{{ bin_id }}">{{ bin_id }}</a>{%- endmacro %}
+{% macro genome_link(bin_id) -%}<a class="ellip" href="{{ url('genome', bin_id) }}" title="{{ bin_id }}">{{ gshort(bin_id) }}</a>{%- endmacro %}

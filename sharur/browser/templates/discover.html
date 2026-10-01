@@ -10,10 +10,10 @@
 </div>
 <div class="grid g3 discover">
   <div class="panel"><h2>Giant proteins</h2>
-    <table><tbody>{% for p in notable.giants[:40] %}<tr><td>{{ protein_link(p.protein_id) }} <span class="count">· {{ catalog.by_bin[p.bin_id].label if p.bin_id in catalog.by_bin else '' }}</span><br><span class="count">{{ p.architecture or ('no placed domains' if p.architecture is defined else '') }}</span></td><td class="num">{{ num(p.length) }}</td></tr>{% endfor %}</tbody></table></div>
+    <table><tbody>{% for p in notable.giants[:40] %}<tr><td>{{ protein_link(p.protein_id) }}<div class="sub">{{ catalog.by_bin[p.bin_id].label if p.bin_id in catalog.by_bin else '' }}</div><div class="sub">{{ p.architecture or ('no placed domains' if p.architecture is defined else '') }}</div></td><td class="num">{{ num(p.length) }} <span class="count">aa</span></td></tr>{% endfor %}</tbody></table></div>
   <div class="panel"><h2>Largest with no annotation</h2>
-    <table><tbody>{% for p in notable.dark[:40] %}<tr><td>{{ protein_link(p.protein_id) }}<br><span class="count ellip">{{ catalog.by_bin[p.bin_id].label if p.bin_id in catalog.by_bin else p.bin_id }}</span></td><td class="num">{{ num(p.length) }}</td></tr>{% endfor %}</tbody></table></div>
+    <table><tbody>{% for p in notable.dark[:40] %}<tr><td>{{ protein_link(p.protein_id) }}<div class="sub">{{ catalog.by_bin[p.bin_id].label if p.bin_id in catalog.by_bin else p.bin_id }}</div></td><td class="num">{{ num(p.length) }} <span class="count">aa</span></td></tr>{% endfor %}</tbody></table></div>
   <div class="panel"><h2>Longest domain repeats</h2>
-    <table><tbody>{% for p in notable.repeats[:40] %}<tr><td>{{ protein_link(p.protein_id) }}<br><span class="count">{{ p.domain }} × {{ p.run }}</span></td><td class="num">{{ num(p.length) }}</td></tr>{% endfor %}</tbody></table></div>
+    <table><tbody>{% for p in notable.repeats[:40] %}<tr><td>{{ protein_link(p.protein_id) }}<div class="sub">{{ p.domain }} × {{ p.run }}</div></td><td class="num">{{ num(p.length) }} <span class="count">aa</span></td></tr>{% endfor %}</tbody></table></div>
 </div>
 {% endblock %}

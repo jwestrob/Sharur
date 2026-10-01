@@ -41,7 +41,7 @@
     <h2>Largest proteins</h2>
     {% if notable %}
     <table><tbody>
-    {% for p in notable %}<tr><td>{{ protein_link(p.protein_id) }}<br><span class="count">{{ p.architecture or 'no placed domains' }}</span></td><td class="num">{{ num(p.length) }} aa</td></tr>{% endfor %}
+    {% for p in notable %}<tr><td>{{ protein_link(p.protein_id) }}<div class="sub">{{ p.architecture or 'no placed domains' }}</div></td><td class="num">{{ num(p.length) }} aa</td></tr>{% endfor %}
     </tbody></table>
     <p class="note"><a href="/discover">More in Discover →</a></p>
     {% else %}<p class="empty">Computing…</p>{% endif %}

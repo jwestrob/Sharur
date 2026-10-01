@@ -273,7 +273,8 @@ details[open] > summary::before { content: "▾ "; }
 .cols { columns: 3 250px; column-gap: 26px; }
 .cols .group { break-inside: avoid; margin-bottom: 22px; }
 .discover table { table-layout: fixed; }
-.discover table td:first-child { max-width: 0; width: 100%; }
+.discover table td:first-child { width: auto; }
+.discover table td.num { width: 92px; white-space: nowrap; }
 .discover .count { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: inline-block; max-width: 100%;
                    vertical-align: bottom; }
 
@@ -294,3 +295,24 @@ details[open] > summary::before { content: "▾ "; }
   h1, .hero h1 { font-size: 24px; }
   .hero { padding: 20px; }
 }
+
+/* ---------- containment: long identifiers and values never escape their box ---------- */
+td { overflow-wrap: anywhere; }
+td.num, th { overflow-wrap: normal; }
+td.num { white-space: nowrap; }
+.ellip { max-width: min(320px, 100%); }
+.bars { grid-template-columns: minmax(56px, max-content) minmax(36px, 1fr) minmax(0, max-content); }
+.bars .label { max-width: min(260px, 38vw); }
+.bars .val { white-space: normal; text-align: right; }
+.chip { max-width: 100%; overflow-wrap: anywhere; }
+.stat b, .stat span { overflow-wrap: anywhere; }
+.crumbs a { overflow-wrap: anywhere; }
+.panel { overflow-wrap: anywhere; }
+h2 .hint { overflow-wrap: anywhere; }
+/* compact list tables sit directly in panels: fixed layout lets long names ellipsize */
+.panel > table, details > table { table-layout: fixed; }
+.panel > table td.num { width: 96px; }
+.panel > table td .ellip, .panel > table td > a.mono { display: block; max-width: 100%; overflow: hidden;
+                                                       text-overflow: ellipsis; white-space: nowrap; }
+td .sub { color: var(--ink-3); font-size: 12.5px; line-height: 1.4; white-space: nowrap; overflow: hidden;
+          text-overflow: ellipsis; }

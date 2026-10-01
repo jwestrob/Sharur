@@ -64,6 +64,11 @@ def _short(pid: str) -> str:
     return tail if len(tail) <= 34 else tail[:16] + "…" + tail[-14:]
 
 
+def _gshort(bin_id: str, limit: int = 32) -> str:
+    """Genome names share long prefixes; keep both ends so names stay distinguishable."""
+    return bin_id if len(bin_id) <= limit else bin_id[:11] + "…" + bin_id[-(limit - 12):]
+
+
 def _evalue(x: Any) -> str:
     return f"{x:.1e}" if isinstance(x, float) else ("–" if x is None else str(x))
 
@@ -83,7 +88,7 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
     dataset_name = Path(db_path).resolve().parent.name
 
     templates = Jinja2Templates(directory=str(HERE / "templates"))
-    templates.env.globals.update(url=_url, bp=_bp, num=_num, pct=_pct, evalue=_evalue, quote=quote, short=_short,
+    templates.env.globals.update(url=_url, bp=_bp, num=_num, pct=_pct, evalue=_evalue, quote=quote, short=_short, gshort=_gshort,
                                  PREDICATE_BY_ID=PREDICATE_BY_ID,
                                  charts=charts, CATEGORY_LABELS=CATEGORY_LABELS, dataset=dataset_name,
                                  catalog=catalog, CATEGORY_COLORS=charts.CATEGORY_COLORS)

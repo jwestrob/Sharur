@@ -38,7 +38,7 @@
 <div class="grid g-side">
   <div class="panel"><h2>Across the tree</h2>{{ prevalence_table(prevalence, rank, url('domain', d.accession)) }}</div>
   <div class="panel"><h2>Most copies</h2>
-    <table><tbody>{% for g, n in top_genomes %}<tr><td>{{ genome_link(g.bin_id) }}<br><span class="count">{{ g.label }}</span></td><td class="num">{{ n }}</td></tr>{% endfor %}</tbody></table></div>
+    <table><tbody>{% for g, n in top_genomes %}<tr><td>{{ genome_link(g.bin_id) }}<div class="sub">{{ g.label }}</div></td><td class="num">{{ n }}</td></tr>{% endfor %}</tbody></table></div>
 </div>
 <div class="panel"><h2>Largest proteins with this domain</h2>
   <table><tbody>{% for pid, bin_id, n in examples %}<tr><td>{{ protein_link(pid) }}</td><td><span class="count">{{ catalog.by_bin[bin_id].label if bin_id in catalog.by_bin else '' }}</span></td><td class="num">{{ num(n) }} aa</td></tr>{% endfor %}</tbody></table>
