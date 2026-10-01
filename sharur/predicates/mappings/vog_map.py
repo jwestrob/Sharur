@@ -18,13 +18,61 @@ VOGdb provides ~48,000 VOGs, of which ~13,000 have informative annotations.
 
 from __future__ import annotations
 
+import gzip
+import os
 import re
+from functools import lru_cache
+from pathlib import Path
 from typing import Optional
 
 from sharur.predicates.mappings.pfam_evidence import vetted_match
 from sharur.predicates.vocabulary import component_level
 
 _ANTI_CRISPR = re.compile(r"\banti.?crispr\b|\bAcr[A-Z0-9]", re.I)
+
+VOG_CATEGORY_NAMES = {"Xr": "Replication", "Xs": "Structure", "Xh": "Host-beneficial",
+                      "Xp": "Virus-beneficial", "Xu": "Unknown function"}
+
+
+def find_vog_annotations() -> Path | None:
+    """Locate ``vog.annotations.tsv`` (or ``.gz``) from VOGdb.
+
+    Checks ``$SHARUR_VOG_ANNOTATIONS``, ``data/reference/vogdb`` (working directory
+    and repository), ``~/.sharur/vogdb`` and the Astra VOGdb directory.
+    """
+    env = os.environ.get("SHARUR_VOG_ANNOTATIONS")
+    roots = [Path("data/reference/vogdb"), Path(__file__).resolve().parents[3] / "data/reference/vogdb",
+             Path.home() / ".sharur/vogdb", Path.home() / ".config/Astra/VOGdb"]
+    candidates = ([Path(env).expanduser()] if env else []) + [
+        root / name for root in roots for name in ("vog.annotations.tsv", "vog.annotations.tsv.gz")]
+    return next((c for c in candidates if c.is_file()), None)
+
+
+@lru_cache(maxsize=1)
+def load_vog_annotations(path: str | None = None) -> dict[str, dict[str, object]]:
+    """VOG id -> consensus description, functional category and VOGdb counts (empty if absent)."""
+    source = Path(path) if path else find_vog_annotations()
+    if source is None or not source.is_file():
+        return {}
+    opener = gzip.open if source.suffix == ".gz" else open
+    table: dict[str, dict[str, object]] = {}
+    with opener(source, "rt") as handle:
+        for line in handle:
+            if line.startswith("#") or not line.strip():
+                continue
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) < 5:
+                continue
+            vog_id, proteins, species, category, description = parts[:5]
+            table[vog_id] = {"description": description, "category": category,
+                             "proteins": int(proteins) if proteins.isdigit() else None,
+                             "species": int(species) if species.isdigit() else None}
+    return table
+
+
+def vog_category_names(category: str | None) -> list[str]:
+    """Readable names for a combined category code such as ``XhXs``."""
+    return [name for code, name in VOG_CATEGORY_NAMES.items() if category and code in category]
 
 # =============================================================================
 # VOGdb Functional Category Mappings

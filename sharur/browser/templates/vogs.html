@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% from "_macros.html" import bar %}
+{% block title %}VOG families{% endblock %}
+{% block content %}
+<h1>Protein families</h1>
+{% set family_tab = 'vog' %}{% include "_family_tabs.html" %}
+<p class="lede">{{ num(families) }} Virus Orthologous Groups (VOGdb) have hits in this dataset: prophage genes, other phage-derived genes, and host genes with viral homologs.
+{% if not has_reference %}<br><span class="tag warn">no VOGdb annotation table found</span> Descriptions and categories need <code>vog.annotations.tsv</code> in <code>data/reference/vogdb/</code> or <code>$SHARUR_VOG_ANNOTATIONS</code>.{% endif %}</p>
+<div class="panel">
+  <div style="margin-bottom:12px">
+    <a class="chip" href="/vogs?q={{ quote(q) }}&sort={{ sort }}" {% if not category %}style="border-color:var(--accent)"{% endif %}>All</a>
+    {% for code, name in VOG_CATEGORY_NAMES.items() if counts.get(code) %}<a class="chip" href="/vogs?q={{ quote(q) }}&sort={{ sort }}&category={{ code }}" {% if category == code %}style="border-color:var(--accent)"{% endif %}><i style="--dot:{{ charts.VOG_COLORS.get(code) }}"></i>{{ name }} <span class="count">{{ num(counts[code]) }}</span></a>{% endfor %}
+  </div>
+  <form class="table-tools" method="get" action="/vogs">
+    <input type="hidden" name="category" value="{{ category }}">
+    <input name="q" value="{{ q }}" placeholder="VOG id or description (e.g. integrase, terminase, portal)" style="flex:1">
+    <select name="sort" onchange="this.form.submit()">
+      {% for key, label in [('genomes', 'Most widespread'), ('patchy', 'Patchiest (near 50% of genomes)'), ('rare', 'Rarest'), ('proteins', 'Most proteins'), ('name', 'Description')] %}<option value="{{ key }}" {{ 'selected' if sort == key }}>{{ label }}</option>{% endfor %}
+    </select>
+    <button>Search</button>
+  </form>
+  <p class="count">{{ num(total) }} families · page {{ page }} of {{ pages }}</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Family</th><th>Category</th><th>Genomes</th><th class="num">Proteins</th></tr></thead>
+    <tbody>{% for r in rows %}<tr>
+      <td><a href="{{ url('vog', r.accession) }}"><b>{{ r.name }}</b></a><div class="sub mono">{{ r.accession }}</div></td>
+      <td>{% for c in r.categories %}<span class="chip"><i style="--dot:{{ charts.VOG_COLORS.get(VOG_CATEGORY_NAMES|dictsort|selectattr(1, 'equalto', c)|map(attribute=0)|first) }}"></i>{{ c }}</span>{% endfor %}</td>
+      <td style="min-width:150px"><div class="cell-bar">{{ bar(r.genomes / n) }}<span class="count">{{ pct(r.genomes / n) }}</span></div></td>
+      <td class="num">{{ num(r.proteins) }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+  <div class="pager">{% if page > 1 %}<a class="btn" href="?q={{ quote(q) }}&sort={{ sort }}&category={{ category }}&page={{ page - 1 }}">← Previous</a>{% endif %}<span class="count">Page {{ page }} of {{ pages }}</span>{% if page < pages %}<a class="btn" href="?q={{ quote(q) }}&sort={{ sort }}&category={{ category }}&page={{ page + 1 }}">Next →</a>{% endif %}</div>
+</div>
+{% endblock %}

@@ -4,15 +4,16 @@
 
 {% macro prevalence_table(rows, rank, base_url) -%}
 <div class="table-tools">
-  <span class="count">Share of genomes in each {{ rank }} (clades with ≥ 3 genomes)</span>
+  <span class="count">Share of genomes in each {{ rank }}{% if rows and rows|selectattr('with', 'equalto', 0)|list|length == 0 and rows|length < 30 %} carrying it{% endif %} (clades with ≥ 3 genomes)</span>
   <span style="margin-left:auto" class="count">By:
   {% for r in ['phylum', 'class', 'order', 'family', 'genus'] %}<a href="{{ base_url }}?rank={{ r }}" {% if r == rank %}style="font-weight:700"{% endif %}>{{ r }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</span>
 </div>
+{% if not rows %}<p class="empty">No clade with at least 3 genomes carries it; see the genome list.</p>{% endif %}
 <div class="bars">
 {% for r in rows %}
   <a class="label" href="{{ url('taxa', rank, r.taxon) }}">{{ r.taxon }}</a>
   {{ bar(r.share) }}
-  <span class="val">{{ pct(r.share) }} <span class="count">of {{ num(r.genomes) }}</span></span>
+  <span class="val">{{ pct(r.share, 1 if 0 < r.share < 0.1 else 0) }} <span class="count">of {{ num(r.genomes) }}</span></span>
 {% endfor %}
 </div>
 {%- endmacro %}

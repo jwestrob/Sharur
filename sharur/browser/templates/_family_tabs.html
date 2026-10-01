@@ -1,0 +1,4 @@
+<nav class="tabs" style="margin:0 0 18px">
+  <a href="/domains" class="{{ 'on' if family_tab == 'pfam' }}">Pfam domains <span>{{ num(catalog.domains|length) }}</span></a>
+  <a href="/vogs" class="{{ 'on' if family_tab == 'vog' }}">VOG families <span>{{ num(catalog.vogs|length) }}</span></a>
+</nav>

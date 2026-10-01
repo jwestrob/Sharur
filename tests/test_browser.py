@@ -102,3 +102,31 @@ def test_domain_and_contig_pages(client):
     assert client.get("/contig/missing").status_code == 404
     genome = client.get("/genome/bin%7C1")
     assert "/contig/bin%7C1_c1" in genome.text  # contig landscape links to the viewer
+
+
+def test_vog_families_use_the_vogdb_annotation_table(db, tmp_path, monkeypatch):
+    import duckdb
+
+    from sharur.predicates.mappings import vog_map
+
+    table = tmp_path / "vog.annotations.tsv"
+    table.write_text("#GroupName\tProteinCount\tSpeciesCount\tFunctionalCategory\tConsensusFunctionalDescription\n"
+                     "VOG00042\t40\t31\tXr\tsp|P0A000|INT_LAMBD Integrase\n")
+    monkeypatch.setenv("SHARUR_VOG_ANNOTATIONS", str(table))
+    vog_map.load_vog_annotations.cache_clear()
+    conn = duckdb.connect(str(db))
+    conn.execute("""INSERT INTO annotations (annotation_id, protein_id, source, accession, name, description, evalue,
+                                             start_aa, end_aa)
+                    VALUES (99, 'bin|1_c1_3', 'vogdb', 'VOG00042', 'VOG00042', '', 1e-20, 5, 180)""")
+    conn.close()
+    try:
+        client = TestClient(create_app(db, background=False))
+        catalog = client.get("/vogs")
+        assert catalog.status_code == 200 and "Integrase" in catalog.text and "sp|P0A000" not in catalog.text
+        page = client.get("/vog/VOG00042")
+        assert page.status_code == 200 and "Replication" in page.text and "40 viral proteins from 31" in page.text
+        assert "Integrase (VOG00042)" in client.get("/contig/bin%7C1_c1").text  # hit labels use the description
+        assert client.get("/search", params={"q": "VOG00042"}, follow_redirects=False).headers["location"] == "/vog/VOG00042"
+        assert client.get("/vog/VOG99999").status_code == 404
+    finally:
+        vog_map.load_vog_annotations.cache_clear()

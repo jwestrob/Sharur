@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% from "_macros.html" import bar, prevalence_table, protein_link, genome_link, label_chip %}
+{% block title %}{{ v.name }}{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="/vogs">VOG families</a></div>
+<h1><span class="rank">VOGdb · {{ v.accession }}</span>{{ v.name }}</h1>
+<p class="lede">{% for c in v.categories %}<span class="chip">{{ c }}</span>{% endfor %}
+{% if v.vogdb_species %}<span class="count">In VOGdb: {{ num(v.vogdb_proteins) }} viral proteins from {{ num(v.vogdb_species) }} virus species.</span>{% endif %}</p>
+<div class="stats">
+  <div class="stat"><b>{{ num(v.genomes) }}</b><span>genomes ({{ pct(v.genomes / (catalog.genomes|length or 1)) }})</span></div>
+  <div class="stat"><b>{{ num(v.proteins) }}</b><span>proteins</span></div>
+  <div class="stat"><b>{{ pct(context.get('prophage', 0) / (total or 1)) }}</b><span>inside prophage regions</span></div>
+  <div class="stat"><b>{{ pct(context.get('island', 0) / (total or 1)) }}</b><span>inside genomic islands</span></div>
+</div>
+
+<div class="grid g-side">
+  <div class="panel">
+    <h2>Genomic context <span class="hint">where carrier genes sit</span></h2>
+    {% set ctx_colors = {'prophage': charts.OVERLAY_COLORS.prophage, 'island': charts.OVERLAY_COLORS.island, 'elsewhere': 'var(--ink-3)'} %}
+    <div class="bars">{% for k in ['prophage', 'island', 'elsewhere'] %}<span class="label">{{ 'prophage region' if k == 'prophage' else ('genomic island' if k == 'island' else 'elsewhere on the contig') }}</span>{{ bar(context.get(k, 0) / (total or 1), ctx_colors[k]) }}<span class="val">{{ num(context.get(k, 0)) }}</span>{% endfor %}</div>
+    <p class="note">A VOG hit outside prophage regions often marks a host gene with viral homologs, or a prophage the region caller did not delimit.</p>
+    <h2 style="margin-top:18px">Functional labels <span class="hint">from this VOG, with evidence</span></h2>
+    {% if labels %}<table><tbody>{% for p, ev in labels %}<tr><td style="width:46%">{{ label_chip(p, url('function', p)) }}</td><td class="mono count">{{ ev }}</td></tr>{% endfor %}</tbody></table>
+    {% else %}<p class="empty">No functional label maps from this VOG; it is reported as an observed hit only.</p>{% endif %}
+  </div>
+  <div class="panel"><h2>Protein lengths</h2>{{ histogram }}</div>
+</div>
+
+<div class="grid g2">
+  <div class="panel"><h2>Pfam domains on the same proteins <span class="hint">share of carrier proteins</span></h2>
+    <div class="bars">{% for name, acc, n in partners %}<a class="label" href="{{ url('domain', acc) }}">{{ name }}</a>{{ bar(n / (total or 1)) }}<span class="val">{{ pct(n / (total or 1)) }}</span>{% else %}<span class="empty">No Pfam domains on these proteins.</span>{% endfor %}</div></div>
+  <div class="panel"><h2>Across the tree</h2>{{ prevalence_table(prevalence, rank, url('vog', v.accession)) }}</div>
+</div>
+
+<div class="grid g2">
+  <div class="panel"><h2>Most copies</h2>
+    <table><tbody>{% for g, n in top_genomes %}<tr><td>{{ genome_link(g.bin_id) }}<div class="sub">{{ g.label }}</div></td><td class="num">{{ n }}</td></tr>{% endfor %}</tbody></table></div>
+  <div class="panel"><h2>Largest proteins with this VOG</h2>
+    <table><tbody>{% for pid, bin_id, contig, s, e, n in examples %}<tr><td>{{ protein_link(pid) }}<div class="sub">{{ catalog.by_bin[bin_id].label if bin_id in catalog.by_bin else '' }}</div></td><td class="num">{{ num(n) }} aa</td></tr>{% endfor %}</tbody></table></div>
+</div>
+{% endblock %}

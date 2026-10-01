@@ -26,6 +26,7 @@ from sharur.browser.catalog import (
     load_catalog,
 )
 from sharur.predicates.mappings.pfam_map import PFAM_EVIDENCE, PFAM_TO_PREDICATES
+from sharur.predicates.mappings.vog_map import VOG_CATEGORY_NAMES
 from sharur.predicates.vocabulary import PREDICATE_BY_ID
 from sharur.storage.duckdb_store import DuckDBStore
 
@@ -106,7 +107,7 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
 
     templates = Jinja2Templates(directory=str(HERE / "templates"))
     templates.env.globals.update(url=_url, bp=_bp, num=_num, pct=_pct, evalue=_evalue, quote=quote, short=_short, gshort=_gshort,
-                                 PREDICATE_BY_ID=PREDICATE_BY_ID,
+                                 PREDICATE_BY_ID=PREDICATE_BY_ID, VOG_CATEGORY_NAMES=VOG_CATEGORY_NAMES,
                                  charts=charts, CATEGORY_LABELS=CATEGORY_LABELS, dataset=dataset_name,
                                  catalog=catalog, CATEGORY_COLORS=charts.CATEGORY_COLORS,
                                  # static assets change with the package; bust browser caches on upgrade
@@ -115,6 +116,18 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
     app = FastAPI(title="Sharur browser", docs_url=None, redoc_url=None, openapi_url=None)
     app.mount("/static", StaticFiles(directory=str(HERE / "static")), name="static")
     app.state.store, app.state.catalog = store, catalog
+
+    def describe_hit(label: str | None) -> str | None:
+        """Replace a bare VOG id in a hit label with its VOGdb consensus description."""
+        if not label:
+            return label
+        head = label.split(" ", 1)[0].strip("()")
+        vog = catalog.vogs.get(head)
+        if vog and vog["description"]:
+            return f'{vog["description"]} ({head})'
+        return label
+
+    templates.env.globals.update(describe_hit=describe_hit)
 
     def render(request: Request, template: str, section: str, /, **context: Any) -> HTMLResponse:
         return templates.TemplateResponse(request, template, {"section": section, **context})
@@ -227,6 +240,7 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
                                  FROM annotations a JOIN p USING (protein_id) GROUP BY 1)
                    SELECT p.protein_id, p.contig_id, p.start, p.sequence_length, best.top, COALESCE(best.hits, 0)
                    FROM p LEFT JOIN best USING (protein_id) ORDER BY p.contig_id, p.start""", [bin_id])
+        rows = [(pid, contig, start, length, describe_hit(top), hits) for pid, contig, start, length, top, hits in rows]
         return render(request, "genome_proteins.html", "taxa", g=genome, rows=rows)
 
     @app.get("/genome/{bin_id:path}", response_class=HTMLResponse)
@@ -323,7 +337,7 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
         genes = []
         for i, g in enumerate(hood.get("proteins", []), 1):
             category = categories.get(g["protein_id"])
-            genes.append({**g, "number": i, "category": category,
+            genes.append({**g, "annotation": describe_hit(g.get("annotation")), "number": i, "category": category,
                           "color": charts.CATEGORY_COLORS.get(category) if category else None})
         edge = c.get("contig_edge")
         genome = catalog.by_bin.get(c["genome"]["bin_id"])
@@ -548,6 +562,8 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
             return _url("function", q)
         if q in catalog.modules:
             return _url("pathway", q)
+        if q.upper() in catalog.vogs:
+            return _url("vog", q.upper())
         if q.split(".")[0].upper() in catalog.domains:
             return _url("domain", q.split(".")[0].upper())
         with lock:
@@ -579,6 +595,11 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
             if needle == d["accession"].lower() or needle in d["name"].lower():
                 add("domain", d["name"], f'{d["accession"]} · {d["genomes"]:,} genomes', _url("domain", d["accession"]))
                 if sum(1 for o in out if o["kind"] == "domain") >= 8:
+                    break
+        for v in catalog.vogs.values():
+            if needle == v["accession"].lower() or (v["description"] and needle in v["description"].lower()):
+                add("VOG", v["name"], f'{v["accession"]} · {v["genomes"]:,} genomes', _url("vog", v["accession"]))
+                if sum(1 for o in out if o["kind"] == "VOG") >= 6:
                     break
         for kind, system_type in sorted({(s["kind"], s["type"]) for s in catalog.systems}):
             if needle in str(system_type).lower():
@@ -680,6 +701,71 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
                       histogram=charts.histogram(lengths, "Protein length (aa)"),
                       top_genomes=sorted(((catalog.genomes[i], n) for i, n in carriers.items()), key=lambda x: -x[1])[:10])
 
+    @app.get("/vogs", response_class=HTMLResponse)
+    def vogs(request: Request, q: str = Query("", max_length=200), sort: str = Query("genomes"),
+             category: str = Query(""), page: int = Query(1, ge=1)):
+        if not catalog.vogs:
+            return render(request, "pending.html", "domains", what="VOG families", missing=catalog.ready.is_set())
+        n = len(catalog.genomes) or 1
+        rows = list(catalog.vogs.values())
+        needle = q.strip().lower()
+        if needle:
+            rows = [r for r in rows if needle in r["accession"].lower() or needle in r["description"].lower()]
+        if category:
+            rows = [r for r in rows if category in (r["category"] or "")]
+        key = {"genomes": lambda r: -r["genomes"], "proteins": lambda r: -r["proteins"],
+               "name": lambda r: r["name"].lower(), "rare": lambda r: (r["genomes"], r["name"].lower()),
+               "patchy": lambda r: abs(r["genomes"] / n - 0.5)}.get(sort, lambda r: -r["genomes"])
+        rows.sort(key=key)
+        pages = max(1, (len(rows) + 99) // 100)
+        page = min(page, pages)
+        counts = Counter(code for r in catalog.vogs.values() for code in VOG_CATEGORY_NAMES if code in (r["category"] or ""))
+        return render(request, "vogs.html", "domains", rows=rows[(page - 1) * 100: page * 100], total=len(rows),
+                      q=q, sort=sort, category=category, page=page, pages=pages, n=n, counts=counts,
+                      families=len(catalog.vogs), has_reference=any(v["annotated"] for v in catalog.vogs.values()))
+
+    @app.get("/vog/{vog_id}", response_class=HTMLResponse)
+    def vog_page(request: Request, vog_id: str, rank: str = Query("class")):
+        from sharur.predicates.mappings.vog_map import vog_evidence  # noqa: PLC0415
+
+        vog = catalog.vogs.get(vog_id)
+        if vog is None:
+            raise HTTPException(404, "VOG not found in this dataset")
+        rank = rank if rank in RANKS else "class"
+        with lock:
+            carriers_rows = store.execute(
+                """SELECT p.protein_id, p.bin_id, p.contig_id, p.start, p.end_coord, p.sequence_length
+                   FROM annotations a JOIN proteins p USING (protein_id)
+                   WHERE LOWER(a.source) IN ('vogdb', 'vog') AND a.accession = ?""", [vog_id])
+            ids = list({r[0] for r in carriers_rows})
+            partners = store.execute(
+                """SELECT COALESCE(NULLIF(name, ''), accession), split_part(accession, '.', 1), COUNT(DISTINCT protein_id)
+                   FROM annotations WHERE LOWER(source) = 'pfam' AND protein_id IN (SELECT UNNEST(?::VARCHAR[]))
+                   GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 15""", [ids]) if ids else []
+        per_genome = Counter(r[1] for r in {(r[0], r[1]) for r in carriers_rows})
+        carriers = {catalog.by_bin[b].index: n for b, n in per_genome.items() if b in catalog.by_bin}
+        # where carriers sit: prophage regions, islands, or elsewhere
+        regions: dict[str, list[tuple[str, int, int]]] = defaultdict(list)
+        for l in catalog.loci:
+            if l["start"] is not None and l["end"] is not None:
+                regions[l["contig_id"]].append((l["type"], l["start"], l["end"]))
+        context: Counter = Counter()
+        seen = set()
+        for pid, _bin, contig, start, end, _n in carriers_rows:
+            if pid in seen:
+                continue
+            seen.add(pid)
+            kinds = {t for t, a, b in regions.get(contig, []) if start <= b and end >= a}
+            context["prophage" if "prophage" in kinds else ("island" if kinds else "elsewhere")] += 1
+        lengths = [n for pid, *_, n in {r[0]: r for r in carriers_rows}.values() if n]
+        examples = sorted({r[0]: r for r in carriers_rows}.values(), key=lambda r: -(r[5] or 0))[:12]
+        labels = sorted(vog_evidence(vog_id, vog["category"], vog["description"]).items())
+        return render(request, "vog.html", "domains", v=vog, carriers=carriers, context=context, total=len(seen),
+                      prevalence=[r for r in catalog.prevalence_by(carriers, rank) if r["genomes"] >= 3][:30],
+                      rank=rank, partners=partners, labels=labels, examples=examples,
+                      histogram=charts.histogram(lengths, "Protein length (aa)"),
+                      top_genomes=sorted(((catalog.genomes[i], n) for i, n in carriers.items()), key=lambda x: -x[1])[:10])
+
     # ------------------------------------------------------------------ #
     # Genome browser
     # ------------------------------------------------------------------ #
@@ -712,7 +798,8 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
         span = max(2000, min(span, length))
         start = max(1, min(start, max(1, length - span + 1)))
         end = start + span - 1
-        window = [{"protein_id": pid, "start": s, "end": e, "strand": st, "length_aa": n, "annotation": top,
+        window = [{"protein_id": pid, "start": s, "end": e, "strand": st, "length_aa": n,
+                   "annotation": describe_hit(top),
                    "category": categories.get(pid), "color": charts.CATEGORY_COLORS.get(categories.get(pid))}
                   for pid, s, e, st, n, top in genes if e >= start and s <= end]
         members = {g[0] for g in genes}

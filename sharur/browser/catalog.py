@@ -12,6 +12,7 @@ are vectorized lookups.
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from collections import Counter, defaultdict
@@ -91,6 +92,7 @@ class Catalog:
     ko_sets: dict[str, set[str]] = field(default_factory=dict)
     notable: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     domains: dict[str, dict[str, Any]] = field(default_factory=dict)  # Pfam accession -> summary
+    vogs: dict[str, dict[str, Any]] = field(default_factory=dict)     # VOG id -> summary (+ VOGdb annotation)
     ready: threading.Event = field(default_factory=threading.Event)
     status: str = "loading"
     map_state: str = "unknown"
@@ -169,8 +171,11 @@ class Catalog:
             totals[taxon] += 1
             if g.index in genome_indices:
                 hits[taxon] += 1
-        return sorted(({"taxon": t, "genomes": n, "with": hits[t], "share": hits[t] / n} for t, n in totals.items()),
-                      key=lambda r: (-r["genomes"], r["taxon"]))
+        rows = [{"taxon": t, "genomes": n, "with": hits[t], "share": hits[t] / n} for t, n in totals.items()]
+        if sum(hits.values()) < 0.05 * len(self.genomes):
+            # rare features: list the clades that carry them, most affected first
+            return sorted((r for r in rows if r["with"]), key=lambda r: (-r["share"], -r["genomes"], r["taxon"]))
+        return sorted(rows, key=lambda r: (-r["genomes"], r["taxon"]))
 
     # ------------------------------------------------------------------ #
     # Modules
@@ -367,6 +372,7 @@ def load_background(store, catalog: Catalog, lock: threading.Lock) -> None:
         catalog.status = "summarizing Pfam domains"
         with lock:
             catalog.domains = _domains(store)
+            catalog.vogs = _vogs(store)
         catalog.status = "finding notable proteins"
         with lock:
             notable = _notable(store)
@@ -398,6 +404,34 @@ def _domains(store) -> dict[str, dict[str, Any]]:
     return {acc: {"accession": acc, "name": name or acc, "description": desc or "", "proteins": proteins,
                   "genomes": genomes, "hits": hits}
             for acc, name, desc, proteins, genomes, hits in rows}
+
+
+def _vogs(store) -> dict[str, dict[str, Any]]:
+    from sharur.predicates.mappings.vog_map import load_vog_annotations, vog_category_names  # noqa: PLC0415
+
+    reference = load_vog_annotations()
+    rows = store.execute("""
+        SELECT a.accession, COUNT(DISTINCT a.protein_id), COUNT(DISTINCT p.bin_id), COUNT(*)
+        FROM annotations a JOIN proteins p USING (protein_id)
+        WHERE LOWER(a.source) IN ('vogdb', 'vog') GROUP BY 1""")
+    out = {}
+    for vog_id, proteins, genomes, hits in rows:
+        ref = reference.get(vog_id, {})
+        description = vog_description(str(ref.get("description") or ""))
+        out[vog_id] = {"accession": vog_id, "name": description or vog_id, "description": description,
+                       "category": ref.get("category") or "", "categories": vog_category_names(ref.get("category")),
+                       "vogdb_proteins": ref.get("proteins"), "vogdb_species": ref.get("species"),
+                       "proteins": proteins, "genomes": genomes, "hits": hits, "annotated": bool(ref)}
+    return out
+
+
+_UNIPROT_HEADER = re.compile(r"^(?:sp|tr)\|[^|\s]+\|\S+\s+")
+
+
+def vog_description(text: str) -> str:
+    """VOGdb consensus descriptions carry a source prefix (``REFSEQ ...``, ``sp|ACC|ENTRY ...``); drop it."""
+    text = text[7:] if text.startswith("REFSEQ ") else text
+    return _UNIPROT_HEADER.sub("", text).strip()
 
 
 def _notable(store) -> dict[str, list[dict[str, Any]]]:

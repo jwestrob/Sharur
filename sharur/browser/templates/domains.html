@@ -2,7 +2,8 @@
 {% from "_macros.html" import bar %}
 {% block title %}Pfam domains{% endblock %}
 {% block content %}
-<h1>Pfam domains</h1>
+<h1>Protein families</h1>
+{% set family_tab = 'pfam' %}{% include "_family_tabs.html" %}
 <p class="lede">{{ num(families) }} Pfam families have hits in this dataset. Open a family for where it occurs, the architectures it sits in, its partner domains, and the functional labels it maps to with their evidence.</p>
 <div class="panel">
   <form class="table-tools" method="get" action="/domains">

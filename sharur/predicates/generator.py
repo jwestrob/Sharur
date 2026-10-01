@@ -215,42 +215,11 @@ class PredicateGenerator:
         if PredicateGenerator._vog_reference is not None:
             return
 
-        import os
-        from pathlib import Path
+        from sharur.predicates.mappings.vog_map import load_vog_annotations
 
-        # Auto-detect reference file location
-        if path is None:
-            # Check common locations
-            candidates = [
-                Path("data/reference/vogdb/vog.annotations.tsv"),
-                Path(__file__).parent.parent.parent.parent / "data/reference/vogdb/vog.annotations.tsv",
-                Path(os.path.expanduser("~/.sharur/vogdb/vog.annotations.tsv")),
-            ]
-            for candidate in candidates:
-                if candidate.exists():
-                    path = str(candidate)
-                    break
-
-        if path is None or not Path(path).exists():
-            # No reference file found - VOGdb will use patterns only
-            PredicateGenerator._vog_reference = {}
-            return
-
-        # Load the reference file
-        try:
-            vog_ref: dict[str, tuple[str, str]] = {}
-            with open(path) as f:
-                next(f)  # Skip header
-                for line in f:
-                    parts = line.strip().split("\t")
-                    if len(parts) >= 5:
-                        vog_id = parts[0]
-                        category = parts[3]
-                        description = parts[4]
-                        vog_ref[vog_id] = (category, description)
-            PredicateGenerator._vog_reference = vog_ref
-        except Exception:
-            PredicateGenerator._vog_reference = {}
+        table = load_vog_annotations(path)
+        PredicateGenerator._vog_reference = {
+            vog_id: (str(row["category"]), str(row["description"])) for vog_id, row in table.items()}
 
     def generate_for_protein(
         self,
