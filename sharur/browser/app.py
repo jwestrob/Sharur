@@ -36,6 +36,7 @@ from sharur.browser import (
     routes_tree,
     routes_synteny,
     routes_systems,
+    search_page,
 )
 from sharur.browser.routes_insight import register as register_insight
 from sharur.browser.catalog import (
@@ -168,6 +169,7 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
         return rows
 
     templates.env.globals.update(describe_hit=describe_hit, hit_rows=hit_rows, SOURCE_LABELS=SOURCE_LABELS)
+    templates.env.filters["hl"] = search_page.highlight
 
     def render(request: Request, template: str, section: str, /, **context: Any) -> HTMLResponse:
         return templates.TemplateResponse(request, template, {"section": section, **context})
@@ -738,15 +740,20 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
                 found = routes_search.scoped_search(ctx, scoped.group(1), bins)
                 scope_url = _url("genome", label) if kind == "genome" else (
                     _url("taxa", kind, label) if kind in RANKS else None)
+                names = {("ko", ko): (ko_names.get(ko) or ("", ""))[0].split(",")[0].strip()
+                         for ko, _ in found["families"]["ko"]}
+                names.update({("pfam", acc): catalog.domains.get(acc, {}).get("name", acc)
+                              for acc, _ in found["families"]["pfam"]})
                 return render(request, "search_scoped.html", "home", q=q, term=scoped.group(1), scope_kind=kind,
                               scope_label=label, scope_url=scope_url, scope_genomes=len(bins),
                               other_ranks=[r for r in routes_search.same_name_ranks(ctx, label) if r[0] != kind]
-                              if kind in RANKS else [], **found)
+                              if kind in RANKS else [],
+                              breakdown=search_page.breakdown(ctx, kind, label, bins, found["per_genome"]),
+                              scope_token=search_page.scope_token(kind, label, bins), family_names=names, **found)
         exact = _exact(q)
         if exact:
             return RedirectResponse(exact, status_code=303)
-        results = _suggest(q, limit=60)
-        return render(request, "search.html", "home", q=q, results=results)
+        return render(request, "search.html", "home", q=q, **search_page.run(ctx, q))
 
     def _exact(q: str) -> str | None:
         if q in catalog.by_bin:

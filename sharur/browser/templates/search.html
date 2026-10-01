@@ -1,8 +1,76 @@
 {% extends "base.html" %}
-{% block title %}Search{% endblock %}
+{% from "_macros.html" import bar %}
+{% block title %}{{ q }} · search{% endblock %}
 {% block content %}
-<h1>Results for “{{ q }}”</h1>
-{% if results %}
-<div class="panel flush"><table><tbody>{% for r in results %}<tr><td><span class="tag">{{ r.kind }}</span></td><td><a href="{{ r.url }}">{{ r.label }}</a></td><td class="count">{{ r.sub }}</td></tr>{% endfor %}</tbody></table></div>
-{% else %}<div class="panel"><p class="empty">Nothing matched. Try a taxon (e.g. a genus), a function such as <code>hydrogenase</code>, a pathway name, or <a href="/architecture?pattern={{ quote(q, safe='') }}">search “{{ q }}” as a domain pattern</a>.</p></div>{% endif %}
+<h1><span class="rank">Search</span>“{{ q }}”</h1>
+<p class="lede">{% if total %}{{ num(total) }} match{{ 'es' if total != 1 }} across {{ groups|length }} kind{{ 's' if groups|length != 1 }}.{% else %}Nothing matched by name.{% endif %}
+{% if near %} Did you mean {% for w in near %}<a href="/search?q={{ quote(w) }}">{{ w }}</a>{{ ', ' if not loop.last else '?' }}{% endfor %}{% endif %}</p>
+
+{% if missing_ko %}
+<div class="panel sr-best">
+  <div class="sr-best-head"><span class="tag">KO</span><h2>{{ missing_ko.id }}{% if missing_ko.symbols %} <span class="hint">{{ missing_ko.symbols }}</span>{% endif %}</h2></div>
+  {% if missing_ko.definition %}<p>{{ missing_ko.definition }}</p>{% endif %}
+  <p class="count">No genome in this dataset carries {{ missing_ko.id }}. <a href="https://www.kegg.jp/entry/{{ missing_ko.id }}" target="_blank" rel="noopener">KEGG ↗</a></p>
+</div>
+{% endif %}
+
+{% if best %}{% set e = best.entry %}
+<div class="panel sr-best">
+  <div class="sr-best-head"><span class="tag">{{ best.tag }}</span><span class="count">best match</span></div>
+  <h2 class="sr-best-title"><a href="{{ e.url }}">{{ e.label|hl(q) }}</a></h2>
+  {% if best.text %}<p class="sr-best-text">{{ best.text }}</p>{% elif e.sub and e.kind not in ('taxon', 'system') %}<p class="sr-best-text">{{ e.sub|hl(q) }}</p>{% endif %}
+  {% if best.share is not none %}<div class="sr-share">{{ bar(best.share) }}<span class="count">{{ pct(best.share) }} of {{ num(catalog.genomes|length) }} genomes</span></div>{% endif %}
+  {% if best.stats %}<div class="sr-stats">{% for v, label in best.stats %}<div><b>{{ v }}</b><span>{{ label }}</span></div>{% endfor %}</div>{% endif %}
+  {% if best.labels %}<div class="sr-labels"><span class="count">Function labels</span> {% for p, name in best.labels %}<a class="chip" href="{{ url('function', p) }}">{{ name }}</a>{% endfor %}</div>{% endif %}
+  <p class="actions">{% for text, href in best.links %}<a class="btn" href="{{ href }}"{% if href.startswith('http') %} target="_blank" rel="noopener"{% endif %}>{{ text }}</a>{% endfor %}</p>
+  {% if best.hint %}<p class="count">{{ best.hint }}.</p>{% endif %}
+</div>
+{% endif %}
+
+{% if groups %}
+<div class="sr-chips" role="toolbar" aria-label="Filter by kind">
+  <button type="button" class="chip on" data-kind="">All <span class="count">{{ num(total) }}</span></button>
+  {% for g in groups %}<button type="button" class="chip" data-kind="{{ g.kind }}">{{ g.label }} <span class="count">{{ g.count_label }}</span></button>{% endfor %}
+</div>
+<div class="sr-groups">
+  {% for g in groups %}
+  <section class="panel sr-group" data-kind="{{ g.kind }}">
+    <h2>{{ g.label }} <span class="hint">{{ g.count_label }}</span></h2>
+    <ul class="sr-list">
+      {% for e in g.rows %}
+      <li{% if loop.index > 8 %} class="sr-extra" hidden{% endif %}>
+        <a class="sr-name{{ ' mono' if e.kind in ('genome', 'protein', 'ko') }}" href="{{ e.url }}">{{ e.label|hl(q) }}</a>
+        <span class="sr-sub">{{ e.sub|hl(q) }}</span>
+        {% if e.share is not none %}<span class="sr-mini" title="{{ num(e.weight) }} genomes">{{ bar(e.share) }}</span>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% if g.rows|length > 8 %}<button type="button" class="sr-more">Show {{ g.rows|length - 8 }} more</button>{% endif %}
+    {% if g.more %}<p class="count"><a href="{{ g.more }}">All {{ g.count_label }} →</a></p>{% endif %}
+  </section>
+  {% endfor %}
+</div>
+{% else %}
+<div class="panel"><p class="empty">Try a taxon (a genus or order), a function such as <code>hydrogenase</code>, a KO (<code>K00001</code>), a Pfam accession, an EC number (<code>1.2.7.1</code>), or <a href="/architecture?pattern={{ quote(q, safe='') }}">search “{{ q }}” as a domain pattern</a>.</p></div>
+{% endif %}
+<p class="note">“<i>term</i> in <i>genome or clade</i>” searches proteins within it, e.g. “hydrogenase in Omnitrophia” or “K00399 in EX4484-52”.</p>
+
+<script>
+(function () {
+  const chips = document.querySelectorAll(".sr-chips .chip");
+  chips.forEach((chip) => chip.addEventListener("click", () => {
+    chips.forEach((c) => c.classList.toggle("on", c === chip));
+    const kind = chip.dataset.kind;
+    document.querySelector(".sr-groups").classList.toggle("filtered", Boolean(kind));
+    document.querySelectorAll(".sr-group").forEach((g) => { g.hidden = Boolean(kind) && g.dataset.kind !== kind; });
+    document.querySelectorAll(".sr-group").forEach((g) => {
+      if (kind && g.dataset.kind === kind) g.querySelectorAll(".sr-extra").forEach((li) => { li.hidden = false; });
+    });
+  }));
+  document.querySelectorAll(".sr-more").forEach((b) => b.addEventListener("click", () => {
+    b.closest(".sr-group").querySelectorAll(".sr-extra").forEach((li) => { li.hidden = false; });
+    b.remove();
+  }));
+})();
+</script>
 {% endblock %}

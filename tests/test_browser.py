@@ -138,6 +138,16 @@ def test_scoped_search(client):
     clade = client.get("/search", params={"q": "transporter in Archaea"})
     assert "bin|1_c1_2" in clade.text and "Search within domain" in clade.text
     assert "No protein here matches" in client.get("/search", params={"q": "rubisco in bin|1"}).text
+    assert "By genome" in page.text and "/matrix?a=bin%7C1&kind=pfam&features=PF00005" in page.text
+    # terms match where a word starts ("tran" in ABC_tran), never mid-word ("BC_tran")
+    assert "bin|1_c1_2" in client.get("/search", params={"q": "tran in bin|1"}).text
+    assert "No protein here matches" in client.get("/search", params={"q": "BC_tran in bin|1"}).text
+
+
+def test_search_page_groups_matches_and_offers_near_misses(client):
+    page = client.get("/search", params={"q": "ABC_tr"}).text
+    assert 'class="sr-chips"' in page and "<mark>ABC_tr</mark>" in page and "best match" in page
+    assert "Did you mean" in client.get("/search", params={"q": "ABC_trn"}).text
 
 
 def test_matrix_pages(client):
