@@ -200,6 +200,8 @@ report/draft files remain independently writable.
 
 - **Hydrogenases:** `hydrogenase` → check `nife_group1`–`nife_group4`, `fefe_groupA`–`fefe_groupC`. Group 3 vs 4 reveals uptake vs evolution.
 - **CRISPR:** `cas_domain` → check `crispr_type_i`/`crispr_type_ii`/`crispr_type_iii` (and subtypes such as `crispr_type_i_e`), effectors, `loci` table.
+  Named subtype claims rest on `crispr_cas_systems` rows with status `crispr_cas` or `cas`
+  (`sharur cas-type`; `docs/guides/crispr-cas.md`); `*_putative` rows are candidates.
 - **Defense:** `defense_component` (gene/domain evidence) marks candidates → inspect
   whichever curated callers exist in the live schema for specific types.
   System-level predicates (`defense_system`, `toxin_antitoxin`, `abortive_infection`,
