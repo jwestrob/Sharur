@@ -195,7 +195,7 @@ def test_resource_profiles_encode_mps_exclusivity_and_slurm_limits(monkeypatch):
 
     assert mps.request("06").accelerator == "mps"
     assert mps.request("06").exclusive_accelerator is True
-    assert slurm.request("04").walltime == "72:00:00"
+    assert slurm.request("04").full_node and not slurm.request("04").walltime
     assert slurm.request("06").gpus == 1
     assert slurm.request("06i").gpus == 0
     assert slurm.request("06i").accelerator == "cpu"
@@ -242,7 +242,7 @@ def test_slurm_bundle_preserves_dependencies_and_keeps_minced_local(tmp_path):
 
     assert (data_dir / "slurm" / "05c.local.sh").is_file()
     astra_script = (data_dir / "slurm" / "04.sbatch").read_text()
-    assert "#SBATCH --time=72:00:00" in astra_script
+    assert "--time" not in astra_script and "--mem" not in astra_script
     assert "--gres=gpu" in (data_dir / "slurm" / "06.sbatch").read_text()
     assert "--gres=gpu" not in (data_dir / "slurm" / "06i.sbatch").read_text()
     assert "--skip-index" in (data_dir / "slurm" / "06.sbatch").read_text()
@@ -353,3 +353,68 @@ def test_slurm_submission_failure_is_terminally_recorded(tmp_path, monkeypatch):
         ledger.close()
     assert run["status"] == "failed"
     assert "scheduler submission failed" in run["error"]
+
+
+
+def _slurm_bundle(tmp_path, monkeypatch, **env):
+    for key in ("SHARUR_SLURM_PARTITION", "SHARUR_SLURM_GPU_PARTITION", "SHARUR_SLURM_EXCLUDE"):
+        monkeypatch.delenv(key, raising=False)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    data_dir = tmp_path / "dataset"
+    stages = StagePaths.from_root(data_dir)
+    profile = resolve_resource_profile("slurm")
+    dag = _build_tools_dag(
+        input_dir=tmp_path / "inputs", data_dir=data_dir, output=data_dir / "sharur.duckdb", stages=stages,
+        profile=profile, skip_quast=False, skip_dfast=False, skip_prodigal=False, skip_astra=False,
+        skip_gecco=False, skip_dbcan=False, skip_crispr=False, skip_embeddings=False, enable_cazymes=False,
+        reads=tmp_path / "reads.tsv",
+    )
+    submit = _emit_slurm_bundle(dag, data_dir=data_dir, profile=profile, resume=False, force=False,
+                                idempotency_key=None, submit=False)
+    return dag, data_dir / "slurm", submit
+
+
+def test_sbatch_scripts_follow_full_node_cluster_rules(tmp_path, monkeypatch):
+    dag, bundle, _ = _slurm_bundle(tmp_path, monkeypatch)
+    scripts = {path.stem: path.read_text() for path in bundle.glob("*.sbatch")}
+    assert {"01", "02", "03", "04", "05a", "05b", "06", "06i", "07", "08"} <= set(scripts)
+    allowed = ("#SBATCH -p ", "#SBATCH -J ", "#SBATCH -o ", "#SBATCH -e ", "#SBATCH --gres=", "#SBATCH --exclude=")
+    for stage, text in scripts.items():
+        directives = [line for line in text.splitlines() if line.startswith("#SBATCH")]
+        assert directives and all(line.startswith(allowed) for line in directives), (stage, directives)
+        for forbidden in ("--mem", "--time", "-t ", "--cpus-per-task", "--exclusive"):
+            assert forbidden not in "\n".join(directives), (stage, forbidden)
+    assert "--gres=gpu:1" in scripts["06"]
+    assert "--gres" not in scripts["04"]
+
+
+def test_parallel_slurm_stages_use_every_allocated_cpu(tmp_path, monkeypatch):
+    from sharur.ingest.resources import CPU_TOKEN, expand_cpu_tokens
+
+    dag, bundle, submit = _slurm_bundle(tmp_path, monkeypatch)
+    for stage, flag in [("01", "--max-workers"), ("02", "--max-workers"), ("03", "--max-workers"),
+                        ("04", "--threads"), ("05a", "--max-workers"), ("05b", "--max-workers"),
+                        ("06i", "--threads"), ("08", "--threads")]:
+        command = dag.nodes[stage].command
+        assert command[command.index(flag) + 1] == CPU_TOKEN, stage
+        assert not any(part.isdigit() and int(part) > 1 for part in command), (stage, command)
+    assert expand_cpu_tokens(["x", "--threads", CPU_TOKEN], {"SLURM_CPUS_ON_NODE": "224"}) == ["x", "--threads", "224"]
+    # serial stages run inline on the submitting host, never as a Slurm job
+    assert not (bundle / "05c.sbatch").exists() and (bundle / "05c.local.sh").is_file()
+    assert not (bundle / "00.sbatch").exists()
+    assert "#SBATCH" not in (bundle / "05c.local.sh").read_text()
+    assert f"bash {bundle / '05c.local.sh'}" in submit.read_text()
+
+
+def test_slurm_partition_and_exclude_come_from_the_environment(tmp_path, monkeypatch):
+    _, bundle, _ = _slurm_bundle(tmp_path, monkeypatch, SHARUR_SLURM_PARTITION="standard",
+                                 SHARUR_SLURM_GPU_PARTITION="gpu", SHARUR_SLURM_EXCLUDE="node-1,node-2")
+    assert "#SBATCH -p standard" in (bundle / "04.sbatch").read_text()
+    assert "#SBATCH -p gpu" in (bundle / "06.sbatch").read_text()
+    assert "#SBATCH --exclude=node-1,node-2" in (bundle / "07.sbatch").read_text()
+
+
+def test_local_profiles_keep_numeric_worker_counts(tmp_path):
+    profile = resolve_resource_profile("local")
+    assert profile.threads(8) == "8" and profile.request("04").describe().endswith("/cpu")

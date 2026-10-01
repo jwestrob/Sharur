@@ -9,9 +9,9 @@ The standard ingest workflow starts from nucleotide assemblies (`.fna`, `.fa`, `
 - Use `sharur-ingest` as the default interface for new dataset ingestion.
 - Use the staged scripts in `src/ingest/` only when you need manual stage control, debugging, or rerunning one stage.
 
-- Do not call `astra search` directly. Use `src/ingest/04_astra_scan.py`.
-- Do not manually insert annotation rows into DuckDB. Use `src/ingest/07_build_knowledge_base.py`.
-- Do not skip `src/ingest/minced_crispr.py` in the standard pipeline.
+- Run annotation through `src/ingest/04_astra_scan.py`, which supplies Sharur's per-database Astra settings.
+- Load annotation rows through `src/ingest/07_build_knowledge_base.py`, the single DuckDB writer.
+- Keep `src/ingest/minced_crispr.py` in the standard pipeline; CRISPR array loci come from it.
 
 If you only have pre-called proteins and no assemblies, see [Alternative: Protein-Only Ingest](#alternative-protein-only-ingest). That path is a special case, not the default workflow.
 
@@ -31,6 +31,14 @@ If `sharur-ingest` is not available after install, refresh the editable install:
 - Standard: `PFAM`, `KOFAM`, `HydDB`, `DefenseFinder`, `dbCAN`
 - Optional: `TXSScan`, `VOGdb`, `CANT-HYD`
 
+### Reference data built or fetched once per machine
+- `sharur setup-kegg` builds the KO → predicate map and KEGG module definitions locally from KEGG REST
+  (academic use; `--inputs` builds from a licensed KEGG copy). KEGG-derived predicates and
+  `sharur modules` use it.
+- VOGdb's `vog.annotations.tsv` supplies VOG descriptions and functional categories for predicates
+  and the browser. See [INSTALL.md](INSTALL.md#reference-databases).
+- Optional: [CoverM](https://github.com/wwood/CoverM) for per-sample read coverage (Stage 08).
+
 ### Input data
 - Genome assembly FASTAs in one directory
 - Extensions supported by Stage 00: `.fna`, `.fa`, `.fasta`
@@ -48,6 +56,15 @@ sharur-ingest \
 
 This is the primary interface for running the standard pipeline. It orchestrates the staged workflow, including the standard stages 00, 03, 04, 05c, 07, and 06 plus the internal `06i` persistent-index attempt, while exposing skip flags for optional stages when needed.
 
+Two options shape the optional layers:
+
+- `--embedding-model MODEL` selects the Hugging Face protein encoder for Stage 06 (ESM-2 8M by
+  default). Any model loadable with `AutoModel` works; embeddings computed elsewhere load with
+  `sharur build-vector-index --embeddings FILE`.
+- `--reads reads.tsv` adds Stage 08, per-sample read coverage with CoverM. The table is
+  tab-separated with `sample_id`, `read1`, and `read2` (paired) or `interleaved`; further columns
+  become sample metadata. Coverage lands in an `abundance.duckdb` sidecar beside the dataset.
+
 Ingest is a dependency-aware DAG, not an unconditional script list. It records runs and
 stage attempts in `data/my_dataset/sharur_ops.db`. Resume is on by default: a stage is reused
 only when its command, inputs, script, resource request, and dependency signatures match a
@@ -62,7 +79,17 @@ Execution profiles are explicit:
 - `--profile local`: bounded local CPU workers
 - `--profile mps`: local CPU stages plus one exclusively locked MPS Stage 06 process
 - `--profile slurm`: write a dependency-linked bundle under `data/my_dataset/slurm/`;
-  add `--submit-slurm` only when ready to submit it
+  add `--submit-slurm` only when ready to submit it. Each parallel stage runs as a full-node job
+  that passes `$SLURM_CPUS_ON_NODE` to its tool; sbatch scripts carry only the job name, log path,
+  GPU request and the partition and node exclusions you set, leaving memory and time to partition
+  defaults. Serial stages (input audit, MinCED) run inline from `submit.sh`. Set the partitions
+  and exclusions once per cluster:
+
+  ```bash
+  export SHARUR_SLURM_PARTITION=standard
+  export SHARUR_SLURM_GPU_PARTITION=gpu
+  export SHARUR_SLURM_EXCLUDE=node-a,node-b   # optional: nodes to avoid
+  ```
 
 The default plan skips optional QUAST, DFAST, GECCO, and the deprecated legacy dbCAN
 helper. Enable them deliberately with `--with-quast`, `--with-dfast`, `--with-gecco`,
@@ -154,6 +181,9 @@ Use `--resume-v2` for an interruption under the same semantic code/config.
   Torch-free child process; `sharur-ingest` records that CPU build separately as `06i`.
 - `vector_index_runner.py`: produces the generation-scoped persistent FAISS sidecar, the
   disk-backed stable protein-ID map, and the atomic index manifest
+- `08_coverage.py` (with `--reads`): maps each sample to the prepared assemblies with CoverM using
+  every allocated CPU and imports depth, covered fraction, read counts and contig lengths into the
+  abundance sidecar
 
 ## Verify the Dataset
 
@@ -211,6 +241,44 @@ exits non-zero on canonical drift and supports `--format json`.
 
 Stage 07 creates the final indexes and runs DuckDB `ANALYZE` before the dataset
 is sealed, giving the optimizer statistics over the final table state.
+
+## Look Around
+
+```bash
+DB=data/my_dataset/sharur.duckdb
+sharur describe --db $DB                                  # sources, curated callers, predicate map state
+sharur card PROTEIN_ID --db $DB                           # one protein: context, hits, evidence-backed predicates
+sharur why PROTEIN_ID sam_binding --db $DB                # the evidence behind one predicate
+sharur modules --db $DB --bin GENOME_ID --min-completeness 0.75
+sharur architecture "TPR_* {10,}" --db $DB               # ordered-domain pattern search
+sharur browse --db $DB                                    # read-only website at http://localhost:8800/
+```
+
+`sharur browse` serves the dataset as linked pages: the tree of life, functions, pathways, Pfam and
+VOG families, systems, a contig viewer and protein pages with sequences. `sharur browse --share
+--host 0.0.0.0` prints a link with an access token for collaborators on your network. See
+[`docs/guides/browser.md`](docs/guides/browser.md).
+
+### Coverage from existing mappings
+
+Import CoverM `contig` tables (or a long table of `sample_id`, `contig_id`, `mean_depth`, …) and
+ask about abundance:
+
+```bash
+sharur import-coverage s1.tsv s2.tsv --db $DB --samples samples.tsv
+sharur abundance --db $DB --predicate nife_group1
+sharur coverage-outliers GENOME_ID --db $DB
+```
+
+### Datasets built before schema 8
+
+New ingests record each contig's assembly length and Prodigal's truncation flags. For an existing
+dataset, add them once, then reseal:
+
+```bash
+sharur backfill-contig-context --db $DB --assemblies path/to/assemblies
+sharur seal --db $DB --force
+```
 
 ## Shared Query Service for Multi-Agent Campaigns
 
@@ -314,7 +382,12 @@ b = Sharur("data/my_dataset/sharur.duckdb", read_only=True)
 giants = b.search_by_predicates(has=["giant", "unannotated"])
 defense = b.search_by_predicates(has=["crispr_associated"])
 if giants.records:
-    similar = b.find_similar(giants.records[0]["protein_id"], k=20)
+    pid = giants.records[0]["protein_id"]
+    b.card(pid)                                     # bounded summary
+    b.why(pid, "unannotated")                       # evidence path for one predicate
+    similar = b.find_similar(pid, k=20)
+b.modules(min_completeness=0.75)                    # KEGG module completeness (after setup-kegg)
+b.search_architecture("Big_* {5,} . VWA")          # domain-architecture patterns
 ```
 
 ## Alternative: Protein-Only Ingest

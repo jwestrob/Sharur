@@ -40,12 +40,13 @@ capabilities needed:
 | `parquet` | Optional PyArrow interoperability |
 | `vectors` | H5 inspection and persistent FAISS similarity |
 | `embeddings` | `vectors` dependencies plus Torch/Transformers embedding inference |
-| `ops` | FastAPI/uvicorn multi-agent coordination service |
+| `ops` | FastAPI/uvicorn/Jinja2: multi-agent coordination service, query service and the `sharur browse` website |
 | `visualization` | Matplotlib, Plotly, and neighborhood rendering |
 | `structure` | Biopython and ESM structure prediction |
 | `reports` | PDF report backends |
 | `notebooks` | Jupyter and ipywidgets |
 | `all` | Every optional runtime surface |
+| `docs` | MkDocs Material for building the documentation site |
 | `dev` | Tests, HTTP test client, linting, typing, and wheel building |
 
 ### Minimal install (no conda)
@@ -55,7 +56,7 @@ If you only need the Python library without bioinformatics CLI tools:
 ```bash
 pip install -e "."                              # lean core
 pip install -e ".[embeddings]"                  # standard ingest including Stage 06
-pip install -e ".[ops]"                         # optional coordination server
+pip install -e ".[ops]"                         # coordination server, query service, dataset browser
 pip install -e ".[dev,vectors,ops,reports]"     # regression-test surfaces
 pip install -e ".[all,dev]"                     # full development environment
 ```
@@ -139,6 +140,46 @@ export ESM_API_KEY="your-key-here"
 
 ## Reference Databases
 
+### KEGG predicate map (built locally)
+
+KEGG data is subject to KEGG's terms, so Sharur ships rules and builds the KO → predicate map on
+your machine:
+
+```bash
+sharur setup-kegg                        # KEGG REST (academic use); cached in ~/.sharur/kegg
+sharur setup-kegg --inputs /path/to/kegg # build from a licensed KEGG copy
+```
+
+`$SHARUR_KEGG_DIR` or `data/reference/kegg` relocate the cache. See [`DATA_LICENSES.md`](DATA_LICENSES.md).
+
+### VOGdb annotation table
+
+VOG descriptions and functional categories come from VOGdb's `vog.annotations.tsv`:
+
+```bash
+mkdir -p data/reference/vogdb
+curl -L -o data/reference/vogdb/vog.annotations.tsv.gz \
+  https://fileshare.lisc.univie.ac.at/vog/latest/vog.annotations.tsv.gz
+```
+
+Sharur looks for `vog.annotations.tsv` (or `.gz`) in `$SHARUR_VOG_ANNOTATIONS`, `data/reference/vogdb/`,
+`~/.sharur/vogdb/` and `~/.config/Astra/VOGdb/`.
+
+### Annotation name maps
+
+Stage 07 enriches annotation rows from `pfam_id_desc.tsv` and KOfam's `ko_list` when present. It
+looks in `$SHARUR_REFERENCE_DIR`, the `reference` directory beside the dataset directory (for
+`data/my_dataset`, `data/reference`), `./data/reference` and `~/.sharur/reference`; Astra's
+`~/.config/Astra/ko_list` also serves.
+
+### CoverM (optional)
+
+Per-sample coverage (`sharur-ingest --reads`, Stage 08) uses [CoverM](https://github.com/wwood/CoverM):
+
+```bash
+conda install -c bioconda coverm
+```
+
 ### HydDB DIAMOND database
 
 Used by `scripts/classify_hydrogenases.py` for hydrogenase subgroup classification:
@@ -180,8 +221,14 @@ sharur preflight --db data/DATASET/sharur.duckdb
 sharur preflight --db data/DATASET/sharur.duckdb --format json --strict
 ```
 
-This distinguishes unavailable, stale, and failed dataset/runtime capabilities instead of
-reducing the result to a single install check.
+This distinguishes unavailable, stale, and failed dataset/runtime capabilities, giving each its
+own status.
+
+To look around a dataset in a web browser:
+
+```bash
+sharur browse --db data/DATASET/sharur.duckdb   # http://localhost:8800/
+```
 
 For granular manual checks:
 

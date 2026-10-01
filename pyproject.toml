@@ -140,6 +140,7 @@ packages = ["sharur"]
 "src/ingest/dbcan_cazyme.py" = "sharur/ingest/stages/dbcan_cazyme.py"
 "src/ingest/gecco_bgc.py" = "sharur/ingest/stages/gecco_bgc.py"
 "src/ingest/minced_crispr.py" = "sharur/ingest/stages/minced_crispr.py"
+"scripts/classify_cazymes.py" = "sharur/ingest/stages/classify_cazymes.py"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -17,6 +17,21 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
 
+# Slurm stages run on full nodes: commands carry this token wherever a worker or thread
+# count belongs, and the stage runner replaces it with $SLURM_CPUS_ON_NODE on the node.
+CPU_TOKEN = "@SLURM_CPUS@"
+FULL_NODE = 0  # ResourceRequest.cpus for a full-node Slurm allocation
+
+
+def expand_cpu_tokens(command: list[str], env: dict[str, str] | None = None) -> list[str]:
+    """Replace :data:`CPU_TOKEN` with the CPUs allocated to this job (``$SLURM_CPUS_ON_NODE``)."""
+    if not any(CPU_TOKEN in part for part in command):
+        return list(command)
+    env = os.environ if env is None else env
+    cpus = env.get("SLURM_CPUS_ON_NODE") or str(os.cpu_count() or 1)
+    return [part.replace(CPU_TOKEN, cpus) for part in command]
+
+
 @dataclass(frozen=True)
 class ResourceRequest:
     cpus: int
@@ -30,6 +45,15 @@ class ResourceRequest:
     def to_dict(self) -> dict:
         return asdict(self)
 
+    @property
+    def full_node(self) -> bool:
+        return self.executor == "slurm" and self.cpus == FULL_NODE
+
+    def describe(self) -> str:
+        if self.full_node:
+            return f"full node{' + ' + str(self.gpus) + ' GPU' if self.gpus else ''}"
+        return f"{self.cpus}cpu/{self.memory_gb}GB/{self.accelerator}"
+
 
 @dataclass(frozen=True)
 class ResourceProfile:
@@ -41,6 +65,10 @@ class ResourceProfile:
 
     def request(self, stage_id: str) -> ResourceRequest:
         return self.requests[stage_id]
+
+    def threads(self, value: int) -> str:
+        """Worker/thread argument for a stage command: every allocated CPU on Slurm."""
+        return CPU_TOKEN if self.name == "slurm" else str(value)
 
     def to_dict(self) -> dict:
         return {
@@ -143,41 +171,28 @@ def _local_profile(*, mps: bool = False) -> ResourceProfile:
 
 
 def _slurm_profile() -> ResourceProfile:
+    """Full-node Slurm stages; serial stages run inline on the submitting host.
+
+    Sbatch scripts carry no CPU, memory or walltime requests: the cluster allocates
+    whole nodes and partition defaults govern memory and time. Parallel stages
+    receive every allocated CPU through :data:`CPU_TOKEN`.
+    """
+    def node(**extra) -> ResourceRequest:
+        return ResourceRequest(FULL_NODE, 0, "", executor="slurm", **extra)
+
     requests = {
-        "00": ResourceRequest(1, 4, "04:00:00", executor="local"),
-        "01": ResourceRequest(8, 24, "12:00:00", executor="slurm"),
-        "02": ResourceRequest(16, 48, "24:00:00", executor="slurm"),
-        "03": ResourceRequest(16, 32, "24:00:00", executor="slurm"),
-        # KOFAM can dominate this stage; use a deliberately generous walltime.
-        "04": ResourceRequest(16, 64, "72:00:00", executor="slurm"),
-        "05a": ResourceRequest(8, 32, "24:00:00", executor="slurm"),
-        "05b": ResourceRequest(8, 32, "24:00:00", executor="slurm"),
-        # Project policy: single-threaded MinCED runs on the login node.
-        "05c": ResourceRequest(1, 8, "24:00:00", executor="local"),
-        "07": ResourceRequest(16, 64, "24:00:00", executor="slurm"),
-        "06": ResourceRequest(
-            8,
-            64,
-            "72:00:00",
-            executor="slurm",
-            accelerator="cuda",
-            gpus=1,
-            exclusive_accelerator=True,
-        ),
-        "06i": ResourceRequest(
-            8,
-            64,
-            "24:00:00",
-            executor="slurm",
-        ),
-        "08": ResourceRequest(16, 64, "48:00:00", executor="slurm"),
+        # Stage 00 audits inputs serially; MinCED is single-threaded. Both run inline.
+        "00": ResourceRequest(1, 4, "", executor="local"),
+        "05c": ResourceRequest(1, 8, "", executor="local"),
+        **{stage: node() for stage in ("01", "02", "03", "04", "05a", "05b", "07", "06i", "08")},
+        "06": node(accelerator="cuda", gpus=1, exclusive_accelerator=True),
     }
     return ResourceProfile(
         name="slurm",
         requests=requests,
-        max_workers=16,
-        annotation_threads=16,
-        index_threads=8,
+        max_workers=0,
+        annotation_threads=0,
+        index_threads=0,
     )
 
 

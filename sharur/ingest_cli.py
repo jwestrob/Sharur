@@ -176,7 +176,7 @@ def _build_tools_dag(
                 "--threads-per-genome",
                 "1",
                 "--max-workers",
-                str(profile.max_workers),
+                profile.threads(profile.max_workers),
                 "--force",
             ],
             dependencies=("00",),
@@ -195,7 +195,7 @@ def _build_tools_dag(
                 "--threads",
                 "1",
                 "--max-workers",
-                str(profile.max_workers),
+                profile.threads(profile.max_workers),
                 "--force",
             ],
             dependencies=("00",),
@@ -212,7 +212,7 @@ def _build_tools_dag(
                 "-o",
                 str(stages.stage03),
                 "--max-workers",
-                str(profile.max_workers),
+                profile.threads(profile.max_workers),
                 "--force",
             ],
             dependencies=("00",),
@@ -232,7 +232,7 @@ def _build_tools_dag(
                 "-o",
                 str(stages.stage04),
                 "--threads",
-                str(profile.annotation_threads),
+                profile.threads(profile.annotation_threads),
                 "--force",
             ],
             dependencies=("03",),
@@ -250,7 +250,7 @@ def _build_tools_dag(
                 "--threads",
                 "1",
                 "--max-workers",
-                str(min(profile.max_workers, 8)),
+                profile.threads(min(profile.max_workers, 8)),
                 "--force",
             ],
             dependencies=("00",),
@@ -270,7 +270,7 @@ def _build_tools_dag(
                 "--output-dir",
                 str(stages.stage05b),
                 "--max-workers",
-                str(min(profile.max_workers, 4)),
+                profile.threads(min(profile.max_workers, 4)),
                 "--threads-per-job",
                 "1",
             ],
@@ -359,7 +359,7 @@ def _build_tools_dag(
                 "--embeddings",
                 str(stages.stage06 / "protein_embeddings.h5"),
                 "--threads",
-                str(profile.index_threads),
+                profile.threads(profile.index_threads),
             ],
             dependencies=("06",),
             outputs=(stages.stage06 / "protein_embeddings.index.json",),
@@ -379,7 +379,7 @@ def _build_tools_dag(
                 "--reads",
                 str(reads),
                 "--threads",
-                str(request.cpus),
+                profile.threads(request.cpus),
                 "--force",
             ],
             dependencies=("07",),
@@ -461,7 +461,7 @@ def _execute_local_dag(
 
             console.print(
                 f"[cyan]run[/cyan] {node.stage_id} {node.label} "
-                f"[dim]({profile.name}, {node.resource.cpus} CPU)[/dim]"
+                f"[dim]({profile.name}, {node.resource.describe()})[/dim]"
             )
             execute_stage(
                 ledger=ledger,
@@ -878,8 +878,7 @@ def run(
             request = node.resource
             console.print(
                 f"  [{node.stage_id}] deps={dependencies} "
-                f"resources={request.cpus}cpu/{request.memory_gb}GB/"
-                f"{request.accelerator}: {' '.join(node.command)}"
+                f"resources={request.describe()}: {' '.join(node.command)}"
             )
         return planned
 
