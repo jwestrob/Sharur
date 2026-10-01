@@ -1274,6 +1274,30 @@ def doctor(
         raise typer.Exit(code=1)
 
 
+@app.command("adopt-astra-hmms")
+def adopt_astra_hmms(
+    dry_run: bool = typer.Option(False, "--dry-run", help="List what would be adopted; write nothing."),
+):
+    """Register databases installed through Astra in Aksha's registry.
+
+    Aksha shares Astra's database storage but keeps its own registry, so
+    Astra-installed databases stay on disk and unknown to `aksha search`.
+    This marks each one installed at its existing directory (no download);
+    the previous registry is kept as hmm_databases.json.bak.
+    """
+    from sharur import hmm_search
+
+    try:
+        adopted = hmm_search.adopt_astra_registry(dry_run=dry_run)
+    except FileNotFoundError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
+    verb = "would adopt" if dry_run else "adopted"
+    for name, directory in adopted:
+        typer.echo(f"{verb} {name}: {directory}")
+    typer.echo(f"{len(adopted)} database(s) {verb} into {hmm_search.registry_path('aksha')}")
+
+
 @app.command(name="architecture")
 def architecture_search(
     pattern: str = typer.Argument(..., help='Domain pattern, e.g. "Big_2{5,} . VWA" or "^ SP ( Cadherin | Big_2 )+"'),

@@ -19,7 +19,7 @@ Browse without knowing an identifier. The left rail offers five ways in:
 
 Genome pages draw the contig landscape (click a contig to open it in the contig viewer: genes on both strands colored by function, with prophages, islands and systems marked above, and controls to pan and zoom), compare the genome's function profile with the dataset average, and list its pathways, systems and largest proteins. Protein pages draw the domain architecture to scale and the gene neighborhood colored by function category, with each label linking to its evidence.
 
-VOG descriptions and categories come from VOGdb's `vog.annotations.tsv`, found in `data/reference/vogdb/`, `~/.sharur/vogdb/`, the Astra VOGdb directory, or `$SHARUR_VOG_ANNOTATIONS`; without it VOG families appear by identifier.
+VOG descriptions and categories come from VOGdb's `vog.annotations.tsv`, found in `data/reference/vogdb/`, `~/.sharur/vogdb/`, the installed VOGdb HMM directory (`~/.config/Astra/VOGdb`), or `$SHARUR_VOG_ANNOTATIONS`; without it VOG families appear by identifier.
 
 **Compare** (`/compare`, or the *Compare with* box on any genome or clade page) sets two genomes or clades side by side: genome statistics, then the functions, pathways, systems and Pfam domains more common on each side, each linking to the proteins behind it. The **function heatmap** (`/heatmap`) shows chosen labels, or presets such as hydrogenases and terminal oxidases, across every clade at a chosen rank; each cell opens the proteins in that clade.
 

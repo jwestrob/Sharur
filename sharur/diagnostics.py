@@ -18,7 +18,10 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, distribution
+from importlib.util import find_spec
 from pathlib import Path
+
+from sharur import hmm_search
 
 
 # Result status values.
@@ -57,7 +60,6 @@ TOOLS: tuple[ToolSpec, ...] = (
     ToolSpec("prodigal", ("prodigal",), ("-v",), True, "gene calling (stage 03)"),
     ToolSpec("diamond", ("diamond",), ("version",), True, "protein alignment"),
     ToolSpec("hmmsearch", ("hmmsearch",), ("-h",), True, "HMM search (HMMER)"),
-    ToolSpec("astra", ("astra",), ("--version",), True, "HMM annotation (stage 04)"),
     ToolSpec("quast", ("quast.py", "quast"), ("--version",), False, "assembly QC (stage 01)"),
     ToolSpec("dfast_qc", ("dfast_qc",), ("--version",), False, "assembly QC (stage 02)"),
     ToolSpec("minced", ("minced",), ("--version",), True, "CRISPR arrays (stage 05c)"),
@@ -76,7 +78,8 @@ TOOLS: tuple[ToolSpec, ...] = (
 
 # Reference-database locations (mirror the paths hardcoded elsewhere in the
 # codebase; see module docstring). These are provisioned out-of-band.
-ASTRA_DB_DIR = Path.home() / ".config" / "Astra"
+# Aksha keeps Astra's storage default; its registry lives in its own config dir.
+ASTRA_DB_DIR = hmm_search.LEGACY_DB_DIR
 FOLDSEEK_DB_DIR = Path.home() / ".foldseek"
 MACSY_MODEL_DIRS = (
     Path.home() / ".macsyfinder" / "models",
@@ -192,12 +195,58 @@ def check_ingest_entrypoint() -> Check:
     )
 
 
+def _dist_version(name: str) -> str | None:
+    try:
+        return distribution(name).version
+    except PackageNotFoundError:
+        return None
+
+
+def check_hmm_search() -> list[Check]:
+    """Stage 04's search CLI (Aksha, or legacy Astra), its runtime, and its database registry."""
+    purpose = "HMM annotation (stage 04)"
+    resolved = hmm_search.resolve_cli()
+    if resolved is None:
+        return [Check("aksha", MISSING, "not found on PATH (github.com/jwestrob/aksha)", True, purpose)]
+    cli, path = resolved
+    if cli == "astra":
+        checks = [Check("aksha", WARN, f"not found; stage 04 uses legacy astra at {path}", True, purpose)]
+    else:
+        checks = [Check("aksha", OK, f"{_dist_version('aksha') or 'present'} ({path})", True, purpose)]
+        # The compiled PyHMMER runtime ships as the aksha-runtime wheel (module astra_pyhmmer).
+        if find_spec("astra_pyhmmer") is not None:
+            runtime = Check("aksha runtime", OK, f"aksha-runtime {_dist_version('aksha-runtime') or 'present'}",
+                            True, "compiled PyHMMER runtime")
+        else:
+            runtime = Check("aksha runtime", MISSING,
+                            "astra_pyhmmer not importable; install the aksha-runtime wheel for this platform",
+                            True, "compiled PyHMMER runtime")
+        checks.append(runtime)
+
+    registry = hmm_search.registry_path(cli)
+    installed = hmm_search.installed_databases(registry)
+    purpose = f"{cli} installed-database registry"
+    if installed is None:
+        checks.append(Check(f"{cli} registry", MISSING, f"not found at {registry}", True, purpose))
+        return checks
+    names = ", ".join(sorted(installed)[:6]) + (" …" if len(installed) > 6 else "")
+    status, detail = (OK, f"{registry} ({names})") if installed else (MISSING, f"{registry} (none installed)")
+    if cli == "aksha":
+        legacy = hmm_search.installed_databases(hmm_search.registry_path("astra")) or {}
+        unadopted = sorted(n for n, d in legacy.items() if n not in installed and d and Path(d).is_dir())
+        if unadopted:
+            status = WARN if installed else MISSING
+            detail += f"; Astra-only: {', '.join(unadopted)} (run `sharur adopt-astra-hmms`)"
+    checks.append(Check(f"{cli} registry", status, detail, True, purpose))
+    return checks
+
+
 def check_reference_dbs() -> list[Check]:
     checks = [
         _check_dir_db(
-            "Astra HMMs",
+            "HMM database storage",
             ASTRA_DB_DIR,
-            "annotation HMM databases",
+            "annotation HMM files (Aksha and Astra db_path)",
             core=True,
         ),
         _check_dir_db("Foldseek DBs", FOLDSEEK_DB_DIR, "structure search databases"),
@@ -262,6 +311,7 @@ def run_all_checks() -> list[Check]:
     """Run every diagnostic and return the flat list of results."""
     results: list[Check] = [check_ingest_entrypoint(), check_duckdb()]
     results.extend(check_tool(spec) for spec in TOOLS)
+    results.extend(check_hmm_search())
     results.extend(check_reference_dbs())
     results.append(check_kegg_map())
     results.extend(check_api_keys())

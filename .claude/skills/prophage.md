@@ -83,7 +83,7 @@ for src, n_hits, n_prot in sources:
 has_vogdb = any(src == 'vogdb' for src, _, _ in sources)
 if not has_vogdb:
     print("ERROR: No VOGdb annotations found. Cannot run prophage detection.")
-    print("Run Astra with VOGdb first, then load annotations.")
+    print("Run stage 04 with -d VOGdb first, then load annotations.")
     # EXIT — cannot proceed without VOGdb
 
 # Check for existing prophage loci
@@ -840,7 +840,7 @@ if misbinned:
 
 This skill adapts to the dataset:
 
-- **No VOGdb annotations?** → Cannot run. Report this and suggest running Astra with VOGdb.
+- **No VOGdb annotations?** → Cannot run. Report this and suggest running stage 04 with `-d VOGdb`.
 - **No vog.annotations.tsv?** → Fall back to keyword-only marker detection using the `name` and `description` fields in the annotations table. Less sensitive but still functional.
 - **Small dataset (<5 genomes)?** → Reduce MIN_MARKERS to 2, increase figure output per genome.
 - **Large dataset (>500 genomes)?** → Use SQL aggregation for statistics, sample representative loci for figures (don't visualize all), batch the contig walk if memory is a concern.

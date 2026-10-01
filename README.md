@@ -47,7 +47,7 @@ sharur doctor          # which external tools, reference databases and keys are 
 sharur setup-kegg      # build the KEGG predicate map locally (KEGG REST, academic use)
 ```
 
-`pip install -e "."` is the lean core; focused extras include `parquet`, `vectors`, `embeddings`, `ops`, `visualization`, `structure`, `reports`, and `notebooks`. External tools (Prodigal, DIAMOND, HMMER, Astra, Foldseek, …) and reference databases install separately; see [`INSTALL.md`](INSTALL.md).
+`pip install -e "."` is the lean core; focused extras include `parquet`, `vectors`, `embeddings`, `ops`, `visualization`, `structure`, `reports`, and `notebooks`. External tools (Prodigal, DIAMOND, HMMER, Aksha, Foldseek, …) and reference databases install separately; see [`INSTALL.md`](INSTALL.md).
 
 KEGG data is subject to [KEGG's terms](https://www.kegg.jp/kegg/legal.html): `sharur setup-kegg` builds the KO → predicate map on your machine, and non-academic users can build from a licensed KEGG copy with `--inputs`. Sharur ships only its own rules; see [`DATA_LICENSES.md`](DATA_LICENSES.md).
 
@@ -174,8 +174,8 @@ Proposals for new mappings are welcome: add them to the proposal files and rebui
 | 01 | QUAST | Optional assembly QC metrics |
 | 02 | DFAST | Optional QC and taxonomy |
 | 03 | Prodigal | Gene calling (`.faa`, `.genes.fna`) |
-| 04 | Astra | Pfam, KOfam, HydDB, DefenseFinder, dbCAN annotation |
-| 04 (opt-in) | Astra + extra DBs | VOGdb, TXSScan, CANT-HYD via repeated `-d` flags |
+| 04 | Aksha | Pfam, KOfam, HydDB, DefenseFinder, dbCAN annotation |
+| 04 (opt-in) | Aksha + extra DBs | VOGdb, TXSScan, CANT-HYD via repeated `-d` flags |
 | 05a | GECCO | Optional biosynthetic gene clusters |
 | 05c | minced | CRISPR array detection |
 | 07 | Builder | DuckDB knowledge base and predicates; optional dbCAN consensus with `--enable-cazymes` |
@@ -222,7 +222,7 @@ make lint
 | [`docs/biological_interpretation.md`](docs/biological_interpretation.md) | Annotation provenance and claim discipline |
 | [`docs/predicates_v2.md`](docs/predicates_v2.md) | V2 semantic-atom predicate system |
 | [`docs/findings_spec.md`](docs/findings_spec.md) | Structured, verifiable findings |
-| [`docs/tools_reference.md`](docs/tools_reference.md) | Astra, ELSA, ESM3, Foldseek |
+| [`docs/tools_reference.md`](docs/tools_reference.md) | Aksha, ELSA, ESM3, Foldseek |
 | [`QUICK_REFERENCE.md`](QUICK_REFERENCE.md) | SQL patterns and operator cheatsheet |
 | [`DATA_LICENSES.md`](DATA_LICENSES.md) | Licenses of shipped data and locally built KEGG data |
 
