@@ -96,3 +96,11 @@ def test_minced_report_is_the_primary_source(db, tmp_path):
     assert (array["contig"], len(array["repeats"]), [s["seq"] for s in array["spacers"]]) == ("c1", 5, SPACERS)
     page = TestClient(create_app(db, background=False, notes_path=tmp_path / "n.sqlite")).get("/crispr/g1_CRISPR1")
     assert "from MinCED" in page.text and "<b>5</b><span>repeats" in page.text
+
+
+def test_crispr_cas_loci_group_arrays_with_cas_genes(db, tmp_path):
+    client = TestClient(create_app(db, background=False, notes_path=tmp_path / "n.sqlite"))
+    page = client.get("/crispr-cas")
+    assert page.status_code == 200 and "1 loci with both" in page.text
+    assert page.text.count('class="stack-item"') == 1 and 'aria-label="CRISPR-Cas locus"' in page.text
+    assert client.get("/crispr-cas", params={"kind": "Cas genes only"}).text.count('class="stack-item"') == 0

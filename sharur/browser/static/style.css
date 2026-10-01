@@ -468,8 +468,8 @@ pre.query { font: 12px/1.5 var(--mono); background: var(--surface-2); border: 1p
 .crispr-array, .crispr-context { width: 100%; min-width: 760px; height: auto; display: block; }
 .crispr-array .repeat { fill: var(--ink); stroke: var(--ink); stroke-width: .8; }
 .crispr-array .repeat.variant { fill: var(--surface); stroke: var(--warn); stroke-width: 1.6; }
-.crispr-context .array-block { fill: var(--array); opacity: .55; stroke: var(--array); stroke-width: 1; }
-.crispr-context .array-block.current { opacity: 1; stroke: var(--ink); stroke-width: 1.6; }
+.array-block { fill: var(--array); opacity: .55; stroke: var(--array); stroke-width: 1; }
+.array-block.current { opacity: 1; stroke: var(--ink); stroke-width: 1.2; }
 .gene.cas { fill: var(--cas); stroke: var(--ink); stroke-width: 1.2; }
 .legend .lg-array { background: var(--array); }
 .legend .lg-cas { background: var(--cas); border: 1px solid var(--ink); }

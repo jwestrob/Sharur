@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}CRISPR-Cas loci{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="/systems">Systems</a><span class="sep">›</span><a href="/crispr">CRISPR arrays</a></div>
+<h1><span class="rank">Systems · genomic context</span>CRISPR-Cas loci</h1>
+<p class="lede">CRISPR arrays and Cas-domain genes merged wherever they lie within 10 kb on a contig: {{ num(counts.get('array + Cas', 0)) }} loci with both, {{ num(counts.get('Cas genes only', 0)) }} clusters of two or more Cas-domain genes without an array, {{ num(counts.get('array only', 0)) }} arrays with no Cas-domain gene nearby, across {{ num(genomes) }} genomes. Cas genes are named from their domains; a named CRISPR-Cas subtype needs a system caller.</p>
+<div class="panel">
+  <form class="table-tools" method="get" action="/crispr-cas">
+    <select name="kind" onchange="this.form.submit()"><option value="">All loci ({{ num(counts.values()|sum) }})</option>{% for k in ['array + Cas', 'Cas genes only', 'array only'] %}<option value="{{ k }}" {{ 'selected' if k == kind }}>{{ k }} ({{ num(counts.get(k, 0)) }})</option>{% endfor %}</select>
+    <select name="flank" onchange="this.form.submit()">{% for f in [0, 3000, 8000, 15000] %}<option value="{{ f }}" {{ 'selected' if f == flank }}>±{{ (f / 1000)|int }} kb flank</option>{% endfor %}</select>
+    <span class="count" style="margin-left:auto">page {{ page }} of {{ pages }} · {{ num(total) }} loci · largest first</span>
+  </form>
+  <div class="legend" style="margin:0 0 12px"><span><i class="lg-array"></i>CRISPR array</span><span><i class="lg-cas"></i>Cas-domain gene</span><span><i style="background:var(--gene)"></i>other gene</span><span><i style="background:var(--gene-dark);border:1px dashed var(--ink-3)"></i>no annotation</span></div>
+  <div class="stack">
+  {% for l, svg, flipped in rows %}
+    <div class="stack-item">
+      <div class="stack-label">
+        <a href="{{ url('crispr', l.arrays[0].locus_id) if l.arrays else url('contig', l.contig_id) ~ '?start=' ~ ([1, l.start - 5000]|max) ~ '&span=' ~ (l.end - l.start + 10000) }}" title="{{ l.bin_id }}">{{ gshort(l.bin_id or '') }}</a>
+        <span class="sub">{{ l.lineage }} · {{ l.kind }}{% if l.cas %} · {{ l.cas|length }} Cas{% endif %}{% if l.arrays %} · {{ l.arrays|length }} array{{ 's' if l.arrays|length > 1 }}{% endif %}{% if flipped %} · reversed{% endif %}</span>
+      </div>
+      <div class="stack-svg">{{ svg }}</div>
+    </div>
+  {% else %}<p class="empty">No CRISPR arrays or Cas-domain genes in this dataset.</p>{% endfor %}
+  </div>
+  {% if pages > 1 %}<div class="pager">{% if page > 1 %}<a class="btn" href="?kind={{ quote(kind) }}&flank={{ flank }}&page={{ page - 1 }}">← Previous</a>{% endif %}<span class="count">Page {{ page }} of {{ pages }}</span>{% if page < pages %}<a class="btn" href="?kind={{ quote(kind) }}&flank={{ flank }}&page={{ page + 1 }}">Next →</a>{% endif %}</div>{% endif %}
+</div>
+{% endblock %}

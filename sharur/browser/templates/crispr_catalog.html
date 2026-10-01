@@ -4,6 +4,7 @@
 {% block content %}
 <div class="crumbs"><a href="/systems">Systems</a></div>
 <h1>CRISPR arrays</h1>
+<p class="actions"><a class="btn" href="/crispr-cas">See arrays with their Cas genes, side by side →</a></p>
 <p class="lede">{{ num(arrays|length) }} arrays in {{ num(genomes) }} genomes. Open one for its repeats and spacers, recovered from the assembly, and the genes around it.{% if not assemblies %} <span class="tag warn">no assemblies found</span> Repeat and spacer detail needs the genome FASTAs.{% endif %}</p>
 <div class="grid g-side">
   <div class="panel"><h2>Across the tree <span class="hint">share of genomes with at least one array</span></h2>{{ prevalence_table(prevalence, rank, '/crispr') }}</div>

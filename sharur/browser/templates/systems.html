@@ -4,7 +4,7 @@
 {% block content %}
 <h1>Systems</h1>
 <p class="lede">Multi-gene systems called by validated, purpose-built callers, and mobile-element regions. Bars show the share of genomes carrying at least one.</p>
-<p class="actions"><a class="btn" href="/crispr">CRISPR arrays →</a></p>
+<p class="actions"><a class="btn" href="/crispr-cas">CRISPR-Cas loci in genomic context →</a> <a class="btn" href="/crispr">CRISPR arrays →</a></p>
 <div class="grid g2">
 {% for kind, rows in kinds.items() %}
   <div class="panel"><h2>{{ kind|capitalize }} systems <span class="hint">{{ num(rows|sum(attribute='count')) }} calls · {{ rows|length }} types</span></h2>

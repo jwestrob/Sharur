@@ -396,4 +396,122 @@ def register(app, ctx, assembly_dirs: list[Path] | None = None) -> None:
             at_contig_start=lo <= 1, at_contig_end=bool(detail["contig_length"]) and hi >= detail["contig_length"],
             spacer_color=_spacer_color)
 
+    # ------------------------------------------------------------------ #
+    # CRISPR-Cas loci: arrays and Cas-domain genes merged along each contig
+    # ------------------------------------------------------------------ #
+
+    def cas_loci() -> list[dict[str, Any]]:
+        if hasattr(ctx, "_cas_loci"):
+            return ctx._cas_loci
+        with ctx.lock:
+            rows = ctx.store.execute(
+                """WITH by_label AS (
+                       SELECT protein_id FROM protein_predicates
+                       WHERE list_has_any(predicates, ['cas_domain', 'crispr_associated', 'cas_nuclease',
+                                                       'crispr_adaptation', 'crispr_accessory'])),
+                        by_name AS (
+                       SELECT DISTINCT protein_id FROM annotations
+                       WHERE regexp_matches(name, ?) OR description ILIKE '%CRISPR-associated%'),
+                        cas AS (SELECT protein_id FROM by_label UNION SELECT protein_id FROM by_name),
+                        named AS (
+                       SELECT a.protein_id, ARG_MIN(COALESCE(NULLIF(a.name, ''), a.accession), COALESCE(a.evalue, 1)) AS top
+                       FROM annotations a JOIN cas USING (protein_id)
+                       WHERE regexp_matches(a.name, ?) OR a.description ILIKE '%CRISPR-associated%' GROUP BY 1)
+                   SELECT p.protein_id, p.contig_id, p.bin_id, p.start, p.end_coord, p.strand, named.top
+                   FROM cas JOIN proteins p USING (protein_id) LEFT JOIN named USING (protein_id)
+                   ORDER BY p.contig_id, p.start""", [_CAS_NAME.pattern, _CAS_NAME.pattern])
+        features: dict[str, list[dict[str, Any]]] = {}
+        for pid, contig, bin_id, start, end, strand, top in rows:
+            features.setdefault(contig, []).append({"kind": "cas", "protein_id": pid, "bin_id": bin_id,
+                                                    "start": start, "end": end, "strand": strand, "name": top})
+        for a in arrays():
+            features.setdefault(a["contig_id"], []).append({"kind": "array", "locus_id": a["locus_id"],
+                                                            "bin_id": a["bin_id"], "start": a["start"],
+                                                            "end": a["end"]})
+        loci = []
+        for contig, items in features.items():
+            items.sort(key=lambda f: f["start"])
+            group: list[dict[str, Any]] = []
+            for f in items + [None]:
+                if f is not None and (not group or f["start"] - max(g["end"] for g in group) <= 10000):
+                    group.append(f)
+                    continue
+                if group and (any(g["kind"] == "array" for g in group) or
+                              sum(g["kind"] == "cas" for g in group) >= 2):
+                    # a lone Cas-domain gene without an array is a domain hit, not a locus
+                    cas = [g for g in group if g["kind"] == "cas"]
+                    arr = [g for g in group if g["kind"] == "array"]
+                    kind = "array + Cas" if cas and arr else ("Cas genes only" if cas else "array only")
+                    bin_id = group[0]["bin_id"]
+                    g0 = catalog.by_bin.get(bin_id)
+                    loci.append({"id": f"{contig}:{group[0]['start']}", "contig_id": contig, "bin_id": bin_id,
+                                 "lineage": g0.label if g0 else "", "start": min(g["start"] for g in group),
+                                 "end": max(g["end"] for g in group), "cas": cas, "arrays": arr, "kind": kind})
+                group = [f] if f is not None else []
+        loci.sort(key=lambda l: (-len(l["cas"]) - 3 * len(l["arrays"]), l["bin_id"] or "", l["start"]))
+        ctx._cas_loci = loci
+        return loci
+
+    def locus_row_svg(locus: dict[str, Any], genes: list[dict[str, Any]], lo: int, hi: int, flip: bool,
+                      width: int = 1040) -> Markup:
+        span = max(1, hi - lo)
+        pad = 12
+        scale = (width - 2 * pad) / span
+
+        def x(pos: int) -> float:
+            return pad + ((hi - pos) if flip else (pos - lo)) * scale
+
+        parts = [f'<line x1="0" y1="22" x2="{width}" y2="22" class="backbone-line"/>']
+        for a in locus["arrays"]:
+            x1, x2 = sorted((x(max(a["start"], lo)), x(min(a["end"], hi))))
+            parts.append(f'<a href="/crispr/{charts.quote(a["locus_id"], safe="")}"><g><title>CRISPR array '
+                         f'{a["start"]:,}–{a["end"]:,}</title><rect x="{x1:.1f}" y="10" width="{max(x2 - x1, 4):.1f}" '
+                         f'height="24" rx="4" class="array-block current"/></g></a>')
+        for g in genes:
+            x1, x2 = sorted((x(max(g["start"], lo)), x(min(g["end"], hi))))
+            forward = (g["strand"] != "-") != flip
+            y, h = 22, 10 if g["cas"] else 7
+            head = min(8.0, (x2 - x1) * 0.45)
+            if forward:
+                pts = f"{x1:.1f},{y - h} {x2 - head:.1f},{y - h} {x2:.1f},{y} {x2 - head:.1f},{y + h} {x1:.1f},{y + h}"
+            else:
+                pts = f"{x2:.1f},{y - h} {x1 + head:.1f},{y - h} {x1:.1f},{y} {x1 + head:.1f},{y + h} {x2:.1f},{y + h}"
+            cls = "gene cas" if g["cas"] else ("gene" if g["label"] else "gene dark")
+            short = (g["cas_name"] or g["label"] or "").split(" (")[0]
+            text = (f'<text x="{(x1 + x2) / 2:.1f}" y="{y + 4}" class="gene-label">{charts._e(short)}</text>'
+                    if short and x2 - x1 > 6.0 * len(short) + 10 else "")
+            parts.append(f'<a href="/protein/{charts.quote(g["protein_id"], safe="")}"><g><title>'
+                         f'{charts._e(short or "no annotation")}</title><polygon class="{cls}" points="{pts}"/>{text}</g></a>')
+        return Markup(f'<svg class="stack-row" viewBox="0 0 {width} 44" role="img" aria-label="CRISPR-Cas locus">'
+                      f'{"".join(parts)}</svg>')
+
+    @app.get("/crispr-cas", response_class=HTMLResponse)
+    def crispr_cas(request: Request, kind: str = Query(""), page: int = Query(1, ge=1),
+                   flank: int = Query(3000, ge=0, le=20000)):
+        loci = cas_loci()
+        counts = Counter(l["kind"] for l in loci)
+        selected = [l for l in loci if not kind or l["kind"] == kind]
+        per_page = 25
+        pages = max(1, (len(selected) + per_page - 1) // per_page)
+        page = min(page, pages)
+        shown = selected[(page - 1) * per_page: page * per_page]
+        windows = [(l, max(1, l["start"] - flank), l["end"] + flank) for l in shown]
+        span = max((hi - lo for _, lo, hi in windows), default=1)
+        rows = []
+        for l, lo, hi in windows:
+            genes = genes_near(l["contig_id"], lo, hi)
+            names = {c["protein_id"]: c["name"] for c in l["cas"]}
+            for g in genes:
+                g["cas_name"] = names.get(g["protein_id"])
+                g["cas"] = g["cas"] or g["protein_id"] in names
+            # orient on the Cas1 gene when present (or the first Cas gene); shared scale = widest window
+            key = next((c for c in l["cas"] if re.search(r"cas1(?![0-9])", str(c["name"] or ""), re.I)),
+                       l["cas"][0] if l["cas"] else None)
+            flip = bool(key and key["strand"] == "-")
+            center = (lo + hi) // 2
+            rows.append((l, locus_row_svg(l, genes, center - span // 2, center + span // 2, flip), flip))
+        return ctx.render(request, "crispr_cas.html", "systems", rows=rows, kind=kind, counts=counts,
+                          total=len(selected), page=page, pages=pages, flank=flank,
+                          genomes=len({l["bin_id"] for l in loci}), arrays_total=len(arrays()))
+
     ctx.crispr_arrays = arrays
