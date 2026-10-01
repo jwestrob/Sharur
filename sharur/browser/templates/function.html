@@ -4,7 +4,7 @@
 {% block content %}
 <div class="crumbs"><a href="/functions">Functions</a>{% if d %}<span class="sep">›</span><a href="/functions#{{ d.category }}">{{ CATEGORY_LABELS.get(d.category, d.category) }}</a>{% endif %}{% if parent %}<span class="sep">›</span><a href="{{ url('function', parent.predicate_id) }}">{{ parent.name }}</a>{% endif %}</div>
 <h1><span class="rank">Function · <code>{{ predicate }}</code></span>{{ d.name if d else predicate }}</h1>
-<p class="lede">{{ d.description if d else '' }}{% if d and d.level == 'system' %} System-level: called only by validated system callers.{% endif %}</p>
+<p class="lede">{{ d.description if d else '' }}{% if d and d.level == 'system' %} System-level: called only by validated system callers.{% elif d %} Component-level: each protein carries a domain or ortholog tied to this function; complete pathways and systems appear under <a href="/pathways">Pathways</a> and <a href="/systems">Systems</a>.{% endif %}</p>
 <p class="actions"><a class="btn" href="{{ url('stack', 'function', predicate) }}">Stack neighborhoods →</a> <a class="btn" href="/triage?source=family&kind=function&id={{ quote(predicate, safe='') }}">Triage carriers →</a> <a class="btn" href="/tree?features={{ quote('function:' ~ predicate, safe=':') }}">Map on tree</a></p>
 {% if restrict %}<div class="banner">Showing genomes and proteins in <b>{{ restrict[0] }}</b> only · <a href="{{ url('function', predicate) }}">show the whole dataset</a></div>{% endif %}
 <div class="stats">
