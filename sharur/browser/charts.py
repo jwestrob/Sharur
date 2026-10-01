@@ -198,8 +198,9 @@ def contig_track(genes: list[dict[str, Any]], overlays: list[dict[str, Any]], st
                   f'y2="{axis_y + 56}" class="backbone-line"/>{"".join(parts)}{strands}</svg>')
 
 
-def histogram(values: list[float], label: str, bins: int = 24, width: int = 420, height: int = 210) -> Markup:
-    """Log-free histogram with median marker."""
+def histogram(values: list[float], label: str, bins: int = 24, width: int = 420, height: int = 210,
+              decimals: int = 0) -> Markup:
+    """Log-free histogram with median marker; ``decimals`` for the axis and median labels."""
     if not values:
         return Markup("")
     values = sorted(values)
@@ -212,15 +213,15 @@ def histogram(values: list[float], label: str, bins: int = 24, width: int = 420,
     bw = (width - 20) / bins
     bars = "".join(f'<rect x="{10 + i * bw:.1f}" y="{height - 24 - c / top * (height - 40):.1f}" '
                    f'width="{bw - 2:.1f}" height="{c / top * (height - 40):.1f}" rx="2" class="hist-bar">'
-                   f'<title>{int(i * hi / bins):,}–{int((i + 1) * hi / bins):,}: {c:,}</title></rect>'
+                   f'<title>{i * hi / bins:,.{decimals}f}–{(i + 1) * hi / bins:,.{decimals}f}: {c:,}</title></rect>'
                    for i, c in enumerate(counts))
     median = values[len(values) // 2]
     mx = 10 + min(median / hi, 1) * (width - 20)
     return Markup(f'<svg class="hist" viewBox="0 0 {width} {height}" role="img" aria-label="{_e(label)}">{bars}'
                   f'<line x1="{mx:.1f}" y1="8" x2="{mx:.1f}" y2="{height - 22}" class="median"/>'
-                  f'<text x="{mx + 4:.1f}" y="16" class="axis">median {median:,.0f}</text>'
+                  f'<text x="{mx + 4:.1f}" y="16" class="axis">median {median:,.{decimals}f}</text>'
                   f'<text x="10" y="{height - 6}" class="axis">0</text>'
-                  f'<text x="{width - 10}" y="{height - 6}" class="axis" text-anchor="end">{hi:,.0f}</text>'
+                  f'<text x="{width - 10}" y="{height - 6}" class="axis" text-anchor="end">{hi:,.{decimals}f}</text>'
                   f'<text x="{width / 2}" y="{height - 6}" class="axis" text-anchor="middle">{_e(label)}</text></svg>')
 
 
@@ -368,3 +369,59 @@ def gene_arrows(strands: str, *, gene: int = 9, gap: int = 2, height: int = 14, 
         parts.append(f'<text x="{width - 12}" y="{height - 3}" class="mini-more">…</text>')
     return Markup(f'<svg class="mini" viewBox="0 0 {width} {height}" width="{width}" height="{height}" '
                   f'role="img" aria-label="{len(strands)} genes">{"".join(parts)}</svg>')
+
+
+# --------------------------------------------------------------------------- #
+# Overview: genome quality
+# --------------------------------------------------------------------------- #
+
+
+def quality_scatter(points: list[dict[str, Any]], *, width: int = 560, height: int = 320,
+                    hq: tuple[float, float] = (90.0, 5.0), mq: tuple[float, float] = (50.0, 10.0)) -> Markup:
+    """Completeness (x) against contamination (y), one dot per genome.
+
+    ``points``: id, x, y, group (0-2 colour a phylum, 3 is "Other"), label.
+    The high-quality corner is shaded; the medium-quality bounds are dashed.
+    Dots carry ``data-g`` (genome id) for click-through and a title for hover.
+    """
+    if not points:
+        return Markup("")
+    left, right, top, bottom = 44, 12, 12, 34
+    xs = [p["x"] for p in points]
+    ys = sorted(p["y"] for p in points)
+    x0 = max(0.0, min(40.0, (min(xs) // 10) * 10))
+    y_hi = ys[int(len(ys) * 0.99) - 1] if len(ys) > 100 else ys[-1]
+    y1 = max(10.0, float(int(y_hi) + 1))
+    pw, ph = width - left - right, height - top - bottom
+
+    def sx(v: float) -> float:
+        return left + (min(max(v, x0), 100.0) - x0) / (100.0 - x0) * pw
+
+    def sy(v: float) -> float:
+        return top + ph - min(max(v, 0.0), y1) / y1 * ph
+
+    parts = [f'<rect x="{sx(hq[0]):.1f}" y="{sy(hq[1]):.1f}" width="{sx(100) - sx(hq[0]):.1f}" '
+             f'height="{sy(0) - sy(hq[1]):.1f}" class="q-hq"/>']
+    step = 10
+    for v in range(int(x0), 101, step):
+        x = sx(v)
+        parts.append(f'<line x1="{x:.1f}" y1="{top}" x2="{x:.1f}" y2="{top + ph}" class="grid-line"/>'
+                     f'<text x="{x:.1f}" y="{height - bottom + 15}" class="axis" text-anchor="middle">{v}</text>')
+    ystep = 1 if y1 <= 12 else 2 if y1 <= 24 else 5
+    for v in range(0, int(y1) + 1, ystep):
+        y = sy(v)
+        parts.append(f'<line x1="{left}" y1="{y:.1f}" x2="{left + pw}" y2="{y:.1f}" class="grid-line"/>'
+                     f'<text x="{left - 6}" y="{y + 4:.1f}" class="axis" text-anchor="end">{v}</text>')
+    if mq[0] >= x0:
+        parts.append(f'<line x1="{sx(mq[0]):.1f}" y1="{sy(mq[1]):.1f}" x2="{sx(mq[0]):.1f}" y2="{sy(0):.1f}" class="q-mq"/>')
+    parts.append(f'<line x1="{sx(max(mq[0], x0)):.1f}" y1="{sy(mq[1]):.1f}" x2="{sx(100):.1f}" y2="{sy(mq[1]):.1f}" class="q-mq"/>')
+    # "Other" underneath, then the named phyla, so colour sits on top
+    for p in sorted(points, key=lambda p: -p["group"]):
+        parts.append(f'<circle cx="{sx(p["x"]):.1f}" cy="{sy(p["y"]):.1f}" r="2.6" class="q-dot q{p["group"]}" '
+                     f'data-g="{_e(p["id"])}"><title>{_e(p["id"])} · {_e(p["label"])}\n'
+                     f'{p["x"]:.1f}% complete, {p["y"]:.1f}% contamination</title></circle>')
+    parts.append(f'<text x="{left + pw / 2:.1f}" y="{height - 4}" class="axis" text-anchor="middle">completeness %</text>'
+                 f'<text x="12" y="{top + ph / 2:.1f}" class="axis" text-anchor="middle" '
+                 f'transform="rotate(-90 12 {top + ph / 2:.1f})">contamination %</text>')
+    return Markup(f'<svg class="qscatter" viewBox="0 0 {width} {height}" role="img" '
+                  f'aria-label="Genome completeness against contamination">{"".join(parts)}</svg>')

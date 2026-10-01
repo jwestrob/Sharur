@@ -127,6 +127,10 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
                                  asset_version=int(max(f.stat().st_mtime for f in (HERE / "static").iterdir())))
 
     app = FastAPI(title="Sharur browser", docs_url=None, redoc_url=None, openapi_url=None)
+    # SVG-heavy pages compress several-fold
+    from starlette.middleware.gzip import GZipMiddleware  # noqa: PLC0415
+
+    app.add_middleware(GZipMiddleware, minimum_size=2048)
     app.mount("/static", StaticFiles(directory=str(HERE / "static")), name="static")
     app.state.store, app.state.catalog = store, catalog
 
@@ -197,13 +201,12 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
 
     @app.get("/", response_class=HTMLResponse)
     def home(request: Request):
+        from sharur.browser import overview  # noqa: PLC0415
+
         child_rank, items = clade_treemap(catalog.genomes, None)
-        systems = Counter(s["kind"] for s in catalog.systems)
         loci = Counter(l["type"] for l in catalog.loci)
-        return render(request, "home.html", "home", child_rank=child_rank, tree=charts.treemap(items, 340),
-                      children=items,
-                      systems=systems, loci=loci,
-                      notable=catalog.notable.get("giants", [])[:6])
+        return render(request, "home.html", "home", child_rank=child_rank, tree=charts.treemap(items, 360),
+                      children=items, loci=loci, o=overview.build(catalog, ctx))
 
     @app.get("/taxa", response_class=HTMLResponse)
     @app.get("/taxa/{rank}/{name:path}", response_class=HTMLResponse)

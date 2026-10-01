@@ -1,50 +1,142 @@
 {% extends "base.html" %}
-{% from "_macros.html" import bar, protein_link, genome_link, child_list %}
+{% from "_macros.html" import bar, protein_link, child_list %}
 {% block title %}Overview{% endblock %}
 {% block content %}
-<section class="hero">
+{% set q = o.quality %}
+{% set sy = o.systems %}
+{% set total_calls = sy.kinds|sum(attribute='calls') + (sy.crispr.calls if sy.crispr else 0) %}
+<section class="hero ov-hero">
+  <span class="ov-kicker">Dataset</span>
   <h1>{{ dataset }}</h1>
-  <p class="lede">{{ num(catalog.totals.genomes) }} genomes and {{ num(catalog.totals.proteins) }} proteins. Start from the tree of life, a function, a pathway, a Pfam domain or a system, or let the discovery lists point you at something unusual.</p>
+  <p class="lede">{{ num(catalog.totals.genomes) }} genomes, {{ num(catalog.totals.proteins) }} proteins and {{ bp(catalog.totals.bases) }} of {{ o.sequence_label }}{% if q.scored %}, {{ pct(q.tiers.high / q.scored) }} of the scored genomes high quality{% endif %}. Start anywhere below: the tree of life, a function, a pathway, a family, a system, or the oddities in Discover.</p>
   <div class="stats">
-    <div class="stat"><b>{{ num(catalog.totals.genomes) }}</b><span>genomes</span></div>
-    <div class="stat"><b>{{ bp(catalog.totals.bases) }}</b><span>assembled sequence</span></div>
+    <a class="stat" href="/genomes"><b>{{ num(catalog.totals.genomes) }}</b><span>genomes</span></a>
+    <div class="stat"><b>{{ bp(catalog.totals.bases) }}</b><span>{{ o.sequence_label }}</span></div>
     <div class="stat"><b>{{ num(catalog.totals.proteins) }}</b><span>proteins</span></div>
     <div class="stat"><b>{{ pct(catalog.totals.annotated / (catalog.totals.proteins or 1)) }}</b><span>with an annotation hit</span></div>
-    <div class="stat"><b>{{ num(catalog.systems|length) }}</b><span>validated systems</span></div>
+    {% if q.scored %}<a class="stat" href="#quality"><b>{{ num(q.tiers.high) }}</b><span>high-quality genomes</span></a>{% endif %}
+    <a class="stat" href="/systems"><b>{{ num(total_calls) }}</b><span>curated system calls</span></a>
   </div>
 </section>
 
+<nav class="ov-explore" aria-label="Explore">
+  {% set tools = [
+    ('/taxa', 'Tree of life', 'Walk from phylum to genus; see what sets each clade apart.', '<path d="M12 3v6M12 9l-6 5M12 9l6 5M6 14v4M18 14v4"/><circle cx="12" cy="3" r="1.5"/><circle cx="6" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/>'),
+    ('/tree', 'Map onto the tree', 'Paint any function, family or system across the taxonomy.', '<path d="M4 12h5M9 12V5h6M9 12v7h6M15 5h5M15 19h5"/>'),
+    ('/landscape', 'Functional landscape', 'Every genome placed by what it encodes; neighbours by function.', '<circle cx="7" cy="8" r="2"/><circle cx="16" cy="6" r="1.6"/><circle cx="14" cy="15" r="2.4"/><circle cx="6" cy="17" r="1.4"/><circle cx="19" cy="17" r="1.2"/>'),
+    ('/matrix', 'Presence/absence', 'Genomes × features for one or two clades, weighed against completeness.', '<rect x="3" y="3" width="5" height="5" rx="1"/><rect x="10" y="3" width="5" height="5" rx="1"/><rect x="3" y="10" width="5" height="5" rx="1"/><rect x="17" y="10" width="4" height="5" rx="1"/><rect x="10" y="17" width="5" height="4" rx="1"/>'),
+    ('/compare', 'Compare', 'Two genomes or clades side by side: functions, pathways, systems.', '<path d="M8 4v16M16 4v16M3 9h5M16 15h5"/>'),
+    ('/discover', 'Discover', 'Giant proteins, clade-specific fusions, unannotated stretches.', '<circle cx="12" cy="12" r="9"/><path d="M15.5 8.5l-2 5-5 2 2-5z"/>'),
+    ('/pathways', 'Pathways', 'KEGG modules: how complete, in whom, and which steps go missing.', '<circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="12" cy="18" r="2"/><path d="M7 6h10M6 8l5 8M18 8l-5 8"/>'),
+    ('/systems', 'Systems', 'Defense, secretion and CRISPR-Cas calls from curated callers.', '<path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/>'),
+    ('/health', 'Data health', 'Checks on gene calls, annotation coverage, completeness and more.', '<path d="M3 12h4l2-5 4 10 2-5h6"/>'),
+  ] %}
+  {% for href, title, text, icon in tools %}<a class="ov-tool" href="{{ href }}"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{{ icon|safe }}</svg></span><span><b>{{ title }}</b><span>{{ text }}</span></span></a>{% endfor %}
+</nav>
+
 <div class="grid g-side">
   <div class="panel"><h2>Who is here <span class="hint">genomes by {{ child_rank }} · click to explore</span></h2>{{ tree }}</div>
-  <div class="panel"><h2>{{ child_rank|capitalize }} groups</h2>{{ child_list(children, child_rank) }}</div>
+  <div class="panel"><h2>{{ child_rank|capitalize if child_rank else 'Groups' }} groups</h2>{{ child_list(children, child_rank) }}</div>
 </div>
 
-<div class="entries" style="margin-top:16px">
-  <a class="entry" href="/taxa"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v6M12 9l-6 5M12 9l6 5"/></svg></span><b>Tree of life</b><span>Walk from phylum to genus; see what makes each clade distinctive.</span></a>
-  <a class="entry" href="/functions"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span><b>Functions</b><span>{{ num(catalog.predicates|length) }} evidence-backed functional labels and where they occur.</span></a>
-  <a class="entry" href="/pathways"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><path d="M7 6h10"/></svg></span><b>Pathways</b><span>KEGG modules: how complete, in whom, and which steps go missing.</span></a>
-  <a class="entry" href="/domains"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="9" width="6" height="6" rx="2"/><rect x="9" y="9" width="9" height="6" rx="2"/><path d="M18 12h4"/></svg></span><b>Protein families</b><span>{{ num(catalog.domains|length) if catalog.domains else 'All' }} Pfam domains and {{ num(catalog.vogs|length) if catalog.vogs else 'all' }} viral VOG families: where they occur and with what.</span></a>
-  <a class="entry" href="/systems"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/></svg></span><b>Systems</b><span>{% for k, n in systems.items() %}{{ num(n) }} {{ k }}{% if not loop.last %}, {% endif %}{% endfor %}{% for k, n in loci.items() %}, {{ num(n) }} {{ k }}{% endfor %}.</span></a>
-  <a class="entry" href="/discover"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M15.5 8.5l-2 5-5 2 2-5z"/></svg></span><b>Discover</b><span>Giant proteins, large unannotated proteins, long domain repeats.</span></a>
+{% if not q.scored %}
+<div class="panel" id="quality">
+  <h2>Genome quality <span class="hint">completeness and contamination</span></h2>
+  <p class="empty">No completeness estimates yet. Fill them from CheckM, CheckM2 or GTDB tables with <code>sharur import-quality</code>; the quality scatter and MIMAG tiers appear here.</p>
 </div>
-
-<div class="grid g2" style="margin-top:16px">
+{% else %}
+<div class="grid g-side" id="quality">
   <div class="panel">
-    <h2>Annotation sources <span class="hint">share of proteins with a hit</span></h2>
-    <div class="bars">
-    {% for s in catalog.sources %}
-      <span class="label">{{ s.source }}</span>{{ bar(s.proteins / (catalog.totals.proteins or 1)) }}<span class="val">{{ pct(s.proteins / (catalog.totals.proteins or 1), 1) }}</span>
-    {% endfor %}
+    <h2>Genome quality <span class="hint">{{ num(q.scored) }} of {{ num(q.total) }} genomes scored · click a dot</span></h2>
+    {{ charts.quality_scatter(q.points) }}
+    <div class="legend ov-legend">
+      {% for name, n in q.legend %}<span><i class="ov-dot q{{ loop.index0 }}"></i>{{ name }} <span class="count">{{ num(n) }}</span></span>{% endfor %}
+      {% if q.other %}<span><i class="ov-dot q3"></i>other phyla <span class="count">{{ num(q.other) }}</span></span>{% endif %}
+      <span><i class="ov-box"></i>high quality</span><span><i class="ov-dash"></i>medium-quality bounds</span>
     </div>
   </div>
   <div class="panel">
-    <h2>Largest proteins</h2>
-    {% if notable %}
-    <table><tbody>
-    {% for p in notable %}<tr><td>{{ protein_link(p.protein_id) }}<div class="sub">{{ p.architecture or 'no placed domains' }}</div></td><td class="num">{{ num(p.length) }} aa</td></tr>{% endfor %}
-    </tbody></table>
-    <p class="note"><a href="/discover">More in Discover →</a></p>
-    {% else %}<p class="empty">Computing…</p>{% endif %}
+    <h2>Quality tiers <span class="hint">MIMAG thresholds</span></h2>
+    <div class="ov-tiers">
+      {% for key, label, rule in [('high', 'High quality', '> 90% complete, < 5% contamination'), ('medium', 'Medium quality', '≥ 50% complete, < 10% contamination'), ('low', 'Lower', 'the rest')] %}
+      <div class="ov-tier ov-{{ key }}"><b>{{ num(q.tiers[key]) }}</b><span>{{ label }}</span><em>{{ rule }}</em>{{ bar(q.tiers[key] / q.scored) }}</div>
+      {% endfor %}
+    </div>
+    <p class="note">Median completeness {{ '%.1f' % q.median }}%.</p>
   </div>
 </div>
+{% endif %}
+
+<div class="grid g2">
+  <div class="panel"><h2>Genome size <span class="hint">Mb of {{ o.sequence_label }} per genome</span></h2>{{ charts.histogram(o.sizes.mb, 'Mb per genome', decimals=2) }}</div>
+  <div class="panel"><h2>Proteins per genome</h2>{{ charts.histogram(o.sizes.proteins, 'proteins per genome') }}</div>
+</div>
+
+<div class="grid g2">
+  <div class="panel">
+    <h2>Annotation sources <span class="hint">share of proteins and of genomes with a hit</span></h2>
+    {% if catalog.sources %}
+    <table class="ov-sources"><thead><tr><th>Source</th><th>Proteins</th><th class="num">Genomes</th></tr></thead><tbody>
+    {% for s in catalog.sources %}{% set ps = s.proteins / (catalog.totals.proteins or 1) %}
+      <tr><td>{{ s.source }}</td><td>{{ bar(ps) }}<span class="count">{{ pct(ps, 1) }} · {{ num(s.proteins) }}</span></td><td class="num">{% if s.genomes is defined %}{{ pct(s.genomes / (catalog.totals.genomes or 1)) }}{% else %}–{% endif %}</td></tr>
+    {% endfor %}
+    </tbody></table>
+    {% else %}<p class="empty">No annotations loaded.</p>{% endif %}
+  </div>
+  <div class="panel">
+    <h2>Curated systems <span class="hint">calls from purpose-built callers</span></h2>
+    {% if sy.kinds or sy.crispr %}
+    <div class="ov-systems">
+      {% for k in sy.kinds %}
+      <div class="ov-sys">
+        <div class="ov-sys-head"><a href="/systems"><b>{{ k.kind|capitalize }}</b></a><span class="count">{{ num(k.calls) }} calls · {{ num(k.types) }} types · {{ pct(k.genomes / (catalog.totals.genomes or 1)) }} of genomes</span></div>
+        <div class="ov-chips">{% for t, n in k.top %}<a class="chip" href="{{ url('system', k.kind, t) }}">{{ t }} <span class="count">{{ num(n) }}</span></a>{% endfor %}</div>
+      </div>
+      {% endfor %}
+      {% if sy.crispr %}
+      <div class="ov-sys">
+        <div class="ov-sys-head"><a href="/systems"><b>CRISPR-Cas</b></a><span class="count">{{ num(sy.crispr.calls) }} subtyped calls · {{ sy.crispr.n_subtypes }} subtypes</span></div>
+        <div class="ov-chips">{% for r in sy.crispr.subtypes %}<a class="chip" href="/crispr-cas/calls?subtype={{ quote(r.subtype, safe='') }}">{{ r.subtype }} <span class="count">{{ num(r.count) }}</span></a>{% endfor %}</div>
+      </div>
+      {% endif %}
+      {% if loci %}<p class="note">Also mapped: {% for k, n in loci.items() %}<a href="{{ url('loci', k) }}">{{ num(n) }} {{ o.locus_labels.get(k, k ~ ' regions') }}</a>{{ ', ' if not loop.last }}{% endfor %}.</p>{% endif %}
+    </div>
+    {% else %}<p class="empty">No curated system calls in this dataset.</p>{% endif %}
+  </div>
+</div>
+
+<div class="panel ov-highlights">
+  <h2>Highlights <span class="hint">standouts from Discover</span></h2>
+  {% if o.highlights %}
+  <div class="ov-cards">
+    {% for h in o.highlights %}
+    <a class="ov-card" href="{{ h.href }}">
+      <span class="ov-card-title">{{ h.title }}</span>
+      <b class="ov-card-value">{{ h.value }}</b>
+      {% if h.kind == 'giant' %}{{ charts.mini_architecture(h.length, h.domains, h.length, partial=h.partial) }}
+      {% elif h.kind == 'island' %}<span class="ov-arrows">{{ charts.gene_arrows(h.strands, max_genes=28) }}</span>{% endif %}
+      <span class="ov-card-detail">{{ h.detail }}</span>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}<p class="empty">Discovery lists are being prepared; highlights appear here shortly.</p>{% endif %}
+</div>
+
+{% if o.recent %}
+<div class="panel">
+  <h2>Recent curation <span class="hint"><a href="/flags">all flags and notes →</a></span></h2>
+  <table class="ov-recent"><tbody>{% for r in o.recent %}<tr>
+    <td><span class="tag">{{ r.kind }}</span></td>
+    <td><a href="{{ r.url }}">{{ r.label }}</a>{% if r.text %}<div class="sub">{{ r.text|truncate(140) }}</div>{% endif %}</td>
+    <td>{% if r.flag %}<span class="chip">{{ r.flag|replace('_', ' ') }}</span>{% endif %}</td>
+    <td class="count num">{{ r.author }} · {{ r.created_at[:10] }}</td>
+  </tr>{% endfor %}</tbody></table>
+</div>
+{% endif %}
+
+{% if q.scored %}<script>
+document.querySelectorAll(".qscatter .q-dot").forEach((dot) => {
+  dot.addEventListener("click", () => { window.location = "/genome/" + encodeURIComponent(dot.dataset.g); });
+});
+</script>{% endif %}
 {% endblock %}
