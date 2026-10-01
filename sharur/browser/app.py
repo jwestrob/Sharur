@@ -527,8 +527,13 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
                          key=lambda kv: -max(r["complete"] for r in kv[1]))
         return render(request, "pathways.html", "pathways", groups=ordered)
 
+    from sharur.browser import pathway_steps  # noqa: PLC0415
+
+    step_cache = pathway_steps.StepCache()
+
     @app.get("/pathway/{module}", response_class=HTMLResponse)
-    def pathway_page(request: Request, module: str, rank: str = Query("order")):
+    def pathway_page(request: Request, module: str, rank: str = Query("order"),
+                     clade: str = Query("", max_length=500)):
         from sharur.modules import evaluate  # noqa: PLC0415
 
         column = catalog.module_column(module)
@@ -562,9 +567,35 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
         genomes = sorted(((catalog.genomes[i], float(column[i])) for i in np.nonzero(column)[0]),
                          key=lambda gc: -gc[1])[:40]
         histogram = np.histogram(column[column > 0], bins=10, range=(0, 1))[0].tolist() if partial else []
+        # step diagram, clade x step heatmap and one-step-short genomes, within an optional clade
+        scope_rank, scope_name, scoped = pathway_steps.scope_genomes(catalog, clade)
+        table = step_cache.get(catalog, d)
+        kos = pathway_steps._all_kos(d, catalog.modules)
+        step_complete = pathway_steps.step_shares(table, scoped)
+        diagram = pathway_steps.diagram(
+            d, shares=pathway_steps.ko_shares(catalog, kos, scoped), step_complete=step_complete,
+            steps=table.steps, names=ko_names.get,
+            ko_url=lambda ko: f"/search?q={quote(ko)}" + (f"%20in%20{quote(scope_name)}" if scope_name else ""))
+        heat_rank = rank
+        if scope_rank and RANKS.index(heat_rank) <= RANKS.index(scope_rank):
+            heat_rank = RANKS[min(RANKS.index(scope_rank) + 1, len(RANKS) - 1)]
+        heat_rows = pathway_steps.clade_rows(catalog, table, scoped, heat_rank)
+        heat = pathway_steps.heatmap(heat_rows, table.steps, heat_rank, _url)
+        near = pathway_steps.nearly_complete(catalog, table, scoped)
+        for group in near:   # a selection token opens the group in the matrix and comparisons
+            import hashlib  # noqa: PLC0415
+
+            ids = sorted(group["ids"])
+            token = "genomes:" + ",".join(ids)
+            if len(token) > 480:
+                token = "selection:" + hashlib.sha1("\n".join(ids).encode()).hexdigest()[:12]
+                catalog.selections[token] = ids
+            group["token"] = token
         return render(request, "pathway.html", "pathways", d=d, clades=clades, steps=steps, rank=rank,
                       genomes=genomes, partial=len(partial), complete=int((column >= 0.75).sum()),
-                      histogram=histogram)
+                      histogram=histogram, diagram=diagram, ko_name=ko_names.get, heat=heat, heat_rank=heat_rank, heat_rows=heat_rows,
+                      near=near, scope_rank=scope_rank, scope_name=scope_name, scope_n=len(scoped),
+                      step_numbers=table.steps, clade=clade)
 
     # ------------------------------------------------------------------ #
     # Systems

@@ -471,7 +471,7 @@
     });
     container.prepend(bar);
   }
-  document.querySelectorAll("svg.track, svg.hood, svg.contig-track, svg.hist, svg.strip, svg.genome-ring, svg.cc-spectrum, svg.tree-fig").forEach((svg) => {
+  document.querySelectorAll("svg.track, svg.hood, svg.contig-track, svg.hist, svg.strip, svg.genome-ring, svg.cc-spectrum, svg.tree-fig, svg.pw-diagram, svg.pw-heat").forEach((svg) => {
     const panel = svg.closest(".panel");
     if (panel && !panel.querySelector(":scope > .fig-export")) addExport(panel, () => inlineCopy(svg), svg.getAttribute("aria-label") || "figure");
   });

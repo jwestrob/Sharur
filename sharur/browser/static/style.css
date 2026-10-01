@@ -807,3 +807,38 @@ svg.tree-fig.t-rect { max-width: none; }
 .land-status[hidden], .land-selection[hidden], .land-tip[hidden] { display: none; }
 .nb-table { width: 100%; }
 .nb-lede { margin: 0 0 8px; }
+
+/* ---------- pathway steps (step diagram, clade x step heatmap, one step short) ---------- */
+.pw-scroll { overflow-x: auto; padding-bottom: 6px; }
+svg.pw-diagram, svg.pw-heat { display: block; }
+.pw-ko rect { stroke: color-mix(in srgb, var(--accent) 45%, var(--line-2)); stroke-width: 1; }
+.pw-ko:hover rect { stroke: var(--accent); stroke-width: 2; }
+.pw-ko.pw-absent rect { stroke: var(--line-2); stroke-dasharray: 3 2; }
+.pw-sym { font: 600 11.5px var(--sans); fill: var(--ink); text-anchor: middle; }
+.pw-id { font: 9.5px var(--mono); fill: var(--ink-3); text-anchor: middle; }
+.pw-ref rect { fill: var(--surface); stroke: var(--accent); stroke-dasharray: 4 2; }
+.pw-undef rect { fill: none; stroke: var(--line-2); stroke-dasharray: 2 3; }
+.pw-alt { fill: color-mix(in srgb, var(--ink-3) 7%, transparent); stroke: var(--line); }
+.pw-optional { opacity: .55; }
+.pw-plus { font: 600 13px var(--sans); fill: var(--ink-3); text-anchor: middle; }
+.pw-arrow { stroke: var(--line-2); stroke-width: 1.5; fill: none; }
+.pw-arrow.strong { stroke: var(--ink-3); }
+.pw-step { font: 600 11px var(--sans); fill: var(--ink-2); text-anchor: middle; }
+.pw-track { fill: var(--line); }
+.pw-fill { fill: var(--accent); }
+.pw-col { font: 600 10.5px var(--sans); fill: var(--ink-3); text-anchor: middle; }
+.pw-row { font: 12px var(--sans); fill: var(--ink-2); text-anchor: end; }
+.pw-cell { stroke: none; }
+.pw-cell.gap { stroke: var(--warn); stroke-width: 2; }
+.pw-cell.whole { stroke: var(--line-2); }
+.pw-val { font: 9.5px var(--sans); fill: var(--ink); text-anchor: middle; pointer-events: none; }
+.pw-n { font: 10px var(--sans); fill: var(--ink-3); }
+.pw-legend .pw-key { display: inline-block; width: 14px; height: 10px; border-radius: 3px; vertical-align: -1px; margin-right: 4px; }
+.pw-key-absent { border: 1px dashed var(--line-2); background: var(--surface-2); }
+.pw-key-alt { border: 1px solid var(--line); background: color-mix(in srgb, var(--ink-3) 7%, transparent); }
+.pw-near { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+.pw-near-group { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; background: var(--surface-2); }
+.pw-near-group h3 { font-size: 14px; margin: 0 0 6px; }
+.pw-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
+.pw-chips .chip { font-size: 11.5px; }
+/* ---------- end pathway steps ---------- */
