@@ -181,6 +181,51 @@ class Catalog:
     # Modules
     # ------------------------------------------------------------------ #
 
+    def clade_modules(self, genomes: list[Genome], *, mode: str = "median",
+                      min_median: float = 0.5, min_present: float = 0.25,
+                      complete: float = 0.75) -> list[dict[str, Any]]:
+        """KEGG module completeness aggregated over ``genomes``.
+
+        Per module: median and mean completeness across the clade, the share of
+        genomes with the module at least ``complete`` (prevalence), the share
+        with any step, and the same median and prevalence over the rest of the
+        dataset for comparison. ``mode='median'`` keeps modules whose clade
+        median is at least ``min_median``; ``mode='present'`` keeps modules with
+        any step in at least ``min_present`` of the clade's genomes.
+        """
+        matrix = self.module_completeness
+        if matrix is None or not genomes:
+            return []
+        inside = np.zeros(matrix.shape[0], dtype=bool)
+        inside[[g.index for g in genomes]] = True
+        clade, rest = matrix[inside], matrix[~inside]
+        median = np.median(clade, axis=0)
+        mean = clade.mean(axis=0)
+        prevalence = (clade >= complete).mean(axis=0)
+        present = (clade > 0).mean(axis=0)
+        overall_median = np.median(matrix, axis=0)
+        rest_prevalence = (rest >= complete).mean(axis=0) if len(rest) else np.zeros(matrix.shape[1])
+        keep = median >= min_median if mode == "median" else present >= min_present
+        rows = []
+        for j in np.nonzero(keep)[0]:
+            d = self.modules[self.module_ids[j]]
+            rows.append({"module": d.module, "name": d.name, "class": d.module_class.split(";")[-1].strip(),
+                         "median": float(median[j]), "mean": float(mean[j]), "prevalence": float(prevalence[j]),
+                         "present": float(present[j]), "dataset_median": float(overall_median[j]),
+                         "rest_prevalence": float(rest_prevalence[j])})
+        rows.sort(key=lambda r: (-r["median"], -r["prevalence"], r["module"]))
+        return rows
+
+    def distinctive_modules(self, genomes: list[Genome], *, margin: float = 0.2,
+                            complete: float = 0.75, top: int = 15) -> list[dict[str, Any]]:
+        """Modules complete (>= ``complete``) in a larger share of the clade than of the rest, by >= ``margin``."""
+        if self.module_completeness is None or not genomes or len(genomes) == len(self.genomes):
+            return []
+        rows = [r for r in self.clade_modules(genomes, mode="present", min_present=0.0, complete=complete)
+                if r["prevalence"] - r["rest_prevalence"] >= margin]
+        rows.sort(key=lambda r: (-(r["prevalence"] - r["rest_prevalence"]), r["module"]))
+        return rows[:top]
+
     def module_column(self, module: str) -> np.ndarray | None:
         if self.module_completeness is None or module not in self.module_ids:
             return None

@@ -52,6 +52,41 @@
   {% endif %}
 </div>
 
+{% set base_url = url('taxa', rank, name) if rank else '/taxa' %}
+<div class="panel" id="pathways">
+  <h2>{% if pathway_mode == 'present' %}Pathways present in at least a quarter of genomes{% else %}Pathways at least half complete{% endif %}
+    <span class="hint">KEGG modules · median completeness across {{ num(genomes|length) }} genome{{ 's' if genomes|length != 1 }} · marker = dataset median</span></h2>
+  {% if catalog.module_completeness is none %}
+  <p class="empty">Pathway summaries are still being computed, or KEGG modules are not built (sharur setup-kegg).</p>
+  {% else %}
+  <div class="table-tools">
+    <input data-filter="clade-modules" placeholder="Filter pathways…"><span class="count" data-count="clade-modules"></span>
+    <span class="count" style="margin-left:auto">Show:
+      <a href="{{ base_url }}?pathways=median#pathways" {% if pathway_mode == 'median' %}style="font-weight:700"{% endif %}>median ≥ 50%</a> ·
+      <a href="{{ base_url }}?pathways=present#pathways" {% if pathway_mode == 'present' %}style="font-weight:700"{% endif %}>any step in ≥ 25% of genomes</a></span>
+  </div>
+  {% if clade_modules %}
+  <div class="scroll"><table id="clade-modules" data-table>
+    <thead><tr><th data-sort="text">Module</th><th data-sort="text">Name</th><th data-sort="text">Group</th><th data-sort="num">Median completeness</th><th data-sort="num" class="num">≥ 75% complete in</th><th data-sort="num" class="num">Any step in</th></tr></thead>
+    <tbody>{% for m in clade_modules %}<tr><td><a href="{{ url('pathway', m.module) }}{% if rank %}?rank={{ rank }}{% endif %}">{{ m.module }}</a></td><td>{{ m.name }}</td><td class="count">{{ m['class'] }}</td>
+      <td data-v="{{ m.median }}"><div class="cell-bar">{{ bar(m.median, '#59a14f' if m.median >= 1 else None, m.dataset_median if rank else none) }}<span class="count">{{ pct(m.median) }}</span></div></td>
+      <td class="num" data-v="{{ m.prevalence }}">{{ pct(m.prevalence) }} <span class="count">of genomes</span></td>
+      <td class="num" data-v="{{ m.present }}">{{ pct(m.present) }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+  {% else %}<p class="empty">{% if pathway_mode == 'present' %}No module has a step in a quarter of these genomes.{% else %}No module has a median completeness of at least half here; <a href="{{ base_url }}?pathways=present#pathways">show modules present in ≥ 25% of genomes</a>.{% endif %}</p>{% endif %}
+  {% if distinctive_modules %}
+  <h2 style="margin-top:18px">Distinctive pathways <span class="hint">≥ 75% complete in this clade vs. the rest of the dataset (marker)</span></h2>
+  <div class="bars">
+  {% for m in distinctive_modules %}
+    <a class="label" href="{{ url('pathway', m.module) }}?rank={{ rank }}" title="{{ m.module }} · {{ m['class'] }}">{{ m.name }}</a>
+    {{ bar(m.prevalence, '#59a14f', m.rest_prevalence) }}
+    <span class="val">{{ pct(m.prevalence) }} <span class="count">vs {{ pct(m.rest_prevalence) }}</span></span>
+  {% endfor %}
+  </div>
+  {% endif %}
+  {% endif %}
+</div>
+
 <div class="panel">
   <h2>Genomes</h2>
   <div class="table-tools"><input data-filter="genomes" placeholder="Filter genomes…"><span class="count" data-count="genomes"></span></div>

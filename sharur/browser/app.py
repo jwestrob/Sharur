@@ -191,7 +191,8 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
 
     @app.get("/taxa", response_class=HTMLResponse)
     @app.get("/taxa/{rank}/{name:path}", response_class=HTMLResponse)
-    def taxa(request: Request, rank: str | None = None, name: str | None = None):
+    def taxa(request: Request, rank: str | None = None, name: str | None = None,
+             pathways: str = Query("median")):
         if rank is not None and rank not in RANKS:
             raise HTTPException(404, "Unknown rank")
         genomes = catalog.clade(rank, name)
@@ -205,7 +206,11 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
                       tree=charts.treemap(items, 300) if len(items) > 1 else None, children=items,
                       enriched=enriched, median_size=float(np.median(sizes)) if sizes else 0,
                       median_proteins=float(np.median([g.proteins for g in genomes])),
-                      systems=_clade_systems(genomes))
+                      systems=_clade_systems(genomes),
+                      pathway_mode="present" if pathways == "present" else "median",
+                      clade_modules=catalog.clade_modules(genomes, mode="present" if pathways == "present"
+                                                          else "median"),
+                      distinctive_modules=catalog.distinctive_modules(genomes))
 
     def _clade_systems(genomes):
         members = {g.bin_id for g in genomes}
