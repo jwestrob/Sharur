@@ -154,6 +154,14 @@ MIGRATIONS: list[tuple[int, str, str]] = [
             VALUES (7, 'Predicate map provenance stamps');
         """,
     ),
+    (
+        8,
+        "Contig length source and gene truncation flags",
+        """
+        INSERT INTO schema_version (version, description)
+            VALUES (8, 'Contig length source and gene truncation flags');
+        """,
+    ),
 ]
 
 
@@ -175,6 +183,15 @@ def _add_v6_contig_index(conn: duckdb.DuckDBPyConnection) -> None:
                 ON contigs(bin_id, contig_id)
             """
         )
+
+
+def _add_v8_contig_context_columns(conn: duckdb.DuckDBPyConnection) -> None:
+    """Add contig length provenance and Prodigal truncation flags."""
+    tables = {str(row[0]) for row in conn.execute("SHOW TABLES").fetchall()}
+    if "contigs" in tables and "length_source" not in _column_names(conn, "contigs"):
+        conn.execute("ALTER TABLE contigs ADD COLUMN length_source VARCHAR")
+    if "proteins" in tables and "partial" not in _column_names(conn, "proteins"):
+        conn.execute("ALTER TABLE proteins ADD COLUMN partial VARCHAR(2)")
 
 
 def _quarantine_pre_v5_system_calls(conn: duckdb.DuckDBPyConnection) -> None:
@@ -360,6 +377,9 @@ def run_migrations(
                 raise
         elif version == 6:
             _add_v6_contig_index(conn)
+            conn.execute(sql)
+        elif version == 8:
+            _add_v8_contig_context_columns(conn)
             conn.execute(sql)
         else:
             conn.execute(sql)

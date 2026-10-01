@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from sharur.contig_context import edge_context
 from sharur.operators.base import OperatorContext, SharurResult
 from sharur.operators.cases import structured_projection_sources
 from sharur.operators.predicates_v2 import explain
@@ -758,13 +759,26 @@ def get_neighborhood(
         region_start = window_proteins[0][1]
         region_end = window_proteins[-1][2]
 
+        edges = edge_context(store, [p[0] for p in window_proteins])
+        edge_notes = []
+        if start_idx == 0:
+            edge_notes.append("contig start inside window")
+        if start_idx + len(window_proteins) >= total_proteins:
+            edge_notes.append("contig end inside window")
+        truncated_ids = [p[0] for p in window_proteins
+                         if p[0] in edges and (edges[p[0]].truncated_start or edges[p[0]].truncated_end)]
+        if truncated_ids:
+            edge_notes.append("runs off contig end: " + ", ".join(truncated_ids))
+
         # Format header
         lines = [
             f"# Neighborhood: {entity_id}",
             f"**Contig:** {contig_id}",
             f"**Region:** {region_start:,}-{region_end:,} bp | {len(window_proteins)} genes",
-            "",
         ]
+        if edge_notes:
+            lines.append(f"**Contig edges:** {'; '.join(edge_notes)}")
+        lines.append("")
 
         # Format as ASCII table
         if all_annotations:
@@ -798,6 +812,7 @@ def get_neighborhood(
                 "annotation": p[6],
                 "predicates": predicates_by_protein.get(p[0], []),
                 "is_anchor": p[0] == entity_id,
+                "edge_status": edges[p[0]].edge_status if p[0] in edges else None,
             }
             if all_annotations:
                 d["annotations"] = _group_annotations_by_source(
@@ -815,6 +830,8 @@ def get_neighborhood(
                 "bin_id": bin_id,
                 "region_start": region_start,
                 "region_end": region_end,
+                "contig_start_in_window": start_idx == 0,
+                "contig_end_in_window": start_idx + len(window_proteins) >= total_proteins,
                 "proteins": protein_dicts,
             },
         )

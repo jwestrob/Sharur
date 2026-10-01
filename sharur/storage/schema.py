@@ -1,6 +1,6 @@
 """DuckDB schema for Sharur."""
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS bins (
@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS contigs (
     gc_content FLOAT,
     is_circular BOOLEAN DEFAULT FALSE,
     taxonomy VARCHAR,
+    length_source VARCHAR,  -- 'assembly' (FASTA record) or 'gene_span' (last gene end)
 
     FOREIGN KEY (bin_id) REFERENCES bins(bin_id)
 );
@@ -35,6 +36,7 @@ CREATE TABLE IF NOT EXISTS proteins (
     sequence TEXT,
     sequence_length INTEGER,
     gc_content FLOAT,
+    partial VARCHAR(2),  -- Prodigal partial flag: left/right edge truncation ('00', '10', '01', '11')
 
     -- Indexes
     FOREIGN KEY (contig_id) REFERENCES contigs(contig_id)

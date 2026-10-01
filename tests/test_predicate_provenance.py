@@ -29,7 +29,7 @@ def _store() -> DuckDBStore:
 
 def test_new_databases_carry_the_provenance_table():
     store = DuckDBStore()
-    assert store.execute("SELECT MAX(version) FROM schema_version")[0][0] == SCHEMA_VERSION == 7
+    assert store.execute("SELECT MAX(version) FROM schema_version")[0][0] == SCHEMA_VERSION >= 7
     assert latest_stamps(store) == {"full": None, "subsets": []}
 
 

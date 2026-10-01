@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from sharur.contig_context import EdgeContext, describe_edge, edge_context
 from sharur.operators.predicates_v2 import get_atoms, get_semantic_state
 from sharur.predicates.mappings import kegg_map
 from sharur.predicates.mappings.cazy_map import cazy_evidence
@@ -281,6 +282,8 @@ def card(store, protein_id: str, window: int = 5, max_per_source: int = 8) -> di
         neighborhood = [{"offset": gi - gene_index, "protein_id": nid, "strand": st, "length": ln,
                          "top_annotation": best.get(nid, "")} for nid, gi, st, ln in neighbors]
 
+    edge = edge_context(store, [pid]).get(pid)
+
     return {
         "protein_id": pid,
         "found": True,
@@ -294,8 +297,17 @@ def card(store, protein_id: str, window: int = 5, max_per_source: int = 8) -> di
         "hydrogenase_classification": _hydrogenase_row(store, protein_id, tables),
         "validated_systems": systems,
         "neighborhood": neighborhood,
+        "contig_edge": edge.to_dict() if edge else None,
         "map_status": _map_status(store) if "predicate_provenance" in tables else {"state": "unstamped"},
     }
+
+
+def _contig_length_text(length: int | None, edge: dict[str, Any] | None) -> str:
+    if not length:
+        return ""
+    if edge and edge.get("length_source") == "assembly":
+        return f" of a {length:,} bp contig"
+    return f" of a contig spanning at least {length:,} bp"
 
 
 def card_markdown(c: dict[str, Any]) -> str:
@@ -304,11 +316,13 @@ def card_markdown(c: dict[str, Any]) -> str:
     loc, genome = c["location"], c["genome"]
     lines = [f"# {c['protein_id']}",
              f"{loc['length_aa']} aa, {loc['contig_id']}:{loc['start']}-{loc['end']} ({loc['strand']}), "
-             f"gene {loc['gene_index']}" + (f" of a {loc['contig_length']:,} bp contig" if loc["contig_length"] else ""),
+             f"gene {loc['gene_index']}" + _contig_length_text(loc["contig_length"], c.get("contig_edge")),
              f"Genome {genome.get('bin_id')}"
              + (f": {genome['taxonomy']}" if genome.get("taxonomy") else "")
              + (f" ({genome['completeness']}% complete, {genome['contamination']}% contamination)"
                 if genome.get("completeness") is not None else "")]
+    if c.get("contig_edge"):
+        lines.append("Contig position: " + describe_edge(EdgeContext(**c["contig_edge"])))
     lines.append("\n## Annotations")
     for source, hits in c["annotations"].items():
         shown = "; ".join(

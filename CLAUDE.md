@@ -186,7 +186,7 @@ report/draft files remain independently writable.
 
 ### MAG Interpretation
 
-**Absence of evidence ≠ evidence of absence.** MAGs are inherently incomplete. Say "not detected in this MAG (N contigs)" — NOT "genome lacks X." Before claiming "A has X but B doesn't", verify B isn't just more fragmented.
+**Absence of evidence ≠ evidence of absence.** MAGs are inherently incomplete. Say "not detected in this MAG (N contigs)" — NOT "genome lacks X." Before claiming "A has X but B doesn't", verify B isn't just more fragmented. Contig position is recorded per gene (`sharur card`, `contig_context.edge_context()`); `sharur modules` lists found genes that cluster at a contig end (`found_at_contig_edge`). See `docs/concepts/contig-edges.md`.
 
 ### Manuscript Citations
 

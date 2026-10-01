@@ -16,7 +16,7 @@ sharur describe --db data/my_dataset/sharur.duckdb
 sharur card PROTEIN_ID --db data/my_dataset/sharur.duckdb
 ```
 
-A card shows a protein's genome and contig, its length and position, its annotation hits, and its predicates with the evidence behind each one, in one screen.
+A card shows a protein's genome and contig, its length and position (including how close it sits to a contig end; see [Contig edges](../concepts/contig-edges.md)), its annotation hits, and its predicates with the evidence behind each one, in one screen.
 
 ## Why does a protein carry a label?
 
@@ -33,7 +33,7 @@ sharur setup-kegg     # once per machine
 sharur modules --db data/my_dataset/sharur.duckdb --bin GENOME_ID --min-completeness 0.75
 ```
 
-Module completeness follows KEGG's module definitions step by step. Genomes assembled from metagenomes are often incomplete, so a missing step means "not detected in this genome", which is weaker than "absent".
+Module completeness follows KEGG's module definitions step by step. Genomes assembled from metagenomes are often incomplete, so a missing step means "not detected in this genome", which is weaker than "absent". When found genes of an incomplete module cluster at a contig end, the output says so.
 
 ## Searching
 

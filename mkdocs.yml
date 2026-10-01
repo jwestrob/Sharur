@@ -61,6 +61,7 @@ nav:
       - How predicates are built: predicate_construction.md
       - Predicate system V2: predicates_v2.md
       - Embeddings and similarity: concepts/embeddings.md
+      - Contig edges: concepts/contig-edges.md
       - Seals and provenance: concepts/seals.md
       - Working with agents: concepts/agents.md
   - Guides:

@@ -21,6 +21,7 @@ from functools import cache
 from pathlib import Path
 from typing import Any
 
+from sharur.contig_context import edge_context
 from sharur.predicates.mappings.kegg_map import kegg_dir
 
 
@@ -273,7 +274,51 @@ def genome_modules(store, *, bins: list[str] | None = None, modules: list[str] |
             completeness, contamination = bin_quality.get(bin_id, (None, None))
             row.update({"bin_id": bin_id, "bin_completeness": completeness, "bin_contamination": contamination})
             rows.append(row)
+    _annotate_contig_edges(store, rows)
     return rows
+
+
+def _edge_clusters(found: set[str], edges: dict, gap: int = 5, min_size: int = 2) -> list[list[str]]:
+    """Clusters of found module genes (>= min_size, <= gap genes apart) that reach a contig end."""
+    by_contig: dict[str, list] = {}
+    for protein in found:
+        context = edges.get(protein)
+        if context is not None and context.genes_to_start is not None:
+            by_contig.setdefault(context.contig_id, []).append(context)
+    clusters = []
+    for genes in by_contig.values():
+        genes.sort(key=lambda c: c.genes_to_start)
+        groups, current = [], [genes[0]]
+        for context in genes[1:]:
+            if context.genes_to_start - current[-1].genes_to_start <= gap:
+                current.append(context)
+            else:
+                groups.append(current)
+                current = [context]
+        groups.append(current)
+        clusters.extend(sorted(c.protein_id for c in group) for group in groups
+                        if len(group) >= min_size and (group[0].near_edge or group[-1].near_edge))
+    return sorted(clusters)
+
+
+def _annotate_contig_edges(store, rows: list[dict[str, Any]]) -> None:
+    """Mark incomplete modules whose found genes cluster at a contig end.
+
+    When two or more found genes of a module sit together (operon-like) and the
+    cluster reaches a contig end, the missing steps could lie beyond the end, on
+    another contig or outside the bin. ``found_at_contig_edge`` lists the genes
+    of such clusters. This is context, not a test: in fragmented MAGs such
+    clusters are also common among complete modules.
+    """
+    def found(row: dict[str, Any]) -> set[str]:
+        return {p for s in row["steps"] for ps in s["proteins"].values() for p in ps}
+
+    incomplete = [r["steps_complete"] < r["steps_total"] for r in rows]
+    edges = edge_context(store, {p for r, inc in zip(rows, incomplete, strict=True) if inc for p in found(r)})
+    for row, inc in zip(rows, incomplete, strict=True):
+        clusters = _edge_clusters(found(row), edges) if inc else []
+        row["found_at_contig_edge"] = sorted(p for cluster in clusters for p in cluster)
+
 
 
 def locus_modules(store, protein_id: str, window: int = 10, directory: Path | None = None) -> list[dict[str, Any]]:
@@ -319,4 +364,10 @@ def modules_markdown(rows: list[dict[str, Any]], title: str) -> str:
         if incomplete and r["completeness"] >= 0.5:
             lines.append("  missing: " + "; ".join(
                 f"step {s['step']} needs {'/'.join(s['missing'][:4])}" for s in incomplete[:6]))
+            if r.get("found_at_contig_edge"):
+                shown = r["found_at_contig_edge"][:4]
+                more = len(r["found_at_contig_edge"]) - len(shown)
+                lines.append("  found genes cluster at a contig end: " + ", ".join(shown)
+                             + (f" (+{more})" if more > 0 else "")
+                             + "; missing genes could lie beyond the contig end")
     return "\n".join(lines)

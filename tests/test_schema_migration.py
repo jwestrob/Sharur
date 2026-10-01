@@ -4,7 +4,7 @@ import duckdb
 import pytest
 
 from sharur.storage.duckdb_store import DuckDBStore
-from sharur.storage.migrations import get_current_version, run_migrations
+from sharur.storage.migrations import MIGRATIONS, get_current_version, run_migrations
 from sharur.storage.schema import SCHEMA, SCHEMA_VERSION
 
 
@@ -68,7 +68,7 @@ def test_schema_version_table_has_correct_data(fresh_conn):
 
 def test_schema_version_constant():
     """SCHEMA_VERSION constant matches latest migration."""
-    assert SCHEMA_VERSION == 7
+    assert SCHEMA_VERSION == max(version for version, _, _ in MIGRATIONS) == 8
 
 
 def test_duckdb_store_runs_migrations():

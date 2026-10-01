@@ -27,6 +27,7 @@ import pandas as pd
 import typer
 from rich.console import Console
 
+from sharur.contig_context import assemblies_from_stage00, fasta_lengths, parse_partial
 from sharur.storage.migrations import run_migrations
 from sharur.storage.schema import SCHEMA
 
@@ -493,6 +494,7 @@ class KnowledgeBaseBuilder:
                         f"{len(protein_rows):,} proteins so far"
                     )
         console.print(f"  Parsed {len(protein_rows):,} proteins from {len(faa_files):,} files ({time.time()-t0:.1f}s)")
+        length_sources = self._assembly_contig_lengths(contig_lengths)
 
         # Ensure bins exist even if stage02 was skipped
         if contig_lengths:
@@ -538,17 +540,20 @@ class KnowledgeBaseBuilder:
                         "gc_content": None,
                         "is_circular": False,
                         "taxonomy": None,
+                        "length_source": length_sources.get((cid, bid), "gene_span"),
                     }
                 )
             cdf = pd.DataFrame(contigs)
             cdf = cdf.reindex(
-                columns=["contig_id", "bin_id", "length", "gc_content", "is_circular", "taxonomy"],
+                columns=["contig_id", "bin_id", "length", "gc_content", "is_circular", "taxonomy",
+                         "length_source"],
                 fill_value=None,
             )
             self.conn.register("tmp_cdf", cdf)
             self.conn.execute(
                 """
-                INSERT INTO contigs (contig_id, bin_id, length, gc_content, is_circular, taxonomy)
+                INSERT INTO contigs (contig_id, bin_id, length, gc_content, is_circular, taxonomy,
+                                     length_source)
                 SELECT * FROM tmp_cdf
                 """,
             )
@@ -579,6 +584,7 @@ class KnowledgeBaseBuilder:
                     "sequence",
                     "sequence_length",
                     "gc_content",
+                    "partial",
                 ],
                 fill_value=None,
             )
@@ -587,12 +593,34 @@ class KnowledgeBaseBuilder:
                 """
                 INSERT INTO proteins (
                     protein_id, contig_id, bin_id, start, end_coord, strand,
-                    gene_index, sequence, sequence_length, gc_content
+                    gene_index, sequence, sequence_length, gc_content, partial
                 )
                 SELECT * FROM tmp_pdf
                 """,
             )
             self.stats["proteins"] = len(protein_rows)
+
+    def _assembly_contig_lengths(self, contig_lengths: Dict[tuple, int]) -> Dict[tuple, str]:
+        """Replace gene-span contig lengths with assembly lengths from stage 00.
+
+        Returns the keys whose length came from the assembly. A contig whose
+        assembly record is shorter than its gene span keeps the gene span.
+        """
+        assemblies = assemblies_from_stage00(self.outputs.stage00_dir)
+        wanted = {bid for (_, bid) in contig_lengths} & set(assemblies)
+        if not wanted:
+            return {}
+        bins = sorted(wanted)
+        with ThreadPoolExecutor(max_workers=self.threads) as executor:
+            lengths = dict(zip(bins, executor.map(lambda b: fasta_lengths(assemblies[b]), bins)))
+        sources: Dict[tuple, str] = {}
+        for (cid, bid), span in list(contig_lengths.items()):
+            length = lengths.get(bid, {}).get(cid)
+            if length is not None and length >= span:
+                contig_lengths[(cid, bid)] = length
+                sources[(cid, bid)] = "assembly"
+        console.print(f"  Contig lengths from assemblies: {len(sources):,}/{len(contig_lengths):,} contigs")
+        return sources
 
     def _parse_prodigal_faa(
         self, path: Path, bin_id: str, contig_lengths: Dict[tuple, int]
@@ -652,6 +680,7 @@ class KnowledgeBaseBuilder:
             except Exception:
                 pass
         contig_id = protein_id.rsplit("_", 1)[0] if "_" in protein_id else protein_id
+        partial = parse_partial(meta[3:]) if meta and len(meta) > 3 else None
         gene_index = None
         return {
             "protein_id": protein_id,
@@ -664,6 +693,7 @@ class KnowledgeBaseBuilder:
             "sequence_length": len(sequence) if sequence else None,
             "gene_index": gene_index,
             "gc_content": None,
+            "partial": partial,
         }
 
     # --- annotations ---------------------------------------------------- #

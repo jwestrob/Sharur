@@ -1058,6 +1058,62 @@ def migrate(
         )
 
 
+@app.command(name="backfill-contig-context")
+def backfill_contig_context_command(
+    db: Path = typer.Option(Path(DEFAULT_DB), "--db", "-d", help="Path to a writable Sharur DuckDB."),
+    assemblies: Path | None = typer.Option(
+        None, "--assemblies",
+        help="Directory of assembly FASTAs named BIN_ID.fna|fa|fasta[.gz] "
+             "(default: the dataset's stage00_prepared manifest)."),
+    proteins: Path | None = typer.Option(
+        None, "--proteins",
+        help="Prodigal output directory with *.faa files (default: the dataset's stage03_prodigal)."),
+):
+    """Record assembly contig lengths and Prodigal truncation flags in an existing database.
+
+    Older databases store each contig's length as the end of its last gene and
+    omit Prodigal's partial-gene flags; contig-edge context needs both.
+    Writes the canonical database: run in a maintenance window, then reseal.
+    """
+    import duckdb  # noqa: PLC0415
+
+    from sharur.contig_context import (  # noqa: PLC0415
+        assemblies_from_dir,
+        assemblies_from_stage00,
+        backfill_contig_context,
+    )
+
+    database = db.expanduser().resolve()
+    if not database.is_file():
+        typer.echo(f"DuckDB file does not exist: {database}", err=True)
+        raise typer.Exit(1)
+    root = database.parent
+    assembly_paths = (assemblies_from_dir(assemblies) if assemblies
+                      else assemblies_from_stage00(root / "stage00_prepared"))
+    protein_dir = proteins or root / "stage03_prodigal"
+    found = [f for f in protein_dir.glob("**/*.faa") if f.parent.name != "all_protein_symlinks"] \
+        if protein_dir.is_dir() else []
+    faas = [f for f in found if f.is_file()]
+    if len(faas) < len(found):
+        typer.echo(f"Skipping {len(found) - len(faas):,} unreadable protein files (broken links?)", err=True)
+    if not assembly_paths and not faas:
+        typer.echo("No assemblies or Prodigal protein files found; pass --assemblies/--proteins.", err=True)
+        raise typer.Exit(1)
+    connection = duckdb.connect(str(database))
+    try:
+        stats = backfill_contig_context(connection, assemblies=assembly_paths, protein_faas=faas)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    finally:
+        connection.close()
+    typer.echo(f"Assemblies read: {len(assembly_paths):,}; protein files read: {len(faas):,}")
+    typer.echo(f"Contig lengths from assemblies: {stats['contigs_updated']:,} "
+               f"({stats['contigs_unmatched']:,} contigs in those bins without an assembly record)")
+    typer.echo(f"Proteins with Prodigal partial flags: {stats['proteins_flagged']:,}")
+    typer.echo("Canonical database state changed. Rebuild dataset.seal.json with `sharur seal --force`.")
+
+
 @app.command(name="verify-seal")
 def verify_seal(
     seal_path: Path = typer.Argument(..., help="Path to dataset.seal.json."),

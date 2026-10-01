@@ -35,6 +35,7 @@ $ sharur [OPTIONS] COMMAND [ARGS]...
 * `preflight`: Emit one typed dataset/runtime capability...
 * `seal`: Write a portable integrity seal for a...
 * `migrate`: Apply pending additive schema/index...
+* `backfill-contig-context`: Record assembly contig lengths and...
 * `verify-seal`: Recompute a dataset seal and report...
 * `build-vector-index`: Build mmap-ready FAISS sidecars and a...
 * `doctor`: Verify external tools, reference...
@@ -410,6 +411,27 @@ $ sharur migrate [OPTIONS]
 **Options**:
 
 * `-d, --db PATH`: Path to a writable Sharur DuckDB.  [default: data/sharur.duckdb]
+* `--help`: Show this message and exit.
+
+### `sharur backfill-contig-context`
+
+Record assembly contig lengths and Prodigal truncation flags in an existing database.
+
+Older databases store each contig's length as the end of its last gene and
+omit Prodigal's partial-gene flags; contig-edge context needs both.
+Writes the canonical database: run in a maintenance window, then reseal.
+
+**Usage**:
+
+```console
+$ sharur backfill-contig-context [OPTIONS]
+```
+
+**Options**:
+
+* `-d, --db PATH`: Path to a writable Sharur DuckDB.  [default: data/sharur.duckdb]
+* `--assemblies PATH`: Directory of assembly FASTAs named BIN_ID.fna|fa|fasta[.gz] (default: the dataset's stage00_prepared manifest).
+* `--proteins PATH`: Prodigal output directory with *.faa files (default: the dataset's stage03_prodigal).
 * `--help`: Show this message and exit.
 
 ### `sharur verify-seal`
