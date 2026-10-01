@@ -540,3 +540,18 @@ svg.mini { display: block; max-width: 100%; height: auto; }
 svg.mini-fill { width: 100%; }
 .feed-table .nowrap, .feed-table td.num { white-space: nowrap; }
 .feed-table td.num .tag { margin-top: 3px; }
+
+
+/* ---- protein page: context panels (architecture elsewhere, copies, usual neighbours) ---- */
+.pctx { margin-top: 18px; align-items: start; }
+.pctx > .panel { margin-top: 0; }
+.pctx-card h2 { margin-bottom: 8px; }
+.pctx-lead { margin: 0 0 8px; line-height: 1.45; }
+.pctx-lead .mono { font-size: 12px; overflow-wrap: anywhere; }
+.pctx-len { margin: 10px 0 4px; font-size: 13px; line-height: 1.6; }
+.pctx-bars { margin: 6px 0 4px; }
+.pctx-side { color: var(--ink-3); font-weight: 600; margin-left: 2px; }
+.pctx-table { width: 100%; }
+.pctx-table td { vertical-align: top; }
+.pctx-actions { margin: 10px 0 0; }
+.pctx-pos { margin-top: 18px; }

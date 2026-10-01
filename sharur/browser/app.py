@@ -24,6 +24,7 @@ from sharur.browser import (
     routes_curation,
     routes_loci,
     routes_matrix,
+    routes_protein_context,
     routes_search,
     routes_systems,
 )
@@ -168,6 +169,7 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
     routes_systems.register(app, ctx)
     routes_crispr.register(app, ctx, [Path(p) for p in assemblies or []])
     routes_cctyper.register(app, ctx)
+    routes_protein_context.register(app, ctx)
 
     @app.middleware("http")
     async def require_token(request: Request, call_next):
