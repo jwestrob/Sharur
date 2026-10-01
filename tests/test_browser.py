@@ -149,3 +149,20 @@ def test_matrix_pages(client):
     assert client.get("/matrix", params={"a": "no such clade"}).status_code == 404
     # one genome: no variable features, a clear message
     assert "No features to show" in client.get("/matrix", params={"a": "bin|1", "kind": "pfam"}).text
+
+
+def test_json_api(client):
+    index = client.get("/api/v1").json()
+    assert any(e["path"] == "/api/v1/genomes" for e in index["endpoints"])
+    assert client.get("/api").status_code == 200
+    genomes = client.get("/api/v1/genomes").json()
+    assert genomes["total"] == 1 and genomes["rows"][0]["bin_id"] == "bin|1"
+    assert client.get("/api/v1/genome/bin|1").json()["completeness"] == pytest.approx(91.5)
+    protein = client.get("/api/v1/protein/bin|1_c1_2").json()
+    assert protein["found"] and "sequence" not in protein
+    assert client.get("/api/v1/protein/bin|1_c1_2", params={"sequence": 1}).json()["sequence"]
+    assert client.get("/api/v1/protein/nope").status_code == 404
+    matrix = client.get("/api/v1/matrix", params={"a": "bin|1", "kind": "pfam", "features": "PF00005"}).json()
+    assert matrix["values"] == [[1.0]]
+    assert client.get("/api/v1/search", params={"q": "abc in bin|1"}).json()["total"] == 1
+    assert client.get("/api/v1/discover/nope").status_code == 404

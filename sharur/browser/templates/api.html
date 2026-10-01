@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}API{% endblock %}
+{% block content %}
+<h1><span class="rank">Read-only</span>JSON API</h1>
+<p class="lede">Everything here as JSON, for scripts, notebooks and agents. Each endpoint answers GET; lists take <code>limit</code> and <code>offset</code>. Proteins come without sequences unless you ask with <code>sequence=1</code>.</p>
+<div class="panel">
+  <table class="api-table"><tbody>
+  {% for e in endpoints %}<tr><td class="mono">{{ e.path }}</td><td>{{ e.what }}{% if e.example %}<div class="sub"><a class="mono" href="{{ e.example }}">{{ e.example }}</a></div>{% endif %}</td></tr>{% endfor %}
+  </tbody></table>
+</div>
+<div class="panel">
+  <h2>From Python</h2>
+<pre class="code">import requests, pandas as pd
+
+base = "{{ request.base_url }}".rstrip("/")
+genomes = pd.DataFrame(requests.get(f"{base}/api/v1/genomes", params={"limit": 5000}).json()["rows"])
+matrix = requests.get(f"{base}/api/v1/matrix", params={"a": "all", "kind": "ko", "n": 40}).json()
+values = pd.DataFrame(matrix["values"], index=[g["id"] for g in matrix["genomes"]],
+                      columns=[f["id"] for f in matrix["features"]])</pre>
+  <p class="count">A browser started with <code>--share</code> needs its access token: open the shared link once in the session, or pass the token as a cookie.</p>
+</div>
+{% endblock %}

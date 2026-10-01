@@ -20,6 +20,7 @@ from sharur.browser import (
     charts,
     clade_content,
     genome_ring,
+    routes_api,
     routes_compare,
     routes_cctyper,
     routes_crispr,
@@ -163,13 +164,15 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
     # Feature modules register before the catch-all path routes below.
     ctx = SimpleNamespace(store=store, lock=lock, catalog=catalog, render=render, url=_url,
                           describe_hit=describe_hit, predicates=PREDICATE_BY_ID, db_path=Path(db_path),
-                          notes_path=Path(notes_path) if notes_path else None, ko_names=ko_names)
+                          notes_path=Path(notes_path) if notes_path else None, ko_names=ko_names,
+                          dataset=dataset_name)
     app.state.ctx = ctx
     routes_loci.register(app, ctx)
     routes_curation.register(app, ctx)
     routes_systems.register(app, ctx)
     routes_crispr.register(app, ctx, [Path(p) for p in assemblies or []])
     routes_cctyper.register(app, ctx)
+    routes_api.register(app, ctx)
 
     @app.middleware("http")
     async def require_token(request: Request, call_next):
@@ -957,6 +960,8 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
                       overview=charts.contig_overview(length, start, end, [(g[1], g[2]) for g in genes],
                                                       _url("contig", contig_id), span),
                       track=charts.contig_track(window, overlays, start, end))
+
+    ctx.suggest = _suggest
 
     @app.get("/api/suggest")
     def suggest(q: str = Query("", max_length=200), kind: str = Query("", max_length=100)):

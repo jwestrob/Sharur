@@ -35,6 +35,7 @@
     ["Function heatmap", "/heatmap", "prevalence clades"], ["Architecture search", "/architecture", "domain pattern"],
     ["Data health", "/health", "checks quality"], ["Flags & notes", "/flags", "curation"],
     ["Triage", "/triage", "curation queue"], ["Collection", "/collection", "saved"], ["Findings", "/findings", "agents"],
+    ["JSON API", "/api", "json export scripts programmatic"],
   ];
   const ACTIONS = [["Switch theme", () => applyTheme(nextTheme()), "dark light mode"],
                    ["Surprise me", () => { window.location = "/discover/random"; }, "random"]];

@@ -610,3 +610,8 @@ svg.genome-ring { width: 100%; height: auto; max-width: 560px; }
 .ring-legend .legend { flex-wrap: wrap; margin-bottom: 10px; }
 .ring-key-contig { background: var(--ink-3); opacity: .55; }
 .ring-key-gene { background: var(--gene); }
+
+/* API page */
+.api-table td:first-child { white-space: nowrap; padding-right: 18px; color: var(--ink); }
+pre.code { background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px;
+  overflow-x: auto; font: 12.5px/1.5 var(--mono); color: var(--ink); }

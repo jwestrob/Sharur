@@ -643,6 +643,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                               min_completeness=min_completeness)
         return groups, result, result.get("empty", "")
 
+    ctx.matrix_compute = compute
+
     def params(kind, pick, order, n):
         kind = kind if kind in KINDS else "ko"
         order = order if order in ("taxonomy", "cluster", "completeness") else "taxonomy"
