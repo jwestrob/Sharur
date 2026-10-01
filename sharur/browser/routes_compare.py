@@ -45,14 +45,40 @@ class Side:
         return f"genome={quote(self.key, safe='')}" if self.is_genome else f"clade={quote(self.key, safe='')}"
 
 
+GENOME_SET = "genomes:"
+SELECTION = "selection:"
+
+
+def genome_set(catalog, token: str | None) -> list[Genome] | None:
+    """Genomes named by ``genomes:ID1,ID2,...`` or by a stored ``selection:<key>`` (see
+    ``routes_landscape``); unknown IDs drop out. None for any other token."""
+    if not token:
+        return None
+    if token.startswith(SELECTION):
+        ids = getattr(catalog, "selections", {}).get(token, [])
+    elif token.startswith(GENOME_SET):
+        ids = [t for t in dict.fromkeys(x.strip() for x in token[len(GENOME_SET):].split(",")) if t]
+    else:
+        return None
+    return [catalog.by_bin[i] for i in ids if i in catalog.by_bin]
+
+
 def resolve_side(catalog, token: str, url) -> Side | None:
-    """``token`` is a genome id or ``rank:name`` (e.g. ``class:Omnitrophia``)."""
+    """``token`` is a genome id, ``rank:name`` (e.g. ``class:Omnitrophia``) or ``genomes:ID1,ID2,...``."""
     token = (token or "").strip()
     if not token:
         return None
     genome = catalog.by_bin.get(token)
     if genome is not None:
         return Side(token, token, "genome", [genome], url("genome", token))
+    selected = genome_set(catalog, token)
+    if selected is not None:
+        if not selected:
+            return None
+        if len(selected) == 1:
+            g = selected[0]
+            return Side(g.bin_id, g.bin_id, "genome", selected, url("genome", g.bin_id))
+        return Side(token, f"{len(selected)} selected genomes", "selection", selected, "/landscape")
     if ":" in token:
         rank, name = token.split(":", 1)
         if rank in RANKS:
@@ -68,6 +94,9 @@ def clade_filter(catalog, value: str | None) -> tuple[str, set[str]] | None:
         return None
     if value in catalog.by_bin:
         return value, {value}
+    selected = genome_set(catalog, value)
+    if selected:
+        return f"{len(selected)} selected genomes", {g.bin_id for g in selected}
     if ":" in value:
         rank, name = value.split(":", 1)
         if rank in RANKS:

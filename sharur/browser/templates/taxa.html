@@ -14,10 +14,11 @@
 </div>
 
 {% if rank %}{% set compare_with = rank ~ ':' ~ name %}{% include "_compare_form.html" %}
-<p class="actions"><a class="btn" href="/matrix?a={{ quote(rank ~ ':' ~ name, safe='') }}">Presence/absence matrix</a> <a class="btn" href="/matrix?a={{ quote(rank ~ ':' ~ name, safe='') }}&pick=absences">Absences beyond incompleteness</a></p>
+<p class="actions"><a class="btn" href="/landscape?q={{ quote(name, safe='') }}{% if child_rank %}&color={{ child_rank }}{% endif %}">Functional landscape</a> <a class="btn" href="/matrix?a={{ quote(rank ~ ':' ~ name, safe='') }}">Presence/absence matrix</a> <a class="btn" href="/matrix?a={{ quote(rank ~ ':' ~ name, safe='') }}&pick=absences">Absences beyond incompleteness</a></p>
 {% else %}<div class="entries cmp-entries">
   <a class="entry" href="/compare"><b>Compare genomes or clades</b><span>Two genomes, two clades, or one of each: what differs in functions, pathways, systems and Pfam domains.</span></a>
   <a class="entry" href="/heatmap"><b>Function heatmap</b><span>Pick functions and see their prevalence in every clade at once.</span></a>
+  <a class="entry" href="/landscape"><b>Functional landscape</b><span>Every genome placed by the KEGG orthologs it carries; select a cluster to open it in the matrix or a comparison.</span></a>
   <a class="entry" href="/matrix"><b>Presence/absence matrix</b><span>Genomes × KOs, Pfam families, modules or systems for one or two clades, weighed against genome completeness.</span></a>
 </div>{% endif %}
 

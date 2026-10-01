@@ -93,6 +93,7 @@ class Catalog:
     notable: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     domains: dict[str, dict[str, Any]] = field(default_factory=dict)  # Pfam accession -> summary
     vogs: dict[str, dict[str, Any]] = field(default_factory=dict)     # VOG id -> summary (+ VOGdb annotation)
+    selections: dict[str, list[str]] = field(default_factory=dict)  # "selection:<hash>" -> genome ids
     ready: threading.Event = field(default_factory=threading.Event)
     status: str = "loading"
     map_state: str = "unknown"

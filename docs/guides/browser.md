@@ -46,6 +46,18 @@ Absences in genomes below 70% complete are hatched. For KOs, Pfam families and f
 Absences beyond incompleteness have three sources: gene loss, gene calls missing from the dataset, and annotation thresholds that miss divergent homologs. Genomes with under 0.5 proteins per kb of assembly have most of their gene calls missing. They are marked in red and left out of the test. Without an assembly file, the cutoff is half the proteins their completeness implies.
 
 
+## Functional landscape
+
+`/landscape` places every genome on one map by what it encodes: a principal-component analysis of genome × KEGG ortholog presence (or Pfam families, or function labels), with each feature centred and the two leading components from a truncated SVD. Genomes sharing many features sit together.
+- **Colour** by any rank; the largest clades get colours and the rest stay grey.
+- **Points** shrink with lower completeness, and genomes under 70% complete are drawn hollow.
+- **Highlight** genomes or clades by name.
+- **Axes:** the side panel lists the share of variance on each axis, how strongly each follows the number of features per genome and genome completeness, and the features that load each end. Axes that track feature counts partly reflect genome size and annotation depth.
+
+Drag a box to select genomes, then open them in the **presence/absence matrix** or **Compare**. Short selections travel in the link as `genomes:ID1,ID2,…`; longer ones are kept by the running browser under a `selection:` key. When most of a selection belongs to one clade, the bar links to that clade too.
+
+Genome pages list the **functionally closest genomes**: every other genome ranked by Jaccard similarity of KEGG ortholog sets (shared ÷ either). A neighbour from a different class or order is tagged. A shared repertoire across lineages can come from shared ecology, gene transfer or similar annotation depth.
+
 ## Similar proteins, structures and findings
 
 - **Similar proteins** on protein pages come from the dataset's persistent embedding index. Build it once with `sharur build-vector-index --db data/my_dataset/sharur.duckdb`; the panel loads after the page and shows the nearest neighbors with their genome, architecture and best hit. For ESM-2 mean-pooled embeddings, cosine values crowd near 1, so the ranking carries more information than the score. `$SHARUR_BROWSE_EMBEDDINGS` points the browser at an embedding file elsewhere.

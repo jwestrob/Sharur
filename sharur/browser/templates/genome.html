@@ -47,6 +47,25 @@
   </div>
 </div>
 
+<div class="panel" id="neighbors" data-neighbors="/api/neighbors/{{ quote(g.bin_id, safe='') }}">
+  <h2>Functionally closest genomes <span class="hint">most shared features · <a href="/landscape?q={{ quote(g.bin_id, safe='') }}">functional landscape →</a></span></h2>
+  <div data-neighbors-body><p class="empty">Comparing feature sets across genomes…</p></div>
+</div>
+<script>
+(function () {
+  const panel = document.getElementById("neighbors");
+  const body = panel.querySelector("[data-neighbors-body]");
+  let tries = 0;
+  function load() {
+    fetch(panel.dataset.neighbors).then((r) => r.text().then((t) => [r.status, t])).then(([code, html]) => {
+      body.innerHTML = html;
+      if (code === 202 && tries++ < 30) setTimeout(load, 1500);
+    }).catch(() => { body.innerHTML = '<p class="empty">Similar genomes could not be loaded.</p>'; });
+  }
+  load();
+})();
+</script>
+
 <div class="panel">
   <h2>Pathways at least half complete <span class="hint">KEGG modules</span></h2>
   {% if modules %}
