@@ -391,25 +391,38 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
                       variable=sorted(variable, key=lambda r: -r["share"]))
 
     @app.get("/function/{predicate}", response_class=HTMLResponse)
-    def function_page(request: Request, predicate: str, rank: str = Query("class")):
+    def function_page(request: Request, predicate: str, rank: str = Query("class"),
+                      clade: str = Query("", max_length=500), genome: str = Query("", max_length=500)):
+        from sharur.browser.routes_compare import clade_filter  # noqa: PLC0415
+
         definition = PREDICATE_BY_ID.get(predicate)
         if definition is None and predicate not in catalog.predicate_index:
             raise HTTPException(404, "Unknown predicate")
         rank = rank if rank in RANKS else "class"
+        restrict = clade_filter(catalog, genome or clade)
         carriers = catalog.carriers(predicate)
+        if restrict:
+            carriers = {i: n for i, n in carriers.items() if catalog.genomes[i].bin_id in restrict[1]}
         prevalence = [r for r in catalog.prevalence_by(carriers, rank) if r["genomes"] >= 3][:30]
         top_genomes = sorted(carriers.items(), key=lambda kv: -kv[1])[:15]
         with lock:
-            examples = store.execute(
-                """SELECT pp.protein_id, p.bin_id, p.sequence_length FROM protein_predicates pp
-                   JOIN proteins p USING (protein_id) WHERE list_contains(pp.predicates, ?)
-                   ORDER BY p.sequence_length DESC LIMIT 25""", [predicate])
+            if restrict:
+                examples = store.execute(
+                    """SELECT pp.protein_id, p.bin_id, p.sequence_length FROM protein_predicates pp
+                       JOIN proteins p USING (protein_id) WHERE list_contains(pp.predicates, ?)
+                         AND p.bin_id IN (SELECT UNNEST(?::VARCHAR[]))
+                       ORDER BY p.sequence_length DESC LIMIT 50""", [predicate, sorted(restrict[1])])
+            else:
+                examples = store.execute(
+                    """SELECT pp.protein_id, p.bin_id, p.sequence_length FROM protein_predicates pp
+                       JOIN proteins p USING (protein_id) WHERE list_contains(pp.predicates, ?)
+                       ORDER BY p.sequence_length DESC LIMIT 25""", [predicate])
         children = [p for p in PREDICATE_BY_ID.values() if p.parent == predicate]
         parent = PREDICATE_BY_ID.get(definition.parent) if definition and definition.parent else None
         return render(request, "function.html", "functions", predicate=predicate, d=definition,
                       carriers=carriers, prevalence=prevalence, rank=rank,
                       top_genomes=[(catalog.genomes[i], n) for i, n in top_genomes], examples=examples,
-                      children=children, parent=parent)
+                      children=children, parent=parent, restrict=restrict, restrict_key=genome or clade)
 
     # ------------------------------------------------------------------ #
     # Pathways
@@ -819,13 +832,24 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
                       track=charts.contig_track(window, overlays, start, end))
 
     @app.get("/api/suggest")
-    def suggest(q: str = Query("", max_length=200)):
-        return JSONResponse(_suggest(q.strip()) if len(q.strip()) >= 2 else [])
+    def suggest(q: str = Query("", max_length=200), kind: str = Query("", max_length=100)):
+        if len(q.strip()) < 2:
+            return JSONResponse([])
+        if not kind:
+            return JSONResponse(_suggest(q.strip()))
+        kinds = {k.strip() for k in kind.split(",")}
+        return JSONResponse([r for r in _suggest(q.strip(), limit=200) if r["kind"] in kinds][:12])
 
     @app.get("/api/status")
     def status():
         return {"status": catalog.status, "ready": catalog.ready.is_set()}
 
+    from types import SimpleNamespace  # noqa: PLC0415
+
+    from sharur.browser import routes_compare  # noqa: PLC0415
+
+    routes_compare.register(app, SimpleNamespace(store=store, lock=lock, catalog=catalog, render=render, url=_url,
+                                                 background=background))
     return app
 
 

@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Compare{% endblock %}
+{% macro side_name(s) -%}{{ gshort(s.label) if s.is_genome else s.label }}{%- endmacro %}
+{% macro side_link(s) -%}<a href="{{ s.url }}" title="{{ s.key }}">{{ side_name(s) }}</a>{%- endmacro %}
+{% macro pair(sa, sb) -%}
+<div class="pair-bars">
+  <div class="bar" style="--bar:var(--cmp-a)"><i style="width:{{ '%.2f' % (sa * 100) }}%"></i></div>
+  <div class="bar" style="--bar:var(--cmp-b)"><i style="width:{{ '%.2f' % (sb * 100) }}%"></i></div>
+</div>
+{%- endmacro %}
+{% macro diff_panel(title, rows, side, other, kind, first) -%}
+<div class="panel">
+  <h2>{{ title }} <span class="hint">more common in {{ side_name(side) }}</span></h2>
+  {% if rows %}
+  <div class="cmp-rows">
+  {% for r in rows %}
+    <div class="cmp-row">
+      {% if kind == 'function' %}<a class="label" href="{{ url('function', r.id) }}?{{ side.filter_param }}" title="{{ r.name }}: proteins in {{ side.label }}"><i class="dot" style="--dot:{{ CATEGORY_COLORS.get(r.category, 'var(--ink-3)') }}"></i>{{ r.name }}</a>
+      {% elif kind == 'module' %}<a class="label" href="{{ url('pathway', r.module) }}" title="{{ r.module }}">{{ r.name }}</a>
+      {% else %}<a class="label" href="{{ url('domain', r.accession) }}" title="{{ r.accession }}">{{ r.name }}</a>{% endif %}
+      {{ pair(r.a, r.b) }}
+      <span class="val">{% if side.is_genome and other.is_genome and kind == 'function' %}{{ r.copies_a if first else r.copies_b }} vs {{ r.copies_b if first else r.copies_a }} <span class="count">proteins</span>{% elif side.is_genome and other.is_genome and kind == 'domain' %}present{% else %}{{ pct(r.a) }} vs {{ pct(r.b) }}{% endif %}</span>
+    </div>
+  {% endfor %}
+  </div>
+  {% else %}<p class="empty">Nothing clearly more common here.</p>{% endif %}
+</div>
+{%- endmacro %}
+{% block content %}
+<div class="crumbs"><a href="/taxa">Tree of life</a></div>
+<h1><span class="rank">Compare</span>{% if a and b %}{{ side_name(a) }} <span class="vs">vs</span> {{ side_name(b) }}{% else %}Genomes and clades{% endif %}</h1>
+
+{% if not (a and b) %}
+<p class="lede">Pick two genomes, two clades, or one of each. Each side is a genome ID or <code>rank:name</code>, for example <code>class:Omnitrophia</code>.</p>
+<form class="panel table-tools" action="/compare" method="get">
+  <input name="a" value="{{ a_key }}" placeholder="first genome or rank:name" style="flex:1">
+  <input name="b" value="{{ b_key }}" placeholder="second genome or rank:name" style="flex:1">
+  <button>Compare</button>
+</form>
+{% if a %}{% set compare_with = a.key %}{% include "_compare_form.html" %}{% endif %}
+{% else %}
+{% set st_a = result.stats[0] %}{% set st_b = result.stats[1] %}
+<div class="legend cmp-legend">
+  <span><i style="background:var(--cmp-a)"></i>{{ side_link(a) }} <span class="count">· {{ a.kind }}{% if not a.is_genome %} · {{ num(st_a.genomes) }} genomes{% endif %}</span></span>
+  <span><i style="background:var(--cmp-b)"></i>{{ side_link(b) }} <span class="count">· {{ b.kind }}{% if not b.is_genome %} · {{ num(st_b.genomes) }} genomes{% endif %}</span></span>
+  <a class="count" href="/compare?a={{ quote(b.key, safe='') }}&b={{ quote(a.key, safe='') }}">swap ⇄</a>
+</div>
+
+<div class="panel">
+  <h2>At a glance {% if not (a.is_genome and b.is_genome) %}<span class="hint">medians across genomes</span>{% endif %}</h2>
+  <table class="cmp-stats">
+    <thead><tr><th></th><th class="num">{{ side_link(a) }}</th><th class="num">{{ side_link(b) }}</th></tr></thead>
+    <tbody>
+      {% if not (a.is_genome and b.is_genome) %}<tr><td>Genomes</td><td class="num">{{ num(st_a.genomes) }}</td><td class="num">{{ num(st_b.genomes) }}</td></tr>{% endif %}
+      <tr><td>Genome size</td><td class="num">{{ bp(st_a.size) }}</td><td class="num">{{ bp(st_b.size) }}</td></tr>
+      <tr><td>Proteins</td><td class="num">{{ num(st_a.proteins|round|int) }}</td><td class="num">{{ num(st_b.proteins|round|int) }}</td></tr>
+      <tr><td>Contigs</td><td class="num">{{ num(st_a.contigs|round|int) }}</td><td class="num">{{ num(st_b.contigs|round|int) }}</td></tr>
+      <tr><td>N50</td><td class="num">{{ bp(st_a.n50) }}</td><td class="num">{{ bp(st_b.n50) }}</td></tr>
+      <tr><td>With an annotation hit</td><td class="num">{{ pct(st_a.annotated) }}</td><td class="num">{{ pct(st_b.annotated) }}</td></tr>
+      {% if result.function_counts %}<tr><td>Functional labels present</td><td class="num">{{ num(result.function_counts.a) }}</td><td class="num">{{ num(result.function_counts.b) }}</td></tr>{% endif %}
+      {% if result.domain_counts %}<tr><td>Pfam families present</td><td class="num">{{ num(result.domain_counts.a) }}</td><td class="num">{{ num(result.domain_counts.b) }}</td></tr>{% endif %}
+    </tbody>
+  </table>
+  {% if a.is_genome or b.is_genome %}<p class="note">Metagenome-assembled genomes are incomplete, so a function missing from one genome is "not detected", which is weaker than absent. Check genome size and N50 above before reading much into a single difference.</p>{% endif %}
+</div>
+
+{% if result.functions %}
+<div class="grid g2">
+  {{ diff_panel('Functions', result.functions[0], a, b, 'function', true) }}
+  {{ diff_panel('Functions', result.functions[1], b, a, 'function', false) }}
+</div>
+<p class="note">Bars show the share of genomes carrying each label{% if a.is_genome and b.is_genome %} (full or empty for single genomes){% endif %}. Click a label for the proteins behind it on that side.</p>
+{% endif %}
+
+{% if result.modules %}
+<div class="grid g2">
+  {{ diff_panel('Pathways', result.modules[0], a, b, 'module', true) }}
+  {{ diff_panel('Pathways', result.modules[1], b, a, 'module', false) }}
+</div>
+{% elif catalog.module_completeness is none %}<div class="panel"><p class="empty">Pathway completeness is still being computed, or KEGG modules are not built.</p></div>{% endif %}
+
+{% if result.systems %}
+<div class="panel">
+  <h2>Systems <span class="hint">share of genomes with at least one call</span></h2>
+  <div class="cmp-rows">
+  {% for r in result.systems %}
+    <div class="cmp-row"><a class="label" href="{{ url('system', r.kind, r.type) }}">{{ r.type }} <span class="count">{{ r.kind }}</span></a>{{ pair(r.a, r.b) }}<span class="val">{{ pct(r.a) }} vs {{ pct(r.b) }}</span></div>
+  {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if result.domains %}
+<div class="grid g2">
+  {{ diff_panel('Pfam domains', result.domains[0], a, b, 'domain', true) }}
+  {{ diff_panel('Pfam domains', result.domains[1], b, a, 'domain', false) }}
+</div>
+{% elif not pfam_ready %}<div class="panel"><p class="empty">Pfam domain presence is still loading; reload in a few seconds.</p></div>{% endif %}
+{% endif %}
+{% endblock %}

@@ -1,0 +1,47 @@
+{# Compare picker. Set `compare_with` (genome id or rank:name) before including. #}
+<form class="compare-form panel" action="/compare" method="get" autocomplete="off">
+  <input type="hidden" name="a" value="{{ compare_with }}">
+  <input type="hidden" name="b" value="">
+  <span class="compare-label">Compare with</span>
+  <div class="picker">
+    <input type="text" class="picker-input" placeholder="another genome or clade (e.g. a genus or order)" aria-label="Genome or clade to compare with">
+    <div class="picker-list" role="listbox"></div>
+  </div>
+  <button type="submit" disabled>Compare</button>
+</form>
+<script>
+(function () {
+  const form = document.currentScript.previousElementSibling;
+  const input = form.querySelector(".picker-input"), list = form.querySelector(".picker-list");
+  const target = form.querySelector('input[name="b"]'), button = form.querySelector("button");
+  let timer = null;
+  function choose(value, label) {
+    target.value = value; input.value = label; list.classList.remove("open"); button.disabled = false;
+  }
+  input.addEventListener("input", () => {
+    clearTimeout(timer); target.value = ""; button.disabled = true;
+    const q = input.value.trim();
+    if (q.length < 2) { list.classList.remove("open"); return; }
+    timer = setTimeout(() => {
+      fetch("/api/suggest?kind=taxon,genome&q=" + encodeURIComponent(q)).then((r) => r.json()).then((rows) => {
+        list.innerHTML = "";
+        rows.forEach((r) => {
+          const value = r.kind === "taxon" ? r.sub + ":" + r.label : r.label;
+          const a = document.createElement("a");
+          a.href = "#";
+          const name = document.createElement("span");
+          name.textContent = r.label;
+          const kind = document.createElement("span");
+          kind.className = "kind";
+          kind.textContent = r.kind === "taxon" ? r.sub : "genome";
+          a.append(name, kind);
+          a.addEventListener("click", (e) => { e.preventDefault(); choose(value, r.label); });
+          list.appendChild(a);
+        });
+        list.classList.toggle("open", rows.length > 0);
+      });
+    }, 120);
+  });
+  document.addEventListener("click", (e) => { if (!form.contains(e.target)) list.classList.remove("open"); });
+})();
+</script>

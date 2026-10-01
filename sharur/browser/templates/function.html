@@ -5,6 +5,7 @@
 <div class="crumbs"><a href="/functions">Functions</a>{% if d %}<span class="sep">›</span><a href="/functions#{{ d.category }}">{{ CATEGORY_LABELS.get(d.category, d.category) }}</a>{% endif %}{% if parent %}<span class="sep">›</span><a href="{{ url('function', parent.predicate_id) }}">{{ parent.name }}</a>{% endif %}</div>
 <h1><span class="rank">Function · <code>{{ predicate }}</code></span>{{ d.name if d else predicate }}</h1>
 <p class="lede">{{ d.description if d else '' }}{% if d and d.level == 'system' %} System-level: called only by validated system callers.{% endif %}</p>
+{% if restrict %}<div class="banner">Showing genomes and proteins in <b>{{ restrict[0] }}</b> only · <a href="{{ url('function', predicate) }}">show the whole dataset</a></div>{% endif %}
 <div class="stats">
   <div class="stat"><b>{{ num(carriers|length) }}</b><span>genomes ({{ pct(carriers|length / (catalog.genomes|length or 1)) }})</span></div>
   <div class="stat"><b>{{ num(carriers.values()|sum) }}</b><span>proteins</span></div>

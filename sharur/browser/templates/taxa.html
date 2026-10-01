@@ -13,6 +13,12 @@
   <div class="stat"><b>{{ num(genomes|sum(attribute='contigs')) }}</b><span>contigs</span></div>
 </div>
 
+{% if rank %}{% set compare_with = rank ~ ':' ~ name %}{% include "_compare_form.html" %}
+{% else %}<div class="entries cmp-entries">
+  <a class="entry" href="/compare"><b>Compare genomes or clades</b><span>Two genomes, two clades, or one of each: what differs in functions, pathways, systems and Pfam domains.</span></a>
+  <a class="entry" href="/heatmap"><b>Function heatmap</b><span>Pick functions and see their prevalence in every clade at once.</span></a>
+</div>{% endif %}
+
 {% if tree %}
 <div class="grid g-side">
   <div class="panel"><h2>{{ child_rank|capitalize }} <span class="hint">sized by genome count · click to go deeper</span></h2>{{ tree }}</div>

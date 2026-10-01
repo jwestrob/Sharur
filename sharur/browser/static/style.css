@@ -327,3 +327,57 @@ td .sub { color: var(--ink-3); font-size: 12.5px; line-height: 1.4; white-space:
 .seq-blocks span:nth-child(even) { color: var(--ink-2); }
 button.done { border-color: var(--ok); color: var(--ok); }
 .visually-hidden { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
+
+/* ---------- compare & heatmap ---------- */
+:root { --cmp-a: #5b8def; --cmp-b: #e0895c; }
+.vs { color: var(--ink-3); font-weight: 500; font-size: .7em; margin: 0 .25em; }
+.cmp-legend { margin: 4px 0 16px; font-size: 13px; align-items: center; }
+.cmp-legend > span { display: inline-flex; align-items: center; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.cmp-entries { margin-bottom: 18px; }
+.cmp-stats td.num, .cmp-stats th.num { width: 32%; }
+.cmp-rows { display: grid; grid-template-columns: minmax(80px, max-content) minmax(60px, 1fr) minmax(0, max-content);
+            gap: 8px 14px; align-items: center; }
+.cmp-row { display: contents; }
+.cmp-row .label { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: min(280px, 34vw);
+                  display: inline-flex; align-items: center; gap: 6px; }
+.cmp-row .val { font-size: 12.5px; color: var(--ink-2); text-align: right; white-space: normal; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dot, var(--ink-3)); flex: none; display: inline-block; }
+.pair-bars { display: grid; gap: 3px; min-width: 0; }
+.pair-bars .bar { height: 6px; }
+.compare-form { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; padding: 12px 16px; }
+.compare-label { font-weight: 650; font-size: 13.5px; }
+.picker { position: relative; flex: 1; min-width: 200px; }
+.picker-input { width: 100%; height: 34px; padding: 0 12px; border: 1px solid var(--line-2); border-radius: 9px;
+                background: var(--surface-2); color: var(--ink); font: inherit; outline: none; }
+.picker-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.picker-list { position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: 6; display: none; padding: 6px;
+               background: var(--surface); border: 1px solid var(--line-2); border-radius: 12px; max-height: 320px;
+               overflow-y: auto; box-shadow: 0 24px 60px -20px rgba(0, 0, 0, .45); }
+.picker-list.open { display: block; }
+.picker-list a { display: flex; justify-content: space-between; gap: 12px; padding: 7px 10px; border-radius: 8px; color: var(--ink); }
+.picker-list a:hover { background: var(--accent-soft); }
+.picker-list .kind { font-size: 10.5px; font-weight: 650; text-transform: uppercase; letter-spacing: .07em; color: var(--ink-3);
+                     border: 1px solid var(--line-2); border-radius: 5px; padding: 1px 6px; flex: none; }
+button[disabled] { opacity: .45; cursor: default; }
+.heat-controls .facet { margin-bottom: 14px; }
+.heat-add { display: inline-block; vertical-align: top; width: min(280px, 100%); margin-bottom: 7px; }
+.heat-ranks { margin: 0; gap: 10px; }
+.heat-toggle { margin-left: auto; }
+.heat-scroll { max-height: 72vh; overflow: auto; }
+table.heatmap { width: auto; border-collapse: separate; border-spacing: 2px; }
+table.heatmap th, table.heatmap td { border: 0; padding: 0; }
+.heatmap th.heat-fn { height: 150px; vertical-align: bottom; padding: 0 0 6px; position: sticky; top: 0; background: var(--surface); }
+.heatmap th.heat-fn a { display: block; width: 34px; writing-mode: vertical-rl; transform: rotate(180deg);
+                        text-transform: none; letter-spacing: 0; font-size: 12px; font-weight: 600; color: var(--ink-2);
+                        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-height: 144px; margin: 0 auto; }
+.heatmap .heat-clade { position: sticky; left: 0; background: var(--surface); text-align: left; padding: 0 12px 0 0;
+                       white-space: nowrap; font-size: 13px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; z-index: 1; }
+.heatmap th.heat-clade { z-index: 2; vertical-align: bottom; padding-bottom: 6px; }
+.heat-cell a { display: grid; place-items: center; width: 34px; height: 26px; border-radius: 5px; font-size: 10.5px;
+               font-weight: 600; color: var(--ink-2); text-decoration: none;
+               background: color-mix(in srgb, var(--accent) calc(var(--v) * 100%), var(--surface-2)); }
+.heat-cell a.hot { color: var(--bg); }
+.heat-cell a:hover { outline: 2px solid var(--ink); outline-offset: -1px; }
+.heat-legend { align-items: center; }
+.heat-scale { display: inline-block; width: 160px; height: 10px; border-radius: 5px;
+              background: linear-gradient(90deg, var(--surface-2), var(--accent)); }

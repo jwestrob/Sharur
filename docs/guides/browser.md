@@ -21,6 +21,8 @@ Genome pages draw the contig landscape (click a contig to open it in the contig 
 
 VOG descriptions and categories come from VOGdb's `vog.annotations.tsv`, found in `data/reference/vogdb/`, `~/.sharur/vogdb/`, the Astra VOGdb directory, or `$SHARUR_VOG_ANNOTATIONS`; without it VOG families appear by identifier.
 
+**Compare** (`/compare`, or the *Compare with* box on any genome or clade page) sets two genomes or clades side by side: genome statistics, then the functions, pathways, systems and Pfam domains more common on each side, each linking to the proteins behind it. The **function heatmap** (`/heatmap`) shows chosen labels, or presets such as hydrogenases and terminal oxidases, across every clade at a chosen rank; each cell opens the proteins in that clade.
+
 The search box suggests taxa, functions, pathways, systems, genomes and proteins as you type (press `/` to focus it). Protein pages show the amino-acid sequence with copy and FASTA download buttons; the CLI, Python API and agent-facing cards stay sequence-free.
 
 ## Sharing
