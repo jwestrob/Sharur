@@ -679,3 +679,47 @@ pre.code { background: var(--surface-2); border: 1px solid var(--line); border-r
 .ov-explore { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 @media (max-width: 1100px) { .ov-explore { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 640px) { .ov-explore { grid-template-columns: minmax(0, 1fr); } }
+/* ---- taxonomy tree (/tree) ---------------------------------------------- */
+.tree-controls .tree-row { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-bottom: 10px; }
+.tree-controls .facet + .facet { margin-top: 8px; }
+.seg { display: inline-flex; border: 1px solid var(--line-2); border-radius: 10px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; height: 32px; background: transparent; }
+.seg button + button { border-left: 1px solid var(--line-2); }
+.seg button.on { background: var(--accent-soft); color: var(--accent-ink); font-weight: 650; }
+.tree-open { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); }
+.tree-open select { height: 32px; padding: 0 8px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--surface); color: var(--ink); }
+.tree-features .picker { max-width: 420px; }
+.tree-layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 18px; align-items: start; margin-top: 18px; }
+.tree-layout > .panel { margin-top: 0; }
+@media (max-width: 1100px) { .tree-layout { grid-template-columns: minmax(0, 1fr); } }
+.tree-host { position: relative; overflow: auto; max-height: 86vh; }
+svg.tree-fig { display: block; width: 100%; height: auto; max-width: 980px; margin: 0 auto; font-family: var(--sans); }
+svg.tree-fig.t-rect { max-width: none; }
+.t-edges line, .t-edges path { stroke: var(--ink-3); stroke-width: 1; fill: none; }
+.t-edges .t-align { stroke: var(--line-2); stroke-dasharray: 2 3; }
+.t-wedge { fill: color-mix(in srgb, var(--ink-3) 28%, transparent); stroke: var(--ink-3); stroke-width: .6; cursor: pointer; transition: fill .12s; }
+.t-wedge:hover { fill: color-mix(in srgb, var(--accent) 40%, transparent); }
+.t-node { fill: var(--surface); stroke: var(--ink-2); stroke-width: 1.2; cursor: pointer; }
+.t-node.t-root { fill: var(--ink-2); }
+.t-node:hover { stroke: var(--accent); stroke-width: 2; }
+.t-cell { stroke: var(--surface); stroke-width: .6; cursor: pointer; }
+.t-cell:hover { stroke: var(--ink); stroke-width: 1.2; }
+.t-label { font-size: 10.5px; fill: var(--ink-2); cursor: pointer; }
+.t-label.t-collapsed { fill: var(--ink); font-weight: 600; }
+.t-label:hover { fill: var(--accent); }
+.t-head { font-size: 10.5px; fill: var(--ink-2); }
+.t-selected.t-label { fill: var(--accent); font-weight: 700; }
+.t-selected.t-wedge, .t-selected.t-node { stroke: var(--accent); stroke-width: 2.2; }
+.tree-tip { position: absolute; z-index: 5; min-width: 180px; max-width: 320px; padding: 8px 10px; border-radius: 8px; pointer-events: none;
+  background: var(--surface); border: 1px solid var(--line-2); box-shadow: 0 6px 20px rgba(0, 0, 0, .14); font-size: 12px; }
+.tree-tip-row { display: flex; align-items: center; gap: 6px; margin-top: 3px; color: var(--ink-2); }
+.tree-tip-row.on { color: var(--ink); font-weight: 650; }
+.tree-tip-row i { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+.tree-legend { margin-top: 12px; }
+.tree-ramp { display: inline-block; width: 44px; height: 10px; border-radius: 3px; vertical-align: -1px; margin-right: 6px;
+  background: linear-gradient(90deg, var(--surface-3), var(--c)); }
+.tree-detail h2 { margin: 0 0 2px; overflow-wrap: anywhere; }
+.tree-detail .actions { margin-top: 12px; }
+.tree-shares { display: grid; gap: 7px; margin-top: 10px; }
+.tree-share { display: grid; grid-template-columns: minmax(0, 1fr) 70px auto; gap: 8px; align-items: center; font-size: 12.5px; }
+.tree-share-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

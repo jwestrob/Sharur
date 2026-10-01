@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}{{ (root_name ~ ' · tree') if root_name else 'Taxonomy tree' }}{% endblock %}
+{% block content %}
+{% set fq = '&features=' ~ quote(features, safe=',:') if features else '' %}
+<div class="crumbs"><a href="/taxa">Tree of life</a>{% if root %}<span class="sep">›</span><a href="/tree?layout={{ layout }}{{ fq }}">All genomes</a>{% endif %}{% for r, n in lineage[:-1] %}{% if r != 'domain' %}<span class="sep">›</span><a href="/tree?root={{ quote(r ~ ':' ~ n, safe='') }}&layout={{ layout }}{{ fq }}">{{ n }}</a>{% endif %}{% endfor %}</div>
+<h1><span class="rank">Tree{% if root_rank %} · {{ root_rank }}{% endif %}</span>{{ root_name or 'All genomes' }}</h1>
+<p class="lede">{{ num(n_genomes) }} genomes in their GTDB taxonomy{% if passed %}, shown from {{ tree.rank }} {{ tree.name }}{% endif %}. Click a clade to open or close it and see its numbers; zoom in from there.{% if chosen %} Rings show the share of each clade's genomes carrying each feature.{% endif %}</p>
+
+<div class="panel tree-controls">
+  <div class="tree-row">
+    <div class="seg" role="group" aria-label="Layout">
+      <button type="button" data-layout="radial" class="{{ 'on' if layout == 'radial' }}">◎ Radial</button>
+      <button type="button" data-layout="rect" class="{{ 'on' if layout == 'rect' }}">☰ Rectangular</button>
+    </div>
+    <label class="tree-open"><span>Open to</span>
+      <select id="tree-open"><option value="">automatic</option>{% for r in open_ranks %}<option value="{{ r }}" {{ 'selected' if payload.open == r }}>{{ r }}</option>{% endfor %}</select>
+    </label>
+    <span class="count tree-size">{{ num(nodes) }} clades</span>
+  </div>
+  <div class="facet tree-features"><span>Features</span>
+    {% for f in chosen %}{% set rest = chosen|rejectattr('token', 'equalto', f.token)|map(attribute='token')|join(',') %}<a class="chip" href="/tree?root={{ quote(root, safe='') }}&layout={{ layout }}&features={{ quote(rest, safe=',:') }}" title="Remove · {{ f.kind_label }} {{ f.id }}"><i style="--dot:{{ f.color }}"></i>{{ f.label }} ×</a>{% endfor %}
+    {% if chosen|length < max_features %}
+    <form class="picker tree-add" autocomplete="off" data-root="{{ root }}" data-layout="{{ layout }}" data-current="{{ features }}">
+      <input type="text" class="picker-input" placeholder="add a KO, Pfam family, function, module or system…" aria-label="Add a feature">
+      <div class="picker-list" role="listbox"></div>
+    </form>{% endif %}
+  </div>
+  {% if presets %}<div class="facet"><span>Presets</span>
+    {% for name, tokens in presets %}<a class="chip" href="/tree?root={{ quote(root, safe='') }}&layout={{ layout }}&features={{ quote(tokens|join(','), safe=',:') }}">{{ name }} <span class="count">{{ tokens|length }}</span></a>{% endfor %}
+  </div>{% endif %}
+  {% for note in notes %}<p class="count">{{ note }}</p>{% endfor %}
+</div>
+
+<div class="tree-layout">
+  <div class="panel tree-panel">
+    <div class="tree-host" id="tree-host">
+      <svg class="tree-fig" id="tree-svg" role="img" aria-label="taxonomy tree"></svg>
+      <div class="tree-tip" hidden></div>
+    </div>
+    {% if chosen %}<div class="legend tree-legend">{% for f in chosen %}<span><i class="tree-ramp" style="--c:{{ f.color }}"></i><b>{{ f.label }}</b> <span class="count">{{ f.kind_label }} · {{ num(f.carriers) }} of {{ num(n_genomes) }} genomes</span></span>{% endfor %}<span class="count">0 → 100% of a clade's genomes</span></div>{% endif %}
+  </div>
+  <aside class="panel tree-detail" id="tree-detail">
+    <p class="empty">Click a clade for its genomes{{ ' and feature shares' if chosen }}.</p>
+  </aside>
+</div>
+<script type="application/json" id="tree-data">{{ payload|tojson }}</script>
+<script src="/static/tree.js?v={{ asset_version }}"></script>
+{% endblock %}

@@ -28,6 +28,7 @@ from sharur.browser import (
     routes_loci,
     routes_matrix,
     routes_search,
+    routes_tree,
     routes_systems,
 )
 from sharur.browser.routes_insight import register as register_insight
@@ -987,6 +988,7 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
     routes_matrix.register(app, ctx)
     clade_content.register(templates, ctx)
     genome_ring.register(templates, ctx)
+    routes_tree.register(app, ctx)
     return app
 
 

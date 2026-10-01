@@ -4,7 +4,7 @@
 {% block content %}
 <div class="crumbs"><a href="/pathways">Pathways</a><span class="sep">›</span>{{ d.module_class }}</div>
 <h1><span class="rank">KEGG module · {{ d.module }}</span>{{ d.name }}</h1>
-<p class="actions"><a class="btn" href="/matrix?a=all&module={{ quote(d.module, safe='') }}&order=cluster">Steps across genomes ▦</a></p>
+<p class="actions"><a class="btn" href="/matrix?a=all&module={{ quote(d.module, safe='') }}&order=cluster">Steps across genomes ▦</a> <a class="btn" href="/tree?features={{ quote('module:' ~ d.module, safe=':') }}">Map on tree</a></p>
 <div class="stats">
   <div class="stat"><b>{{ num(complete) }}</b><span>genomes ≥ 75% complete</span></div>
   <div class="stat"><b>{{ num(partial) }}</b><span>genomes with any step</span></div>

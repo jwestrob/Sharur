@@ -25,6 +25,12 @@ VOG descriptions and categories come from VOGdb's `vog.annotations.tsv`, found i
 
 The search box suggests taxa, functions, pathways, systems, genomes and proteins as you type (press `/` to focus it). Protein pages show the amino-acid sequence with copy and FASTA download buttons; the CLI, Python API and agent-facing cards stay sequence-free.
 
+## Taxonomy tree
+
+`/tree` draws the dataset's GTDB taxonomy as a cladogram, radial or rectangular, down to genus. It opens as deep as fits on screen; closed clades are wedges whose length grows with their genome count. Click a clade to open or close it and see its numbers, then zoom in (`/tree?root=order:Woesearchaeales`) or jump to its clade page.
+
+Map up to eight features onto the tree: KOs, Pfam families, function labels, KEGG modules (counted at ≥ 75% completeness) and curated system types, including CRISPR-Cas subtypes. Each becomes a ring (radial) or column (rectangular) holding the share of each clade's genomes that carry it. Add features with the picker, start from a preset, or use **Map on tree** on function, Pfam, pathway, system and matrix pages. The SVG and PNG buttons export the figure in light colours.
+
 ## Presence/absence matrix
 
 `/matrix` draws genomes as rows and features as columns: KEGG orthologs, Pfam families, KEGG modules (cells hold completeness), curated systems, or function labels. Open it from any clade page, from **Compare** (*genome-by-genome matrix*), or from a pathway page (*Steps across genomes*), which lays out the module's KOs step by step.
