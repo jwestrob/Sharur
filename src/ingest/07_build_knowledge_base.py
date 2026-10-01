@@ -979,11 +979,13 @@ class KnowledgeBaseBuilder:
         for crispr_json in (self.outputs.stage05c_dir.glob("*_crispr_arrays.json") if self.outputs.stage05c_dir.exists() else []):
             try:
                 arrays = json.loads(crispr_json.read_text()).get("arrays", [])
+                # MinCED numbers arrays per genome (CRISPR1, CRISPR2, ...): scope IDs by genome
+                genome = crispr_json.name[: -len("_crispr_arrays.json")]
                 loci_rows = []
                 for arr in arrays:
                     loci_rows.append(
                         {
-                            "locus_id": arr.get("id"),
+                            "locus_id": f"{genome}_{arr.get('id')}",
                             "locus_type": "crispr",
                             "contig_id": arr.get("contig"),
                             "start": arr.get("startCoordinate", 0),

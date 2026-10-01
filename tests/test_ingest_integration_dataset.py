@@ -168,9 +168,13 @@ def test_ingest_pipeline_with_dummy_dataset(tmp_path):
     stage05a.mkdir(parents=True, exist_ok=True)
     _write(stage05a / "combined_bgc_data.json", json.dumps({"clusters": gecco_clusters}))
 
-    # Stage05c CRISPR arrays (empty)
+    # Stage05c CRISPR arrays: MinCED numbers arrays per genome, so every genome has a CRISPR1
     stage05c.mkdir(parents=True, exist_ok=True)
-    _write(stage05c / "synthetic_crispr_arrays.json", json.dumps({"arrays": []}))
+    for cluster in gecco_clusters:
+        crispr_bin = cluster["cluster_id"][: -len("_cluster1")]
+        array = {"id": "CRISPR1", "contig": cluster["contig"], "startCoordinate": 120, "endCoordinate": 260,
+                 "strand": ".", "metadata": {"ID": "CRISPR1", "rpt_family": "CRISPR"}}
+        _write(stage05c / f"{crispr_bin}_crispr_arrays.json", json.dumps({"arrays": [array]}))
 
     outputs = PipelineOutputs(
         stage00_dir=data_dir / "stage00_prepared",
@@ -206,3 +210,6 @@ def test_ingest_pipeline_with_dummy_dataset(tmp_path):
     assert conn.execute("SELECT COUNT(*) FROM semantic_state").fetchone()[0] == total_proteins
     assert conn.execute("SELECT COUNT(*) FROM protein_predicates").fetchone()[0] == total_proteins
     assert (data_dir / "reports" / "predicates_v2_review_queue.tsv").exists()
+    crispr_ids = {r[0] for r in conn.execute("SELECT locus_id FROM loci WHERE locus_type = 'crispr'").fetchall()}
+    assert crispr_ids == {f"{c['cluster_id'][: -len('_cluster1')]}_CRISPR1" for c in gecco_clusters}
+    assert len(crispr_ids) > 1
