@@ -34,6 +34,32 @@ from sharur.storage.schema import SCHEMA
 console = Console()
 logger = logging.getLogger(__name__)
 
+
+def reference_dirs(data_dir: Path | None = None) -> List[Path]:
+    """Directories that may hold reference maps (``pfam_id_desc.tsv``, ``ko_list``), in priority order.
+
+    ``$SHARUR_REFERENCE_DIR``; ``data/reference`` beside the dataset directory
+    (``data/my_dataset`` -> ``data/reference``); ``./data/reference``; the source
+    checkout's ``data/reference``; ``~/.sharur/reference``.
+    """
+    candidates: List[Path] = []
+    if os.environ.get("SHARUR_REFERENCE_DIR"):
+        candidates.append(Path(os.environ["SHARUR_REFERENCE_DIR"]).expanduser())
+    if data_dir is not None:
+        candidates.append(Path(data_dir).resolve().parent / "reference")
+    candidates += [Path.cwd() / "data" / "reference", Path(__file__).resolve().parents[2] / "data" / "reference",
+                   Path.home() / ".sharur" / "reference"]
+    seen: List[Path] = []
+    for candidate in candidates:
+        if candidate not in seen:
+            seen.append(candidate)
+    return seen
+
+
+def find_reference(dirs: List[Path], name: str) -> Optional[Path]:
+    """First existing ``name`` among ``dirs``."""
+    return next((d / name for d in dirs if (d / name).is_file()), None)
+
 # --------------------------------------------------------------------------- #
 # Default e-value thresholds applied at load time.
 # Databases with --cut_ga (PFAM, KOFAM, HydDB) are already clean; these
@@ -265,7 +291,8 @@ class KnowledgeBaseBuilder:
             "review_queue": 0,
         }
         # reference maps for annotation names
-        self.ref_dir = Path(__file__).resolve().parents[2] / "data" / "reference"
+        self.ref_dirs = reference_dirs(outputs.stage00_dir.parent)
+        self.ref_dir = self.ref_dirs[0] if self.ref_dirs else Path("data") / "reference"
         self.pfam_id_to_acc: Dict[str, str] = {}
         self.pfam_acc_to_name: Dict[str, str] = {}
         self.pfam_acc_to_desc: Dict[str, str] = {}
@@ -275,7 +302,7 @@ class KnowledgeBaseBuilder:
 
     def _load_reference_maps(self) -> None:
         # PFAM mapping: id -> accession, accession -> name/description
-        pfam_path = self.ref_dir / "pfam_id_desc.tsv"
+        pfam_path = find_reference(self.ref_dirs, "pfam_id_desc.tsv") or self.ref_dir / "pfam_id_desc.tsv"
         if pfam_path.exists():
             try:
                 pdf = pd.read_csv(pfam_path, sep="\t", header=None, names=["accession", "id", "description"])
@@ -290,7 +317,9 @@ class KnowledgeBaseBuilder:
                 "profile names in the accession column"
             )
         # KEGG KOFAM mapping
-        ko_path = self.ref_dir / "ko_list"
+        ko_path = (find_reference(self.ref_dirs, "ko_list")
+                   or find_reference([Path.home() / ".config" / "Astra"], "ko_list")
+                   or self.ref_dir / "ko_list")
         if ko_path.exists():
             try:
                 kdf = pd.read_csv(ko_path, sep="\t")
@@ -1147,8 +1176,10 @@ class KnowledgeBaseBuilder:
         self._release_db()
         try:
             import sys
-            scripts_dir = Path(__file__).resolve().parents[2] / "scripts"
-            sys.path.insert(0, str(scripts_dir))
+            # Packaged installs ship classify_cazymes beside the stages; checkouts keep it in scripts/
+            for candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[2] / "scripts"):
+                if (candidate / "classify_cazymes.py").is_file() and str(candidate) not in sys.path:
+                    sys.path.insert(0, str(candidate))
 
             from classify_cazymes import classify_cazymes as run_classification
 
