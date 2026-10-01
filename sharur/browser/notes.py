@@ -21,7 +21,7 @@ FLAGS = {
     "interesting": ("Interesting", "★"),
     "follow_up": ("Follow up", "↻"),
 }
-KINDS = ("protein", "genome", "system", "domain", "vog", "function", "contig", "clade", "module")
+KINDS = ("protein", "genome", "system", "domain", "vog", "function", "contig", "clade", "module", "crispr")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS notes (

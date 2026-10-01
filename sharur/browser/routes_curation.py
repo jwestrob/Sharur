@@ -29,6 +29,8 @@ def entity_url(ctx, kind: str, entity: str) -> str:
         return ctx.url("taxa", rank, name)
     if kind == "module":
         return ctx.url("pathway", entity)
+    if kind == "crispr":
+        return ctx.url("crispr", entity)
     return ctx.url(kind, entity)
 
 

@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}CRISPR array · {{ a.locus_id }}{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="/crispr">CRISPR arrays</a>{% if g %}<span class="sep">›</span><a href="{{ url('genome', g.bin_id) }}">{{ gshort(g.bin_id) }}</a>{% endif %}<span class="sep">›</span><a href="{{ url('contig', a.contig_id) }}?start={{ [1, a.start - 20000]|max }}&span=50000">contig</a></div>
+<h1><span class="rank">CRISPR array{% if g %} · {{ g.label }}{% endif %}</span>{{ a.locus_id }}</h1>
+<div class="stats">
+  <div class="stat"><b>{{ detail.repeats|length if detail.repeats else '–' }}</b><span>repeats</span></div>
+  <div class="stat"><b>{{ detail.spacers|length if detail.repeats else '–' }}</b><span>spacers{% if repeated_spacers %} · {{ repeated_spacers }} duplicated{% endif %}</span></div>
+  <div class="stat"><b>{{ a.consensus|length or '–' }} bp</b><span>repeat consensus</span></div>
+  <div class="stat"><b>{% if spacer_lengths %}{{ spacer_lengths|min }}–{{ spacer_lengths|max }} bp{% else %}–{% endif %}</b><span>spacer lengths</span></div>
+  <div class="stat"><b>{{ cas|length }}</b><span>Cas-domain genes within {{ (flank / 1000)|int }} kb{% if nearest is not none %} · nearest {{ bp(nearest) }}{% endif %}</span></div>
+</div>
+<p class="actions"><a class="btn" href="{{ url('contig', a.contig_id) }}?start={{ [1, a.start - 20000]|max }}&span=50000">Open in contig viewer</a>
+{% if detail.spacers %}<a class="btn" href="{{ url('crispr', a.locus_id) }}/spacers.fasta">Download spacers (FASTA)</a>{% endif %}
+<span class="count">{{ a.contig_id }}:{{ num(a.start) }}–{{ num(a.end) }}</span></p>
+
+<div class="panel">
+  <h2>Genomic context <span class="hint">{{ num(lo) }}–{{ num(hi) }} bp · Cas-domain genes highlighted · click a gene</span></h2>
+  <div class="scroll">{{ context }}</div>
+  <div class="legend"><span><i class="lg-array"></i>CRISPR array</span><span><i class="lg-cas"></i>Cas-domain gene</span><span><i style="background:var(--gene)"></i>other gene</span><span><i style="background:var(--gene-dark);border:1px dashed var(--ink-3)"></i>no annotation</span>{% if at_contig_start %}<span class="edge">window reaches the contig start</span>{% endif %}{% if at_contig_end %}<span class="edge">window reaches the contig end</span>{% endif %}</div>
+  <form class="table-tools" style="margin-top:10px" method="get"><select name="flank" onchange="this.form.submit()">{% for f in [5000, 15000, 30000, 60000] %}<option value="{{ f }}" {{ 'selected' if f == flank }}>±{{ (f / 1000)|int }} kb</option>{% endfor %}</select></form>
+</div>
+
+<div class="panel">
+  <h2>Array <span class="hint">repeats as diamonds (outlined when they differ from the consensus), spacers as colored blocks; identical spacers share a color · from {{ detail.source }}</span></h2>
+  {% if detail.repeats %}<div class="scroll">{{ array }}</div>
+  {% elif not detail.seq_available %}<p class="empty">The assembly for this genome was not found, so only the array span is known. Point <code>sharur browse --assemblies DIR</code> at the genome FASTAs.</p>
+  {% else %}<p class="empty">No copy of the repeat consensus was found along the recorded span.</p>{% endif %}
+</div>
+
+{% if cas %}
+<div class="panel">
+  <h2>Cas-domain genes nearby <span class="hint">observed domains and labels; a named CRISPR-Cas subtype needs a system caller</span></h2>
+  <div class="scroll"><table>
+    <thead><tr><th>Gene</th><th class="num">Distance</th><th>Best hit</th><th>Cas evidence</th></tr></thead>
+    <tbody>{% for c in cas %}<tr><td><a class="mono" href="{{ url('protein', c.protein_id) }}">{{ short(c.protein_id) }}</a></td>
+      <td class="num">{% if c.end < a.start %}{{ bp(a.start - c.end) }} upstream{% elif c.start > a.end %}{{ bp(c.start - a.end) }} downstream{% else %}overlaps{% endif %}</td>
+      <td>{{ c.label or '—' }}</td><td>{% for l in c.cas_labels %}<span class="chip">{{ PREDICATE_BY_ID[l].name if l in PREDICATE_BY_ID else l }}</span>{% endfor %}{% for n in c.cas_names %}<span class="chip mono">{{ n }}</span>{% endfor %}</td></tr>{% endfor %}</tbody>
+  </table></div>
+</div>
+{% endif %}
+
+{% if detail.repeats %}
+<div class="panel">
+  <h2>Repeats and spacers <span class="hint">left to right on the contig; differences from the consensus highlighted</span></h2>
+  <div class="table-tools"><button type="button" data-copy="spacer-fasta" data-label="Copy spacers (FASTA)">Copy spacers (FASTA)</button></div>
+  <textarea id="spacer-fasta" class="visually-hidden" readonly aria-hidden="true" tabindex="-1">{% for s in detail.spacers %}&gt;{{ a.locus_id }}_spacer{{ loop.index }}
+{{ s.seq }}
+{% endfor %}</textarea>
+  <div class="scroll"><table class="crispr-table">
+    <thead><tr><th class="num">#</th><th class="num">Position</th><th>Repeat</th><th class="num">Spacer</th><th>Spacer sequence</th></tr></thead>
+    <tbody>{% for r in detail.repeats %}{% set s = detail.spacers[loop.index0] if loop.index0 < detail.spacers|length else none %}<tr>
+      <td class="num count">{{ loop.index }}</td><td class="num count">{{ num(r.start) }}</td>
+      <td class="mono seq-cell">{% for ch in r.seq %}{% if loop.index0 in r.diff %}<mark>{{ ch }}</mark>{% else %}{{ ch }}{% endif %}{% endfor %}</td>
+      <td class="num count">{% if s %}{{ s.length }} bp{% endif %}</td>
+      <td class="mono seq-cell">{% if s %}<i class="spacer-dot" style="background:{{ spacer_color(s.seq) }}"></i>{{ s.seq }}{% endif %}</td></tr>{% endfor %}</tbody>
+  </table></div>
+  <p class="note">Consensus: <code class="mono">{{ a.consensus }}</code></p>
+</div>
+{% endif %}
+
+{% set note_kind = 'crispr' %}{% set note_id = a.locus_id %}{% include "_notes.html" %}
+{% endblock %}

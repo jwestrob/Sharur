@@ -130,3 +130,11 @@ def test_vog_families_use_the_vogdb_annotation_table(db, tmp_path, monkeypatch):
         assert client.get("/vog/VOG99999").status_code == 404
     finally:
         vog_map.load_vog_annotations.cache_clear()
+
+
+def test_scoped_search(client):
+    page = client.get("/search", params={"q": "abc in bin|1"})
+    assert page.status_code == 200 and "bin|1_c1_2" in page.text and "1 proteins in 1 of 1 genome" in page.text
+    clade = client.get("/search", params={"q": "transporter in Archaea"})
+    assert "bin|1_c1_2" in clade.text and "Search within domain" in clade.text
+    assert "No protein here matches" in client.get("/search", params={"q": "rubisco in bin|1"}).text

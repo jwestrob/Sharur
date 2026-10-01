@@ -39,6 +39,15 @@ def run_minced(fasta: Path, out_dir: Path) -> dict[str, Any]:
         raise RuntimeError(f"minced failed: {result.stderr}")
 
     arrays = parse_minced_gff(gff_out)
+    # keep MinCED's per-repeat table with each array so the database carries repeats and spacers
+    if txt_out.exists():
+        from sharur.crispr import parse_minced_text
+
+        tables = {(t["contig"], t["start"]): t for t in parse_minced_text(txt_out)}
+        for array in arrays:
+            table = tables.get((array["contig"], array["startCoordinate"]))
+            if table:
+                array["repeats"], array["spacers"] = table["repeats"], table["spacers"]
     return {"genome": fasta.stem, "arrays": arrays}
 
 

@@ -105,20 +105,35 @@
           return dir * x.localeCompare(y);
         });
         rows.forEach((r) => body.appendChild(r));
+        table.dispatchEvent(new Event("rows-sorted"));
       });
     });
     const filter = document.querySelector(`input[data-filter="${table.id}"]`);
     const counter = document.querySelector(`[data-count="${table.id}"]`);
+    const CAP = 40;
+    let expanded = false;
+    // long tables show their first rows; a toggle reveals the rest, and filtering always searches everything
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "show-all";
+    toggle.addEventListener("click", () => { expanded = !expanded; update(); });
+    (table.closest(".scroll") || table).insertAdjacentElement("afterend", toggle);
     function update() {
       const q = filter ? filter.value.trim().toLowerCase() : "";
-      let shown = 0;
+      let matches = 0, shown = 0;
       Array.from(body.rows).forEach((r) => {
         const hit = !q || r.textContent.toLowerCase().includes(q);
-        r.style.display = hit ? "" : "none";
-        if (hit) shown++;
+        if (hit) matches++;
+        const visible = hit && (expanded || matches <= CAP);
+        r.style.display = visible ? "" : "none";
+        if (visible) shown++;
       });
-      if (counter) counter.textContent = shown.toLocaleString() + " of " + body.rows.length.toLocaleString();
+      toggle.hidden = matches <= CAP;
+      toggle.textContent = expanded ? "Show the first " + CAP : "Show all " + matches.toLocaleString() + " rows";
+      if (counter) counter.textContent = (shown < matches ? shown.toLocaleString() + " shown · " : "") +
+        matches.toLocaleString() + " of " + body.rows.length.toLocaleString();
     }
+    table.addEventListener("rows-sorted", update);
     if (filter) filter.addEventListener("input", update);
     update();
   });
@@ -283,6 +298,7 @@
           tr.append(td1, td2, td3, td4, td5);
           body.append(tr);
         });
+        collectionTable.dispatchEvent(new Event("rows-sorted"));
         document.dispatchEvent(new Event("tables-changed"));
       });
   }
@@ -340,7 +356,8 @@
       const b = el("button", { type: "button", className: "tsv-btn", title: "Download the rows shown as TSV" }, "TSV");
       b.addEventListener("click", () => {
         const head = Array.from(table.tHead ? table.tHead.rows[0].cells : []).map((c) => c.textContent.trim());
-        const rows = Array.from(table.tBodies[0].rows).filter((r) => r.style.display !== "none")
+        const q = (document.querySelector(`input[data-filter="${table.id}"]`) || { value: "" }).value.trim().toLowerCase();
+        const rows = Array.from(table.tBodies[0].rows).filter((r) => !q || r.textContent.toLowerCase().includes(q))
           .map((r) => Array.from(r.cells).map((c) => (c.dataset.v ?? c.textContent).trim().replace(/\s+/g, " ")).join("\t"));
         const blob = new Blob([[head.join("\t")].concat(rows).join("\n") + "\n"], { type: "text/tab-separated-values" });
         const link = el("a", { href: URL.createObjectURL(blob), download: (document.title.split(" · ")[0] || "table").replace(/[^\w.-]+/g, "_") + ".tsv" });

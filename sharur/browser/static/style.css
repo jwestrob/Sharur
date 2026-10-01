@@ -462,3 +462,20 @@ pre.query { font: 12px/1.5 var(--mono); background: var(--surface-2); border: 1p
             padding: 10px 12px; white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; max-height: 260px;
             margin: 8px 0 0; }
 .check-result { margin-top: 6px; }
+
+/* ---------- CRISPR ---------- */
+:root { --cas: #f0a33a; --array: #45aec4; }
+.crispr-array, .crispr-context { width: 100%; min-width: 760px; height: auto; display: block; }
+.crispr-array .repeat { fill: var(--ink); stroke: var(--ink); stroke-width: .8; }
+.crispr-array .repeat.variant { fill: var(--surface); stroke: var(--warn); stroke-width: 1.6; }
+.crispr-context .array-block { fill: var(--array); opacity: .55; stroke: var(--array); stroke-width: 1; }
+.crispr-context .array-block.current { opacity: 1; stroke: var(--ink); stroke-width: 1.6; }
+.gene.cas { fill: var(--cas); stroke: var(--ink); stroke-width: 1.2; }
+.legend .lg-array { background: var(--array); }
+.legend .lg-cas { background: var(--cas); border: 1px solid var(--ink); }
+.legend .edge { color: var(--warn); }
+.crispr-table td.seq-cell { font-size: 12px; letter-spacing: .03em; white-space: nowrap; }
+.crispr-table mark { background: color-mix(in srgb, var(--warn) 35%, transparent); color: var(--ink); border-radius: 2px; }
+.spacer-dot { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 7px; vertical-align: 0; }
+.show-all { display: block; margin: 12px auto 0; height: 32px; }
+.show-all[hidden] { display: none; }

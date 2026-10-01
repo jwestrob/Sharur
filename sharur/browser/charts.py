@@ -18,7 +18,8 @@ CATEGORY_COLORS = {
     "mobile": "#c97aa4", "viral": "#e88fa8", "cazy": "#88a85a", "division": "#6f93c4", "structure": "#9aa3ad",
 }
 VOG_COLORS = {"Xr": "#9a7fe0", "Xs": "#45aec4", "Xh": "#4fb38d", "Xp": "#c97aa4", "Xu": "#9aa3ad"}
-OVERLAY_COLORS = {"prophage": "#c97aa4", "island": "#d9ae45", "defense": "#d9667e", "secretion": "#5b8def"}
+OVERLAY_COLORS = {"prophage": "#c97aa4", "island": "#d9ae45", "defense": "#d9667e", "secretion": "#5b8def",
+                  "crispr": "#45aec4"}
 
 
 def _e(value: Any) -> str:

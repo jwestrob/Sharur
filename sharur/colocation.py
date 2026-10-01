@@ -25,7 +25,6 @@ validate_defense_systems.py and validate_secretion_systems.py.
 
 from __future__ import annotations
 
-import functools
 import logging
 import re
 import time
@@ -1289,27 +1288,38 @@ def _solve_conflict_component(
 
     component_mask = sum(1 << index for index in component_indices)
 
-    @functools.cache
-    def solve(mask: int) -> tuple[int, ...]:
-        if not mask:
-            return ()
-
+    def pivot_of(mask: int) -> int:
         active = [index for index in component_indices if mask & (1 << index)]
-        pivot = max(
+        return max(
             active,
             key=lambda index: (
                 (conflict_masks[index] & mask).bit_count(),
                 -index,
             ),
         )
+
+    # Same memoized branching as the recursive form, driven by an explicit stack:
+    # large conflict components (thousands of candidates) would otherwise exceed
+    # Python's recursion limit.
+    memo: dict[int, tuple[int, ...]] = {0: ()}
+    stack = [component_mask]
+    while stack:
+        mask = stack[-1]
+        if mask in memo:
+            stack.pop()
+            continue
+        pivot = pivot_of(mask)
         pivot_bit = 1 << pivot
-
-        without_pivot = solve(mask & ~pivot_bit)
+        without_mask = mask & ~pivot_bit
         with_mask = mask & ~pivot_bit & ~conflict_masks[pivot]
-        with_pivot = tuple(sorted((pivot, *solve(with_mask))))
-        return _better_solution(hits, with_pivot, without_pivot)
-
-    return solve(component_mask)
+        pending = [m for m in (without_mask, with_mask) if m not in memo]
+        if pending:
+            stack.extend(pending)
+            continue
+        with_pivot = tuple(sorted((pivot, *memo[with_mask])))
+        memo[mask] = _better_solution(hits, with_pivot, memo[without_mask])
+        stack.pop()
+    return memo[component_mask]
 
 
 # ------------------------------------------------------------------ #

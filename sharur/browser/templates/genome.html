@@ -35,6 +35,9 @@
     {% if systems or loci %}
       {% for s in systems %}<a class="chip" href="{{ url('system', s.kind, s.type) }}"><i style="--dot:{{ '#e15759' if s.kind == 'defense' else '#4e79a7' }}"></i>{{ s.type }}{% if s.subtype and s.subtype != s.type %} · {{ s.subtype }}{% endif %}</a>{% endfor %}
       {% if loci %}<p class="note">{{ loci|selectattr('type', 'equalto', 'prophage')|list|length }} prophage regions · {{ loci|selectattr('type', 'equalto', 'island')|list|length }} islands</p>{% endif %}
+      {% set arrays = loci|selectattr('type', 'equalto', 'crispr')|list %}
+      {% if arrays %}<h2 style="margin-top:14px">CRISPR arrays <span class="hint">{{ arrays|length }}</span></h2>
+      {% for x in arrays %}<a class="chip" href="{{ url('crispr', x.locus_id) }}"><i style="--dot:{{ charts.OVERLAY_COLORS.crispr }}"></i>{{ short(x.contig_id) }}:{{ num(x.start) }} · {{ bp((x.end or 0) - (x.start or 0)) }}</a>{% endfor %}{% endif %}
     {% else %}<p class="empty">No validated systems or mobile-element calls.</p>{% endif %}
     {% if abundance %}
     <h2 style="margin-top:16px">Abundance</h2>

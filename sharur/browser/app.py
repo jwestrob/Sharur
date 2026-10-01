@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Red
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from sharur.browser import charts, routes_compare, routes_curation, routes_loci
+from sharur.browser import charts, routes_compare, routes_crispr, routes_curation, routes_loci, routes_search
 from sharur.browser.routes_insight import register as register_insight
 from sharur.browser.catalog import (
     BIOLOGICAL,
@@ -94,7 +94,7 @@ def _evalue(x: Any) -> str:
 
 
 def create_app(db_path: str | Path, *, token: str | None = None, background: bool = True,
-               notes_path: str | Path | None = None) -> FastAPI:
+               notes_path: str | Path | None = None, assemblies: list[str | Path] | None = None) -> FastAPI:
     """Browser over one dataset, opened read-only."""
     from sharur.abundance import default_path  # noqa: PLC0415
 
@@ -142,6 +142,7 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
     app.state.ctx = ctx
     routes_loci.register(app, ctx)
     routes_curation.register(app, ctx)
+    routes_crispr.register(app, ctx, [Path(p) for p in assemblies or []])
 
     @app.middleware("http")
     async def require_token(request: Request, call_next):
@@ -577,6 +578,18 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
         q = q.strip()
         if not q:
             return RedirectResponse("/", status_code=303)
+        scoped = routes_search.SCOPED.match(q)
+        if scoped:
+            scope = routes_search.resolve_scope(ctx, scoped.group(2))
+            if scope is not None:
+                kind, label, bins = scope
+                found = routes_search.scoped_search(ctx, scoped.group(1), bins)
+                scope_url = _url("genome", label) if kind == "genome" else (
+                    _url("taxa", kind, label) if kind in RANKS else None)
+                return render(request, "search_scoped.html", "home", q=q, term=scoped.group(1), scope_kind=kind,
+                              scope_label=label, scope_url=scope_url, scope_genomes=len(bins),
+                              other_ranks=[r for r in routes_search.same_name_ranks(ctx, label) if r[0] != kind]
+                              if kind in RANKS else [], **found)
         exact = _exact(q)
         if exact:
             return RedirectResponse(exact, status_code=303)

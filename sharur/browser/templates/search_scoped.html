@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}{{ term }} in {{ scope_label }}{% endblock %}
+{% block content %}
+<h1><span class="rank">Search within {{ scope_kind }}</span>“{{ term }}” in {% if scope_url %}<a href="{{ scope_url }}">{{ scope_label }}</a>{% else %}{{ scope_label }}{% endif %}</h1>
+<p class="lede">{{ num(total) }} proteins in {{ num(genomes) }} of {{ num(scope_genomes) }} genome{{ 's' if scope_genomes != 1 }} match{% if labels %} the labels {{ labels|join(', ') }} or{% endif %} annotation names, accessions and descriptions containing “{{ term }}”.</p>
+{% if other_ranks %}<p class="note" style="margin-top:-8px">“{{ scope_label }}” also names a {% for r, n in other_ranks %}{{ r }} of {{ n }} genome{{ 's' if n != 1 }} (<a href="{{ url('taxa', r, scope_label) }}">open</a>){% if not loop.last %}, {% endif %}{% endfor %}. Results above cover the {{ scope_kind }}.</p>{% endif %}
+<div class="panel">
+  <div class="table-tools"><input data-filter="scoped" placeholder="Filter results…"><span class="count" data-count="scoped"></span></div>
+  <div class="scroll"><table id="scoped" data-table>
+    <thead><tr><th data-sort="text">Protein</th><th data-sort="text">Genome</th><th data-sort="num" class="num">Length</th><th data-sort="text">Matched</th></tr></thead>
+    <tbody>{% for r in rows %}<tr>
+      <td><a class="mono" href="{{ url('protein', r.protein_id) }}" title="{{ r.protein_id }}">{{ short(r.protein_id) }}</a><div class="sub mono">{{ short(r.contig or '') }}:{{ num(r.start) }}</div></td>
+      <td><a href="{{ url('genome', r.bin_id) }}" title="{{ r.bin_id }}">{{ gshort(r.bin_id) }}</a><div class="sub">{{ r.lineage }}</div></td>
+      <td class="num">{{ num(r.length) }} aa</td>
+      <td>{% for l in r.labels %}<span class="chip">{{ l }}</span>{% endfor %}{% for h in r.hits %}<div class="sub" style="white-space:normal">{{ h }}</div>{% endfor %}</td></tr>
+    {% else %}<tr><td colspan="4" class="empty">No protein here matches “{{ term }}”. Try a broader word, a Pfam or KEGG name, or check the clade spelling.</td></tr>{% endfor %}</tbody>
+  </table></div>
+</div>
+<p class="note">Search tip: “<i>term</i> in <i>genome or clade</i>” works anywhere in the search box — e.g. “hydrogenase in Omnitrophia”, “PF00092 in JACQLI01”.</p>
+{% endblock %}

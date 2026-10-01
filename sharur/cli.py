@@ -1401,6 +1401,8 @@ def browse_command(
     share: bool = typer.Option(False, "--share", help="Require a random access token (printed in the link)."),
     notes: Path | None = typer.Option(None, "--notes", help="Notes and flags database "
                                       "(default: browser_notes.sqlite beside the dataset)."),
+    assemblies: list[Path] = typer.Option([], "--assemblies", help="Directory of genome FASTAs named BIN_ID.fna "
+                                          "(for CRISPR repeats and spacers); repeatable. Dataset folders are searched too."),
 ):
     """Browse a dataset in a web browser: protein cards, neighborhoods, evidence, genomes, searches."""
     import secrets  # noqa: PLC0415
@@ -1418,7 +1420,8 @@ def browse_command(
     typer.echo(f"Sharur browser: http://{shown_host}:{port}/" + (f"?token={token}" if token else ""))
     if not loopback and not share:
         typer.echo("Binding beyond this machine: access requires the token in the link above.")
-    uvicorn.run(create_app(db, token=token, notes_path=notes), host=host, port=port, log_level="warning")
+    uvicorn.run(create_app(db, token=token, notes_path=notes, assemblies=assemblies), host=host, port=port,
+                log_level="warning")
 
 
 @app.command(name="describe")

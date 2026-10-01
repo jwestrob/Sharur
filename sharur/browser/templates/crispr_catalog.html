@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% from "_macros.html" import bar, prevalence_table, genome_link %}
+{% block title %}CRISPR arrays{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="/systems">Systems</a></div>
+<h1>CRISPR arrays</h1>
+<p class="lede">{{ num(arrays|length) }} arrays in {{ num(genomes) }} genomes. Open one for its repeats and spacers, recovered from the assembly, and the genes around it.{% if not assemblies %} <span class="tag warn">no assemblies found</span> Repeat and spacer detail needs the genome FASTAs.{% endif %}</p>
+<div class="grid g-side">
+  <div class="panel"><h2>Across the tree <span class="hint">share of genomes with at least one array</span></h2>{{ prevalence_table(prevalence, rank, '/crispr') }}</div>
+  <div class="panel">
+    <h2>Most arrays</h2>
+    <table><tbody>{% for b, n in per_genome %}<tr><td>{{ genome_link(b) }}<div class="sub">{{ catalog.by_bin[b].label if b in catalog.by_bin else '' }}</div></td><td class="num">{{ n }}</td></tr>{% endfor %}</tbody></table>
+    {% if shared %}<h2 style="margin-top:16px">Shared repeats <span class="hint">same consensus in several arrays</span></h2>
+    <table><tbody>{% for rep, n in shared if n > 1 %}<tr><td class="mono count" title="Repeat consensus, {{ rep|length }} bp">{{ rep|length }} bp repeat · <span class="ellip" style="max-width:160px">{{ rep[:12] }}…</span></td><td class="num">{{ n }} arrays</td></tr>{% endfor %}</tbody></table>{% endif %}
+  </div>
+</div>
+<div class="panel">
+  <h2>Arrays</h2>
+  <div class="table-tools"><input data-filter="arrays" placeholder="Filter by genome, lineage or contig…"><span class="count" data-count="arrays"></span></div>
+  <div class="scroll"><table id="arrays" data-table>
+    <thead><tr><th data-sort="text">Array</th><th data-sort="text">Genome</th><th data-sort="text">Lineage</th><th data-sort="num" class="num">Span</th><th data-sort="num" class="num">Repeat</th><th data-sort="num" class="num">Approx. spacers</th></tr></thead>
+    <tbody>{% for x in arrays %}<tr>
+      <td><a href="{{ url('crispr', x.locus_id) }}">{{ x.locus_id.split('_')[-1] }}</a><div class="sub mono">{{ short(x.contig_id) }}:{{ num(x.start) }}</div></td>
+      <td>{{ genome_link(x.bin_id or '') }}</td><td class="count">{{ x.lineage }}</td>
+      <td class="num" data-v="{{ x.length }}">{{ bp(x.length) }}</td>
+      <td class="num">{{ x.consensus|length or '–' }} bp</td>
+      <td class="num" data-v="{{ ((x.length - x.consensus|length) / (x.consensus|length + 35))|round|int if x.consensus else 0 }}">{% if x.consensus %}~{{ ((x.length - x.consensus|length) / (x.consensus|length + 35))|round|int }}{% else %}–{% endif %}</td></tr>{% endfor %}</tbody>
+  </table></div>
+  <p class="note">Approximate spacer counts assume ~35 bp spacers; each array page counts them exactly from the assembly.</p>
+</div>
+{% endblock %}
