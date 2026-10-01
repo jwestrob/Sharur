@@ -471,10 +471,14 @@
     });
     container.prepend(bar);
   }
-  document.querySelectorAll("svg.track, svg.hood, svg.contig-track, svg.hist, svg.strip, svg.genome-ring, svg.cc-spectrum, svg.tree-fig").forEach((svg) => {
-    const panel = svg.closest(".panel");
-    if (panel && !panel.querySelector(":scope > .fig-export")) addExport(panel, () => inlineCopy(svg), svg.getAttribute("aria-label") || "figure");
-  });
+  function attachExports(root) {
+    root.querySelectorAll("svg.track, svg.hood, svg.contig-track, svg.hist, svg.strip, svg.genome-ring, svg.cc-spectrum, svg.tree-fig, svg.seqp-fig").forEach((svg) => {
+      const panel = svg.closest(".panel");
+      if (panel && !panel.querySelector(":scope > .fig-export")) addExport(panel, () => inlineCopy(svg), svg.getAttribute("aria-label") || "figure");
+    });
+  }
+  attachExports(document);
+  window.sharurAttachExports = attachExports;   // for panels fetched after the page loads
   document.querySelectorAll(".stack").forEach((stack) => {
     if (stack.querySelector(".stack-item")) addExport(stack.closest(".panel"), () => stackSvg(stack), "loci");
   });
