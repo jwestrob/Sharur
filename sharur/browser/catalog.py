@@ -341,8 +341,9 @@ def load_catalog(store) -> Catalog:
         catalog.map_state = map_status(store).state if "predicate_provenance" in tables else "unstamped"
     except Exception:  # pragma: no cover - provenance is advisory here
         catalog.map_state = "unknown"
-    catalog.sources = [{"source": s, "proteins": n} for s, n in store.execute(
-        "SELECT LOWER(source), COUNT(DISTINCT protein_id) FROM annotations GROUP BY 1 ORDER BY 2 DESC")]
+    catalog.sources = [{"source": s, "proteins": n, "genomes": g} for s, n, g in store.execute(
+        """SELECT LOWER(a.source), COUNT(DISTINCT a.protein_id), COUNT(DISTINCT p.bin_id)
+           FROM annotations a JOIN proteins p USING (protein_id) GROUP BY 1 ORDER BY 2 DESC""")]
     logger.info("catalog loaded in %.1fs", time.time() - t0)
     return catalog
 
