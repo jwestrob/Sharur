@@ -23,7 +23,7 @@ def _author(request: Request) -> str:
 def entity_url(ctx, kind: str, entity: str) -> str:
     if kind == "system":
         call = ctx.system_by_id.get(entity)
-        return ctx.url("system", call["kind"], call["type"]) + "/loci" if call else "#"
+        return ctx.url("call", entity) if call else "#"
     if kind == "clade":
         rank, _, name = entity.partition(":")
         return ctx.url("taxa", rank, name)

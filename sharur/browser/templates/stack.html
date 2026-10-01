@@ -24,7 +24,7 @@
   {% for row, svg in rows %}
     <div class="stack-item" data-entity="{{ 'system' if mode == 'system' else 'protein' }}" data-id="{{ row.system_id if mode == 'system' else row.anchor }}">
       <div class="stack-label">
-        <a href="{{ url('genome', row.bin_id) }}" title="{{ row.bin_id }}">{{ gshort(row.bin_id) }}</a>
+        <a href="{{ url('call', row.system_id) if mode == 'system' and row.system_id else url('genome', row.bin_id) }}" title="{{ 'Open this call in its genomic context' if mode == 'system' else row.bin_id }}">{{ gshort(row.bin_id) }}</a>
         <span class="sub">{{ row.genome_label }}{% if row.title %} · {{ row.title }}{% endif %}{% if row.flipped %} · reversed{% endif %}</span>
       </div>
       <div class="stack-svg">{{ svg }}</div>

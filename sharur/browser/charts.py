@@ -131,8 +131,12 @@ def contig_overview(length: int, start: int, end: int, genes: list[tuple[int, in
 
 
 def contig_track(genes: list[dict[str, Any]], overlays: list[dict[str, Any]], start: int, end: int,
-                 width: int = 1200) -> Markup:
-    """Genes in the window on two strand lanes, with feature bands above."""
+                 width: int = 1200, *, contig_start: bool = False, contig_end: bool = False) -> Markup:
+    """Genes in the window on two strand lanes, with feature bands above.
+
+    Genes marked ``member`` are outlined and labeled with their ``profile``;
+    ``contig_start``/``contig_end`` draw dashed markers where the window meets a contig end.
+    """
     span = max(1, end - start + 1)
     scale = (width - 20) / span
     lanes: list[int] = []
@@ -173,15 +177,19 @@ def contig_track(genes: list[dict[str, Any]], overlays: list[dict[str, Any]], st
             points = f"{x1:.1f},{y - h} {x2 - head:.1f},{y - h} {x2:.1f},{y} {x2 - head:.1f},{y + h} {x1:.1f},{y + h}"
         else:
             points = f"{x2:.1f},{y - h} {x1 + head:.1f},{y - h} {x1:.1f},{y} {x1 + head:.1f},{y + h} {x2:.1f},{y + h}"
-        cls = "gene" if g.get("annotation") else "gene dark"
+        cls = ("gene" if g.get("annotation") or g.get("member") else "gene dark") + (" member" if g.get("member") else "")
         fill = f' style="fill:{g["color"]}"' if g.get("color") else ""
-        label = (g.get("annotation") or "").split(" (")[0]
+        label = g.get("profile") if g.get("member") and g.get("profile") else (g.get("annotation") or "").split(" (")[0]
         text = ""
         if label and x2 - x1 > 6.2 * len(label) + 12:
             text = f'<text x="{(x1 + x2) / 2:.1f}" y="{y + 4}" class="gene-label">{_e(label)}</text>'
         parts.append(f'<a href="/protein/{quote(g["protein_id"], safe="")}"><g><title>{_e(label or "no annotation")}'
                      f' · {g["length_aa"]} aa · {g["start"]:,}–{g["end"]:,} ({g["strand"]})</title>'
                      f'<polygon class="{cls}" points="{points}"{fill}/>{text}</g></a>')
+    if contig_start:
+        parts.append(f'<line x1="8" y1="{axis_y + 14}" x2="8" y2="{axis_y + 98}" class="contig-end"/>')
+    if contig_end:
+        parts.append(f'<line x1="{width - 12}" y1="{axis_y + 14}" x2="{width - 12}" y2="{axis_y + 98}" class="contig-end"/>')
     height = axis_y + 100
     strands = (f'<text x="{width - 6}" y="{axis_y + 26}" class="axis" text-anchor="end">+ strand</text>'
                f'<text x="{width - 6}" y="{axis_y + 98}" class="axis" text-anchor="end">− strand</text>')
