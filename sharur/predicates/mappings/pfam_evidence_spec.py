@@ -450,9 +450,11 @@ d("sensor_kinase", ["GO:0000155", "GO:0004673"], [r"(sensor|histidine) kinase|se
 
 d("two_component", ["GO:0000160", "GO:0000155"], [r"two[- ]component|response regulator|histidine kinase|HisKA|Response_reg|receiver domain|phosphotransfer"])
 
-d("mcr_complex", ['GO:0050524', 'GO:0015948'], ['methyl[- ]coenzyme M reductase', 'MCR_|MCRA\\b'])
+# Methyl-CoM reductase families are MCR_alpha/_beta/_gamma...; Pfam "MCRA" is the unrelated
+# myosin-cross-reactive-antigen (oleate hydratase) family, so the name alone never implies MCR.
+d("mcr_complex", ['GO:0050524', 'GO:0015948'], ['methyl[- ]coenzyme M reductase', 'MCR_'])
 
-d("methanogenesis", ['GO:0015948', 'GO:0050524', 'GO:0019386', 'GO:0019385', 'GO:0019387'], ['methanogen|methyl[- ]coenzyme M|coenzyme M|heterodisulfide|methanopterin|methanofuran|formylmethanofuran|trimethylamine|methylamine', 'MCR_|MCRA\\b|Mtr[A-H]|MtrH|Fmd|Fwd|Mtd\\b|Mch\\b|FTR\\b|Hdr[A-E]|Frh[ABG]|Mvh[ADG]|Eha\\b|Ehb\\b|MtaA|MtaB|MttB|MtbA|MtmB|CdhC|CdhD|CO_dh'])
+d("methanogenesis", ['GO:0015948', 'GO:0050524', 'GO:0019386', 'GO:0019385', 'GO:0019387'], ['methanogen|methyl[- ]coenzyme M|coenzyme M|heterodisulfide|methanopterin|methanofuran|formylmethanofuran|trimethylamine|methylamine', 'MCR_|Mtr[A-H]|MtrH|Fmd|Fwd|Mtd\\b|Mch\\b|FTR\\b|Hdr[A-E]|Frh[ABG]|Mvh[ADG]|Eha\\b|Ehb\\b|MtaA|MtaB|MttB|MtbA|MtmB|CdhC|CdhD|CO_dh'])
 
 d("nickel_binding", ['GO:0016151'], ['nickel|urease|NiFe', 'Ni_|HypA|HypB|UreE|UreG|NikA|NikR|MCR_|CO_dh|CdhC|Ni-'])
 

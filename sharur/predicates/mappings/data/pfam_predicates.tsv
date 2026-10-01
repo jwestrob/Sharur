@@ -3380,7 +3380,7 @@ PF06092	DUF943	hypothetical,membrane	hypothetical=text:DUF9;membrane=text:membra
 PF06093	Spt4	metal_binding,transcription,zinc_binding,zinc_finger	metal_binding=text:zinc;transcription=text:Spt4;zinc_binding=text:zinc;zinc_finger=text:zinc finger
 PF06094	GGACT	transferase	transferase=text:transferase
 PF06097	DUF945	hypothetical	hypothetical=text:unknown function
-PF06100	MCRA	dehydratase,fad_binding,lyase,mcr_complex,methanogenesis	dehydratase=swissprot:5/5 single-domain 5/5;fad_binding=swissprot:5/5 single-domain 5/5;lyase=swissprot:5/5 single-domain 5/5;mcr_complex=text:MCRA;methanogenesis=text:MCRA
+PF06100	MCRA	dehydratase,fad_binding,lyase	dehydratase=swissprot:5/5 single-domain 5/5;fad_binding=swissprot:5/5 single-domain 5/5;lyase=swissprot:5/5 single-domain 5/5
 PF06103	DUF948	hypothetical	hypothetical=text:unknown function
 PF06107	DUF951	hypothetical	hypothetical=text:unknown function
 PF06108	DUF952	hypothetical	hypothetical=text:unknown function

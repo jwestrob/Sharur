@@ -2139,7 +2139,6 @@ PF02505	methanogenesis,methyl_coenzyme_m_reductase	MCR_D (methyl-coenzyme M redu
 PF02783	methanogenesis,methyl_coenzyme_m_reductase	MCR_beta_N (methyl-coenzyme M reductase beta N-terminal)
 PF02745	methanogenesis,methyl_coenzyme_m_reductase	MCR_alpha_N (methyl-coenzyme M reductase alpha N-terminal)
 PF10117	methanogenesis,methyl_coenzyme_m_reductase	McrBC (methyl-coenzyme M reductase B/C fusion)
-PF06100	methanogenesis,methyl_coenzyme_m_reductase	MCRA (methyl-coenzyme M reductase alpha)
 PF01996	f420_dependent,ligase	F420_ligase (F420 biosynthesis)
 PF04075	f420_dependent,reductase,quinone_metabolism	F420H2_quin_red (F420H2:quinone oxidoreductase)
 PF01314	oxidoreductase,pyruvate_metabolism,ferredoxin_dependent	AFOR_C (2-oxoacid ferredoxin oxidoreductase C-terminal)
