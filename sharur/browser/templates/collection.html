@@ -7,6 +7,8 @@
   <div class="table-tools">
     <form method="post" action="/api/fasta" id="fasta-form"><input type="hidden" name="ids"><button type="submit">Download protein FASTA</button></form>
     <button type="button" id="copy-prompt" data-label="Copy agent prompt">Copy agent prompt</button>
+    <button type="button" id="collection-matrix" hidden title="Open the collected genomes as one group in the presence/absence matrix">Genome matrix</button>
+    <button type="button" id="collection-compare" hidden title="Compare the collected genomes with another genome or clade">Compare with…</button>
     <button type="button" id="clear-collection">Clear</button>
     <span class="count" id="collection-count" style="margin-left:auto"></span>
   </div>

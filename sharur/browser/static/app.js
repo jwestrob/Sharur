@@ -281,6 +281,12 @@
       catch (err) { prompt.classList.remove("visually-hidden"); prompt.select(); const ok = document.execCommand("copy"); prompt.classList.add("visually-hidden"); b.textContent = ok ? "Copied ✓" : "Copy failed"; }
       setTimeout(() => { b.textContent = b.dataset.label; }, 1600);
     });
+    // collected genomes as one group for the matrix or a comparison
+    const asGroup = (go) => fetch("/api/selection", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ genomes: c.genome }) }).then((r) => r.json()).then((d) => { if (d.token) go(encodeURIComponent(d.token)); });
+    const mx = document.getElementById("collection-matrix"), cmp = document.getElementById("collection-compare");
+    if (mx && c.genome.length) { mx.hidden = false; mx.addEventListener("click", () => asGroup((t) => { location.href = "/matrix?a=" + t; })); }
+    if (cmp && c.genome.length > 1) { cmp.hidden = false; cmp.addEventListener("click", () => asGroup((t) => { location.href = "/compare?a=" + t; })); }
     document.getElementById("clear-collection").addEventListener("click", () => { store.set("sharur_collection", { protein: [], genome: [] }); location.reload(); });
     if (total) fetch("/api/collection", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ proteins: c.protein, genomes: c.genome }) })
       .then((r) => r.json()).then((rows) => {
