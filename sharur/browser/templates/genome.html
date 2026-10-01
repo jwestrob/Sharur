@@ -19,6 +19,19 @@
   <p class="note">A genome in a few long pieces reads as a handful of wide blocks; a fragmented one as a fine comb, where genes near contig ends may have lost their neighbors. <a href="{{ url('genome', g.bin_id) }}/contigs">Browse contigs →</a></p>
 </div>
 
+{% set ring = genome_ring(g) %}{% if ring %}
+<div class="panel ring-panel">
+  <h2>Genome ring <span class="hint">contigs around the circle, longest first · genes on each strand by function · marked features inside · hover or click</span></h2>
+  <div class="ring-wrap">{{ ring[0] }}
+    <div class="ring-legend">
+      <div class="legend"><span><i class="ring-key-contig"></i>contig</span><span><i class="ring-key-gene"></i>no category</span>{{ ring[1] }}</div>
+      {% if ring[2] %}<div class="legend">{{ ring[2] }}</div>{% endif %}
+      <p class="note">Outer gene ring: forward strand; inner: reverse strand. Contig lengths as recorded in the dataset.</p>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <div class="grid g-side">
   <div class="panel">
     <h2>Function profile <span class="hint">share of proteins per category · marker = dataset average</span></h2>

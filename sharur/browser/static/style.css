@@ -592,3 +592,20 @@ svg.mini-fill { width: 100%; }
 .cc-stats { margin: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .cc-lists { margin-top: 14px; }
 .cc-lists h3 { font-size: 13.5px; margin: 0 0 8px; }
+
+/* genome ring */
+.ring-wrap { display: grid; grid-template-columns: minmax(0, 560px) minmax(0, 1fr); gap: 22px; align-items: center; }
+@media (max-width: 900px) { .ring-wrap { grid-template-columns: minmax(0, 1fr); } }
+svg.genome-ring { width: 100%; height: auto; max-width: 560px; }
+.ring-contig { fill: var(--ink-3); opacity: .55; }
+.ring-contig.alt { opacity: .3; }
+.ring-contig:hover { opacity: .9; }
+.ring-gene { fill: var(--gene); }
+.ring-mark { stroke: var(--surface); stroke-width: .5; }
+.ring-mark:hover { filter: brightness(1.2); }
+.ring-guide { fill: none; stroke: var(--line); stroke-dasharray: 2 4; }
+.ring-title { font: 600 20px var(--sans); fill: var(--ink); text-anchor: middle; }
+.ring-sub { font: 13px var(--sans); fill: var(--ink-3); text-anchor: middle; }
+.ring-legend .legend { flex-wrap: wrap; margin-bottom: 10px; }
+.ring-key-contig { background: var(--ink-3); opacity: .55; }
+.ring-key-gene { background: var(--gene); }
