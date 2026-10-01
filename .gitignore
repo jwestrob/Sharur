@@ -160,3 +160,6 @@ mmcif/
 
 # MkDocs build output
 site/
+
+# agent worktrees
+.claude/worktrees/

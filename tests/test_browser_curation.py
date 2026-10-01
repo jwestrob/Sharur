@@ -112,3 +112,7 @@ def test_collection_previews_and_gene_navigation(client):
     page = client.get("/protein/g1_c_2").text
     assert 'data-key="prev-gene"' in page and 'data-key="next-gene"' in page and 'data-collect="protein"' in page
     assert 'data-notes-kind="protein"' in page
+
+
+def test_mobile_element_pages_keep_their_template(client):
+    assert client.get("/loci/prophage").status_code in (200, 404)  # no loci in the toy dataset

@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} · loci{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="{{ back }}">{{ title }}</a></div>
+<h1><span class="rank">{% if mode == 'system' %}{{ kind }} system · every call as its locus{% else %}{{ kind }} · neighborhoods{% endif %}</span>{{ title }}</h1>
+<p class="actions">{% if mode == 'system' %}<a class="btn" href="/triage?source=system&kind={{ kind }}&id={{ quote(title, safe='') }}&subtype={{ quote(subtype) }}">Triage these calls →</a>{% else %}<a class="btn" href="/triage?source=family&kind={{ kind }}&id={{ quote(ident, safe='') }}">Triage carriers →</a>{% endif %}</p>
+<p class="lede">{% if mode == 'system' %}{{ num(total) }} calls{% if subtype %} of subtype {{ subtype }}{% endif %}, aligned on {% if core %}the <b>{{ core }}</b> component{% else %}the first system gene{% endif %} and turned so it points right. System genes are outlined; flanking genes take their family's color, the same in every row.
+{% else %}{{ num(shown) }} of {{ num(total) }} carriers from {{ num(genomes) }} genomes, one genome at a time, aligned on the carrier gene (outlined) and turned so it points right. Shared colors mark the same family across rows.{% endif %}</p>
+
+<div class="panel">
+  <form class="table-tools" method="get" action="{{ base }}">
+    {% if mode == 'system' %}
+    <select name="subtype" onchange="this.form.submit()"><option value="">All subtypes</option>{% for s, n in subtypes %}<option value="{{ s if s != '–' else '' }}" {{ 'selected' if s == subtype }}>{{ s }} ({{ n }})</option>{% endfor %}</select>
+    {% else %}
+    <select name="limit" onchange="this.form.submit()">{% for n in [15, 30, 60, 100] %}<option value="{{ n }}" {{ 'selected' if n == limit }}>{{ n }} loci</option>{% endfor %}</select>
+    {% endif %}
+    <select name="flank" onchange="this.form.submit()">{% for n in [2, 3, 6, 10] %}<option value="{{ n }}" {{ 'selected' if n == flank }}>±{{ n }} genes</option>{% endfor %}</select>
+    <input type="hidden" name="rank" value="{{ rank }}"><input type="hidden" name="clade" value="{{ clade }}">
+    {% if clade %}<span class="chip">{{ rank }}: {{ clade }} <a href="{{ base }}?flank={{ flank }}" title="Clear">✕</a></span>{% endif %}
+    <span class="count" style="margin-left:auto">{% if mode == 'system' %}page {{ page }} of {{ pages }}{% endif %}</span>
+  </form>
+  <div class="legend" style="margin:0 0 12px">{% for key, color, n in legend %}<span><i style="background:{{ color }}"></i>{{ key }} <span class="count">{{ n }}</span></span>{% endfor %}<span><i style="background:var(--gene-dark);border:1px dashed var(--ink-3)"></i>no annotation</span><span><i style="background:transparent;border-left:2px dashed var(--warn)"></i>contig end</span></div>
+  <div class="stack">
+  {% for row, svg in rows %}
+    <div class="stack-item" data-entity="{{ 'system' if mode == 'system' else 'protein' }}" data-id="{{ row.system_id if mode == 'system' else row.anchor }}">
+      <div class="stack-label">
+        <a href="{{ url('genome', row.bin_id) }}" title="{{ row.bin_id }}">{{ gshort(row.bin_id) }}</a>
+        <span class="sub">{{ row.genome_label }}{% if row.title %} · {{ row.title }}{% endif %}{% if row.flipped %} · reversed{% endif %}</span>
+      </div>
+      <div class="stack-svg">{{ svg }}</div>
+    </div>
+  {% else %}<p class="empty">Nothing to draw.</p>{% endfor %}
+  </div>
+  {% if pages > 1 %}<div class="pager">{% if page > 1 %}<a class="btn" href="{{ base }}?subtype={{ quote(subtype) }}&flank={{ flank }}&rank={{ rank }}&clade={{ quote(clade) }}&page={{ page - 1 }}">← Previous</a>{% endif %}<span class="count">Page {{ page }} of {{ pages }}</span>{% if page < pages %}<a class="btn" href="{{ base }}?subtype={{ quote(subtype) }}&flank={{ flank }}&rank={{ rank }}&clade={{ quote(clade) }}&page={{ page + 1 }}">Next →</a>{% endif %}</div>{% endif %}
+</div>
+{% endblock %}

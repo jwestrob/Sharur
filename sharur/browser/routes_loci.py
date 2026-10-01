@@ -188,7 +188,7 @@ def register(app, ctx) -> None:
         rows = build_rows(ctx, anchors, flank)
         svgs, legend = render_stack(rows)
         subtypes = Counter(s["subtype"] or "–" for s in calls).most_common()
-        return ctx.render(request, "loci.html", "systems", mode="system", kind=kind, title=system_type,
+        return ctx.render(request, "stack.html", "systems", mode="system", kind=kind, title=system_type,
                           rows=list(zip(rows, svgs)), legend=legend, total=len(selected), page=page, pages=pages,
                           subtype=subtype, subtypes=subtypes, rank=rank, clade=clade, flank=flank, core=core,
                           base=ctx.url("system", kind, system_type) + "/loci", back=ctx.url("system", kind, system_type))
@@ -240,7 +240,7 @@ def register(app, ctx) -> None:
                             "title": "", "genome_label": g.label if g else ""})
         built = build_rows(ctx, anchors, flank)
         svgs, legend = render_stack(built, member_label="carrier")
-        return ctx.render(request, "loci.html", "domains" if kind in ("domain", "vog") else "functions",
+        return ctx.render(request, "stack.html", "domains" if kind in ("domain", "vog") else "functions",
                           mode="family", kind=kind, ident=ident, title=name, rows=list(zip(built, svgs)),
                           legend=legend, total=len(rows), shown=len(built), genomes=len(by_genome), rank=rank,
                           clade=clade, flank=flank, limit=limit, base=ctx.url("stack", kind, ident), back=back,
