@@ -22,7 +22,7 @@
   <label><span>Min. completeness %</span><input type="number" name="min_completeness" value="{{ '%g' % min_completeness }}" min="0" max="100" step="5"></label>
   <label class="wide"><span>KEGG module <i class="count">KOs in step order</i></span><input type="text" name="module" value="{{ module }}" placeholder="M00001"></label>
   <label class="wide"><span>Or these features <i class="count">IDs, comma-separated</i></span><input type="text" name="features" value="{{ features }}" placeholder="K00001, K00002 · PF00005 · defense:CBASS"></label>
-  <div class="wide matrix-submit"><button type="submit">Show matrix</button>{% if payload %}<a class="btn" href="/matrix.tsv?{{ qs }}&order={{ order }}">Download TSV</a>{% endif %}</div>
+  <div class="wide matrix-submit"><button type="submit">Show matrix</button>{% if payload %}<a class="btn" href="/matrix.tsv?{{ qs }}&order={{ order }}">Download TSV</a>{% set tree_root = groups[0].key if groups and groups[0].rank else '' %}{% set tree_tokens = [] %}{% for f in result.features[:8] %}{% set _ = tree_tokens.append(kind ~ ':' ~ f.id) %}{% endfor %}<a class="btn" href="/tree?root={{ quote(tree_root, safe='') }}&features={{ quote(tree_tokens|join(','), safe=',:') }}" title="The first eight features as rings on the taxonomy tree">Map on tree</a>{% endif %}</div>
 </form>
 
 {% if message %}<div class="panel"><p class="empty">{{ message }}</p></div>{% endif %}
@@ -60,7 +60,7 @@
       {% if result.tested %}<th title="If every genome carried the feature and reported it with probability equal to its completeness">Absences vs incompleteness</th>{% endif %}
     </tr></thead>
     <tbody>{% for f in result.features %}<tr>
-      <td class="mono"><a href="{{ feature_url(f.id) }}">{{ f.id }}</a>{% set ext = external_url(kind, f.id) %}{% if ext %} <a class="ext" href="{{ ext }}" target="_blank" rel="noopener">↗</a>{% endif %}{% if f.get('step') is not none %} <span class="count">step {{ f.step + 1 }}</span>{% endif %}</td>
+      <td class="mono"><a href="{{ feature_url(f.id) }}">{{ f.id }}</a>{% set ext = external_url(kind, f.id) %}{% if ext %} <a class="ext" href="{{ ext }}" target="_blank" rel="noopener">↗</a>{% endif %} <a class="ext" href="/tree?features={{ quote(kind ~ ':' ~ f.id, safe=':') }}" title="Map on the taxonomy tree">⌾</a>{% if f.get('step') is not none %} <span class="count">step {{ f.step + 1 }}</span>{% endif %}</td>
       <td>{{ f.name }}</td>
       {% for e in f.groups %}<td style="min-width:120px">{{ bar(e.share) }}<span class="count">{{ e.carriers }}/{{ e.n }}</span></td><td class="num count">{{ '%g' % e.median if e.median is not none else '–' }}</td>{% endfor %}
       {% if two %}<td class="num">{{ '%+.0f' % (f.delta * 100) }} pts</td><td class="num count">{{ pval(f.fisher_p) }}</td><td class="num count">{{ pval(f.fisher_q) }}</td>{% endif %}

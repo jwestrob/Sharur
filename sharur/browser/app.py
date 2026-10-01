@@ -25,6 +25,7 @@ from sharur.browser import (
     routes_loci,
     routes_matrix,
     routes_search,
+    routes_tree,
     routes_systems,
 )
 from sharur.browser.routes_insight import register as register_insight
@@ -975,6 +976,7 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
     ctx.background = background
     routes_compare.register(app, ctx)
     routes_matrix.register(app, ctx)
+    routes_tree.register(app, ctx)
     return app
 
 

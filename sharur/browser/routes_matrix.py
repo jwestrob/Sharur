@@ -621,6 +621,7 @@ def _tsv(result: dict[str, Any]) -> str:
 def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     """Add /matrix and /matrix.tsv. ``ctx``: store, lock, catalog, render, url, ko_names, cctyper_systems."""
     sets = FeatureSets(ctx)
+    ctx.feature_sets = sets   # shared with the taxonomy tree
 
     def compute(a: str, b: str, kind: str, features: str, module: str, pick: str, n: int, order: str,
                 min_completeness: float) -> tuple[list[Group], dict[str, Any] | None, str]:
