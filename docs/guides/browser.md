@@ -31,6 +31,25 @@ The search box suggests taxa, functions, pathways, systems, genomes and proteins
 - **Structures** appear for proteins with a model in `structures/`: either a file named after the protein ID (characters outside `A-Z a-z 0-9 _ . -` written as `_`), or a JSON result file whose records name both `protein_id` and `pdb_path`, as the structure and Foldseek workflows write. The viewer colors by pLDDT, lists the Foldseek matches recorded with the model, and labels models shorter than the protein as partial.
 - **Agent findings** from `findings.jsonl` (in the dataset directory or one level below) appear on the proteins, genomes, clades and system types they reference, and under **Findings** in the left rail. A finding's page reruns its verification queries against the database: a single read-only SELECT each, with file-reading functions refused and a 10-second timeout. Python and shell checks are listed and skipped.
 
+## Loci side by side
+
+Every system type has a **View every call as its locus** page: each call drawn with a few flanking genes, aligned on the system's core component and turned so it points right, with system genes outlined. Domain, VOG and function pages have **Stack neighborhoods**, the same view for every carrier of the family, sampled one genome at a time. Genes take their family's color in every row, so conserved neighborhoods read as vertical bands and the odd ones out stand apart. Filter by subtype or clade and widen the flank as needed.
+
+## Curation
+
+Flag any protein, genome, system call, family, pathway or clade as **verified**, **suspicious**, **interesting** or **follow up**, and add free-text notes. Set your name once (left rail, "Curating as"); every flag and note records its author and time, and deletions keep the history. Notes live in `browser_notes.sqlite` beside the dataset (or `--notes PATH`), apart from the evidence-backed labels. **Flags & notes** lists them with filters and exports them as TSV or JSONL.
+
+**Triage** walks a list one item at a time: every call of a system type, every carrier of a family, or everything carrying a flag. Each item shows its locus and the curation panel; keys `1`–`4` toggle flags, `n` writes a note, `j`/`k` move on and back, `o` opens the item.
+
+## Working faster
+
+- **Collection:** "＋ Collect" (or `c`) on protein and genome pages builds a set kept in this browser; the Collection page downloads protein FASTA and copies a ready prompt for an agent.
+- **Previews:** hover over a protein or genome link for its architecture, lineage, labels and flags.
+- **Tables:** sort by any column, filter, download the rows shown as TSV, and move with `j`/`k` and Enter.
+- **Genes:** `[` and `]` step to the previous and next gene on a protein page.
+- **Figures:** hover over any track, neighborhood, contig view, stack or histogram for SVG and PNG downloads, drawn in the light theme for papers and slides.
+- **Recently viewed** pages sit in the left rail; `?` lists every shortcut.
+
 ## Sharing
 
 The server binds to this machine by default. To let collaborators on your network open it:

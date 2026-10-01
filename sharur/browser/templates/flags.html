@@ -15,7 +15,7 @@
     <select name="author" onchange="this.form.submit()"><option value="">Everyone</option>{% for a in authors %}<option value="{{ a }}" {{ 'selected' if a == author }}>{{ a }}</option>{% endfor %}</select>
     <span style="margin-left:auto" class="count">{{ num(total) }} entries · <a href="/flags.tsv?flag={{ flag }}&kind={{ kind }}&author={{ quote(author) }}">TSV</a> · <a href="/flags.jsonl?flag={{ flag }}&kind={{ kind }}&author={{ quote(author) }}">JSONL</a></span>
   </form>
-  <div class="scroll"><table id="flags" data-table>
+  <div class="scroll"><table id="flags" data-table data-no-tsv>
     <thead><tr><th data-sort="text">When</th><th data-sort="text">Item</th><th data-sort="text">Flag or note</th><th data-sort="text">By</th></tr></thead>
     <tbody>{% for r in rows %}<tr><td class="count" style="white-space:nowrap">{{ r.created_at[:16]|replace('T', ' ') }}</td>
       <td><span class="tag">{{ r.kind }}</span> <a href="{{ r.url }}">{{ r.label }}</a></td>

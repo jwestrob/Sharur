@@ -333,7 +333,7 @@
   // ---- tables: TSV export and j/k selection --------------------------------
   function decorateTables() {
     document.querySelectorAll("table[data-table]").forEach((table) => {
-      if (table.dataset.tsv) return;
+      if (table.dataset.tsv || table.dataset.noTsv !== undefined) return;
       table.dataset.tsv = "1";
       const tools = table.closest(".panel") && table.closest(".panel").querySelector(".table-tools");
       if (!tools) return;
