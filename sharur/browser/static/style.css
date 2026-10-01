@@ -482,3 +482,11 @@ pre.query { font: 12px/1.5 var(--mono); background: var(--surface-2); border: 1p
 /* long identifiers in stat tiles stay on one line */
 .stat b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .stat b a { color: inherit; }
+
+/* protein page: one domain lane per annotation source */
+.lane { display: grid; grid-template-columns: 120px 1fr; align-items: start; gap: 8px; }
+.lane + .lane { border-top: 1px solid var(--line); padding-top: 6px; margin-top: 4px; }
+.lane-label { font-size: 12px; color: var(--ink-2); padding-top: 16px; }
+@media (max-width: 640px) { .lane { grid-template-columns: 1fr; } .lane-label { padding-top: 0; } }
+a.ext { text-decoration: none; font-size: 11px; color: var(--ink-3); }
+a.ext:hover { color: var(--accent); }

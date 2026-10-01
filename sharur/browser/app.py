@@ -129,17 +129,30 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
     app.mount("/static", StaticFiles(directory=str(HERE / "static")), name="static")
     app.state.store, app.state.catalog = store, catalog
 
+    from sharur.browser.annotations import SOURCE_LABELS, KoNames, describe_ko, domain_lanes, external_url, hit_view  # noqa: PLC0415
+
+    ko_names = KoNames(store)
+    with lock:
+        ko_names.get("K00001")  # load once, before handlers share the connection
+
     def describe_hit(label: str | None) -> str | None:
-        """Replace a bare VOG id in a hit label with its VOGdb consensus description."""
+        """Name bare VOG and KO ids in a hit label (VOGdb consensus, KEGG symbol and definition)."""
         if not label:
             return label
         head = label.split(" ", 1)[0].strip("()")
         vog = catalog.vogs.get(head)
         if vog and vog["description"]:
             return f'{vog["description"]} ({head})'
-        return label
+        return describe_ko(label, ko_names)
 
-    templates.env.globals.update(describe_hit=describe_hit)
+    def hit_rows(annotations: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+        rows = []
+        for src, hits in annotations.items():
+            for h in hits:
+                rows.append({**h, **hit_view(src, h, ko_names), "source": src})
+        return rows
+
+    templates.env.globals.update(describe_hit=describe_hit, hit_rows=hit_rows, SOURCE_LABELS=SOURCE_LABELS)
 
     def render(request: Request, template: str, section: str, /, **context: Any) -> HTMLResponse:
         return templates.TemplateResponse(request, template, {"section": section, **context})
@@ -353,6 +366,7 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
             if not c.get("found"):
                 raise HTTPException(404, "Protein not found")
             domains = [d.to_dict() for d in architecture(store, protein_id)]
+            lanes = domain_lanes(store, protein_id)
             sequence_rows = store.execute("SELECT sequence FROM proteins WHERE protein_id = ?", [protein_id])
             hood = get_neighborhood(store, protein_id, window=8).raw or {}
             ids = [g["protein_id"] for g in hood.get("proteins", [])]
@@ -376,8 +390,21 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
         prev_gene = order[here - 1] if here > 0 else None
         next_gene = order[here + 1] if 0 <= here < len(order) - 1 else None
         systems_here = [s for s in catalog.systems if protein_id in s["proteins"]]
+        length = c["location"]["length_aa"]
+        tracks = []
+        for source, placed in lanes:
+            for d in placed:
+                ko = d["accession"].split(".")[0]
+                known = ko_names.get(ko) if ko[:1] == "K" else None
+                if known:
+                    d["label"] = known[0].split(",")[0].strip() or ko
+                    d["title"] = f"{ko} {known[1]}"
+                if source == "pfam":
+                    continue
+                d["href"] = external_url(source, d["accession"])
+            tracks.append((source, len(placed), charts.domain_track(length, placed)))
         return render(request, "protein.html", "taxa", c=c, g=genome, domains=domains,
-                      track=charts.domain_track(c["location"]["length_aa"], domains),
+                      track=charts.domain_track(length, domains), tracks=tracks,
                       hood=charts.neighborhood(genes, start_edge=hood.get("contig_start_in_window", False),
                                                end_edge=hood.get("contig_end_in_window", False)),
                       genes=genes, edge=edge, edge_text=describe_edge(EdgeContext(**edge)) if edge else "",

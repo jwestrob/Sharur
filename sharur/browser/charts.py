@@ -229,8 +229,18 @@ def histogram(values: list[float], label: str, bins: int = 24, width: int = 420,
 # --------------------------------------------------------------------------- #
 
 
+def _domain_href(d: dict[str, Any]) -> str | None:
+    if d.get("href", "") != "":
+        return d.get("href")
+    return f'/domain/{quote(d["accession"].split(".")[0], safe="")}'
+
+
 def domain_track(length: int | None, domains: list[dict[str, Any]], width: int = 1000) -> Markup:
-    """Domains to scale; labels in lanes below so none overlap."""
+    """Domains to scale; labels in lanes below so none overlap.
+
+    A domain's ``label`` replaces its name on the track, and ``href`` its link
+    (default: the Pfam domain page; None for no link).
+    """
     if not length:
         return Markup("")
     pad, scale = 8, (width - 16) / length
@@ -240,10 +250,14 @@ def domain_track(length: int | None, domains: list[dict[str, Any]], width: int =
         x = pad + (d["start_aa"] - 1) * scale
         w = max(3.0, (d["end_aa"] - d["start_aa"] + 1) * scale)
         color = color_for(d["name"])
-        boxes.append(f'<a href="/domain/{quote(d["accession"].split(".")[0], safe="")}"><g class="dom">'
-                     f'<title>{_e(d["name"])} ({_e(d["accession"])}) aa {d["start_aa"]}–{d["end_aa"]}</title>'
-                     f'<rect x="{x:.1f}" y="14" width="{w:.1f}" height="22" rx="6" fill="{color}"/></g></a>')
-        text_w = 6.6 * len(d["name"]) + 6
+        label = d.get("label") or d["name"]
+        href = _domain_href(d)
+        box = (f'<g class="dom"><title>{_e(d.get("title") or d["name"])} ({_e(d["accession"])}) '
+               f'aa {d["start_aa"]}–{d["end_aa"]}</title>'
+               f'<rect x="{x:.1f}" y="14" width="{w:.1f}" height="22" rx="6" fill="{color}"/></g>')
+        external = ' target="_blank" rel="noopener"' if href and href.startswith("http") else ""
+        boxes.append(f'<a href="{_e(href)}"{external}>{box}</a>' if href else box)
+        text_w = 6.6 * len(label) + 6
         for lane, free in enumerate(lanes):
             if x >= free:
                 lanes[lane] = x + text_w
@@ -254,7 +268,7 @@ def domain_track(length: int | None, domains: list[dict[str, Any]], width: int =
         if lane < 4:
             y = 52 + lane * 15
             labels.append(f'<line x1="{x + 1:.1f}" y1="36" x2="{x + 1:.1f}" y2="{y - 10}" class="tick"/>'
-                          f'<text x="{x + 1:.1f}" y="{y}">{_e(d["name"])}</text>')
+                          f'<text x="{x + 1:.1f}" y="{y}">{_e(label)}</text>')
     height = 52 + min(len(lanes), 4) * 15
     ticks = []
     step = next(s for s in (50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000) if length / s <= 10)

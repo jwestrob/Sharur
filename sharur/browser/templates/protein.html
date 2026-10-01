@@ -17,7 +17,8 @@
 
 <div class="panel">
   <h2>Domain architecture <span class="hint">{{ c.architecture or 'no placed Pfam domains' }}</span></h2>
-  {% if domains %}{{ track }}{% else %}<p class="empty">No Pfam domains with coordinates. {% if not c.annotations %}This protein has no annotation hits at all.{% endif %}</p>{% endif %}
+  {% if tracks %}{% for source, n, t in tracks %}<div class="lane"><span class="lane-label">{{ SOURCE_LABELS.get(source, source) }} <span class="count">{{ n }}</span></span>{{ t }}</div>{% endfor %}
+  {% else %}<p class="empty">No hits with coordinates. {% if not c.annotations %}This protein has no annotation hits at all.{% endif %}</p>{% endif %}
 </div>
 
 <div class="panel">
@@ -78,8 +79,8 @@
 <div class="panel">
   <details {% if (c.annotations|length) < 4 %}open{% endif %}><summary>Annotation hits ({{ c.annotations.values()|map('length')|sum }})</summary>
   <div class="scroll" style="margin-top:10px"><table>
-    <thead><tr><th>Source</th><th>Accession</th><th>Name</th><th>Description</th><th class="num">E-value</th></tr></thead>
-    <tbody>{% for src, hits in c.annotations.items() %}{% for h in hits %}<tr><td><span class="tag">{{ src }}</span></td>{% set vog = catalog.vogs.get(h.accession) if src in ('vogdb', 'vog') else none %}<td class="mono">{% if src == 'pfam' and h.accession.split('.')[0] in catalog.domains %}<a href="{{ url('domain', h.accession.split('.')[0]) }}">{{ h.accession }}</a>{% elif vog %}<a href="{{ url('vog', h.accession) }}">{{ h.accession }}</a>{% else %}{{ h.accession }}{% endif %}</td><td>{{ vog.description if vog and vog.description else h.name }}</td><td class="count">{% if vog %}{{ vog.categories|join(', ') }}{% else %}{{ h.description or '' }}{% endif %}</td><td class="num count">{{ evalue(h.evalue) }}</td></tr>{% endfor %}{% endfor %}</tbody>
+    <thead><tr><th>Source</th><th>Accession</th><th>Name</th><th>Detail</th><th class="num">E-value</th></tr></thead>
+    <tbody>{% for h in hit_rows(c.annotations) %}{% set src = h.source %}{% set vog = catalog.vogs.get(h.accession) if src in ('vogdb', 'vog') else none %}<tr><td><span class="tag">{{ SOURCE_LABELS.get(src, src) }}</span></td><td class="mono">{% if src == 'pfam' and h.accession.split('.')[0] in catalog.domains %}<a href="{{ url('domain', h.accession.split('.')[0]) }}">{{ h.accession }}</a>{% elif vog %}<a href="{{ url('vog', h.accession) }}">{{ h.accession }}</a>{% else %}{{ h.accession }}{% endif %}{% if h.external %} <a class="ext" href="{{ h.external }}" target="_blank" rel="noopener" title="Open in {{ 'KEGG' if h.external.startswith('https://www.kegg') else 'InterPro' if 'interpro' in h.external else 'CAZy' }}">↗</a>{% endif %}</td><td>{% if h.symbol %}<b>{{ h.symbol }}</b> · {% endif %}{{ vog.description if vog and vog.description else h.name }}</td><td class="count">{% if vog %}{{ vog.categories|join(', ') }}{% else %}{{ h.detail }}{% endif %}</td><td class="num count">{{ evalue(h.evalue) }}</td></tr>{% endfor %}</tbody>
   </table></div></details>
 </div>
 {% endblock %}
