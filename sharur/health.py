@@ -571,11 +571,64 @@ def check_kegg(ctx: Context) -> Finding:
                    "Build it with `sharur setup-kegg` (KEGG data stays on this machine).")
 
 
+def kofam_ko_list() -> Path | None:
+    """KOfam's ko_list (per-KO score thresholds), wherever an HMM-search install or Sharur keeps it."""
+    import os  # noqa: PLC0415
+
+    from sharur.hmm_search import LEGACY_DB_DIR, aksha_config_dir  # noqa: PLC0415
+
+    candidates = [os.environ.get("SHARUR_KOFAM_KO_LIST"), aksha_config_dir() / "ko_list", LEGACY_DB_DIR / "ko_list",
+                  Path(__file__).resolve().parents[1] / "data" / "reference" / "ko_list"]
+    return next((Path(c) for c in candidates if c and Path(c).is_file()), None)
+
+
+def check_kofam_standard(ctx: Context) -> Finding:
+    """KO calls on KOs without a KOfam score threshold must reach E <= 1e-15 (the KOfam cascade)."""
+    title = "KO calls vs the KOfam standard"
+    calls = ctx.scalar("""SELECT COUNT(*) FROM annotations WHERE LOWER(source) IN ('kofam', 'kegg')
+                          AND regexp_matches(accession, '^K[0-9]{5}$')""")
+    if not calls:
+        return Finding("kofam_standard", "Annotations", title, "ok", "The dataset holds no KO calls.")
+    path = kofam_ko_list()
+    if path is None:
+        return Finding("kofam_standard", "Annotations", title, "info",
+                       f"{calls:,} KO calls; KOfam's ko_list was not found, so their thresholds were not checked.",
+                       "Install KOfam through Aksha, or point SHARUR_KOFAM_KO_LIST at a ko_list file.")
+    uncalibrated = []
+    with open(path) as fh:
+        next(fh, None)
+        for line in fh:
+            parts = line.split("\t")
+            if len(parts) > 1 and parts[1].strip() == "-":
+                uncalibrated.append(parts[0])
+    weak = ctx.q("""
+        SELECT a.accession, COUNT(*), COUNT(DISTINCT a.protein_id), COUNT(DISTINCT p.bin_id)
+        FROM annotations a JOIN proteins p USING (protein_id)
+        WHERE LOWER(a.source) IN ('kofam', 'kegg') AND a.accession IN (SELECT UNNEST(?::VARCHAR[]))
+          AND a.evalue > 1.0001e-15
+        GROUP BY 1 ORDER BY 2 DESC, 1""", [uncalibrated])
+    if not weak:
+        return Finding("kofam_standard", "Annotations", title, "ok",
+                       f"All {calls:,} KO calls pass KOfam's score threshold where the KO has one, or E ≤ 1e-15 "
+                       "where it has none.")
+    rows = sum(r[1] for r in weak)
+    proteins = ctx.scalar("""SELECT COUNT(DISTINCT protein_id) FROM annotations WHERE LOWER(source) IN ('kofam', 'kegg')
+                             AND accession IN (SELECT UNNEST(?::VARCHAR[])) AND evalue > 1.0001e-15""", [uncalibrated])
+    return Finding("kofam_standard", "Annotations", title, "warn",
+                   f"{_count(rows, 'KO call')} on {_count(proteins, 'protein')} {_verb(rows, 'sits', 'sit')} on "
+                   f"{_count(len(weak), 'KO')} that KOfam leaves without a score threshold, at E > 1e-15 (KOfam's "
+                   "cascade keeps those only at E ≤ 1e-15). Pathway "
+                   "completeness and KO-derived labels count them.",
+                   "Keep calls on those KOs at E ≤ 1e-15 (dataset scale), as `aksha search --cascade` does, then "
+                   "regenerate predicates.",
+                   [{"kind": "ko", "id": k, "note": f"{n:,} calls in {g:,} genomes"} for k, n, _, g in weak[:EXAMPLES]])
+
+
 CHECKS: list[Callable[[Context], Finding]] = [
     check_schema, check_seal,
     check_completeness, check_contamination, check_empty_genomes,
     check_gene_calls, check_strand, check_positionless, check_duplicate_coordinates, check_contigs,
-    check_annotation_coverage, check_predicate_maps,
+    check_annotation_coverage, check_kofam_standard, check_predicate_maps,
     check_crispr_scan, check_callers,
     check_kegg,
 ]

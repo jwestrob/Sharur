@@ -97,6 +97,30 @@ def test_annotation_coverage_flags_a_dense_source_missing_from_a_large_genome(tm
     assert [e["note"] for e in cov.examples] == ["no defensefinder"]
 
 
+def test_kofam_standard_flags_weak_calls_on_uncalibrated_kos(tmp_path, monkeypatch):
+    """K00001 has a KOfam threshold (calls pass by construction); K00002 has none, so only E <= 1e-15 stands."""
+    ko_list = tmp_path / "ko_list"
+    ko_list.write_text("knum\tthreshold\tscore_type\tprofile_type\nK00001\t50.0\tfull\tall\nK00002\t-\t-\t-\n")
+    monkeypatch.setenv("SHARUR_KOFAM_KO_LIST", str(ko_list))
+    path = tmp_path / "sharur.duckdb"
+    s = DuckDBStore(str(path))
+    c = s.conn
+    c.execute("INSERT INTO bins (bin_id) VALUES ('g1')")
+    c.execute("INSERT INTO contigs (contig_id, bin_id, length) VALUES ('c1', 'g1', 9000)")
+    c.executemany("INSERT INTO proteins (protein_id, contig_id, bin_id, start, end_coord, strand) VALUES (?, 'c1', 'g1', ?, ?, '+')",
+                  [(f"p{i}", 1000 * i + 1, 1000 * i + 900) for i in range(3)])
+    c.executemany("INSERT INTO annotations (annotation_id, protein_id, source, accession, name, evalue, score) "
+                  "VALUES (?, ?, 'kegg', ?, ?, ?, 60)",
+                  [(1, "p0", "K00001", "K00001", 1e-5), (2, "p1", "K00002", "K00002", 1e-20),
+                   (3, "p2", "K00002", "K00002", 1e-5)])
+    s.close()
+
+    finding = {f.key: f for f in run_checks(path).findings}["kofam_standard"]
+
+    assert finding.status == "warn" and finding.summary.startswith("1 KO call on 1 protein sits on 1 KO that")
+    assert [e["id"] for e in finding.examples] == ["K00002"]
+
+
 def test_gene_call_deficits_prefer_assemblies():
     proteins = {f"g{i}": 1000 for i in range(6)} | {"small": 20}
     completeness = dict.fromkeys(proteins, 90.0)

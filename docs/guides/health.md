@@ -34,6 +34,7 @@ The browser shows the same report at `/health`. A pill in the left rail counts t
 | Genes | Proteins sharing coordinates | Several accessions mapped to one locus |
 | Genes | Contig lengths | Contigs without genes, and lengths taken from the last gene, which `sharur backfill-contig-context` replaces with assembly lengths |
 | Annotations | Annotation coverage | Hits per source. Each source's typical share of a genome's proteins predicts how many hits a genome of a given size should carry; a genome expecting more than seven hits from a source and holding none was most likely never searched with it (the pattern an interrupted search leaves). Sources that hit about one gene per genome, such as hydrogenases, stay below that expectation, and rows written by system callers record calls, so a genome without them holds a result |
+| Annotations | KO calls vs the KOfam standard | KOfam publishes no score threshold for about 1,300 KOs; its cascade keeps calls on those only at E ≤ 1e-15. Calls above that (left by a search run with GA cutoffs alone) feed pathway completeness and KO-derived labels; the check counts them by KO. Reads KOfam's `ko_list` from the Aksha or Astra install, or `SHARUR_KOFAM_KO_LIST` |
 | Annotations | Function labels vs installed maps | Whether stored labels came from the maps installed now |
 | Callers | CRISPR array scan | Genomes with a MinCED report among those with assemblies |
 | Callers | Curated system callers | Defense, secretion and CRISPR-Cas calls, given the hits they need |
