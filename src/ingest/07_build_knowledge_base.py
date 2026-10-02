@@ -523,6 +523,14 @@ class KnowledgeBaseBuilder:
                         f"{len(protein_rows):,} proteins so far"
                     )
         console.print(f"  Parsed {len(protein_rows):,} proteins from {len(faa_files):,} files ({time.time()-t0:.1f}s)")
+        positionless = {r["bin_id"] for r in protein_rows if r["contig_id"] == r["protein_id"] and r["start"] == 0}
+        if positionless:
+            n = sum(1 for r in protein_rows if r["contig_id"] == r["protein_id"] and r["start"] == 0)
+            message = (f"{n:,} proteins in {len(positionless):,} genomes have FASTA headers without Prodigal "
+                       "coordinates; each is stored as its own contig and gene-order features treat it as "
+                       "unplaced. Stage 03 Prodigal output gives them positions.")
+            logger.warning(message)
+            console.print(f"  [yellow]{message}[/yellow]")
         length_sources = self._assembly_contig_lengths(contig_lengths)
 
         # Ensure bins exist even if stage02 was skipped
@@ -699,16 +707,21 @@ class KnowledgeBaseBuilder:
         return rows
 
     def _row_from_header(self, protein_id: str, meta: Optional[List[str]], sequence: str, bin_id: str) -> Dict:
-        # Meta fields: start, end, strand_flag (1/-1)
+        # Meta fields: start, end, strand_flag (1/-1). A header without them (e.g. an NCBI protein FASTA)
+        # carries no position: the protein is stored as its own contig, which gene-order code and
+        # `sharur health` treat as unplaced. A contig derived from such an ID would group unrelated
+        # proteins (every RefSeq WP_ accession on one contig "WP").
         start, end, strand = 0, len(sequence) * 3, "+"
+        positioned = False
         if meta and len(meta) >= 3:
             try:
                 start = int(meta[0])
                 end = int(meta[1])
                 strand = "+" if meta[2].strip() == "1" else "-"
+                positioned = True
             except Exception:
-                pass
-        contig_id = protein_id.rsplit("_", 1)[0] if "_" in protein_id else protein_id
+                start, end, strand = 0, len(sequence) * 3, "+"
+        contig_id = protein_id.rsplit("_", 1)[0] if positioned and "_" in protein_id else protein_id
         partial = parse_partial(meta[3:]) if meta and len(meta) > 3 else None
         gene_index = None
         return {

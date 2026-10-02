@@ -61,6 +61,30 @@ def test_knowledge_builder_rejects_empty_protein_records(tmp_path):
         builder._parse_prodigal_faa(faa_path, "bin1", {})
 
 
+def test_knowledge_builder_keeps_coordinate_less_proteins_on_their_own_contigs(tmp_path):
+    faa_path = tmp_path / "mixed.faa"
+    faa_path.write_text(">ctg1_1 # 1 # 9 # -1 # ID=1_1;partial=00\nMAK\n"
+                        ">WP_000001.1 hypothetical protein\nMAKL\n>WP_000002.1\nMAKLV\n")
+    outputs = PipelineOutputs(
+        stage00_dir=tmp_path / "stage00",
+        stage01_dir=tmp_path / "stage01",
+        stage02_dir=tmp_path / "stage02",
+        stage03_dir=tmp_path / "stage03",
+        stage04_dir=tmp_path / "stage04",
+        stage05a_dir=tmp_path / "stage05a",
+        stage05b_dir=tmp_path / "stage05b",
+        stage05c_dir=tmp_path / "stage05c",
+        stage06_dir=tmp_path / "embeddings",
+    )
+    builder = KnowledgeBaseBuilder(outputs, tmp_path / "sharur.duckdb")
+
+    rows = {r["protein_id"]: r for r in builder._parse_prodigal_faa(faa_path, "bin1", {})}
+
+    assert (rows["ctg1_1"]["contig_id"], rows["ctg1_1"]["strand"], rows["ctg1_1"]["end_coord"]) == ("ctg1", "-", 9)
+    assert [rows[p]["contig_id"] for p in ("WP_000001.1", "WP_000002.1")] == ["WP_000001.1", "WP_000002.1"]
+    assert rows["WP_000001.1"]["start"] == 0
+
+
 def test_ingest_pipeline_with_dummy_dataset(tmp_path):
     dataset_dir = REPO_ROOT / "dummy_dataset"
     if not dataset_dir.exists():
