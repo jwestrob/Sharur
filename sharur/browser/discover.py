@@ -97,7 +97,7 @@ def fusions(store, catalog, *, min_genomes: int = 3, outside: int = 20,
         WITH d AS (
             SELECT DISTINCT a.protein_id, p.bin_id, split_part(a.accession, '.', 1) AS acc
             FROM annotations a JOIN proteins p USING (protein_id) WHERE LOWER(a.source) = 'pfam'),
-        names AS (SELECT split_part(accession, '.', 1) AS acc, ANY_VALUE(COALESCE(NULLIF(name, ''), accession)) AS nm
+        names AS (SELECT split_part(accession, '.', 1) AS acc, MIN(COALESCE(NULLIF(name, ''), accession)) AS nm
                   FROM annotations WHERE LOWER(source) = 'pfam' GROUP BY 1),
         n AS (SELECT protein_id, COUNT(*) AS k FROM d GROUP BY 1),
         dd AS (SELECT d.* FROM d JOIN n USING (protein_id) WHERE n.k BETWEEN 2 AND 15),
@@ -126,7 +126,9 @@ def fusions(store, catalog, *, min_genomes: int = 3, outside: int = 20,
         kept.append({"domains": [(a, a_name), (b, b_name)], "genomes": len(genomes), "bins": set(bins),
                      "proteins": proteins, "example": example, "rank": lca[0], "clade": lca[1],
                      "clade_size": clade_size[lca], "domain_proteins": {a: a_prot, b: b_prot}})
-    kept.sort(key=lambda f: (-f["genomes"], -f["genomes"] / f["clade_size"], f["example"]))
+    # Merging is greedy, so the order must be total: pairs from one multi-domain protein tie on the rest.
+    kept.sort(key=lambda f: (-f["genomes"], -f["genomes"] / f["clade_size"], f["example"],
+                             [acc for acc, _ in f["domains"]]))
     merged: list[dict[str, Any]] = []
     for f in kept:
         accs = {acc for acc, _ in f["domains"]}

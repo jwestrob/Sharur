@@ -296,7 +296,7 @@ def check_gene_calls(ctx: Context) -> Finding:
 
 
 def check_strand(ctx: Context) -> Finding:
-    rows = ctx.q("SELECT strand, COUNT(*) FROM proteins GROUP BY 1 ORDER BY 2 DESC")
+    rows = ctx.q("SELECT strand, COUNT(*) FROM proteins GROUP BY 1 ORDER BY 2 DESC, 1")
     counts = {str(s): n for s, n in rows}
     symbolic = {s for s in counts if s in ("+", "-")}
     numeric = {s for s in counts if s in ("1", "-1")}
@@ -316,7 +316,7 @@ def check_positionless(ctx: Context) -> Finding:
     self_rows = ctx.q("""SELECT COUNT(*), COUNT(DISTINCT bin_id) FROM proteins WHERE contig_id = protein_id""")[0]
     shared = ctx.q("""
         SELECT contig_id, COUNT(DISTINCT bin_id) AS g, COUNT(*) AS n FROM proteins
-        GROUP BY 1 HAVING COUNT(DISTINCT bin_id) > 1 ORDER BY n DESC""")
+        GROUP BY 1 HAVING COUNT(DISTINCT bin_id) > 1 ORDER BY n DESC, 1""")
     # stacked at 0 on contigs that are otherwise ordinary (shared and self contigs counted above)
     stacked = ctx.scalar("""
         WITH shared AS (SELECT contig_id FROM proteins GROUP BY 1 HAVING COUNT(DISTINCT bin_id) > 1)
@@ -354,7 +354,7 @@ def check_positionless(ctx: Context) -> Finding:
 def check_duplicate_coordinates(ctx: Context) -> Finding:
     rows = ctx.q("""
         SELECT contig_id, start, end_coord, COUNT(*) AS n FROM proteins WHERE start > 0
-        GROUP BY 1, 2, 3 HAVING COUNT(*) > 1 ORDER BY n DESC""")
+        GROUP BY 1, 2, 3 HAVING COUNT(*) > 1 ORDER BY n DESC, 1, 2""")
     if not rows:
         return Finding("duplicate_coordinates", "Genes", "Proteins sharing coordinates", "ok",
                        "No two placed proteins share contig coordinates.")
@@ -396,7 +396,7 @@ def check_annotation_coverage(ctx: Context) -> Finding:
     n_genomes = len(ctx.genomes)
     rows = ctx.q("""
         SELECT LOWER(a.source), COUNT(DISTINCT p.bin_id), COUNT(DISTINCT a.protein_id)
-        FROM annotations a JOIN proteins p USING (protein_id) GROUP BY 1 ORDER BY 2 DESC, 3 DESC""")
+        FROM annotations a JOIN proteins p USING (protein_id) GROUP BY 1 ORDER BY 2 DESC, 3 DESC, 1""")
     total_proteins = ctx.scalar("SELECT COUNT(*) FROM proteins") or 0
     annotated = ctx.scalar("SELECT COUNT(DISTINCT protein_id) FROM annotations") or 0
     if not rows:

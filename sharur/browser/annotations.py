@@ -41,7 +41,7 @@ class KoNames:
         names: dict[str, tuple[str, str]] = {}
         try:
             for ko, desc in _rows(self._store,
-                                  "SELECT accession, ANY_VALUE(description) FROM annotations "
+                                  "SELECT accession, MIN(description) FROM annotations "
                                   "WHERE LOWER(source) = 'kegg' AND description IS NOT NULL GROUP BY 1"):
                 names[ko] = ("", desc)
         except Exception:  # noqa: BLE001 - datasets without annotations still render

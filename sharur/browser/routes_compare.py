@@ -150,19 +150,29 @@ class PfamPairs:
         self.acc_idx: np.ndarray | None = None
 
     def load(self, store, catalog, lock) -> None:
+        # Families come back as integer codes per genome (one row per genome), not one row per pair:
+        # millions of (genome, accession) tuples cost far more memory than the arrays they become.
         try:
             with lock:
-                rows = store.execute("""
-                    SELECT p.bin_id, split_part(a.accession, '.', 1), ANY_VALUE(COALESCE(NULLIF(a.name, ''), a.accession))
-                    FROM annotations a JOIN proteins p USING (protein_id)
-                    WHERE LOWER(a.source) = 'pfam' GROUP BY 1, 2""")
-            accessions = sorted({acc for _, acc, _ in rows})
-            index = {acc: k for k, acc in enumerate(accessions)}
-            self.names = {acc: name for _, acc, name in rows}
-            bins = np.array([catalog.by_bin[b].index if b in catalog.by_bin else -1 for b, _, _ in rows], dtype=np.int32)
-            accs = np.array([index[acc] for _, acc, _ in rows], dtype=np.int32)
-            keep = bins >= 0
-            self.accessions, self.bin_idx, self.acc_idx = accessions, bins[keep], accs[keep]
+                families = store.execute("""
+                    SELECT split_part(accession, '.', 1) AS acc, MIN(COALESCE(NULLIF(name, ''), accession))
+                    FROM annotations WHERE LOWER(source) = 'pfam' GROUP BY 1 ORDER BY 1""")
+                per_genome = store.execute("""
+                    WITH codes AS (SELECT acc, (ROW_NUMBER() OVER (ORDER BY acc) - 1)::INTEGER AS k FROM (
+                        SELECT DISTINCT split_part(accession, '.', 1) AS acc FROM annotations WHERE LOWER(source) = 'pfam'))
+                    SELECT p.bin_id, LIST(DISTINCT c.k) FROM annotations a JOIN proteins p USING (protein_id)
+                    JOIN codes c ON c.acc = split_part(a.accession, '.', 1)
+                    WHERE LOWER(a.source) = 'pfam' GROUP BY 1""")
+            self.names = dict(families)
+            bins, accs = [], []
+            for bin_id, codes in per_genome:
+                genome = catalog.by_bin.get(bin_id)
+                if genome is not None:
+                    bins.append(np.full(len(codes), genome.index, dtype=np.int32))
+                    accs.append(np.asarray(codes, dtype=np.int32))
+            self.accessions = [acc for acc, _ in families]
+            self.bin_idx = np.concatenate(bins) if bins else np.zeros(0, dtype=np.int32)
+            self.acc_idx = np.concatenate(accs) if accs else np.zeros(0, dtype=np.int32)
         finally:
             self.ready.set()
 
@@ -304,10 +314,11 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     catalog, render, url = ctx.catalog, ctx.render, ctx.url
     pfam = PfamPairs()
     app.state.pfam_pairs = pfam
+    summaries = getattr(ctx, "summaries", ctx.store)
     if ctx.background:
-        threading.Thread(target=pfam.load, args=(ctx.store, catalog, ctx.lock), daemon=True).start()
+        threading.Thread(target=pfam.load, args=(summaries, catalog, ctx.lock), daemon=True).start()
     else:
-        pfam.load(ctx.store, catalog, ctx.lock)
+        pfam.load(summaries, catalog, ctx.lock)
 
     @app.get("/compare", response_class=HTMLResponse)
     def compare_page(request: Request, a: str = Query("", max_length=500), b: str = Query("", max_length=500)):

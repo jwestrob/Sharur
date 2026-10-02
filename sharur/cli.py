@@ -1449,6 +1449,9 @@ def browse_command(
                                       "(default: browser_notes.sqlite beside the dataset)."),
     assemblies: list[Path] = typer.Option([], "--assemblies", help="Directory of genome FASTAs named BIN_ID.fna "
                                           "(for CRISPR repeats and spacers); repeatable. Dataset folders are searched too."),
+    summary_cache: bool = typer.Option(True, "--summary-cache/--no-summary-cache",
+                                       help="Compute startup summaries once per database version in a worker "
+                                            "process and reuse them (keeps the server near 1 GB)."),
 ):
     """Browse a dataset in a web browser: protein cards, neighborhoods, evidence, genomes, searches."""
     import secrets  # noqa: PLC0415
@@ -1466,7 +1469,11 @@ def browse_command(
     typer.echo(f"Sharur browser: http://{shown_host}:{port}/" + (f"?token={token}" if token else ""))
     if not loopback and not share:
         typer.echo("Binding beyond this machine: access requires the token in the link above.")
-    uvicorn.run(create_app(db, token=token, notes_path=notes, assemblies=assemblies), host=host, port=port,
+    from sharur.browser.startup_cache import default_dir  # noqa: PLC0415
+
+    app = create_app(db, token=token, notes_path=notes, assemblies=assemblies,
+                     cache_dir=default_dir() if summary_cache else None)
+    uvicorn.run(app, host=host, port=port,
                 log_level="warning")
 
 

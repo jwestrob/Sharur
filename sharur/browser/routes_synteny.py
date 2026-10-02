@@ -67,7 +67,8 @@ def spread(catalog, genome_ids) -> dict[str, Any]:
         if distinct[rank] > 1:
             below = rank
             break
-    clades = Counter(g.taxonomy.get(below) or UNCLASSIFIED for g in genomes).most_common() if below else []
+    counts = Counter(g.taxonomy.get(below) or UNCLASSIFIED for g in genomes) if below else Counter()
+    clades = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
     return {"genomes": len(genomes), "lca": common, "distinct": distinct, "rank": below, "clades": clades}
 
 
@@ -217,9 +218,15 @@ class SyntenyView:
 
     # ---- background summaries ---------------------------------------------------------------------------
 
+    def summary_key(self) -> str:
+        st = self.path.stat()
+        return f"synteny:{self.path.resolve()}:{st.st_size}:{st.st_mtime_ns}:{self.run_id}"
+
     def summarize(self) -> None:
         try:
-            self.summary = self._summarize()
+            cache = getattr(self.ctx, "summaries", None)
+            cached = cache.artifact(self.summary_key()) if hasattr(cache, "artifact") else None
+            self.summary = cached if cached is not None else self._summarize()
         except Exception as exc:  # noqa: BLE001 - the overview shows the reason
             logger.exception("synteny summary failed")
             self.summary_error = f"{type(exc).__name__}: {exc}"

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import re
+import sys
 import threading
 import time
 from collections import Counter, defaultdict
@@ -276,9 +277,8 @@ def load_catalog(store) -> Catalog:
     quality = {}
     if {"completeness", "contamination"} <= bin_columns:
         quality = {b: (c, x) for b, c, x in store.execute("SELECT bin_id, completeness, contamination FROM bins")}
-    lengths: dict[str, list[int]] = defaultdict(list)
-    for bin_id, length in store.execute("SELECT bin_id, length FROM contigs"):
-        lengths[bin_id].append(length or 0)
+    # Per-genome lists keep large tables to one row per genome (cheap to cache and to rebuild).
+    lengths = {b: [n or 0 for n in v] for b, v in store.execute("SELECT bin_id, LIST(length) FROM contigs GROUP BY 1")}
     contig_stats = {b: (len(v), sum(v), _n50(v)) for b, v in lengths.items()}
     protein_stats = {b: (n, longest) for b, n, longest in store.execute(
         "SELECT bin_id, COUNT(*), MAX(sequence_length) FROM proteins GROUP BY 1")}
@@ -300,18 +300,25 @@ def load_catalog(store) -> Catalog:
                       "annotated": sum(g.annotated for g in catalog.genomes)}
 
     if "protein_predicates" in tables:
-        pairs = store.execute("""
-            SELECT pr.bin_id, x.p, COUNT(*) FROM
-                (SELECT protein_id, UNNEST(predicates) AS p FROM protein_predicates) x
-            JOIN proteins pr USING (protein_id) WHERE x.p NOT LIKE '%:%' GROUP BY 1, 2""")
-        names = sorted({p for _, p, _ in pairs})
+        per_genome = store.execute("""
+            SELECT bin_id, LIST(p ORDER BY p), LIST(n ORDER BY p) FROM (
+                SELECT pr.bin_id, x.p, COUNT(*) AS n FROM
+                    (SELECT protein_id, UNNEST(predicates) AS p FROM protein_predicates) x
+                JOIN proteins pr USING (protein_id) WHERE x.p NOT LIKE '%:%' GROUP BY 1, 2) GROUP BY 1""")
+        names = sorted({p for _, preds, _ in per_genome for p in preds})
         catalog.predicates = names
         catalog.predicate_index = {p: k for k, p in enumerate(names)}
-        bins = np.array([catalog.by_bin[b].index if b in catalog.by_bin else -1 for b, _, _ in pairs], dtype=np.int32)
-        preds = np.array([catalog.predicate_index[p] for _, p, _ in pairs], dtype=np.int32)
-        counts = np.array([n for _, _, n in pairs], dtype=np.int32)
-        keep = bins >= 0
-        catalog.pair_bin, catalog.pair_pred, catalog.pair_count = bins[keep], preds[keep], counts[keep]
+        bins, preds, counts = [], [], []
+        for bin_id, genome_preds, genome_counts in per_genome:
+            genome = catalog.by_bin.get(bin_id)
+            if genome is not None:
+                bins.append(np.full(len(genome_preds), genome.index, dtype=np.int32))
+                preds.append(np.array([catalog.predicate_index[p] for p in genome_preds], dtype=np.int32))
+                counts.append(np.array(genome_counts, dtype=np.int32))
+        empty = np.zeros(0, dtype=np.int32)
+        catalog.pair_bin = np.concatenate(bins) if bins else empty
+        catalog.pair_pred = np.concatenate(preds) if preds else empty
+        catalog.pair_count = np.concatenate(counts) if counts else empty
         catalog.predicate_genomes = np.bincount(catalog.pair_pred, minlength=len(names))
         catalog.predicate_proteins = np.bincount(catalog.pair_pred, weights=catalog.pair_count, minlength=len(names))
         _category_shares(store, catalog)
@@ -344,7 +351,7 @@ def load_catalog(store) -> Catalog:
         catalog.map_state = "unknown"
     catalog.sources = [{"source": s, "proteins": n, "genomes": g} for s, n, g in store.execute(
         """SELECT LOWER(a.source), COUNT(DISTINCT a.protein_id), COUNT(DISTINCT p.bin_id)
-           FROM annotations a JOIN proteins p USING (protein_id) GROUP BY 1 ORDER BY 2 DESC""")]
+           FROM annotations a JOIN proteins p USING (protein_id) GROUP BY 1 ORDER BY 2 DESC, 1""")]
     logger.info("catalog loaded in %.1fs", time.time() - t0)
     return catalog
 
@@ -400,11 +407,11 @@ def load_background(store, catalog: Catalog, lock: threading.Lock) -> None:
         if definitions:
             with lock:
                 hits = store.execute(
-                    """SELECT p.bin_id, a.accession FROM annotations a JOIN proteins p USING (protein_id)
+                    """SELECT p.bin_id, LIST(DISTINCT a.accession) FROM annotations a JOIN proteins p USING (protein_id)
                        WHERE LOWER(a.source) IN ('kofam', 'kegg') AND regexp_matches(a.accession, '^K[0-9]{5}$')
-                       GROUP BY 1, 2""")
-            for bin_id, ko in hits:
-                catalog.ko_sets.setdefault(bin_id, set()).add(ko)
+                       GROUP BY 1""")
+            for bin_id, kos in hits:
+                catalog.ko_sets[bin_id] = {sys.intern(ko) for ko in kos}   # ~20k KOs shared by ~1M entries
             ids = sorted(definitions)
             matrix = np.zeros((len(catalog.genomes), len(ids)), dtype=np.float32)
             module_kos = {m: _kos(definitions[m]) for m in ids}
@@ -441,7 +448,7 @@ def _kos(definition) -> set[str]:
 
 def _domains(store) -> dict[str, dict[str, Any]]:
     rows = store.execute("""
-        SELECT split_part(a.accession, '.', 1) AS acc, ANY_VALUE(NULLIF(a.name, '')), ANY_VALUE(NULLIF(a.description, '')),
+        SELECT split_part(a.accession, '.', 1) AS acc, MIN(NULLIF(a.name, '')), MIN(NULLIF(a.description, '')),
                COUNT(DISTINCT a.protein_id), COUNT(DISTINCT p.bin_id), COUNT(*)
         FROM annotations a JOIN proteins p USING (protein_id)
         WHERE LOWER(a.source) = 'pfam' GROUP BY 1""")

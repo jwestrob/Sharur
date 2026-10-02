@@ -115,17 +115,29 @@ def _evalue(x: Any) -> str:
 
 
 def create_app(db_path: str | Path, *, token: str | None = None, background: bool = True,
-               notes_path: str | Path | None = None, assemblies: list[str | Path] | None = None) -> FastAPI:
-    """Browser over one dataset, opened read-only."""
+               notes_path: str | Path | None = None, assemblies: list[str | Path] | None = None,
+               cache_dir: str | Path | None = None) -> FastAPI:
+    """Browser over one dataset, opened read-only.
+
+    With ``cache_dir``, startup summaries come from a per-database cache built in a worker process
+    (see ``startup_cache``), which keeps the server's memory near its working set.
+    """
     from sharur.abundance import default_path  # noqa: PLC0415
 
     store = DuckDBStore(str(db_path), read_only=True)
     lock = threading.Lock()
-    catalog = load_catalog(store)
+    summaries = store
+    if cache_dir is not None:
+        from sharur.browser import startup_cache  # noqa: PLC0415
+
+        cached = startup_cache.ensure(db_path, cache_dir)
+        if cached is not None:
+            summaries = startup_cache.Replayer(store, *cached)
+    catalog = load_catalog(summaries)
     if background:
-        threading.Thread(target=load_background, args=(store, catalog, lock), daemon=True).start()
+        threading.Thread(target=load_background, args=(summaries, catalog, lock), daemon=True).start()
     else:
-        load_background(store, catalog, lock)
+        load_background(summaries, catalog, lock)
     sidecar = default_path(db_path)
     dataset_name = Path(db_path).resolve().parent.name
 
@@ -175,7 +187,7 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
         return templates.TemplateResponse(request, template, {"section": section, **context})
 
     # Feature modules register before the catch-all path routes below.
-    ctx = SimpleNamespace(store=store, lock=lock, catalog=catalog, render=render, url=_url,
+    ctx = SimpleNamespace(store=store, summaries=summaries, lock=lock, catalog=catalog, render=render, url=_url,
                           describe_hit=describe_hit, predicates=PREDICATE_BY_ID, db_path=Path(db_path),
                           notes_path=Path(notes_path) if notes_path else None, ko_names=ko_names,
                           dataset=dataset_name)

@@ -653,6 +653,7 @@ $ sharur browse [OPTIONS]
 * `--share`: Require a random access token (printed in the link).
 * `--notes PATH`: Notes and flags database (default: browser_notes.sqlite beside the dataset).
 * `--assemblies PATH`: Directory of genome FASTAs named BIN_ID.fna (for CRISPR repeats and spacers); repeatable. Dataset folders are searched too.
+* `--summary-cache / --no-summary-cache`: Compute startup summaries once per database version in a worker process and reuse them (keeps the server near 1 GB).  [default: summary-cache]
 * `--help`: Show this message and exit.
 
 ### `sharur describe`

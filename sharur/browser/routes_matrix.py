@@ -116,7 +116,7 @@ def _load_pfam(ctx) -> FeatureSet:
                FROM annotations a JOIN proteins p USING (protein_id)
                WHERE LOWER(a.source) = 'pfam' GROUP BY 1, 2""")
         named = dict(ctx.store.execute(
-            """SELECT split_part(accession, '.', 1), ANY_VALUE(COALESCE(NULLIF(name, ''), accession))
+            """SELECT split_part(accession, '.', 1), MIN(COALESCE(NULLIF(name, ''), accession))
                FROM annotations WHERE LOWER(source) = 'pfam' GROUP BY 1"""))
     ids, bins, feats, values = _sparse(ctx.catalog, rows)
     domains = ctx.catalog.domains
