@@ -25,6 +25,9 @@ AREAS = ("Database", "Genomes", "Genes", "Annotations", "Callers", "References")
 EXAMPLES = 10
 BROAD_SOURCE = 0.10   # sources hitting at least this share of a typical genome's proteins
 THIN_SOURCE = 0.25    # under this fraction of a broad source's typical share, a genome looks partly annotated
+GAP_EXPECTED = 7.0    # hits a genome's size predicts from a source; with none, P(0) = e^-7 < 0.1%: never searched
+# Rows written by system callers and classifiers: a genome without them holds no call, a result in itself.
+CALLER_SOURCES = ("defensefinder_system", "txsscan_system", "hyddb_subgroup")
 
 
 @dataclass
@@ -413,13 +416,19 @@ def check_annotation_coverage(ctx: Context) -> Finding:
     genomes_with = {s: g for s, g, _ in rows}
     subset = sorted(s for s in broad if genomes_with[s] < 0.5 * n_genomes)
     gaps, thin = [], []
-    for source in sorted(broad - set(subset)):
+    # A genome large enough to expect several hits from a source, yet with none, was most likely never
+    # searched with it (an interrupted run leaves exactly this pattern, narrow sources included).
+    for source in sorted(set(share) - set(subset) - set(CALLER_SOURCES)):
         missing = [r[0] for r in ctx.q("""
-            SELECT b.bin_id FROM bins b ANTI JOIN (
+            WITH sizes AS (SELECT bin_id, COUNT(*) AS n FROM proteins GROUP BY 1)
+            SELECT z.bin_id FROM sizes z ANTI JOIN (
                 SELECT DISTINCT p.bin_id FROM annotations a JOIN proteins p USING (protein_id)
-                WHERE LOWER(a.source) = ?) s USING (bin_id) ORDER BY b.bin_id""", [source])]
+                WHERE LOWER(a.source) = ?) s USING (bin_id)
+            WHERE z.n * ? > ? ORDER BY z.bin_id""", [source, share[source] or 0, GAP_EXPECTED])]
         if missing:
             gaps.append((source, missing))
+        if source not in broad:
+            continue
         thin += [(source, b, f) for b, f in ctx.q("""
             WITH hits AS (SELECT p.bin_id, COUNT(DISTINCT a.protein_id) AS hits FROM annotations a
                           JOIN proteins p USING (protein_id) WHERE LOWER(a.source) = ? GROUP BY 1),

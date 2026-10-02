@@ -73,6 +73,30 @@ def test_checks_find_each_problem(dataset):
     assert "## Genes" in report.to_markdown()
 
 
+def test_annotation_coverage_flags_a_dense_source_missing_from_a_large_genome(tmp_path):
+    """defensefinder hits 10 of 200 proteins in g1 and g2, so g3's 200 proteins predict 10 hits: g3 was never
+    searched. hyddb (one hit) and caller rows (defensefinder_system) predict too few to read anything into."""
+    path = tmp_path / "sharur.duckdb"
+    s = DuckDBStore(str(path))
+    c = s.conn
+    for b in ("g1", "g2", "g3"):
+        c.execute("INSERT INTO bins (bin_id) VALUES (?)", [b])
+        c.execute("INSERT INTO contigs (contig_id, bin_id, length) VALUES (?, ?, 300000)", [f"{b}_c", b])
+        c.executemany("INSERT INTO proteins (protein_id, contig_id, bin_id, start, end_coord, strand) VALUES (?, ?, ?, ?, ?, '+')",
+                      [(f"{b}_{i}", f"{b}_c", b, 1000 * i + 1, 1000 * i + 900) for i in range(200)])
+    rows = [(f"{b}_{i}", "pfam") for b in ("g1", "g2", "g3") for i in range(100)]
+    rows += [(f"{b}_{i}", "defensefinder") for b in ("g1", "g2") for i in range(10)]
+    rows += [("g1_0", "hyddb")] + [(f"g1_{i}", "defensefinder_system") for i in range(10)]
+    c.executemany("INSERT INTO annotations (annotation_id, protein_id, source, accession, name) VALUES (?, ?, ?, 'X', 'X')",
+                  [(n, pid, src) for n, (pid, src) in enumerate(rows, 1)])
+    s.close()
+
+    cov = {f.key: f for f in run_checks(path).findings}["annotation_coverage"]
+
+    assert cov.status == "warn" and "1 genome lacks defensefinder hits that 2 others have" in cov.summary
+    assert [e["note"] for e in cov.examples] == ["no defensefinder"]
+
+
 def test_gene_call_deficits_prefer_assemblies():
     proteins = {f"g{i}": 1000 for i in range(6)} | {"small": 20}
     completeness = dict.fromkeys(proteins, 90.0)

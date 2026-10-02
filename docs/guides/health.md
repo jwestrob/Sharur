@@ -33,7 +33,7 @@ The browser shows the same report at `/health`. A pill in the left rail counts t
 | Genes | Genes without a genomic position | Proteins that are their own contig, contig IDs shared across genomes, and proteins stacked at coordinate 0; neighborhoods and operons skip them |
 | Genes | Proteins sharing coordinates | Several accessions mapped to one locus |
 | Genes | Contig lengths | Contigs without genes, and lengths taken from the last gene, which `sharur backfill-contig-context` replaces with assembly lengths |
-| Annotations | Annotation coverage | Hits per source. Broad sources (Pfam, KOfam, VOGdb), which annotate a sizeable share of a typical genome's proteins, should reach every genome; narrow ones (hydrogenases, defense, secretion) hit few genes by design |
+| Annotations | Annotation coverage | Hits per source. Each source's typical share of a genome's proteins predicts how many hits a genome of a given size should carry; a genome expecting more than seven hits from a source and holding none was most likely never searched with it (the pattern an interrupted search leaves). Sources that hit about one gene per genome, such as hydrogenases, stay below that expectation, and rows written by system callers record calls, so a genome without them holds a result |
 | Annotations | Function labels vs installed maps | Whether stored labels came from the maps installed now |
 | Callers | CRISPR array scan | Genomes with a MinCED report among those with assemblies |
 | Callers | Curated system callers | Defense, secretion and CRISPR-Cas calls, given the hits they need |
