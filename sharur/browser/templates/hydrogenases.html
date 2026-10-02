@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% from "_macros.html" import bar %}
+{% block title %}Hydrogenases{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="/systems">Systems</a></div>
+<h1><span class="rank">Systems · curated caller</span>Hydrogenases</h1>
+{% if s %}
+<p class="lede">Every protein with a HydDB HMM hit carries the subgroup of its nearest HydDB reference ({{ s.release }} · <code>{{ s.version }}</code>). That subgroup is a provisional assignment; the catalytic-domain check, KOfam hits and the ±6-gene neighborhood each add evidence, kept apart below. Calls that carry only Complex I-superfamily domains rest on their neighborhood.</p>
+
+<div class="stats hyd-ladder">
+  <div class="stat"><b>{{ num(s.proteins) }}</b><span>proteins with a HydDB HMM hit</span></div>
+  <div class="stat"><b>{{ num(s.assigned) }}</b><span>assigned a subgroup by nearest reference</span></div>
+  <div class="stat"><b>{{ num(s.cleared) }}</b><span>catalytic domain observed</span></div>
+  <div class="stat"><b>{{ num(s.flagged) }}</b><span>need curation · {{ num(s.flagged_verdicts.get('supported', 0)) }} with hydrogenase genes nearby, {{ num(s.flagged_verdicts.get('complex_i_context', 0)) }} with Complex I genes nearby</span></div>
+  <div class="stat"><b>{{ num(s.ko.get('subgroup', 0)) }}</b><span>KOfam hit corroborates the subgroup{% if s.ko.get('compatible') %} · {{ num(s.ko.compatible) }} compatible{% endif %}</span></div>
+  <div class="stat"><b>{{ num(s.genomes) }}</b><span>genomes with a curated call ({{ pct(s.genomes / ((catalog.genomes|length) or 1)) }})</span></div>
+</div>
+
+<div class="grid g-side">
+  <div class="panel">
+    <h2>Groups <span class="hint">curated calls: catalytic domain observed, or hydrogenase genes nearby · bars show genomes</span></h2>
+    <div class="scroll"><table>
+      <thead><tr><th>Group</th><th class="num">Calls</th><th class="num">Curated</th><th>Genomes with a curated call</th></tr></thead>
+      <tbody>{% for g in s.groups %}<tr>
+        <td><a href="/hydrogenases/calls?class={{ g['class'] }}&group={{ g.group }}">{{ g.label }}</a></td>
+        <td class="num">{{ num(g.calls) }}</td><td class="num">{{ num(g.curated) }}</td>
+        <td><div class="cell-bar">{{ bar(g.share, 'var(--hyd)') }}<span class="count">{{ num(g.genomes) }} · {{ pct(g.share, 1) }}</span></div></td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+  </div>
+  <div class="panel">
+    <h2>Reading a call</h2>
+    <dl class="kv">
+      <dt>HydDB HMM hit</dt><dd>a catalytic-subunit profile matches</dd>
+      <dt>Assigned to a subgroup</dt><dd>nearest HydDB reference; provisional</dd>
+      <dt>Catalytic domain observed</dt><dd>NiFeSe_Hases or Fe_hyd on the protein</dd>
+      <dt>KOfam corroborates</dt><dd>a KOfam hit captures that subgroup's references</dd>
+      <dt>Hydrogenase genes nearby</dt><dd>KEGG hydrogenase or maturation KOs, or catalytic domains, within 6 genes; no nuo genes</dd>
+      <dt>Complex I genes nearby</dt><dd>KOfam nuoA–N within 6 genes; no hydrogenase genes</dd>
+    </dl>
+    <p class="note">A named complex (Ech, Hyc, Mbh…) needs its subunit genes; a physiological role needs the genome's metabolic context. Subgroup roles follow Søndergaard et al. 2016, Table 1.</p>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Subgroups <span class="hint">{{ s.table|length }} subgroups · hover a name for its exact HydDB label</span></h2>
+  <div class="table-tools"><input data-filter="hyd-subgroups" placeholder="Filter…"><span class="count" data-count="hyd-subgroups"></span></div>
+  <div class="scroll"><table id="hyd-subgroups" data-table>
+    <thead><tr><th data-sort="text">Subgroup</th><th data-sort="text">Table 1 role</th><th data-sort="num" class="num">Calls</th>
+      <th data-sort="num" class="num">Catalytic domain</th><th data-sort="num">Need curation (neighborhood)</th>
+      <th data-sort="num" class="num">KOfam corroborates</th><th data-sort="num">Genomes (curated)</th></tr></thead>
+    <tbody>{% for r in s.table %}<tr>
+      <td class="nowrap"><a href="/hydrogenases/calls?class={{ r['class'] }}&subgroup={{ quote(r.subgroup or '', safe='') }}" title="{{ r.label }}">{{ r.label|replace('_Group_', ' ')|replace('_', ' ') }}</a></td>
+      <td class="hyd-role"><span class="tag {{ 'ok' if r.interpretation == 'characterized' else '' }}" title="{{ interpretation.get(r.interpretation, r.interpretation) }}">{{ r.interpretation }}</span> {{ r.role }}</td>
+      <td class="num">{{ num(r.calls) }}</td>
+      <td class="num" data-v="{{ r.cleared }}">{{ num(r.cleared) }}</td>
+      {% set f = r.flagged %}{% set nflag = f.values()|sum %}
+      <td data-v="{{ nflag }}">{% if nflag %}<span class="hyd-split" title="{% for v in verdicts if f.get(v) %}{{ verdict_labels[v] }}: {{ f.get(v) }}{{ '; ' if not loop.last }}{% endfor %}">{% for v in verdicts if f.get(v) %}<i class="v-{{ v }}" style="flex:{{ f.get(v) }}"></i>{% endfor %}</span><span class="count">{{ num(nflag) }}{% if f.get('supported') %} · {{ num(f.get('supported')) }} supported{% endif %}</span>{% else %}<span class="count">—</span>{% endif %}</td>
+      <td class="num">{{ num(r.ko_subgroup) if r.ko_subgroup else '—' }}</td>
+      <td data-v="{{ r.share }}"><div class="cell-bar">{{ bar(r.share, 'var(--hyd)') }}<span class="count">{{ num(r.curated_genomes) }}</span></div></td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  <div class="legend">{% for v in verdicts %}<span><i class="v-{{ v }}"></i>{{ verdict_labels[v] }}</span>{% endfor %}</div>
+</div>
+
+<div class="panel">
+  <h2>Across the tree <span class="hint">share of each clade's genomes with a call · clades with ≥ 3 genomes</span></h2>
+  <form class="table-tools" method="get" action="/hydrogenases">
+    <select name="rank" onchange="this.form.submit()">{% for r in ranks %}<option value="{{ r }}" {{ 'selected' if r == rank }}>{{ r|capitalize }}</option>{% endfor %}</select>
+    <select name="evidence" onchange="this.form.submit()">{% for k, label in evidence_labels.items() %}<option value="{{ k }}" {{ 'selected' if k == evidence }}>{{ label }}</option>{% endfor %}</select>
+  </form>
+  {% if dist.rows %}
+  <div class="scroll heat-scroll"><table class="heatmap">
+    <thead><tr><th class="heat-clade">{{ rank|capitalize }}</th>{% for c in dist.columns %}<th class="hyd-col" title="{{ c.label }}">{{ c.short }}</th>{% endfor %}</tr></thead>
+    <tbody>{% for row in dist.rows %}<tr>
+      <td class="heat-clade"><a href="{{ url('taxa', rank, row.taxon) }}" title="{{ row.taxon }}">{{ row.taxon }}</a> <span class="count">{{ num(row.genomes) }}</span></td>
+      {% for cell in row.cells %}{% set col = dist.columns[loop.index0] %}
+      <td class="heat-cell"><a href="/hydrogenases/calls?class={{ col['class'] }}&group={{ col.group }}&clade={{ quote(row.taxon, safe='') }}&rank={{ rank }}{{ '&evidence=curated' if evidence == 'curated' else '' }}" style="--v:{{ '%.3f' % cell.share }}" class="{{ 'hot' if cell.share >= 0.55 else '' }}" title="{{ col.label }} in {{ row.taxon }}: {{ num(cell.n) }} of {{ num(row.genomes) }} genomes">{% if cell.n %}{{ '<1' if cell.share < 0.005 else (cell.share * 100)|round|int }}{% endif %}</a></td>
+      {% endfor %}</tr>{% endfor %}</tbody>
+  </table></div>
+  <p class="note">A genome without a call may carry one on a contig the assembly missed; read low shares against completeness.</p>
+  {% else %}<p class="empty">No clade has three or more genomes.</p>{% endif %}
+</div>
+
+{% else %}
+<p class="lede">This dataset stores hydrogenase subgroup labels from an earlier classifier pass. Sharur's reconciled classifier records each call's nearest reference, catalytic-domain check, KOfam corroboration and curation reason in <code>hydrogenase_classifications</code>; this page draws on that table.</p>
+<div class="panel">
+  <h2>Classify this dataset</h2>
+  <p>Dry run (reports what changes and discards its staged copy), then publish:</p>
+  <pre class="code">python scripts/classify_hydrogenases.py --db DATASET/sharur.duckdb
+python scripts/classify_hydrogenases.py --db DATASET/sharur.duckdb --publish</pre>
+  <p class="note">Publishing replaces the database atomically, keeps the prior file beside it, regenerates labels for affected proteins and reseals the dataset.</p>
+</div>
+<div class="grid g2">
+  <div class="panel"><h2>Stored subgroup labels <span class="hint">earlier pass · <code>hyddb_subgroup</code></span></h2>
+    <div class="scroll"><table data-table><thead><tr><th data-sort="text">Label</th><th data-sort="num" class="num">Proteins</th><th data-sort="num" class="num">Genomes</th></tr></thead>
+    <tbody>{% for label, proteins, genomes in stored.labels %}<tr><td>{% if label in PREDICATE_BY_ID %}<a href="{{ url('function', label) }}">{{ label }}</a>{% else %}{{ label }}{% endif %}</td><td class="num">{{ num(proteins) }}</td><td class="num">{{ num(genomes) }}</td></tr>{% else %}<tr><td colspan="3" class="empty">No stored labels.</td></tr>{% endfor %}</tbody></table></div>
+  </div>
+  <div class="panel"><h2>HydDB HMM hits <span class="hint">catalytic-subunit profiles</span></h2>
+    <div class="scroll"><table data-table><thead><tr><th data-sort="text">Profile</th><th data-sort="num" class="num">Proteins</th><th data-sort="num" class="num">Genomes</th></tr></thead>
+    <tbody>{% for name, proteins, genomes in stored.hits %}<tr><td>{{ name }}</td><td class="num">{{ num(proteins) }}</td><td class="num">{{ num(genomes) }}</td></tr>{% else %}<tr><td colspan="3" class="empty">No HydDB hits.</td></tr>{% endfor %}</tbody></table></div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

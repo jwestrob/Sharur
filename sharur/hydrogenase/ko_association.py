@@ -84,6 +84,12 @@ def load_associations(path: Path = SNAPSHOT) -> dict[str, tuple[Association, ...
     return associations
 
 
+def named_kos(path: Path = SNAPSHOT) -> frozenset[str]:
+    """Every KO KEGG names as a hydrogenase, including those whose profile captures no HydDB reference."""
+    with open(path) as handle:
+        return frozenset(line.split("\t", 1)[0] for line in handle if line.strip() and not line.startswith("#"))
+
+
 def associations(ko: str) -> tuple[Association, ...]:
     """HydDB label associations of one KO (empty when it captures no references)."""
     return load_associations().get(ko, ())

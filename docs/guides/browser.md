@@ -13,7 +13,7 @@ Browse without knowing an identifier. The left rail offers five ways in:
 | **Tree of life** | A treemap of the dataset's clades; each clade page shows its subclades, genome size and assembly quality, the functions carried more often than in the rest of the dataset, its most common systems, and a sortable genome table |
 | **Functions** | The labels that vary most between genomes, every label by category, and a page per label with its prevalence across the tree and example proteins |
 | **Pathways** | KEGG modules with the share of genomes carrying each; a page per module with completeness by clade and how often each step is found |
-| **Systems** | Defense and secretion system types and mobile-element regions, with their distribution across the tree |
+| **Systems** | Defense and secretion system types, CRISPR-Cas subtypes, hydrogenases and mobile-element regions, with their distribution across the tree |
 | **Families** | Every Pfam domain and VOG family in the dataset. Pfam pages show the functional labels the family maps to with their evidence, its architectures and partner domains; VOG pages show the VOGdb consensus description and functional category, whether carrier genes sit in prophage regions or islands, and the Pfam domains on the same proteins. Both show protein lengths and prevalence across the tree |
 | **Discover** | The dataset's extremes and oddities, each with a full list: giant proteins drawn to scale (marked when the gene runs off its contig) and the clades richest in them; Pfam domains fused on one protein only within one order, family or genus while common apart elsewhere; the longest stretches of unannotated genes (whole unannotated contigs flagged); the largest unannotated proteins; the longest domain repeats; curated system types seen in three genomes or fewer; and domain-pattern search. *Surprise me* opens a random entry |
 
@@ -35,6 +35,10 @@ The search box suggests taxa, functions, pathways, systems, genomes and proteins
 `/tree` draws the dataset's GTDB taxonomy as a cladogram, radial or rectangular, down to genus. It opens as deep as fits on screen; closed clades are wedges whose length grows with their genome count. Click a clade to open or close it and see its numbers, then zoom in (`/tree?root=order:Woesearchaeales`) or jump to its clade page.
 
 Map up to eight features onto the tree: KOs, Pfam families, function labels, KEGG modules (counted at ≥ 75% completeness) and curated system types, including CRISPR-Cas subtypes. Each becomes a ring (radial) or column (rectangular) holding the share of each clade's genomes that carry it. Add features with the picker, start from a preset, or use **Map on tree** on function, Pfam, pathway, system and matrix pages. The SVG and PNG buttons export the figure in light colours.
+
+## Hydrogenases
+
+`/hydrogenases` reads the hydrogenase classifier's table (`scripts/classify_hydrogenases.py`) and keeps each call's evidence apart: the HydDB HMM hit, the subgroup of the nearest HydDB reference (provisional), the catalytic-domain check, KOfam corroboration, and the ±6-gene neighborhood. The neighborhood reads KEGG's hydrogenase and maturation KOs on one side and KOfam nuoA–N on the other (`sharur.hydrogenase.neighborhood`), so a Group 4 call that carries only Complex I-superfamily domains shows whether hydrogenase-complex or Complex I genes surround it. The page lists subgroups with their Søndergaard et al. 2016 Table 1 roles, maps each group across the tree, and draws every call in its contig context; genome and protein pages link to their calls. Datasets classified before the reconciled classifier show their stored subgroup labels and the command that classifies them.
 
 ## Presence/absence matrix
 

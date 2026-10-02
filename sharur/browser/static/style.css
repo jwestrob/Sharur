@@ -934,3 +934,29 @@ mark { background: color-mix(in srgb, var(--accent) 24%, transparent); color: in
 .sr-fam-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
 .sr-fam-row .btn { margin-left: auto; }
 /* ---------- end search results ---------- */
+/* ---------- hydrogenases (classifier calls, evidence, neighborhoods) ---------- */
+:root { --hyd: #2f9e6f; --c1: #a0619a; --v-mixed: #d39c32; --v-none: #9aa3ad; }
+.gene.hyd-focal { fill: var(--hyd); stroke: var(--ink); stroke-width: 1.4; }
+.gene.hyd-marker { fill: color-mix(in srgb, var(--hyd) 45%, var(--gene)); stroke: var(--hyd); stroke-width: 1; }
+.gene.c1-marker { fill: var(--c1); stroke: var(--ink); stroke-width: 1; }
+.legend .lg-hyd { background: var(--hyd); border: 1px solid var(--ink); }
+.legend .lg-hyd-marker { background: color-mix(in srgb, var(--hyd) 45%, var(--gene)); border: 1px solid var(--hyd); }
+.legend .lg-c1 { background: var(--c1); }
+.hyd-split { display: inline-flex; width: 110px; height: 8px; border-radius: 4px; overflow: hidden; vertical-align: middle;
+             margin-right: 8px; background: var(--line); }
+.hyd-split i, .legend i.v-supported, .legend i.v-complex_i_context, .legend i.v-mixed, .legend i.v-no_markers,
+.legend i.v-no_position { display: inline-block; }
+.v-supported { background: var(--hyd); } .v-complex_i_context { background: var(--c1); }
+.v-mixed { background: var(--v-mixed); } .v-no_markers, .v-no_position { background: var(--v-none); }
+.tag.v-tag { color: var(--ink); }
+.tag.v-tag.v-supported { background: color-mix(in srgb, var(--hyd) 18%, transparent); color: var(--hyd); }
+.tag.v-tag.v-complex_i_context { background: color-mix(in srgb, var(--c1) 18%, transparent); color: var(--c1); }
+.tag.v-tag.v-mixed { background: color-mix(in srgb, var(--v-mixed) 18%, transparent); color: var(--v-mixed); }
+.tag.v-tag.v-no_markers, .tag.v-tag.v-no_position { background: color-mix(in srgb, var(--v-none) 18%, transparent);
+                                                   color: var(--ink-3); }
+.hyd-role { font-size: 12.5px; color: var(--ink-2); max-width: 460px; }
+.hyd-chips { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; margin-top: 3px; }
+.hyd-ladder .stat span { line-height: 1.35; }
+.heatmap th.hyd-col { font-size: 11px; font-weight: 700; white-space: nowrap; padding: 0 6px 8px; color: var(--ink-3);
+                      text-align: center; }
+/* ---------- end hydrogenases ---------- */

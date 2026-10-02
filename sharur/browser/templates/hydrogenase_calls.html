@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Hydrogenases · {{ title }}{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="/systems">Systems</a><span class="sep">›</span><a href="/hydrogenases">Hydrogenases</a></div>
+<h1><span class="rank">Hydrogenase calls · genomic context</span>{{ title }}</h1>
+<p class="lede">Each call drawn in its contig context, oriented on the call, with neighbors that carry hydrogenase or Complex I markers colored. The subgroup comes from the nearest HydDB reference; the chips list the evidence the call carries.{% if params.clade %} Clade: {{ params.clade }} ({{ params.rank }}).{% endif %}{% if params.genome %} Genome: <a href="{{ url('genome', params.genome) }}">{{ params.genome }}</a>.{% endif %}</p>
+<div class="panel">
+  <form class="table-tools" method="get" action="/hydrogenases/calls">
+    {% for k in ('class', 'group', 'genome', 'clade', 'rank') if params[k] %}<input type="hidden" name="{{ k }}" value="{{ params[k] }}">{% endfor %}
+    <select name="subgroup" onchange="this.form.submit()"><option value="">All subgroups</option>{% for cls, sub, label in subgroups if not params['class'] or cls == params['class'] %}<option value="{{ sub }}" {{ 'selected' if sub == params.subgroup }}>{{ label }}</option>{% endfor %}</select>
+    <select name="evidence" onchange="this.form.submit()">
+      {% for k, label in [('', 'Every assignment'), ('curated', 'Curated: catalytic domain or hydrogenase genes nearby'), ('cleared', 'Catalytic domain observed'), ('flagged', 'Need curation')] %}<option value="{{ k }}" {{ 'selected' if k == params.evidence }}>{{ label }}</option>{% endfor %}
+    </select>
+    <select name="verdict" onchange="this.form.submit()"><option value="">Any neighborhood</option>{% for v in verdicts %}<option value="{{ v }}" {{ 'selected' if v == params.verdict }}>{{ verdict_labels[v] }}</option>{% endfor %}</select>
+    <select name="flank" onchange="this.form.submit()">{% for f in [3000, 6000, 12000, 20000] %}<option value="{{ f }}" {{ 'selected' if f == params.flank }}>±{{ (f / 1000)|int }} kb</option>{% endfor %}</select>
+    <span class="count" style="margin-left:auto">page {{ page }} of {{ pages }} · {{ num(total) }} calls</span>
+  </form>
+  <div class="legend" style="margin:0 0 12px"><span><i class="lg-hyd"></i>the call</span><span><i class="lg-hyd-marker"></i>hydrogenase or maturation gene</span><span><i class="lg-c1"></i>Complex I gene (nuoA–N)</span><span><i style="background:var(--gene)"></i>other gene</span><span><i style="background:var(--gene-dark);border:1px dashed var(--ink-3)"></i>no annotation</span></div>
+  <div class="stack">
+  {% for c, svg in rows %}
+    <div class="stack-item">
+      <div class="stack-label">
+        <a href="{{ url('protein', c.protein_id) }}" title="{{ c.protein_id }}">{{ short(c.protein_id) }}</a>
+        <span class="sub"><a href="{{ url('genome', c.bin_id) }}" title="{{ c.bin_id }}">{{ gshort(c.bin_id) }}</a> · {{ c.lineage }}</span>
+        <span class="sub hyd-chips">
+          <b>{{ c.label }}</b>{% if c.pident is not none %} · {{ '%.0f' % c.pident }}% id{% endif %}
+          {% if c.cleared %}<span class="tag ok" title="{{ c.curation_reason }}">catalytic domain</span>{% else %}<span class="tag warn" title="{{ c.curation_reason }}">needs curation</span>{% endif %}
+          <span class="tag v-tag v-{{ c.verdict }}" title="{% if c.hydrogenase_markers %}hydrogenase: {{ c.hydrogenase_markers|join(', ') }}{% endif %}{% if c.hydrogenase_markers and c.complex_i_markers %}; {% endif %}{% if c.complex_i_markers %}Complex I: {{ c.complex_i_markers|join(', ') }}{% endif %}">{{ verdict_labels[c.verdict] }}</span>
+          {% if c.ko_support in ('subgroup', 'compatible') %}<span class="tag" title="{{ ko_labels[c.ko_support] }}">KOfam {{ c.ko_support }}</span>{% endif %}
+        </span>
+      </div>
+      <div class="stack-svg">{% if svg %}{{ svg }}{% else %}<p class="empty">No genomic position for this protein.</p>{% endif %}</div>
+    </div>
+  {% else %}<p class="empty">No calls match these filters.</p>{% endfor %}
+  </div>
+  {% if pages > 1 %}{% set q = 'class=' ~ quote(params['class']) ~ '&subgroup=' ~ quote(params.subgroup, safe='') ~ '&group=' ~ params.group ~ '&evidence=' ~ params.evidence ~ '&verdict=' ~ params.verdict ~ '&genome=' ~ quote(params.genome, safe='') ~ '&clade=' ~ quote(params.clade, safe='') ~ '&rank=' ~ params.rank ~ '&flank=' ~ params.flank %}
+  <div class="pager">{% if page > 1 %}<a class="btn" href="?{{ q }}&page={{ page - 1 }}">← Previous</a>{% endif %}<span class="count">Page {{ page }} of {{ pages }}</span>{% if page < pages %}<a class="btn" href="?{{ q }}&page={{ page + 1 }}">Next →</a>{% endif %}</div>{% endif %}
+</div>
+{% endblock %}

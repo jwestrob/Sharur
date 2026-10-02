@@ -45,8 +45,10 @@
   </div>
   <div class="panel">
     <h2>Systems and elements</h2>
-    {% if systems or loci or cas_calls %}
-      {% for c in cas_calls %}<a class="chip" href="{{ url('cas-system', c.system_id) }}" title="{{ c.prediction_cas }} · {{ c.genes_count }} genes"><i style="--dot:{{ charts.OVERLAY_COLORS.crispr if c.confident else '#9aa3ad' }}"></i>{% if c.confident %}CRISPR-Cas {{ c.prediction }}{% else %}Cas candidate (putative){% endif %}</a>{% endfor %}
+    {% if systems or loci or cas_calls or hyd_calls %}
+      {% for c in hyd_calls %}<a class="chip" href="/hydrogenases/calls?genome={{ quote(g.bin_id, safe='') }}" title="{{ c.label }} · {{ 'catalytic domain observed' if c.cleared else 'needs curation' }} · {{ VERDICT_LABELS[c.verdict] }}"><i style="--dot:{{ 'var(--hyd)' if c.curated else '#9aa3ad' }}"></i>{{ c.label|replace('_Group_', ' ')|replace('_', ' ') }}{% if not c.curated %} (review){% endif %}</a>{% endfor %}
+      {% for c in cas_calls if c.confident %}<a class="chip" href="{{ url('cas-system', c.system_id) }}" title="{{ c.prediction_cas }} · {{ c.genes_count }} genes"><i style="--dot:{{ charts.OVERLAY_COLORS.crispr }}"></i>CRISPR-Cas {{ c.prediction }}</a>{% endfor %}
+      {% set cas_candidates = cas_calls|rejectattr('confident')|list %}{% if cas_candidates %}<a class="chip" href="{{ url('cas-system', cas_candidates[0].system_id) if cas_candidates|length == 1 else '/crispr-cas/calls?status=cas_putative' }}" title="Cas operons the subtype scoring leaves unnamed"><i style="--dot:#9aa3ad"></i>Cas candidate{{ 's' if cas_candidates|length > 1 }} (putative){% if cas_candidates|length > 1 %} <span class="count">×{{ cas_candidates|length }}</span>{% endif %}</a>{% endif %}
       {% for s in systems %}<a class="chip" href="{{ url('call', s.system_id) }}" title="This call in its genomic context"><i style="--dot:{{ '#e15759' if s.kind == 'defense' else '#4e79a7' }}"></i>{{ s.type }}{% if s.subtype and s.subtype != s.type %} · {{ s.subtype }}{% endif %}</a>{% endfor %}
       {% if loci %}<p class="note">{{ loci|selectattr('type', 'equalto', 'prophage')|list|length }} prophage regions · {{ loci|selectattr('type', 'equalto', 'island')|list|length }} islands</p>{% endif %}
       {% set arrays = loci|selectattr('type', 'equalto', 'crispr')|list %}

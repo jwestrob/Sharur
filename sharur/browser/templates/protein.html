@@ -47,7 +47,7 @@
       <dt>Genome</dt><dd>{% if g %}<a href="{{ url('genome', g.bin_id) }}">{{ g.bin_id }}</a>{% endif %}</dd>
       <dt>Contig</dt><dd class="mono">{{ loc.contig_id }}</dd>
       {% if edge_text %}<dt>Position</dt><dd>{{ edge_text }}</dd>{% endif %}
-      {% if c.hydrogenase_classification %}<dt>Hydrogenase</dt><dd>{{ c.hydrogenase_classification.outcome }}: {{ c.hydrogenase_classification.reference_label }}</dd>{% endif %}
+      {% if c.hydrogenase_classification %}{% set h = hydrogenase_call(c.protein_id) if hydrogenase_call is defined else none %}<dt>Hydrogenase</dt><dd>{% if h and h.outcome == 'assigned' %}<a href="/hydrogenases/calls?class={{ h['class'] }}&subgroup={{ quote(h.subgroup or '', safe='') }}">{{ h.label }}</a> by nearest HydDB reference · {% if h.cleared %}catalytic domain observed{% else %}needs curation{% endif %} · {{ VERDICT_LABELS[h.verdict] }}{% else %}{{ c.hydrogenase_classification.outcome }}: {{ c.hydrogenase_classification.reference_label }}{% endif %}</dd>{% endif %}
     </dl>
     {% if systems_here %}<h2 style="margin-top:14px">Part of</h2>{% for s in systems_here %}<a class="chip" href="{{ url('call', s.system_id) }}" title="This call in its genomic context">{{ s.type }} ({{ s.kind }})</a>{% endfor %}{% endif %}
     {% if nearby %}<h2 style="margin-top:14px">Pathway steps nearby</h2>

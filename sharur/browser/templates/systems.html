@@ -33,6 +33,15 @@
     <p class="note">Cas genes are named from their domains; a named CRISPR-Cas subtype needs a system caller.</p>
   </div>
 {% endif %}
+  <div class="panel"><h2><a href="/hydrogenases">Hydrogenases</a> <span class="hint">{% if hydrogenases %}{{ num(hydrogenases.assigned) }} calls · nearest HydDB reference, with domain, KOfam and neighborhood evidence{% else %}subgroup labels from an earlier classifier pass{% endif %}</span></h2>
+    {% if hydrogenases %}
+    <div class="scroll"><table>
+      <thead><tr><th>Group</th><th class="num">Curated calls</th><th>Genomes</th></tr></thead>
+      <tbody>{% for g in hydrogenases.groups %}<tr><td><a href="/hydrogenases/calls?class={{ g['class'] }}&group={{ g.group }}&evidence=curated">{{ g.label }}</a></td><td class="num">{{ num(g.curated) }}</td><td><div class="cell-bar">{{ bar(g.share, 'var(--hyd)') }}<span class="count">{{ pct(g.share, 1) }}</span></div></td></tr>{% endfor %}</tbody>
+    </table></div>
+    <p class="note">Curated: catalytic domain observed, or hydrogenase genes nearby. {{ num(hydrogenases.flagged) }} calls carry only Complex I-superfamily domains and await curation.</p>
+    {% else %}<p class="note">Open the <a href="/hydrogenases">hydrogenase page</a> for the stored labels and the command that classifies this dataset.</p>{% endif %}
+  </div>
 </div>
 {% if loci %}
 <div class="panel"><h2>Mobile-element regions</h2>

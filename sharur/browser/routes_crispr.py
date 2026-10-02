@@ -438,7 +438,7 @@ def register(app, ctx, assembly_dirs: list[Path] | None = None) -> None:
         return loci
 
     def locus_row_svg(locus: dict[str, Any], genes: list[dict[str, Any]], lo: int, hi: int, flip: bool,
-                      width: int = 1040) -> Markup:
+                      width: int = 1040, label: str = "CRISPR-Cas locus") -> Markup:
         span = max(1, hi - lo)
         pad = 12
         scale = (width - 2 * pad) / span
@@ -461,13 +461,13 @@ def register(app, ctx, assembly_dirs: list[Path] | None = None) -> None:
                 pts = f"{x1:.1f},{y - h} {x2 - head:.1f},{y - h} {x2:.1f},{y} {x2 - head:.1f},{y + h} {x1:.1f},{y + h}"
             else:
                 pts = f"{x2:.1f},{y - h} {x1 + head:.1f},{y - h} {x1:.1f},{y} {x1 + head:.1f},{y + h} {x2:.1f},{y + h}"
-            cls = "gene cas" if g["cas"] else ("gene" if g["label"] else "gene dark")
-            short = (g["cas_name"] or g["label"] or "").split(" (")[0]
+            cls = g.get("cls") or ("gene cas" if g["cas"] else ("gene" if g["label"] else "gene dark"))
+            short = (g.get("cas_name") or g["label"] or "").split(" (")[0]
             text = (f'<text x="{(x1 + x2) / 2:.1f}" y="{y + 4}" class="gene-label">{charts._e(short)}</text>'
                     if short and x2 - x1 > 6.0 * len(short) + 10 else "")
             parts.append(f'<a href="/protein/{charts.quote(g["protein_id"], safe="")}"><g><title>'
                          f'{charts._e(short or "no annotation")}</title><polygon class="{cls}" points="{pts}"/>{text}</g></a>')
-        return Markup(f'<svg class="stack-row" viewBox="0 0 {width} 44" role="img" aria-label="CRISPR-Cas locus">'
+        return Markup(f'<svg class="stack-row" viewBox="0 0 {width} 44" role="img" aria-label="{charts._e(label)}">'
                       f'{"".join(parts)}</svg>')
 
     @app.get("/crispr-cas", response_class=HTMLResponse)

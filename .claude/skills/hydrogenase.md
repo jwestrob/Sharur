@@ -161,49 +161,33 @@ an interpretation.
 
 ### Step 3: Neighborhood evidence for every review-flagged call
 
-Classify each review-flagged protein as **supported**, **Complex I context**, or
-**ambiguous** from its ±6-gene neighborhood.
+Read each review-flagged protein's ±6-gene neighborhood with the shared rule (the browser's
+`/hydrogenases` page uses the same one):
 
 ```python
-COMPLEX_I_KOS = {f"K{n:05d}" for n in range(330, 344)}          # nuoA-N
-HYC_KOS = {f"K{n:05d}" for n in range(15827, 15834)}            # hycB-G, hycA (formate hydrogenlyase)
-HYF_KOS = {f"K{n:05d}" for n in range(12136, 12146)}            # hyfA-J (hydrogenase-4)
-ECH_KOS = {f"K{n:05d}" for n in range(14086, 14092)}            # echA-F
-MATURATION_KOS = {"K04651", "K04652", "K04653", "K04654", "K04655", "K04656", "K03605"}  # hypA-F, hyaD/hybD
-COMPLEX_I_PFAM_NAMES = {"Complex1_30kDa", "Complex1_49kDa", "Oxidored_q6", "Oxidored_q5_N", "Oxidored_q4"}
-HYDROGENASE_PFAM_NAMES = {"NiFeSe_Hases", "Fe_hyd_lg_C", "Fe_hyd_SSU"}
-NAME_PREFIXES = {"ech": "Ech", "eha": "Eha", "ehb": "Ehb", "hyc": "Hyc", "hyf": "Hyf", "coo": "Coo"}
+from sharur.hydrogenase.neighborhood import VERDICT_LABELS, VERDICTS, neighborhood_contexts
 
-
-def neighborhood_evidence(protein_id, window=6):
-    nbr = b.get_neighborhood(protein_id, window=window, all_annotations=True)
-    complex_i, hydrogenase = set(), set()
-    for gene in nbr:
-        if gene.get("protein_id") == protein_id:
-            continue
-        for ann in gene.get("annotations", []):
-            acc, name = ann.get("accession") or "", ann.get("name") or ""
-            if acc in COMPLEX_I_KOS or {acc, name} & COMPLEX_I_PFAM_NAMES:
-                complex_i.add(f"{acc} {name}")
-            if acc in HYC_KOS | HYF_KOS | ECH_KOS | MATURATION_KOS or {acc, name} & HYDROGENASE_PFAM_NAMES:
-                hydrogenase.add(f"{acc} {name}")
-            for prefix, complex_name in NAME_PREFIXES.items():
-                if name.lower().startswith(prefix):
-                    hydrogenase.add(f"{complex_name}: {name}")
-    if hydrogenase and not complex_i:
-        return "supported", complex_i, hydrogenase
-    if complex_i and not hydrogenase:
-        return "complex_i_context", complex_i, hydrogenase
-    return "ambiguous", complex_i, hydrogenase
-
-
-verdicts = {pid: neighborhood_evidence(pid) for pid, *_ in review}
-for label in ("supported", "complex_i_context", "ambiguous"):
-    print(label, sum(v[0] == label for v in verdicts.values()))
+contexts = neighborhood_contexts(b.store, [pid for pid, *_ in review])
+for verdict in VERDICTS:
+    print(VERDICT_LABELS[verdict], sum(c.verdict == verdict for c in contexts.values()))
+# each context also lists its markers: contexts[pid].hydrogenase, contexts[pid].complex_i
 ```
 
-Report the counts per verdict for this dataset. Rates differ widely between datasets
-and lineages; compute them, and cite them only for the dataset measured.
+Markers, by side:
+
+- **Hydrogenase:** every KO KEGG names as a hydrogenase (`kegg_hyddb_snapshot.tsv`, 121 KOs,
+  hyp maturation genes included), the Hyc/Hyf/Ech KOs, the NiFeSe_Hases / Fe_hyd_lg_C / Fe_hyd_SSU
+  catalytic domains, and Ech/Eha/Ehb/Hyc/Hyf/Coo gene names.
+- **Complex I:** KOfam nuoA–N (K00330–K00343). KOfam calibrates these profiles against their
+  hydrogenase relatives. Pfam Complex I-superfamily families (Oxidored_q6, Complex1_30kDa,
+  Complex1_49kDa, Oxidored_q4, Oxidored_q5_N) count on neither side: hydrogenase complexes carry
+  them too, Oxidored_q6 covering [NiFe] small subunits. On DPANN, Oxidored_q6 sits beside 699 of
+  1,258 calls that carry the catalytic domain.
+
+Verdicts: `supported` (hydrogenase markers only), `complex_i_context` (Complex I markers only),
+`mixed` (both), `no_markers` (neither), `no_position`. Report the counts per verdict for this
+dataset. Rates differ widely between datasets and lineages; compute them, and cite them only for
+the dataset measured.
 
 ### Step 4: Interpret by subgroup
 
@@ -232,8 +216,7 @@ summary = {
     "assigned": len(rows),
     "domain_check_cleared": len(cleared),
     "needs_curation": len(review),
-    "neighborhood": {k: sum(v[0] == k for v in verdicts.values())
-                     for k in ("supported", "complex_i_context", "ambiguous")},
+    "neighborhood": {k: sum(c.verdict == k for c in contexts.values()) for k in VERDICTS},
     "class_conflicts": len(conflicts),
 }
 ```

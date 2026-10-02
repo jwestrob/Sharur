@@ -29,7 +29,7 @@
     ["Overview", "/", "home"], ["Tree of life", "/taxa", "taxa clades treemap"],
     ["Taxonomy tree", "/tree", "cladogram map features rings"], ["Functional landscape", "/landscape", "map genomes pca"],
     ["Functions", "/functions", "labels predicates"], ["Pathways", "/pathways", "kegg modules"],
-    ["Families", "/domains", "pfam vog domains"], ["Systems", "/systems", "defense secretion crispr"],
+    ["Families", "/domains", "pfam vog domains"], ["Systems", "/systems", "defense secretion crispr"], ["Hydrogenases", "/hydrogenases", "hydrogenase nife fefe hyddb group 4"],
     ["CRISPR arrays", "/crispr", "minced repeats spacers"], ["Discover", "/discover", "giants fusions unannotated"],
     ["Presence/absence matrix", "/matrix", "genomes features ko"], ["Compare", "/compare", "two genomes clades"],
     ["Function heatmap", "/heatmap", "prevalence clades"], ["Architecture search", "/architecture", "domain pattern"],
