@@ -34,6 +34,7 @@ Astra and missing from Aksha's registry, stage 04 names the fix: `sharur adopt-a
 **Notes:**
 - `--prot_in` expects a **directory** containing `.faa` files, not a single file
 - Output: consolidated hits at `<outdir>/<database_lowercase>_results/<DATABASE>_hits_df.tsv` (per-genome intermediates land in `tmp_results/*_results.tsv`)
+- A search that exits non-zero leaves the genomes it reached in `<DATABASE>_hits_df.partial.tsv`; stage 04 reports it as failed with the genome count, and stage 07 loads only the complete `<DATABASE>_hits_df.tsv`
 - For single files: `mkdir source/ && cp proteins.faa source/`
 
 ### Secretion System Identification (TXSScan)

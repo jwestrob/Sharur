@@ -97,8 +97,10 @@ def run_single_astra_scan(database: str, protein_symlink_dir: Path, output_dir: 
         hits_file = db_output_dir / f"{database}_hits_df.tsv"
 
         if not hits_file.exists():
-            # Fallback: consolidate per-genome results from tmp_results/
-            hits_file = _consolidate_tmp_results(db_output_dir, database, hits_file)
+            # Fallback: consolidate per-genome results from tmp_results/. A search that exited non-zero
+            # reached only some genomes; their hits go to a .partial file, which stage 07 does not load.
+            target = db_output_dir / f"{database}_hits_df.partial.tsv" if search_failed else hits_file
+            hits_file = _consolidate_tmp_results(db_output_dir, database, target)
 
         if hits_file is None or not hits_file.exists():
             result["error_message"] = (
@@ -117,11 +119,14 @@ def run_single_astra_scan(database: str, protein_symlink_dir: Path, output_dir: 
         except Exception as e:
             logger.warning(f"Failed to parse results statistics for {database}: {e}")
 
-        if search_failed and result["total_hits"] > 0:
+        if search_failed:
+            reached = len(list((db_output_dir / "tmp_results").glob("*_results.tsv")))
+            searched = len(list(protein_symlink_dir.glob("*.faa")))
             result["execution_status"] = "partial"
             result["error_message"] = (
-                f"{tool} exited non-zero but {result['total_hits']:,} hits recovered "
-                f"from tmp_results/"
+                f"{tool} exited with code {process_result.returncode} after {reached:,} of {searched:,} genomes; "
+                f"their {result['total_hits']:,} hits are in {hits_file.name}, which stage 07 skips. "
+                f"Rerun {database} to annotate every genome."
             )
         else:
             result["execution_status"] = "success"
@@ -308,7 +313,7 @@ def run_astra_scan(
             status = "✓" if result["execution_status"] == "success" else "✗"
             console.print(f"{status} {database}: {result.get('total_hits', 0):,} hits in {result['execution_time_seconds']:.1f}s")
             
-            if result["execution_status"] == "failed":
+            if result["execution_status"] != "success":
                 console.print(f"[red]  Error: {result.get('error_message', 'Unknown error')}[/red]")
                 
         except Exception as e:
@@ -325,7 +330,7 @@ def run_astra_scan(
     
     # Generate summary statistics
     successful_results = [r for r in results if r["execution_status"] == "success"]
-    failed_results = [r for r in results if r["execution_status"] == "failed"]
+    failed_results = [r for r in results if r["execution_status"] != "success"]   # partial runs included
     
     total_hits = sum(r.get("total_hits", 0) for r in successful_results)
     total_unique_proteins = sum(r.get("unique_proteins", 0) for r in successful_results)
