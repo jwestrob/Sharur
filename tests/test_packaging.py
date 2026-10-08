@@ -26,6 +26,12 @@ def test_stage_helpers_imported_at_runtime_are_packaged():
     assert FORCE.get("scripts/classify_cazymes.py") == "sharur/ingest/stages/classify_cazymes.py"
 
 
+def test_provider_attribution_stays_attached_to_the_wheel():
+    for notice in ("DATA_LICENSES.md", "CITATIONS.md"):
+        assert FORCE.get(notice) == f"sharur/{notice}"
+        assert (REPO / notice).is_file()
+
+
 def test_package_data_lives_inside_the_package_and_is_not_excluded():
     wheel = PYPROJECT["tool"]["hatch"]["build"]["targets"]["wheel"]
     assert wheel["packages"] == ["sharur"]

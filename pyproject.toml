@@ -128,6 +128,8 @@ build-backend = "hatchling.build"
 packages = ["sharur"]
 
 [tool.hatch.build.targets.wheel.force-include]
+"DATA_LICENSES.md" = "sharur/DATA_LICENSES.md"
+"CITATIONS.md" = "sharur/CITATIONS.md"
 "config/predicates_v2" = "sharur/predicates_v2/config"
 "src/ingest/00_prepare_inputs.py" = "sharur/ingest/stages/00_prepare_inputs.py"
 "src/ingest/01_run_quast.py" = "sharur/ingest/stages/01_run_quast.py"
