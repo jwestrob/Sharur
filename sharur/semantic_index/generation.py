@@ -11,7 +11,7 @@ Layout of an index directory::
 A generation is complete and immutable once its directory is published. Opening one
 verifies, before any request is served: the generation and component formats; each
 component manifest hash and the shared protein-dictionary binding; the source's size,
-mtime and inode (and its seal hash, when recorded) against the adopted state; and,
+mtime and inode (and its seal's dataset ID, when recorded) against the adopted state; and,
 by default, every payload checksum. A mismatch raises :class:`StaleGenerationError`
 or :class:`GenerationError`; there is no silent fallback.
 """
@@ -156,8 +156,8 @@ def assemble(index_dir: str | Path, db_path: str | Path, *, membership: str | Pa
         seal = {"name": seal_path.name, "sha256": sha256_file(seal_path),
                 "dataset_id": json.loads(seal_path.read_text()).get("dataset_id")}
         recorded = membership_manifest["source"].get("seal")
-        if recorded and recorded.get("sha256") != seal["sha256"]:
-            raise StaleGenerationError("Seal differs from the one recorded at membership build time")
+        if recorded and recorded.get("dataset_id") != seal["dataset_id"]:
+            raise StaleGenerationError("Seal dataset ID differs from the one recorded at membership build time")
     digest = hashlib.sha256("\n".join(manifests[n][1] for n in COMPONENTS).encode()).hexdigest()
     generation_id = f"g1-{digest[:16]}"
     generations = index_dir / "generations"
@@ -255,9 +255,10 @@ def verify(generation: Generation, db_path: str | Path, *, payloads: bool = True
             f"{db_path.name} differs from the state generation {generation.generation_id} was adopted for "
             "(size, mtime or inode changed); rebuild or re-adopt the index")
     if source.get("seal"):
+        # Bind the dataset identity; a reseal that only refreshes software provenance keeps it.
         seal = Path(seal_path) if seal_path else db_path.parent / source["seal"]["name"]
-        if not seal.is_file() or sha256_file(seal) != source["seal"]["sha256"]:
-            raise StaleGenerationError(f"Dataset seal differs from the one bound to {generation.generation_id}")
+        if not seal.is_file() or json.loads(seal.read_text()).get("dataset_id") != source["seal"]["dataset_id"]:
+            raise StaleGenerationError(f"Dataset seal identity differs from the one bound to {generation.generation_id}")
     manifests = {}
     for name, info in generation.record["components"].items():
         manifest, manifest_sha = _manifest(generation.component(name), COMPONENTS[name])

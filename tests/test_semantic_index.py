@@ -352,6 +352,8 @@ def test_seal_binding(tmp_path):
     seal.write_text(json.dumps({"dataset_id": "fixture"}))
     _build_generation(tmp_path, db, tmp_path / "index", seal=seal)
     CompactSemanticProvider.open(tmp_path / "index", db).close()
+    seal.write_text(json.dumps({"dataset_id": "fixture", "provenance": {"git": "later"}}))
+    CompactSemanticProvider.open(tmp_path / "index", db).close()     # provenance-only reseal keeps the binding
     seal.write_text(json.dumps({"dataset_id": "other"}))
     with pytest.raises(StaleGenerationError, match="seal"):
         CompactSemanticProvider.open(tmp_path / "index", db)
