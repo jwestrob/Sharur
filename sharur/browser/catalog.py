@@ -403,15 +403,16 @@ def load_background(store, catalog: Catalog, lock: threading.Lock) -> None:
         from sharur.modules import evaluate, load_modules  # noqa: PLC0415
 
         catalog.status = "computing pathways"
+        # KO presence per genome needs only the annotations; module completeness also needs a KEGG build
+        with lock:
+            hits = store.execute(
+                """SELECT p.bin_id, LIST(DISTINCT a.accession) FROM annotations a JOIN proteins p USING (protein_id)
+                   WHERE LOWER(a.source) IN ('kofam', 'kegg') AND regexp_matches(a.accession, '^K[0-9]{5}$')
+                   GROUP BY 1""")
+        for bin_id, kos in hits:
+            catalog.ko_sets[bin_id] = {sys.intern(ko) for ko in kos}   # ~20k KOs shared by ~1M entries
         definitions = load_modules()
         if definitions:
-            with lock:
-                hits = store.execute(
-                    """SELECT p.bin_id, LIST(DISTINCT a.accession) FROM annotations a JOIN proteins p USING (protein_id)
-                       WHERE LOWER(a.source) IN ('kofam', 'kegg') AND regexp_matches(a.accession, '^K[0-9]{5}$')
-                       GROUP BY 1""")
-            for bin_id, kos in hits:
-                catalog.ko_sets[bin_id] = {sys.intern(ko) for ko in kos}   # ~20k KOs shared by ~1M entries
             ids = sorted(definitions)
             matrix = np.zeros((len(catalog.genomes), len(ids)), dtype=np.float32)
             module_kos = {m: _kos(definitions[m]) for m in ids}

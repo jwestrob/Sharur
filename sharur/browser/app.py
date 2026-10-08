@@ -5,6 +5,7 @@ from __future__ import annotations
 import secrets
 import threading
 from collections import Counter, defaultdict
+from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -169,8 +170,14 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
                                  # static assets change with the package; bust browser caches on upgrade
                                  asset_version=int(max(f.stat().st_mtime for f in (HERE / "static").iterdir())))
 
-    app = FastAPI(title="Sharur browser", docs_url=None, redoc_url=None, openapi_url=None)
-    app.add_event_handler("shutdown", semantic.close)
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        try:
+            yield
+        finally:
+            semantic.close()
+
+    app = FastAPI(title="Sharur browser", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     # SVG-heavy pages compress several-fold
     from starlette.middleware.gzip import GZipMiddleware  # noqa: PLC0415
 

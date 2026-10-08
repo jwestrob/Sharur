@@ -30,6 +30,7 @@ dependencies = [
     "typer>=0.9.0",
     "rich>=13.0.0",
     "requests>=2.28.0",
+    "pytz>=2023.3",  # DuckDB returns TIMESTAMPTZ values through pytz (synteny runs, compaction checks)
 ]
 
 [project.optional-dependencies]
@@ -54,6 +55,8 @@ ops = [
     "fastapi>=0.110.0",
     "uvicorn>=0.27.0",
     "jinja2>=3.1",
+    "python-multipart>=0.0.9",  # browser forms (flags, notes, collection)
+    "scipy>=1.10.0",  # landscape SVD, matrix statistics
 ]
 visualization = [
     "matplotlib>=3.7.0",
