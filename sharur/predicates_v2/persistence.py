@@ -1690,9 +1690,10 @@ def _promote_full_generation(
             INSERT INTO semantic_state
             SELECT * FROM v2_generation_state
         """)
+        # protein_id order keeps each protein's rows in few row groups (zone maps)
         store.execute("""
             INSERT INTO semantic_terms
-            SELECT * FROM v2_generation_terms
+            SELECT * FROM v2_generation_terms ORDER BY protein_id
         """)
         if update_legacy_predicates:
             store.execute("""
@@ -1802,6 +1803,7 @@ def _insert_semantic_terms_from_v2_sql(
         FROM semantic_atoms
         WHERE atom_id NOT LIKE '_source_witness:%'
         {protein_filter}
+        ORDER BY protein_id
         """,
         params,
     )
@@ -1837,6 +1839,7 @@ def _insert_semantic_terms_from_v2_sql(
             source_accession
         FROM direct_terms
         WHERE source_prefix IS NOT NULL
+        ORDER BY protein_id
         """,
         params,
     )
@@ -1862,6 +1865,7 @@ def _insert_semantic_terms_from_v2_sql(
             WHERE LEN(composite_predicates) > 0
             {state_filter}
         ) composites
+        ORDER BY protein_id
         """,
         params,
     )
@@ -2380,6 +2384,7 @@ def _persist_semantic_terms(
             SELECT protein_id, term_id, term_kind, facet, relation,
                    source_db, source_accession
             FROM _semantic_terms_batch
+            ORDER BY protein_id
         """,
     )
 

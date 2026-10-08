@@ -182,8 +182,9 @@ CREATE TABLE IF NOT EXISTS semantic_terms (
     source_db VARCHAR NOT NULL DEFAULT '',
     source_accession VARCHAR NOT NULL DEFAULT ''
 );
-CREATE INDEX IF NOT EXISTS idx_semantic_terms_term ON semantic_terms(term_id);
-CREATE INDEX IF NOT EXISTS idx_semantic_terms_protein ON semantic_terms(protein_id);
+-- semantic_terms carries no secondary index: rows are written in protein_id
+-- order, so zone maps prune per-protein reads, and term lookups scan the
+-- compressed term_id column faster than an ART index serves them.
 
 -- Constraint-free append targets for resumable full refreshes. Completed
 -- generations are promoted into the canonical constrained/indexed tables in
@@ -269,6 +270,8 @@ V2_RETIRED_INDEX_NAMES = (
     "idx_semantic_terms_facet_term",
     "idx_semantic_terms_source",
     "idx_semantic_terms_kind",
+    "idx_semantic_terms_term",
+    "idx_semantic_terms_protein",
 )
 V2_ALL_INDEX_NAMES = tuple(dict.fromkeys((*V2_INDEX_NAMES, *V2_RETIRED_INDEX_NAMES)))
 

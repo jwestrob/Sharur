@@ -653,15 +653,14 @@ def test_full_generation_defers_indexes_and_releases_build_tables(monkeypatch):
         FROM duckdb_indexes()
         WHERE index_name IN (
             'idx_semantic_atoms_protein',
-            'idx_semantic_atoms_facet',
-            'idx_semantic_terms_term'
+            'idx_semantic_atoms_facet'
         )
     """).fetchall())
     assert index_expressions == {
         "idx_semantic_atoms_protein": "[protein_id]",
         "idx_semantic_atoms_facet": "[facet]",
-        "idx_semantic_terms_term": "[term_id]",
     }
+    assert not {name for name in completed_indexes if name.startswith("idx_semantic_terms_")}
     tables = {row[0] for row in store.conn.execute("SHOW TABLES").fetchall()}
     assert not tables.intersection(persistence._GENERATION_TABLES)
 

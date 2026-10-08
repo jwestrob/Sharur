@@ -178,8 +178,7 @@ CREATE TABLE IF NOT EXISTS semantic_terms (
     source_db VARCHAR NOT NULL DEFAULT '',
     source_accession VARCHAR NOT NULL DEFAULT ''
 );
-CREATE INDEX IF NOT EXISTS idx_semantic_terms_term ON semantic_terms(term_id);
-CREATE INDEX IF NOT EXISTS idx_semantic_terms_protein ON semantic_terms(protein_id);
+-- semantic_terms has no secondary index; see sharur/predicates_v2/model.py.
 
 -- Constraint-free append targets used while a resumable full V2 refresh is
 -- running. They are bulk-promoted into the canonical tables at completion.
