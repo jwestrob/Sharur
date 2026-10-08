@@ -1951,14 +1951,27 @@ def _integrate_results(
         insert_df = insert_df.reindex(columns=cols, fill_value="")
         conn.register("tmp_systems", insert_df)
         column_sql = ", ".join(cols)
+        # DuckDB upserts may retain old values in indexed non-key columns.
+        # Replacing the row set inside this transaction updates every column
+        # while retaining the existing table, constraints and lookup indexes.
+        conn.execute(f"DELETE FROM {table_name}")
         conn.execute(
-            f"INSERT OR REPLACE INTO {table_name} ({column_sql}) "
+            f"INSERT INTO {table_name} ({column_sql}) "
             f"SELECT {column_sql} FROM tmp_systems"
         )
-        conn.execute(
-            f"DELETE FROM {table_name} "
-            "WHERE system_id NOT IN (SELECT system_id FROM tmp_systems)"
+        comparisons = " OR ".join(
+            f"stored.{column} IS DISTINCT FROM expected.{column}"
+            for column in cols if column != "created_at"
         )
+        mismatches = conn.execute(
+            f"SELECT COUNT(*) FROM {table_name} stored "
+            "FULL OUTER JOIN tmp_systems expected USING (system_id) "
+            f"WHERE {comparisons}"
+        ).fetchone()[0]
+        if mismatches:
+            raise RuntimeError(
+                f"Persisted {table_name} rows differ from validated caller output"
+            )
         conn.unregister("tmp_systems")
         logger.info(
             "Replaced %d existing %s rows with %d validated rows",
@@ -2149,9 +2162,8 @@ def _integrate_results(
         logger.info(f"  FP reduction: {astra_count - system_count} proteins ({fp_rate:.1f}%)")
 
     conn.commit()
-    # DuckDB 1.1 cannot create an index with outstanding updates and does not
-    # update a newly added indexed column during INSERT OR REPLACE. Build this
-    # nonessential lookup index only after the replacement transaction commits.
+    # Build the optional lookup index after committing the replacement;
+    # DuckDB versions can reject index creation with outstanding updates.
     conn.execute(
         f"CREATE INDEX IF NOT EXISTS idx_{table_name}_replicon "
         f"ON {table_name}(genome_id, contig_id)"

@@ -19,6 +19,7 @@ from sharur.colocation import (
     _parse_model_xml,
     _select_best_hits_per_position,
     _translate_hit_accessions,
+    integrate_defense_results,
     integrate_secretion_results,
     resolve_conflicts,
     validate_systems,
@@ -619,3 +620,50 @@ def test_integration_rejects_cross_contig_membership_before_mutation(
 
     assert stored_systems == [("stale",)]
     assert stored_annotations == [("stale",)]
+
+
+@pytest.mark.parametrize(
+    ("integrator", "table_name", "source"),
+    [(integrate_defense_results, "defense_systems", "defensefinder_system"),
+     (integrate_secretion_results, "secretion_systems", "txsscan_system")],
+)
+def test_reintegration_updates_existing_indexed_replicon_columns(
+    tmp_path: Path, integrator, table_name: str, source: str,
+) -> None:
+    db_path = tmp_path / "indexed_systems.duckdb"
+    _seed_integration_db(db_path)
+    systems, genes = _system_frames()
+    integrator(db_path, systems, genes)
+    conn = duckdb.connect(str(db_path))
+    before_constraints = conn.execute(
+        "SELECT constraint_type, constraint_column_names FROM duckdb_constraints() "
+        "WHERE table_name = ? ORDER BY constraint_index", [table_name]
+    ).fetchall()
+    assert conn.execute(
+        "SELECT count(*) FROM duckdb_indexes() WHERE index_name = ?",
+        [f"idx_{table_name}_replicon"],
+    ).fetchone()[0] == 1
+    conn.execute(
+        "UPDATE proteins SET bin_id='genome-2',contig_id='contig-2' "
+        "WHERE protein_id IN ('p1','p2')"
+    )
+    conn.close()
+    systems.loc[0, "genome_id"] = "genome-2"
+    systems.loc[0, "contig_id"] = "contig-2"
+    integrator(db_path, systems, genes)
+    conn = duckdb.connect(str(db_path), read_only=True)
+    assert conn.execute(
+        f"SELECT system_id,genome_id,contig_id,protein_ids FROM {table_name}"
+    ).fetchall() == [("genome-1_test_1", "genome-2", "contig-2", "p1,p2")]
+    assert conn.execute(
+        "SELECT count(*) FROM system_proteins WHERE system_source = ?", [source]
+    ).fetchone()[0] == 2
+    assert conn.execute(
+        "SELECT constraint_type, constraint_column_names FROM duckdb_constraints() "
+        "WHERE table_name = ? ORDER BY constraint_index", [table_name]
+    ).fetchall() == before_constraints
+    assert conn.execute(
+        "SELECT count(*) FROM duckdb_indexes() WHERE index_name = ?",
+        [f"idx_{table_name}_replicon"],
+    ).fetchone()[0] == 1
+    conn.close()
