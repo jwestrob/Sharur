@@ -1,7 +1,11 @@
 """Guards for what the wheel must carry beyond Python modules."""
 
 import re
-import tomllib
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10: pytest ships the tomli backport
+    import tomli as tomllib
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
