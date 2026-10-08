@@ -512,9 +512,9 @@ def _fetch_semantic_terms(
     same stored rows. Blank sources and accessions read as None here.
     """
     provider = attached_semantic_provider(store)
-    if provider is not None:
+    if provider is not None and provider.has_rich_rows:
         rows = provider.rich_rows(protein_id)
-    elif "semantic_terms" not in table_names:
+    elif provider is None and "semantic_terms" not in table_names:
         return []
     else:
         rows = store.execute(

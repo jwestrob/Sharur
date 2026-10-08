@@ -774,8 +774,8 @@ backfilled.
 #### Optional compact index
 
 `sharur.semantic_index` can serve the same membership and stored rows from a
-compact, read-only index generation: Roaring/uint32 postings per term, every
-stored row in a per-protein layout, and per-genome protein sets. Results are
+compact, read-only index generation: Roaring/uint32 postings per term,
+per-genome protein sets and, optionally, every stored row in a per-protein layout. Results are
 identical to the SQL table (active membership is
 `(term_kind != 'atom' OR relation != 'excludes')`; rows keep NULL, blank and
 duplicate values), and term searches return in well under a millisecond.
@@ -795,6 +795,12 @@ sharur browse --db data/DATASET/sharur.duckdb --semantic-index INDEX_DIR      # 
 sharur preflight --db data/DATASET/sharur.duckdb --semantic-index INDEX_DIR   # verifies the index
 sharur-query --db data/DATASET/sharur.duckdb --direct --semantic-index INDEX_DIR   # /v1/atoms/proteins
 ```
+
+The rows component is optional. A membership-only generation (postings plus
+genome scope, about 121 MB for DPANN) serves term search, and stored rows come
+from `semantic_terms`, which is stored in `protein_id` order without secondary
+indexes. Keep the rows component where per-protein SQL reads are slow, for
+example when protein IDs share long prefixes and zone maps cannot prune.
 
 An index directory holds immutable `generations/<id>/` plus a `CURRENT`
 pointer. Opening verifies the generation against the database (size, mtime,

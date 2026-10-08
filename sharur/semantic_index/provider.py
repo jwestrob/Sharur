@@ -124,6 +124,7 @@ class SqlSemanticProvider:
 
     backend = "sql"
     needs_store_lock = True
+    has_rich_rows = True
     # The term catalog is a GROUP BY over every row; the main search box skips it.
     cheap_catalog = False
 
@@ -260,6 +261,8 @@ class CompactSemanticProvider:
     def __init__(self, generation: Generation, membership, forward, scope) -> None:
         self.generation = generation
         self.membership, self.forward, self.scope = membership, forward, scope
+        # A generation without the rows component serves membership only; callers read rows from SQL.
+        self.has_rich_rows = forward is not None
         self.counters = _Counters()
         self._catalog: list[tuple[str, int]] | None = None
         self._closed = False
@@ -279,11 +282,13 @@ class CompactSemanticProvider:
         verify(generation, db_path, payloads=verify_payloads, content_match=content_match, seal_path=seal_path)
         membership = PostingIndex(generation.component("membership"))
         try:
-            forward = ForwardIndex(generation.component("forward"), generation.component("membership"))
+            forward = (ForwardIndex(generation.component("forward"), generation.component("membership"))
+                       if "forward" in generation.record["components"] else None)
             try:
                 scope = GenomeScope(generation.component("genome_scope"), generation.component("membership"))
             except BaseException:
-                forward.close()
+                if forward is not None:
+                    forward.close()
                 raise
         except BaseException:
             membership.close()
@@ -305,7 +310,7 @@ class CompactSemanticProvider:
             raise GenerationError(f"Dataset has {proteins} proteins; generation has {counts['proteins']}")
         tables = {r[0] for r in store.execute(
             "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'")}
-        if "semantic_terms" in tables:
+        if "semantic_terms" in tables and counts["rich_rows"] is not None:
             rows = store.execute("SELECT COUNT(*) FROM semantic_terms")[0][0]
             if rows != counts["rich_rows"]:
                 raise GenerationError(f"semantic_terms has {rows} rows; generation has {counts['rich_rows']}")
@@ -314,8 +319,14 @@ class CompactSemanticProvider:
         if self._closed:
             raise GenerationError("Compact semantic provider is closed")
 
+    def _rows(self) -> None:
+        self._open()
+        if self.forward is None:
+            raise GenerationError("This generation serves membership only; read stored rows from SQL")
+
     def identity(self) -> dict[str, Any]:
-        return {"backend": self.backend, **self.generation.identity(), "root": str(self.generation.root)}
+        return {"backend": self.backend, **self.generation.identity(), "root": str(self.generation.root),
+                "rich_rows": "compact" if self.has_rich_rows else "sql"}
 
     def available(self) -> bool:
         return not self._closed
@@ -339,17 +350,17 @@ class CompactSemanticProvider:
         return SearchPage(len(result), ids, (time.perf_counter() - started) * 1000)
 
     def rich_rows(self, protein_id: str) -> list[tuple]:
-        self._open()
+        self._rows()
         self.counters.hit("rich_rows")
         return self.forward.rows_for_protein(protein_id)
 
     def rich_row_count(self, protein_id: str) -> int:
-        self._open()
+        self._rows()
         pid = self.forward.proteins.find(protein_id)
         return 0 if pid is None else self.forward.row_count(pid)
 
     def rich_rows_many(self, protein_ids: list[str]) -> dict[str, list[tuple]]:
-        self._open()
+        self._rows()
         self.counters.hit("rich_rows_many")
         return {pid: self.forward.rows_for_protein(pid) for pid in protein_ids}
 
@@ -370,7 +381,8 @@ class CompactSemanticProvider:
 
     def stats(self) -> dict[str, Any]:
         self._open()
-        return {"rich_rows": int(self.forward.manifest["rows"]), "terms": len(self.membership.terms)}
+        rows = int(self.forward.manifest["rows"]) if self.forward is not None else None
+        return {"rich_rows": rows, "terms": len(self.membership.terms)}
 
     def close(self) -> None:
         if self._closed:
@@ -378,7 +390,8 @@ class CompactSemanticProvider:
         self._closed = True
         self._catalog = None
         for reader in (self.scope, self.forward, self.membership):
-            reader.close()
+            if reader is not None:
+                reader.close()
 
 
 def attach(store, provider) -> None:

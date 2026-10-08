@@ -143,6 +143,8 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
         attach(store, semantic)
     else:
         semantic = SqlSemanticProvider(store)
+    # stored rows: from the index when it carries them, else from semantic_terms
+    semantic_rows = semantic if semantic.has_rich_rows else SqlSemanticProvider(store)
     lock = threading.Lock()
     summaries = store
     if cache_dir is not None:
@@ -209,7 +211,7 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
     ctx = SimpleNamespace(store=store, summaries=summaries, lock=lock, catalog=catalog, render=render, url=_url,
                           describe_hit=describe_hit, predicates=PREDICATE_BY_ID, db_path=Path(db_path),
                           notes_path=Path(notes_path) if notes_path else None, ko_names=ko_names,
-                          dataset=dataset_name, semantic=semantic)
+                          dataset=dataset_name, semantic=semantic, semantic_rows=semantic_rows)
     app.state.ctx = ctx
     app.state.semantic = semantic
     routes_terms.register(app, ctx)    # before the /protein/{id} and /api/v1/protein/{id} catch-alls
@@ -420,7 +422,7 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
             c = card(store, protein_id, window=0)
             if not c.get("found"):
                 raise HTTPException(404, "Protein not found")
-            term_rows = semantic.rich_row_count(protein_id) if semantic.available() else None
+            term_rows = semantic_rows.rich_row_count(protein_id) if semantic_rows.available() else None
             domains = [d.to_dict() for d in architecture(store, protein_id)]
             lanes = domain_lanes(store, protein_id)
             sequence_rows = store.execute("SELECT sequence FROM proteins WHERE protein_id = ?", [protein_id])

@@ -43,8 +43,9 @@ def is_active(term_kind: str | None, relation: str | None) -> bool:
     return (term_kind is not None and term_kind != "atom") or (relation is not None and relation != "excludes")
 
 
-def _guard(ctx):
-    return ctx.lock if ctx.semantic.needs_store_lock else nullcontext()
+def _guard(ctx, provider=None):
+    provider = provider or ctx.semantic
+    return ctx.lock if provider.needs_store_lock else nullcontext()
 
 
 def backend_label(provider) -> str:
@@ -83,9 +84,10 @@ def run_search(ctx, request: SearchRequest, offset: int, limit: int) -> dict[str
     started = time.perf_counter()
     with _guard(ctx):
         page = provider.search(request, offset=offset, limit=limit)
-        t1 = time.perf_counter()
-        positives = set(request.has + request.any_of)
-        evidence = provider.rich_rows_many(page.protein_ids) if positives and page.protein_ids else {}
+    t1 = time.perf_counter()
+    positives = set(request.has + request.any_of)
+    with _guard(ctx, ctx.semantic_rows):
+        evidence = ctx.semantic_rows.rich_rows_many(page.protein_ids) if positives and page.protein_ids else {}
     t2 = time.perf_counter()
     info = {}
     if page.protein_ids:
@@ -120,9 +122,10 @@ def protein_terms(ctx, protein_id: str) -> dict[str, Any] | None:
     if not found:
         return None
     started = time.perf_counter()
+    with _guard(ctx, ctx.semantic_rows):
+        rows = ctx.semantic_rows.rich_rows(protein_id)
+    elapsed = (time.perf_counter() - started) * 1000
     with _guard(ctx):
-        rows = ctx.semantic.rich_rows(protein_id)
-        elapsed = (time.perf_counter() - started) * 1000
         counts = ctx.semantic.term_counts(dict.fromkeys(r[0] for r in rows))
     groups: list[dict[str, Any]] = []
     for row in rows:
@@ -181,9 +184,9 @@ def register(app: FastAPI, ctx) -> None:
         if out is None:
             raise HTTPException(404, "Protein not found")
         response = ctx.render(request, "protein_terms.html", "taxa", t=out, g=ctx.catalog.by_bin.get(out["bin_id"]),
-                              backend=ctx.semantic.identity(),
+                              backend=ctx.semantic_rows.identity(),
                               names={grp["term_id"]: term_family_name(ctx, grp["term_id"]) for grp in out["groups"]})
-        return _stamp(response, ctx.semantic, out["timing_ms"])
+        return _stamp(response, ctx.semantic_rows, out["timing_ms"])
 
     @app.get("/api/v1/terms")
     def api_terms(request: Request, has: list[str] = Query([]), any: list[str] = Query([]),
@@ -212,9 +215,9 @@ def register(app: FastAPI, ctx) -> None:
         out = protein_terms(ctx, protein_id)
         if out is None:
             raise HTTPException(404, "Protein not found")
-        body = {"backend": ctx.semantic.identity(), "protein_id": protein_id, "fields": list(FIELDS),
+        body = {"backend": ctx.semantic_rows.identity(), "protein_id": protein_id, "fields": list(FIELDS),
                 "count": len(out["rows"]), "rows": [list(r) for r in out["rows"]], "timing_ms": out["timing_ms"]}
-        return _stamp(JSONResponse(body), ctx.semantic, out["timing_ms"])
+        return _stamp(JSONResponse(body), ctx.semantic_rows, out["timing_ms"])
 
     @app.get("/api/v1/semantic")
     def api_semantic():

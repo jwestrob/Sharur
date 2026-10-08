@@ -118,12 +118,13 @@ def _membership():
     return out
 
 
-def _build_generation(tmp, db, index, *, seal=None, name="build"):
+def _build_generation(tmp, db, index, *, seal=None, name="build", rows=True):
     work = tmp / name
     build_membership(db, work / "membership", seal=seal)
-    build_forward(db, work / "membership", work / "forward")
+    if rows:
+        build_forward(db, work / "membership", work / "forward")
     build_genome_scope(db, work / "membership", work / "genome_scope")
-    gen = assemble(index, db, membership=work / "membership", forward=work / "forward",
+    gen = assemble(index, db, membership=work / "membership", forward=work / "forward" if rows else None,
                    genome_scope=work / "genome_scope", seal_path=seal)
     select(index, gen.generation_id)
     return gen
@@ -652,3 +653,40 @@ def test_builder_connection_closes_before_its_spill_directory_is_removed(tmp_pat
     assert not spill.exists()
     with pytest.raises(duckdb.ConnectionException):
         con.execute("SELECT 1")
+
+
+def test_membership_only_generation_reads_rows_from_sql(dataset, tmp_path):
+    from fastapi.testclient import TestClient  # noqa: PLC0415
+
+    from sharur.browser import create_app  # noqa: PLC0415
+    from sharur.operators import Sharur  # noqa: PLC0415
+
+    db = tmp_path / "copy" / "sharur.duckdb"          # own file: the module fixtures hold the original
+    db.parent.mkdir()
+    shutil.copyfile(dataset["db"], db)
+    lite, full_index = tmp_path / "lite_index", tmp_path / "full_index"
+    gen = _build_generation(tmp_path, db, lite, rows=False, name="lite")
+    _build_generation(tmp_path, db, full_index, name="full")
+    assert set(gen.record["components"]) == {"membership", "genome_scope"}
+    assert gen.record["counts"]["rich_rows"] is None
+    provider = CompactSemanticProvider.open(lite, db)
+    assert not provider.has_rich_rows and provider.identity()["rich_rows"] == "sql"
+    with pytest.raises(GenerationError, match="membership only"):
+        provider.rich_rows("bin|1_c1_1")
+    provider.close()
+    sql = Sharur(db, read_only=True)
+    compact = Sharur(db, read_only=True, semantic_index_path=lite)
+    assert sorted(compact.search_by_atoms(has=["pfam:PF00005"], limit=100)) == sorted(
+        sql.search_by_atoms(has=["pfam:PF00005"], limit=100))
+    assert compact.explain("bin|2_c1_2")["terms"] == sql.explain("bin|2_c1_2")["terms"]
+    full = TestClient(create_app(db, background=False, semantic_index=full_index))
+    with TestClient(create_app(db, background=False, semantic_index=lite)) as client:
+        rows = client.get("/api/v1/protein/bin|2_c1_2/terms")
+        assert rows.headers["X-Sharur-Semantic-Backend"] == "sql"
+        assert rows.json()["rows"] == full.get("/api/v1/protein/bin|2_c1_2/terms").json()["rows"]
+        search = client.get("/api/v1/terms", params={"has": "pfam:PF00005"})
+        assert search.headers["X-Sharur-Semantic-Backend"].startswith("compact g1-")
+        expected = full.get("/api/v1/terms", params={"has": "pfam:PF00005"}).json()
+        assert {k: v for k, v in search.json().items() if k not in ("backend", "timing_ms")} == {
+            k: v for k, v in expected.items() if k not in ("backend", "timing_ms")}
+        assert "Stored V2 term rows" in client.get("/protein/bin%7C2_c1_2").text

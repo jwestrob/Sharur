@@ -6,7 +6,8 @@ Layout of an index directory::
       CURRENT                         {"generation": "<id>"}, replaced atomically
       generations/<id>/
         generation.json               source binding + component manifest hashes
-        membership/  forward/  genome_scope/
+        membership/  genome_scope/    required
+        forward/                      optional: every stored row; without it rows come from SQL
 
 A generation is complete and immutable once its directory is published. Opening one
 verifies, before any request is served: the generation and component formats; each
@@ -41,6 +42,7 @@ from sharur.semantic_index.formats import (
 
 GENERATION_FORMAT = "sharur-semantic-index-generation-v1"
 COMPONENTS = {"membership": MEMBERSHIP_FORMAT, "forward": FORWARD_FORMAT, "genome_scope": SCOPE_FORMAT}
+REQUIRED_COMPONENTS = frozenset({"membership", "genome_scope"})
 POINTER = "CURRENT"
 
 
@@ -109,7 +111,7 @@ def _manifest(directory: Path, expected_format: str) -> tuple[dict, str]:
 def _check_bindings(manifests: dict[str, tuple[dict, str]]) -> None:
     membership, membership_sha = manifests["membership"]
     shared = {name: membership["files"][name] for name in ("proteins.utf8", "proteins.offsets.u64")}
-    for name in ("forward", "genome_scope"):
+    for name in (n for n in manifests if n != "membership"):
         manifest = manifests[name][0]
         if manifest["matching_manifest_sha256"] != membership_sha:
             raise GenerationError(f"{name} was built against a different membership manifest")
@@ -128,17 +130,20 @@ def _verify_payloads(directory: Path, manifest: dict) -> None:
             raise GenerationError(f"Payload differs from its manifest: {path}")
 
 
-def assemble(index_dir: str | Path, db_path: str | Path, *, membership: str | Path, forward: str | Path,
-             genome_scope: str | Path, seal_path: str | Path | None = None,
+def assemble(index_dir: str | Path, db_path: str | Path, *, membership: str | Path,
+             genome_scope: str | Path, forward: str | Path | None = None, seal_path: str | Path | None = None,
              provenance: dict | None = None) -> Generation:
     """Adopt built components for ``db_path`` as a new immutable generation (CURRENT is left unchanged).
 
     The full source SHA-256 must equal the one recorded by the components; every deployed
-    payload is checksum-verified while it is copied into the generation.
+    payload is checksum-verified while it is copied into the generation. Without ``forward``
+    the generation serves membership and genome scope, and stored rows are read from SQL.
     """
     index_dir = Path(index_dir).resolve()
     db_path = Path(db_path).resolve()
-    sources = {"membership": Path(membership), "forward": Path(forward), "genome_scope": Path(genome_scope)}
+    sources = {"membership": Path(membership), "genome_scope": Path(genome_scope)}
+    if forward is not None:
+        sources["forward"] = Path(forward)
     manifests = {name: _manifest(path, COMPONENTS[name]) for name, path in sources.items()}
     _check_bindings(manifests)
     membership_manifest = manifests["membership"][0]
@@ -158,7 +163,7 @@ def assemble(index_dir: str | Path, db_path: str | Path, *, membership: str | Pa
         recorded = membership_manifest["source"].get("seal")
         if recorded and recorded.get("dataset_id") != seal["dataset_id"]:
             raise StaleGenerationError("Seal dataset ID differs from the one recorded at membership build time")
-    digest = hashlib.sha256("\n".join(manifests[n][1] for n in COMPONENTS).encode()).hexdigest()
+    digest = hashlib.sha256("\n".join(manifests[n][1] for n in COMPONENTS if n in manifests).encode()).hexdigest()
     generation_id = f"g1-{digest[:16]}"
     generations = index_dir / "generations"
     generations.mkdir(parents=True, exist_ok=True)
@@ -182,7 +187,7 @@ def assemble(index_dir: str | Path, db_path: str | Path, *, membership: str | Pa
             components[name] = {"dir": name, "format": COMPONENTS[name], "manifest_sha256": manifest_sha,
                                 "payload_bytes": sum(e["bytes"] for f, e in manifest["files"].items()
                                                      if f not in CONTROL_FILES)}
-        forward_manifest = manifests["forward"][0]
+        forward_manifest = manifests["forward"][0] if "forward" in manifests else None
         scope_manifest = manifests["genome_scope"][0]
         record = {"format": GENERATION_FORMAT, "generation_id": generation_id, "components": components,
                   "source": {"name": db_path.name, "sha256": source_sha, "state": state, "seal": seal},
@@ -190,8 +195,9 @@ def assemble(index_dir: str | Path, db_path: str | Path, *, membership: str | Pa
                              "active_proteins": membership_manifest["active_protein_count"],
                              "terms": membership_manifest["term_count"],
                              "memberships": membership_manifest["memberships"],
-                             "rich_rows": forward_manifest["rows"],
-                             "rich_term_ids": forward_manifest["dictionaries"]["term_id"]["non_null_values"],
+                             "rich_rows": forward_manifest["rows"] if forward_manifest else None,
+                             "rich_term_ids": (forward_manifest["dictionaries"]["term_id"]["non_null_values"]
+                                               if forward_manifest else None),
                              "genomes": scope_manifest["genome_count"],
                              "null_owned_proteins": scope_manifest["null_ownership_count"]},
                   "adopted_at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
@@ -232,8 +238,9 @@ def resolve(index_dir: str | Path) -> Generation:
     record = json.loads((gen_dir / "generation.json").read_text())
     if record.get("format") != GENERATION_FORMAT:
         raise GenerationError(f"Unknown generation format in {gen_dir}")
-    if set(record.get("components", {})) != set(COMPONENTS):
-        raise GenerationError(f"Generation lacks a component: {gen_dir}")
+    present = set(record.get("components", {}))
+    if not REQUIRED_COMPONENTS <= present <= set(COMPONENTS):
+        raise GenerationError(f"Generation lacks a required component or has an unknown one: {gen_dir}")
     return Generation(gen_dir, record["generation_id"], record)
 
 

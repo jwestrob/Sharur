@@ -178,7 +178,7 @@ CREATE TABLE IF NOT EXISTS semantic_terms (
     source_db VARCHAR NOT NULL DEFAULT '',
     source_accession VARCHAR NOT NULL DEFAULT ''
 );
--- semantic_terms has no secondary index; see sharur/predicates_v2/model.py.
+-- semantic_terms has no secondary index (see sharur/predicates_v2/model.py).
 
 -- Constraint-free append targets used while a resumable full V2 refresh is
 -- running. They are bulk-promoted into the canonical tables at completion.

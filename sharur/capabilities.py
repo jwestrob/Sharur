@@ -508,7 +508,8 @@ def _semantic_checks(
     provider=None,
 ) -> list[Capability]:
     checks: list[Capability] = []
-    required_v2 = {"semantic_atoms", "semantic_state"} | (set() if provider else {"semantic_terms"})
+    rows_from_index = provider is not None and provider.has_rich_rows
+    required_v2 = {"semantic_atoms", "semantic_state"} | (set() if rows_from_index else {"semantic_terms"})
     missing_v2 = sorted(required_v2 - tables.keys())
     if missing_v2:
         checks.append(
@@ -524,7 +525,7 @@ def _semantic_checks(
     else:
         state_count = _count(store, "semantic_state")
         atom_count = _count(store, "semantic_atoms")
-        term_count = provider.stats()["rich_rows"] if provider else _count(store, "semantic_terms")
+        term_count = provider.stats()["rich_rows"] if rows_from_index else _count(store, "semantic_terms")
         complete = protein_count > 0 and state_count == protein_count and term_count > 0
         checks.append(
             Capability(
