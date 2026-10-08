@@ -149,7 +149,6 @@ class _TransformWorkerState:
 _WORKER_STATE = _TransformWorkerState()
 _PREPARED_CHUNKS_COMPLETE = object()
 _RAW_ATOM_COLUMNS = [
-    "input_position",
     "protein_id",
     "atom_id",
     "facet",
@@ -159,6 +158,31 @@ _RAW_ATOM_COLUMNS = [
     "evidence_evalue",
     "evidence_score",
 ]
+# One canonical atom key (protein, atom, accession) can receive several raw atoms: one KO from
+# both kegg and kofam, a component hit and its system call, several hits of one Pfam. The stored
+# row is the strongest evidence under a total order over its own fields, so it is the same for
+# every annotation read order: relation strength, lowest E-value, highest score, source, facet.
+_RELATION_RANK = {"implies": 0, "excludes": 1, "supports": 2, "flags": 3, "unresolved": 4}
+_ATOM_PREFERENCE_SQL = (
+    "CASE relation "
+    + " ".join(f"WHEN '{name}' THEN {rank}" for name, rank in _RELATION_RANK.items())
+    + f" ELSE {len(_RELATION_RANK)} END, "
+    "evidence_evalue ASC NULLS LAST, evidence_score DESC NULLS LAST, "
+    "source_db ASC NULLS LAST, facet ASC"
+)
+
+
+def _atom_preference(atom: SemanticAtom) -> tuple:
+    """Sort key matching _ATOM_PREFERENCE_SQL; the smallest key is the stored row."""
+    return (
+        _RELATION_RANK.get(atom.relation.value, len(_RELATION_RANK)),
+        atom.evidence_evalue is None, atom.evidence_evalue or 0.0,
+        atom.evidence_score is None, -(atom.evidence_score or 0.0),
+        atom.source_db is None, atom.source_db or "",
+        atom.facet.value,
+    )
+
+
 _STATE_COLUMNS = [
     "protein_id",
     "activities",
@@ -691,7 +715,6 @@ def _transform_batch_to_frames(
     raw_atom_rows: list[tuple] = []
     state_rows: list[tuple] = []
     legacy_rows: list[tuple[str, list[str]]] = []
-    input_position = 0
 
     for item in inputs:
         atoms, state = _transform_protein(
@@ -701,7 +724,6 @@ def _transform_batch_to_frames(
         )
         for atom in atoms:
             raw_atom_rows.append((
-                input_position,
                 atom.protein_id,
                 atom.atom_id,
                 atom.facet.value,
@@ -711,7 +733,6 @@ def _transform_batch_to_frames(
                 atom.evidence_evalue,
                 atom.evidence_score,
             ))
-            input_position += 1
 
         state_rows.append((
             item.protein_id,
@@ -1463,7 +1484,9 @@ def _fetch_annotations_by_protein(
     placeholders = ",".join(["?"] * len(protein_ids))
     rows = store.execute(
         f"SELECT protein_id, source, accession, name, description, evalue, score "
-        f"FROM annotations WHERE protein_id IN ({placeholders})",
+        f"FROM annotations WHERE protein_id IN ({placeholders}) "
+        # the IN filter runs as a parallel hash join, whose output order varies run to run
+        "ORDER BY protein_id, annotation_id",
         protein_ids,
     )
 
@@ -2004,7 +2027,6 @@ def _persist_generation_chunk(
     """Append one full-refresh chunk through reusable vectorized batch views."""
     raw_atom_rows = [
         (
-            position,
             atom.protein_id,
             atom.atom_id,
             atom.facet.value,
@@ -2014,7 +2036,7 @@ def _persist_generation_chunk(
             atom.evidence_evalue,
             atom.evidence_score,
         )
-        for position, atom in enumerate(atoms)
+        for atom in atoms
     ]
     raw_atom_frame = pd.DataFrame.from_records(
         raw_atom_rows,
@@ -2077,9 +2099,8 @@ def _persist_generation_frames(
     try:
         store.conn.execute("BEGIN TRANSACTION;")
         try:
-            # The canonical atom key keeps the last occurrence. ROW_NUMBER
-            # reproduces the prior ordered Python-dict behavior in DuckDB.
-            store.execute("""
+            # The canonical atom key keeps its strongest evidence (_ATOM_PREFERENCE_SQL).
+            store.execute(f"""
                 INSERT INTO v2_generation_atoms
                 SELECT
                     protein_id, atom_id, facet, relation, source_accession,
@@ -2087,7 +2108,7 @@ def _persist_generation_frames(
                 FROM _v2_raw_atoms_batch
                 QUALIFY ROW_NUMBER() OVER (
                     PARTITION BY protein_id, atom_id, source_accession
-                    ORDER BY input_position DESC
+                    ORDER BY {_ATOM_PREFERENCE_SQL}
                 ) = 1
             """)
             store.execute("""
@@ -2198,9 +2219,14 @@ def _persist_atoms(
         return
 
     # Batch insert via executemany for ~10-50x speedup over per-row inserts
-    rows_by_key: dict[tuple[str, str, str], tuple] = {}
+    strongest: dict[tuple[str, str, str], SemanticAtom] = {}
     for atom in atoms:
-        rows_by_key[(atom.protein_id, atom.atom_id, atom.source_accession)] = (
+        key = (atom.protein_id, atom.atom_id, atom.source_accession)
+        if key not in strongest or _atom_preference(atom) < _atom_preference(strongest[key]):
+            strongest[key] = atom
+    rows_by_key: dict[tuple[str, str, str], tuple] = {}
+    for key, atom in strongest.items():
+        rows_by_key[key] = (
             atom.protein_id,
             atom.atom_id,
             atom.facet.value,

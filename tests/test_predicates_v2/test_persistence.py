@@ -738,10 +738,11 @@ def test_generation_preserves_raw_duplicate_evidence_in_terms_and_legacy():
         expected_count=1,
     )
 
+    # the stored atom row is the strongest evidence (supports outranks flags)
     assert store.conn.execute("""
         SELECT relation FROM semantic_atoms
         WHERE protein_id = 'p1' AND atom_id = 'duplicate_atom'
-    """).fetchall() == [("flags",)]
+    """).fetchall() == [("supports",)]
     assert store.conn.execute("""
         SELECT term_id, term_kind, relation
         FROM semantic_terms
@@ -757,6 +758,55 @@ def test_generation_preserves_raw_duplicate_evidence_in_terms_and_legacy():
     assert store.conn.execute("""
         SELECT predicates FROM protein_predicates WHERE protein_id = 'p1'
     """).fetchone()[0] == exact_legacy[0][1]
+
+
+def _colliding_atoms() -> list[SemanticAtom]:
+    """Raw atoms sharing one canonical key, as from kegg+kofam KOs, a component hit with its
+    system call, or several hits of one Pfam."""
+    def atom(relation, source_db, evalue, score):
+        return SemanticAtom(protein_id="p1", atom_id="shared_role", facet=SemanticFacet.role,
+                            relation=relation, source_accession="K00001", source_db=source_db,
+                            evidence_evalue=evalue, evidence_score=score)
+    return [
+        atom(ClaimRelation.flags, "defensefinder", 1e-80, 300.0),
+        atom(ClaimRelation.implies, "kofam", 1e-20, 90.0),
+        atom(ClaimRelation.implies, "kegg", 1e-40, 150.0),
+        atom(ClaimRelation.implies, "kofam", 1e-40, 150.0),
+        atom(ClaimRelation.implies, "kegg", 1e-40, 120.0),
+        atom(ClaimRelation.implies, "kegg", None, None),
+        atom(ClaimRelation.supports, "pfam", 1e-90, 400.0),
+    ]
+
+
+@pytest.mark.parametrize("path", ["generation_tables", "direct"])
+def test_atom_key_collision_keeps_strongest_evidence_for_every_input_order(path):
+    """The stored row for a shared atom key is independent of annotation read order."""
+    import itertools
+    import random
+
+    atoms = _colliding_atoms()
+    orders = list(itertools.permutations(atoms))
+    random.Random(0).shuffle(orders)
+    stored = set()
+    for order in orders[:60]:
+        store = _seed_store()
+        persistence.create_v2_tables(store, create_indexes=False)
+        if path == "generation_tables":
+            persistence._clear_generation_tables(store)
+            persistence._persist_generation_chunk(
+                store, list(order), {"p1": SemanticState(protein_id="p1", roles=["shared_role"], size_class="small")},
+                legacy_rows=[], update_legacy_predicates=False,
+                checkpoint_processed=None, checkpoint_last_protein_id=None,
+            )
+            persistence._promote_full_generation(store, update_legacy_predicates=False, expected_count=1)
+        else:
+            persistence._persist_atoms(store, list(order))
+        stored.update(store.conn.execute("""
+            SELECT relation, source_db, evidence_evalue, evidence_score FROM semantic_atoms
+            WHERE protein_id = 'p1' AND atom_id = 'shared_role'
+        """).fetchall())
+    # strongest relation, then lowest E-value, then highest score, then source name
+    assert stored == {("implies", "kegg", 1e-40, 150.0)}
 
 
 def test_full_generation_resumes_at_last_atomic_chunk(monkeypatch):
