@@ -337,8 +337,13 @@ def create_app(
     heavy_timeout_seconds: float = DEFAULT_HEAVY_TIMEOUT_SECONDS,
     max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTES,
     max_result_bytes: int = DEFAULT_MAX_RESULT_BYTES,
+    semantic_index: str | Path | None = None,
 ) -> FastAPI:
-    """Build a lazy, single-owner query application."""
+    """Build a lazy, single-owner query application.
+
+    With ``semantic_index``, ``/v1/atoms/proteins`` reads a compact V2 term index verified
+    against the served database when the runtime opens; ``/health`` names the backend.
+    """
 
     resolved_db = Path(db_path).expanduser().resolve()
     if staged_database is None and not allow_unsealed:
@@ -376,6 +381,7 @@ def create_app(
         temp_directory=configured_temp,
         max_temp_directory_size=max_temp_directory_size,
         dataset_id=staged_database.dataset_id if staged_database else None,
+        semantic_index=semantic_index,
     )
     admission = WeightedAdmissionController(
         capacity=capacity_units,
@@ -581,6 +587,7 @@ def create_app(
             "workers": 1,
             "auth_required": query_auth.auth_required,
             "resource_budget": runtime.resource_budget,
+            "semantic_backend": snapshot["semantic_backend"],
             "settings": snapshot["settings"],
             "admission": admission.snapshot(),
             "ts": time.time(),
@@ -836,6 +843,11 @@ def main() -> None:
     )
     parser.add_argument("--seal", type=Path)
     parser.add_argument(
+        "--semantic-index",
+        type=Path,
+        help="Compact V2 term index directory for /v1/atoms/proteins (needs pyroaring).",
+    )
+    parser.add_argument(
         "--reserve-gb",
         type=float,
         default=DEFAULT_RESERVE_BYTES / 1024**3,
@@ -967,6 +979,7 @@ def main() -> None:
         max_queue=args.max_queue,
         light_timeout_seconds=args.light_timeout,
         heavy_timeout_seconds=args.heavy_timeout,
+        semantic_index=args.semantic_index,
     )
     uvicorn.run(server_app, host=args.host, port=args.port, workers=1)
 

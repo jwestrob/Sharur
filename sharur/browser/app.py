@@ -37,6 +37,7 @@ from sharur.browser import (
     routes_tree,
     routes_synteny,
     routes_systems,
+    routes_terms,
     search_page,
 )
 from sharur.browser.routes_insight import register as register_insight
@@ -117,15 +118,31 @@ def _evalue(x: Any) -> str:
 
 def create_app(db_path: str | Path, *, token: str | None = None, background: bool = True,
                notes_path: str | Path | None = None, assemblies: list[str | Path] | None = None,
-               cache_dir: str | Path | None = None) -> FastAPI:
+               cache_dir: str | Path | None = None, semantic_index: str | Path | None = None) -> FastAPI:
     """Browser over one dataset, opened read-only.
 
     With ``cache_dir``, startup summaries come from a per-database cache built in a worker process
     (see ``startup_cache``), which keeps the server's memory near its working set.
+    With ``semantic_index``, V2 term search and stored term rows read a compact index generation,
+    verified against this database before any request is served (see ``sharur.semantic_index``);
+    otherwise they read ``semantic_terms``. Startup summaries never read V2 terms, so their cache
+    serves either backend.
     """
     from sharur.abundance import default_path  # noqa: PLC0415
+    from sharur.semantic_index.provider import SqlSemanticProvider, attach  # noqa: PLC0415
 
     store = DuckDBStore(str(db_path), read_only=True)
+    if semantic_index is not None:
+        from sharur.semantic_index.provider import CompactSemanticProvider  # noqa: PLC0415
+
+        try:
+            semantic = CompactSemanticProvider.open(semantic_index, db_path, store=store)
+        except BaseException:
+            store.close()
+            raise
+        attach(store, semantic)
+    else:
+        semantic = SqlSemanticProvider(store)
     lock = threading.Lock()
     summaries = store
     if cache_dir is not None:
@@ -151,6 +168,7 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
                                  asset_version=int(max(f.stat().st_mtime for f in (HERE / "static").iterdir())))
 
     app = FastAPI(title="Sharur browser", docs_url=None, redoc_url=None, openapi_url=None)
+    app.add_event_handler("shutdown", semantic.close)
     # SVG-heavy pages compress several-fold
     from starlette.middleware.gzip import GZipMiddleware  # noqa: PLC0415
 
@@ -191,8 +209,10 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
     ctx = SimpleNamespace(store=store, summaries=summaries, lock=lock, catalog=catalog, render=render, url=_url,
                           describe_hit=describe_hit, predicates=PREDICATE_BY_ID, db_path=Path(db_path),
                           notes_path=Path(notes_path) if notes_path else None, ko_names=ko_names,
-                          dataset=dataset_name)
+                          dataset=dataset_name, semantic=semantic)
     app.state.ctx = ctx
+    app.state.semantic = semantic
+    routes_terms.register(app, ctx)    # before the /protein/{id} and /api/v1/protein/{id} catch-alls
     routes_loci.register(app, ctx)
     routes_curation.register(app, ctx)
     routes_systems.register(app, ctx)
@@ -400,6 +420,7 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
             c = card(store, protein_id, window=0)
             if not c.get("found"):
                 raise HTTPException(404, "Protein not found")
+            term_rows = semantic.rich_row_count(protein_id) if semantic.available() else None
             domains = [d.to_dict() for d in architecture(store, protein_id)]
             lanes = domain_lanes(store, protein_id)
             sequence_rows = store.execute("SELECT sequence FROM proteins WHERE protein_id = ?", [protein_id])
@@ -444,7 +465,8 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
                                                end_edge=hood.get("contig_end_in_window", False)),
                       genes=genes, edge=edge, edge_text=describe_edge(EdgeContext(**edge)) if edge else "",
                       nearby=nearby, systems_here=systems_here, prev_gene=prev_gene, next_gene=next_gene,
-                      sequence=_sequence_view(sequence_rows[0][0] if sequence_rows else None))
+                      sequence=_sequence_view(sequence_rows[0][0] if sequence_rows else None),
+                      term_rows=term_rows, semantic_backend=semantic.backend)
 
     def _top_categories(ids: list[str]) -> dict[str, str]:
         """Most specific biological category per protein, for neighborhood colors."""
@@ -759,7 +781,10 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
                          for ko, _ in found["families"]["ko"]}
                 names.update({("pfam", acc): catalog.domains.get(acc, {}).get("name", acc)
                               for acc, _ in found["families"]["pfam"]})
+                v2_term = scoped.group(1).strip()
+                v2_term = v2_term if semantic.cheap_catalog and semantic.term_counts([v2_term])[v2_term] else None
                 return render(request, "search_scoped.html", "home", q=q, term=scoped.group(1), scope_kind=kind,
+                              v2_term=v2_term, scope_query=scoped.group(2).strip(),
                               scope_label=label, scope_url=scope_url, scope_genomes=len(bins),
                               other_ranks=[r for r in routes_search.same_name_ranks(ctx, label) if r[0] != kind]
                               if kind in RANKS else [],
@@ -784,6 +809,8 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
         with lock:
             if store.execute("SELECT 1 FROM proteins WHERE protein_id = ?", [q]):
                 return _url("protein", q)
+        if semantic.cheap_catalog and semantic.term_counts([q])[q]:
+            return "/terms?has=" + quote(q, safe=":")
         return None
 
     def _suggest(q: str, limit: int = 12) -> list[dict[str, str]]:
@@ -824,6 +851,9 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
                 add("genome", g.bin_id, g.label, _url("genome", g.bin_id))
                 if sum(1 for o in out if o["kind"] == "genome") >= 8:
                     break
+        if semantic.cheap_catalog:
+            for term, n in semantic.suggest_terms(q, 4):
+                add("V2 term", term, f"{n:,} proteins", "/terms?has=" + quote(term, safe=":"))
         with lock:
             for (pid,) in store.execute(
                     "SELECT protein_id FROM proteins WHERE protein_id ILIKE ? LIMIT 6", [f"%{q}%"]):

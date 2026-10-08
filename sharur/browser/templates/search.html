@@ -39,7 +39,7 @@
     <ul class="sr-list">
       {% for e in g.rows %}
       <li{% if loop.index > 8 %} class="sr-extra" hidden{% endif %}>
-        <a class="sr-name{{ ' mono' if e.kind in ('genome', 'protein', 'ko') }}" href="{{ e.url }}">{{ e.label|hl(q) }}</a>
+        <a class="sr-name{{ ' mono' if e.kind in ('genome', 'protein', 'ko', 'term') }}" href="{{ e.url }}">{{ e.label|hl(q) }}</a>
         <span class="sr-sub">{{ e.sub|hl(q) }}</span>
         {% if e.share is not none %}<span class="sr-mini" title="{{ num(e.weight) }} genomes">{{ bar(e.share) }}</span>{% endif %}
       </li>

@@ -13,6 +13,7 @@ from sharur.predicates_v2.model import (
     SemanticFacet,
     SemanticState,
 )
+from sharur.semantic_index.provider import attached as attached_semantic_provider
 
 if TYPE_CHECKING:
     from sharur.storage.duckdb_store import DuckDBStore
@@ -274,6 +275,10 @@ def search_by_atoms(
     if not has and not lacks:
         return []
 
+    provider = attached_semantic_provider(store)
+    if provider is not None:
+        return provider.search_compatible(has, lacks, limit)
+
     if _semantic_terms_has_rows(store):
         return _search_by_atoms_from_semantic_terms(store, has, lacks, limit)
 
@@ -500,19 +505,27 @@ def _fetch_semantic_terms(
     protein_id: str,
     table_names: set[str],
 ) -> list[dict]:
-    """Fetch materialized atom, accession, and composite terms."""
-    if "semantic_terms" not in table_names:
-        return []
+    """Fetch materialized atom, accession, and composite terms.
 
-    rows = store.execute(
-        """
-        SELECT term_id, term_kind, facet, relation, source_db, source_accession
-        FROM semantic_terms
-        WHERE protein_id = ?
-        ORDER BY term_kind, term_id, source_db, source_accession
-        """,
-        [protein_id],
-    )
+    Rows follow the API order (term kind, term, source, accession) with facet and
+    relation breaking ties, NULLs last; an attached compact provider returns the
+    same stored rows. Blank sources and accessions read as None here.
+    """
+    provider = attached_semantic_provider(store)
+    if provider is not None:
+        rows = provider.rich_rows(protein_id)
+    elif "semantic_terms" not in table_names:
+        return []
+    else:
+        rows = store.execute(
+            """
+            SELECT term_id, term_kind, facet, relation, source_db, source_accession
+            FROM semantic_terms
+            WHERE protein_id = ?
+            ORDER BY term_kind, term_id, source_db, source_accession, facet, relation
+            """,
+            [protein_id],
+        )
     return [
         {
             "term_id": row[0],

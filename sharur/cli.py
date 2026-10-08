@@ -928,6 +928,11 @@ def preflight(
         "--synteny",
         help="Optional non-default normalized ELSA sidecar.",
     ),
+    semantic_index: Path | None = typer.Option(
+        None,
+        "--semantic-index",
+        help="Optional compact semantic index directory to verify against this database.",
+    ),
     output_format: BriefFormat = typer.Option(
         BriefFormat.markdown,
         "--format",
@@ -953,6 +958,7 @@ def preflight(
         include_tools=not skip_tools,
         assembly_evidence_path=assembly_evidence,
         synteny_path=synteny,
+        semantic_index=semantic_index,
     )
     if output_format == BriefFormat.json:
         typer.echo(brief.to_json())
@@ -1497,6 +1503,10 @@ def browse_command(
     summary_cache: bool = typer.Option(True, "--summary-cache/--no-summary-cache",
                                        help="Compute startup summaries once per database version in a worker "
                                             "process and reuse them (keeps the server near 1 GB)."),
+    semantic_index: Path | None = typer.Option(
+        None, "--semantic-index",
+        help="Serve V2 term search and stored term rows from this compact index (its CURRENT generation), "
+             "verified against the database at startup. Needs pyroaring (sharur[compact])."),
 ):
     """Browse a dataset in a web browser: protein cards, neighborhoods, evidence, genomes, searches."""
     import secrets  # noqa: PLC0415
@@ -1516,8 +1526,25 @@ def browse_command(
         typer.echo("Binding beyond this machine: access requires the token in the link above.")
     from sharur.browser.startup_cache import default_dir  # noqa: PLC0415
 
-    app = create_app(db, token=token, notes_path=notes, assemblies=assemblies,
-                     cache_dir=default_dir() if summary_cache else None)
+    try:
+        app = create_app(db, token=token, notes_path=notes, assemblies=assemblies,
+                         cache_dir=default_dir() if summary_cache else None, semantic_index=semantic_index)
+    except ModuleNotFoundError as exc:
+        if semantic_index is None:
+            raise
+        typer.echo(f"--semantic-index needs {exc.name}: pip install 'sharur[compact]'", err=True)
+        raise typer.Exit(1) from None
+    except Exception as exc:
+        from sharur.semantic_index import GenerationError  # noqa: PLC0415
+        from sharur.semantic_index.readers import ArtifactError  # noqa: PLC0415
+
+        if semantic_index is None or not isinstance(exc, (GenerationError, ArtifactError)):
+            raise
+        typer.echo(f"Semantic index refused: {exc}", err=True)
+        raise typer.Exit(1) from None
+    if semantic_index is not None:
+        identity = app.state.semantic.identity()
+        typer.echo(f"V2 terms: compact index {identity['generation_id']} (source {identity['source_sha256'][:12]}…)")
     uvicorn.run(app, host=host, port=port,
                 log_level="warning")
 

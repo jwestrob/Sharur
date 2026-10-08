@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}V2 term search{% endblock %}
+{% block content %}
+<h1><span class="rank">V2 semantic terms</span>Term search</h1>
+<p class="lede">Proteins by the V2 terms stored for them: all of, any of, none of, optionally within a genome or clade.
+Membership counts each stored term row except atoms whose relation is <code>excludes</code>. Results list proteins in identifier order.</p>
+
+<form class="panel matrix-form" action="/terms" method="get" autocomplete="off">
+  <label class="wide"><span>All of <i class="count">term IDs, space- or comma-separated</i></span><input type="text" name="has" value="{{ form.has }}" placeholder="pfam:PF00271 dna_repair" list="term-options" data-term-input></label>
+  <label class="wide"><span>Any of <i class="count">optional</i></span><input type="text" name="any" value="{{ form.any }}" placeholder="kegg:K03657 kegg:K03658" list="term-options" data-term-input></label>
+  <label class="wide"><span>None of <i class="count">optional</i></span><input type="text" name="lacks" value="{{ form.lacks }}" placeholder="unannotated" list="term-options" data-term-input></label>
+  <label class="wide"><span>Within <i class="count">optional genome or clade</i></span><span class="picker"><input type="text" name="scope" class="group-input picker-input" value="{{ form.scope }}" placeholder="a genome ID or clade name"><span class="picker-list" role="listbox"></span></span></label>
+  <div class="wide matrix-submit"><button type="submit">Search</button>
+    <span class="note">Served by <b>{{ backend.backend }}</b>{% if backend.generation_id %} index <span class="mono">{{ backend.generation_id }}</span>{% else %} <span class="mono">semantic_terms</span>{% endif %}</span>
+    {% if result %}<a class="btn" href="/api/v1/terms?{{ query_string }}">JSON</a>{% endif %}</div>
+  <datalist id="term-options"></datalist>
+</form>
+
+{% if error %}<div class="panel"><p class="empty">{{ error }}</p></div>{% endif %}
+
+{% if result %}
+<div class="stats">
+  <div class="stat"><b>{{ num(result.total) }}</b><span>protein{{ 's' if result.total != 1 }}{% if scope_info %} within {{ scope_info.label }} ({{ num(scope_info.genomes) }} genome{{ 's' if scope_info.genomes != 1 }}){% endif %}</span></div>
+  {% for term in req.terms() %}<div class="stat"><b>{{ num(result.term_counts.get(term, 0)) }}</b><span><span class="mono">{{ term }}</span>{% if names.get(term) %} · {{ names[term] }}{% endif %} {% if term in req.lacks %}(none of){% elif term in req.any_of %}(any of){% else %}(all of){% endif %} · proteins in the dataset</span></div>{% endfor %}
+</div>
+
+<div class="panel">
+  <div class="scroll"><table id="term-hits" data-table>
+    <thead><tr><th data-sort="text">Protein</th><th data-sort="text">Genome</th><th data-sort="num" class="num">Length</th><th>Stored rows for the queried terms</th></tr></thead>
+    <tbody>{% for r in result.rows %}<tr>
+      <td><a class="mono" href="{{ url('protein', r.protein_id) }}" title="{{ r.protein_id }}">{{ short(r.protein_id) }}</a><div class="sub mono">{{ short(r.contig_id or '') }}:{{ num(r.start) }}</div><div class="sub"><a href="{{ url('protein', r.protein_id) }}/terms">all stored terms</a></div></td>
+      <td>{% if r.bin_id %}<a href="{{ url('genome', r.bin_id) }}" title="{{ r.bin_id }}">{{ gshort(r.bin_id) }}</a><div class="sub">{{ r.lineage }}</div>{% else %}—{% endif %}</td>
+      <td class="num">{{ num(r.length) }} aa</td>
+      <td>{% for m in r.matched[:6] %}<div class="sub" style="white-space:normal"><span class="mono">{{ m.term_id }}</span> {{ m.relation or 'NULL' }} · {{ m.facet or 'NULL' }} · <span class="mono">{{ m.source_db if m.source_db is not none else 'NULL' }}{% if m.source_accession %}:{{ m.source_accession }}{% endif %}</span></div>{% endfor %}{% if r.matched|length > 6 %}<div class="sub">+{{ r.matched|length - 6 }} more</div>{% endif %}</td></tr>
+    {% else %}<tr><td colspan="4" class="empty">No protein carries this combination of terms{% if scope_info %} within {{ scope_info.label }}{% endif %}.</td></tr>{% endfor %}</tbody>
+  </table></div>
+  {% if pages.prev or pages.next %}<div class="pager">
+    <a class="btn{{ ' off' if not pages.prev }}" href="{{ pages.prev or '#' }}">‹ Previous</a>
+    <span class="count">{{ num(result.offset + 1) }}–{{ num([result.offset + result.limit, result.total]|min) }} of {{ num(result.total) }}</span>
+    <a class="btn{{ ' off' if not pages.next }}" href="{{ pages.next or '#' }}">Next ›</a>
+  </div>{% endif %}
+</div>
+<p class="note">Term lookup {{ '%.2f' % result.timing_ms.search }} ms · stored rows {{ '%.2f' % result.timing_ms.evidence }} ms · protein metadata {{ '%.2f' % result.timing_ms.hydrate }} ms.</p>
+{% endif %}
+<script>
+(function () {
+  var list = document.getElementById("term-options"), timer = null;
+  document.querySelectorAll("[data-term-input]").forEach(function (input) {
+    input.addEventListener("input", function () {
+      clearTimeout(timer);
+      var words = input.value.split(/[\s,]+/), last = words[words.length - 1];
+      if (last.length < 2) return;
+      timer = setTimeout(function () {
+        fetch("/api/v1/terms/suggest?limit=12&q=" + encodeURIComponent(last)).then(function (r) { return r.json(); }).then(function (rows) {
+          var head = words.slice(0, -1).join(" ");
+          list.innerHTML = "";
+          rows.forEach(function (row) {
+            var o = document.createElement("option");
+            o.value = (head ? head + " " : "") + row.term_id;
+            o.label = row.proteins.toLocaleString() + " proteins";
+            list.appendChild(o);
+          });
+        });
+      }, 150);
+    });
+  });
+})();
+</script>
+{% endblock %}

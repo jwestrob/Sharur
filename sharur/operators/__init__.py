@@ -94,6 +94,7 @@ class Sharur:
         duckdb_threads: int | None = None,
         duckdb_memory_limit: str | None = None,
         duckdb_temp_directory: Path | str | None = None,
+        semantic_index_path: Path | str | None = None,
     ):
         """
         Initialize Sharur instance.
@@ -115,6 +116,10 @@ class Sharur:
                 for example ``"8GB"``.
             duckdb_temp_directory: Spill directory for this agent's DuckDB
                 connection.
+            semantic_index_path: Optional compact V2 term index directory (needs
+                ``pyroaring``). ``search_by_atoms`` and ``explain`` then read it
+                instead of ``semantic_terms``, with identical results; the index
+                is verified against this database when the store first opens.
         """
         self._db_path = Path(db_path) if db_path else None
         self._read_only = read_only
@@ -132,6 +137,9 @@ class Sharur:
             "duckdb_memory_limit": duckdb_memory_limit,
             "duckdb_temp_directory": duckdb_temp_directory,
         }
+        self._semantic_index_path = (
+            Path(semantic_index_path) if semantic_index_path is not None else None
+        )
         self._session: Optional[ExplorationSession] = None
         self._manifest: Optional[AnalysisManifest] = None
         self._hypothesis_registry = None
@@ -140,11 +148,24 @@ class Sharur:
     def session(self) -> ExplorationSession:
         """Lazy-load exploration session."""
         if self._session is None:
-            self._session = ExplorationSession(
+            session = ExplorationSession(
                 db_path=self._db_path,
                 read_only=self._read_only,
                 **self._duckdb_options,
             )
+            if self._semantic_index_path is not None:
+                from sharur.semantic_index.provider import (
+                    CompactSemanticProvider,
+                    attach,
+                )
+
+                attach(
+                    session.db,
+                    CompactSemanticProvider.open(
+                        self._semantic_index_path, self._db_path, store=session.db
+                    ),
+                )
+            self._session = session
         return self._session
 
     @property

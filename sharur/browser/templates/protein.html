@@ -40,6 +40,7 @@
       {% for p, ev in values.items() %}{{ label_chip(p, url('protein', c.protein_id) ~ '/why/' ~ quote(p, safe='')) }}{% endfor %}
     </div>
     {% else %}<p class="empty">No functional labels.</p>{% endfor %}
+    {% if term_rows is not none %}<p class="note"><a href="{{ url('protein', c.protein_id) }}/terms">Stored V2 term rows ({{ num(term_rows) }}) →</a> <span class="count">{{ semantic_backend }}</span></p>{% endif %}
   </div>
   <div class="panel">
     <h2>Context</h2>

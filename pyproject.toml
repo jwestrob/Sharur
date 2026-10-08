@@ -40,6 +40,9 @@ vectors = [
     "faiss-cpu>=1.7.0",
     "h5py>=3.8.0",
 ]
+compact = [
+    "pyroaring>=1.0.3",
+]
 embeddings = [
     "faiss-cpu>=1.7.0",
     "h5py>=3.8.0",
@@ -77,6 +80,7 @@ all = [
     "pyarrow>=14.0.0",
     "faiss-cpu>=1.7.0",
     "h5py>=3.8.0",
+    "pyroaring>=1.0.3",
     "torch>=2.0.0",
     "transformers>=4.30.0",
     "scipy>=1.10.0",

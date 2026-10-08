@@ -463,13 +463,52 @@ def _predicate_map_check(store: DuckDBStore) -> Capability:
     return Capability("predicate_maps", CapabilityState.available, summary, evidence=evidence)
 
 
+def _semantic_index_check(
+    db_path: Path,
+    store: DuckDBStore,
+    index_dir: Path,
+):
+    """Verify an opt-in compact semantic index; returns the capability and its open provider (or None)."""
+    from sharur.semantic_index import GenerationError, StaleGenerationError  # noqa: PLC0415
+
+    evidence: dict[str, Any] = {"index": str(index_dir)}
+    try:
+        from sharur.semantic_index import CompactSemanticProvider  # noqa: PLC0415
+
+        provider = CompactSemanticProvider.open(index_dir, db_path, store=store)
+    except ModuleNotFoundError as exc:
+        return Capability(
+            "semantic_index", CapabilityState.unavailable,
+            f"Compact semantic index readers need {exc.name}.", evidence=evidence,
+            remediation="pip install 'sharur[compact]'",
+        ), None
+    except StaleGenerationError as exc:
+        return Capability(
+            "semantic_index", CapabilityState.stale, str(exc), evidence=evidence,
+            remediation="Rebuild or re-adopt the index for this database.",
+        ), None
+    except (GenerationError, ValueError, OSError) as exc:
+        return Capability(
+            "semantic_index", CapabilityState.unavailable, f"{type(exc).__name__}: {exc}",
+            evidence=evidence,
+        ), None
+    evidence.update(provider.identity())
+    evidence["counts"] = provider.generation.record["counts"]
+    return Capability(
+        "semantic_index", CapabilityState.available,
+        f"Compact semantic index {provider.generation.generation_id} matches this database.",
+        evidence=evidence,
+    ), provider
+
+
 def _semantic_checks(
     store: DuckDBStore,
     tables: dict[str, set[str]],
     protein_count: int,
+    provider=None,
 ) -> list[Capability]:
     checks: list[Capability] = []
-    required_v2 = {"semantic_atoms", "semantic_state", "semantic_terms"}
+    required_v2 = {"semantic_atoms", "semantic_state"} | (set() if provider else {"semantic_terms"})
     missing_v2 = sorted(required_v2 - tables.keys())
     if missing_v2:
         checks.append(
@@ -485,7 +524,7 @@ def _semantic_checks(
     else:
         state_count = _count(store, "semantic_state")
         atom_count = _count(store, "semantic_atoms")
-        term_count = _count(store, "semantic_terms")
+        term_count = provider.stats()["rich_rows"] if provider else _count(store, "semantic_terms")
         complete = protein_count > 0 and state_count == protein_count and term_count > 0
         checks.append(
             Capability(
@@ -503,6 +542,8 @@ def _semantic_checks(
                     "atoms": atom_count,
                     "terms": term_count,
                     "coverage": (state_count / protein_count if protein_count else 0.0),
+                    # named only for an opt-in index, so default briefs (and seal provenance) stay as they were
+                    **({"terms_backend": provider.backend} if provider else {}),
                 },
                 remediation=(
                     None
@@ -1073,8 +1114,13 @@ def build_capability_brief(
     include_execution: bool = True,
     assembly_evidence_path: str | Path | None = None,
     synteny_path: str | Path | None = None,
+    semantic_index: str | Path | None = None,
 ) -> CapabilityBrief:
-    """Build one non-mutating capability/preflight brief."""
+    """Build one non-mutating capability/preflight brief.
+
+    With ``semantic_index``, the compact index generation is verified against this
+    database and V2 term counts are read through it.
+    """
     resolved = Path(db_path).expanduser().resolve()
     (
         capabilities,
@@ -1084,10 +1130,16 @@ def build_capability_brief(
         sequence_protein_count,
         invalid_sequence_count,
     ) = _database_checks(resolved)
+    provider = None
     try:
         if store is not None and {"annotations", "proteins"} <= tables.keys():
             capabilities.extend(_annotation_checks(store, tables))
-            capabilities.extend(_semantic_checks(store, tables, protein_count))
+            if semantic_index is not None:
+                index_check, provider = _semantic_index_check(
+                    resolved, store, Path(semantic_index).expanduser().resolve()
+                )
+                capabilities.append(index_check)
+            capabilities.extend(_semantic_checks(store, tables, protein_count, provider))
         else:
             for capability_id in (
                 "annotation_sources",
@@ -1104,6 +1156,8 @@ def build_capability_brief(
                     )
                 )
     finally:
+        if provider is not None:
+            provider.close()
         if store is not None:
             store.close()
     capabilities.extend(_embedding_checks(resolved, sequence_protein_count, invalid_sequence_count))

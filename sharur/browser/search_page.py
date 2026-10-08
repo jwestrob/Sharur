@@ -24,12 +24,12 @@ from markupsafe import Markup, escape
 from sharur.browser.catalog import RANKS, UNCLASSIFIED
 from sharur.predicates.vocabulary import PREDICATE_BY_ID
 
-KIND_ORDER = ("taxon", "genome", "function", "pathway", "ko", "pfam", "vog", "system", "protein")
+KIND_ORDER = ("taxon", "genome", "function", "pathway", "ko", "pfam", "vog", "system", "term", "protein")
 KIND_LABELS = {"taxon": "Taxa", "genome": "Genomes", "function": "Function labels", "pathway": "Pathways",
                "ko": "KEGG orthologs", "pfam": "Pfam families", "vog": "VOG families", "system": "Systems",
-               "protein": "Proteins"}
+               "term": "V2 semantic terms", "protein": "Proteins"}
 KIND_TAGS = {"taxon": "taxon", "genome": "genome", "function": "function", "pathway": "pathway", "ko": "KO",
-             "pfam": "Pfam", "vog": "VOG", "system": "system", "protein": "protein"}
+             "pfam": "Pfam", "vog": "VOG", "system": "system", "term": "V2 term", "protein": "protein"}
 KO_RE = re.compile(r"^K\d{5}$", re.I)
 EC_RE = re.compile(r"^(?:EC[:\s]*)?(\d+\.(?:\d+|-)\.(?:\d+|-)\.(?:n?\d+|-))$", re.I)
 EC_IN_TEXT = re.compile(r"\[EC:([^\]]+)\]")
@@ -331,6 +331,10 @@ def preview(ctx, e: Entry) -> dict[str, Any]:
         kind = e.data["kind"]
         out["stats"] = [(f"{e.weight:,}", "genomes"), (kind, "curated caller")]
         out["links"] = [("Calls", e.url), ("Map on tree", tree(f"system:{e.id}"))]
+    elif e.kind == "term":
+        out["text"] = "V2 term stored in the semantic term table; its proteins and their stored rows are one click away."
+        out["stats"] = [(f"{e.weight:,}", "proteins")]
+        out["links"] = [("Proteins with this term", e.url)]
     out["share"] = e.share
     return out
 
@@ -356,6 +360,14 @@ def run(ctx, q: str) -> dict[str, Any]:
             proteins.append((score, Entry("protein", pid, pid, f"{g.label if g else bin_id} · {length or 0:,} aa",
                                           _url("protein", pid), pid.lower())))
     groups["protein"] = proteins
+    semantic = getattr(ctx, "semantic", None)
+    if semantic is not None and semantic.cheap_catalog and len(stripped) >= 2:
+        # V2 terms are their own vocabulary; they are listed beside function labels, never merged with them
+        for term, n in semantic.suggest_terms(stripped, SHOWN):
+            low = term.lower()
+            score = 99 if low == stripped.lower() else 79 if low.startswith(stripped.lower()) else 49
+            groups["term"].append((score, Entry("term", term, term, f"{n:,} proteins",
+                                                "/terms?has=" + quote(term, safe=":"), low, "", n)))
     out_groups = []
     for kind in KIND_ORDER:
         rows = groups[kind]

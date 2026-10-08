@@ -771,6 +771,38 @@ Materialized search view. It stores:
 `semantic_atoms`/`semantic_state` only for older databases that have not been
 backfilled.
 
+#### Optional compact index
+
+`sharur.semantic_index` can serve the same membership and stored rows from a
+compact, read-only index generation: Roaring/uint32 postings per term, every
+stored row in a per-protein layout, and per-genome protein sets. Results are
+identical to the SQL table (active membership is
+`(term_kind != 'atom' OR relation != 'excludes')`; rows keep NULL, blank and
+duplicate values), and term searches return in well under a millisecond.
+`semantic_terms` stays the source of truth for SQL access; the index is
+derived from it and rebuilt after term writes.
+
+Opt in per entry point (needs `pip install 'sharur[compact]'`):
+
+```python
+b = Sharur("data/DATASET/sharur.duckdb", read_only=True, semantic_index_path="INDEX_DIR")
+b.search_by_atoms(has=["pfam:PF00005"])     # served by the index
+b.explain("PROTEIN_ID")["terms"]           # stored rows from the index
+```
+
+```bash
+sharur browse --db data/DATASET/sharur.duckdb --semantic-index INDEX_DIR      # /terms pages
+sharur preflight --db data/DATASET/sharur.duckdb --semantic-index INDEX_DIR   # verifies the index
+sharur-query --db data/DATASET/sharur.duckdb --direct --semantic-index INDEX_DIR   # /v1/atoms/proteins
+```
+
+An index directory holds immutable `generations/<id>/` plus a `CURRENT`
+pointer. Opening verifies the generation against the database (size, mtime,
+inode, seal and every payload checksum) and refuses a stale one; rebuild with
+`sharur.semantic_index.build` and adopt with `sharur.semantic_index.assemble`
+then `select`. Source-aware searches (`search_atoms`, `search_by_facet`) and
+all annotation and caller tables stay on SQL.
+
 ### `v2_generation_checkpoint`
 
 Operational state for a full semantic refresh. The row stores the semantic

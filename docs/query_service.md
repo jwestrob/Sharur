@@ -227,6 +227,8 @@ workers can cancel their own requests and operators can cancel any request.
 Server timeouts and client disconnects invoke DuckDB cursor interruption. The
 runtime discards an interrupted cursor before its thread serves another query.
 
+
+`--semantic-index INDEX_DIR` serves `/v1/atoms/proteins` from a compact V2 term index (identical results, sub-millisecond membership; see `docs/predicates_v2.md`). The index is verified against the served database when the runtime opens, a staged replica by content hash, and `/health` reports the backend under `semantic_backend`.
 ## Observability
 
 Authenticated endpoints expose:

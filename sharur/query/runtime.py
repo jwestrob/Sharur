@@ -248,9 +248,12 @@ class ReadOnlyDuckDBRuntime:
         temp_directory: str | Path,
         max_temp_directory_size: str = "128GB",
         dataset_id: str | None = None,
+        semantic_index: str | Path | None = None,
     ):
         if isinstance(threads, bool) or not isinstance(threads, int) or threads < 1:
             raise ValueError("threads must be a positive integer")
+        self.semantic_index = Path(semantic_index).expanduser().resolve() if semantic_index else None
+        self.semantic_provider: Any = None
         self.db_path = Path(db_path).expanduser().resolve()
         self.threads = threads
         self.memory_limit = _validate_size(memory_limit, "memory_limit")
@@ -353,8 +356,26 @@ class ReadOnlyDuckDBRuntime:
             self._owner_lock_handle = owner_lock
             self._root = root
             self._settings = {str(name): str(value) for name, value in settings}
+            if self.semantic_index is not None:
+                self._open_semantic_index(root)
             self._opened_at = time.time()
             self._generation += 1
+
+    def _open_semantic_index(self, root: duckdb.DuckDBPyConnection) -> None:
+        """Verify and open the compact V2 term index once; every thread's store routes through it."""
+        from sharur.semantic_index.provider import CompactSemanticProvider  # noqa: PLC0415
+
+        cursor = root.cursor()
+        try:
+            check = CursorStore(cursor, db_path=self.db_path, resource_budget=self.resource_budget)
+            # A staged replica is a verified byte copy with its own inode; bind it by content.
+            self.semantic_provider = CompactSemanticProvider.open(
+                self.semantic_index, self.db_path, store=check, content_match=True,
+                seal_path=self.db_path.parent / "dataset.seal.json"
+                if (self.db_path.parent / "dataset.seal.json").is_file() else None,
+            )
+        finally:
+            cursor.close()
 
     def close(self) -> None:
         with self._state_lock:
@@ -366,6 +387,9 @@ class ReadOnlyDuckDBRuntime:
             self._cursors.clear()
             self._root = None
             self._owner_lock_handle = None
+            semantic, self.semantic_provider = self.semantic_provider, None
+        if semantic is not None:
+            semantic.close()
         for query in active:
             with contextlib.suppress(Exception):
                 query.store.interrupt()
@@ -396,6 +420,8 @@ class ReadOnlyDuckDBRuntime:
             resource_budget=self.resource_budget,
             dataset_id=self.dataset_id,
         )
+        if self.semantic_provider is not None:
+            store.semantic_provider = self.semantic_provider
         self._thread_local.store = store
         self._thread_local.generation = self._generation
         return store
@@ -556,6 +582,9 @@ class ReadOnlyDuckDBRuntime:
                 "open": self._root is not None,
                 "database": str(self.db_path),
                 "dataset_id": self.dataset_id,
+                "semantic_backend": (
+                    self.semantic_provider.identity() if self.semantic_provider is not None else {"backend": "sql"}
+                ),
                 "owner_lock": str(self._owner_lock_path),
                 "opened_at": self._opened_at,
                 "settings": dict(self._settings),

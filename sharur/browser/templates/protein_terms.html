@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}V2 terms · {{ t.protein_id }}{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="{{ url('protein', t.protein_id) }}">{{ t.protein_id }}</a>{% if g %} · <a href="{{ url('genome', g.bin_id) }}">{{ g.bin_id }}</a>{% endif %}</div>
+<h1><span class="rank">V2 semantic terms</span>Stored term rows</h1>
+<p class="lede">{{ num(t.rows|length) }} stored row{{ 's' if t.rows|length != 1 }} across {{ num(t.groups|length) }} term{{ 's' if t.groups|length != 1 }}, exactly as recorded: each row names the term, its kind, facet and relation, and the source and accession it was computed from.
+Served by <b>{{ backend.backend }}</b>{% if backend.generation_id %} index <span class="mono">{{ backend.generation_id }}</span>{% else %} <span class="mono">semantic_terms</span>{% endif %}.</p>
+
+<div class="panel">
+  <div class="table-tools"><input data-filter="protein-terms" placeholder="Filter rows…"><span class="count" data-count="protein-terms"></span></div>
+  <div class="scroll"><table id="protein-terms" data-table>
+    <thead><tr><th data-sort="text">Term</th><th data-sort="text">Kind</th><th data-sort="text">Facet</th><th data-sort="text">Relation</th><th data-sort="text">Source</th><th data-sort="text">Accession</th><th data-sort="num" class="num">Proteins with term</th></tr></thead>
+    <tbody>{% for grp in t.groups %}{% for row in grp.rows %}<tr>
+      <td>{% if loop.first %}<a class="mono" href="/terms?has={{ quote(grp.term_id, safe=':') }}">{{ grp.term_id }}</a>{% if names.get(grp.term_id) %}<div class="sub">{{ names[grp.term_id] }}</div>{% endif %}{% if not grp.active %}<div class="sub"><span class="tag warn">outside search membership</span></div>{% endif %}{% else %}<span class="sub mono">〃</span>{% endif %}</td>
+      {% for value in row[1:] %}<td class="mono">{% if value is none %}<span class="count">NULL</span>{% elif value == '' %}<span class="count">(blank)</span>{% else %}{{ value }}{% endif %}</td>{% endfor %}
+      <td class="num">{% if loop.first %}<a href="/terms?has={{ quote(grp.term_id, safe=':') }}">{{ num(grp.proteins) }}</a>{% if g %}<div class="sub"><a href="/terms?has={{ quote(grp.term_id, safe=':') }}&scope={{ quote(g.bin_id, safe='') }}">in this genome</a></div>{% endif %}{% endif %}</td></tr>
+    {% endfor %}{% else %}<tr><td colspan="7" class="empty">No stored V2 term rows for this protein.</td></tr>{% endfor %}</tbody>
+  </table></div>
+</div>
+<p class="note">Search membership counts every row except atoms whose relation is <code>excludes</code>. Rows follow term kind, term, source and accession, with facet and relation breaking ties. <a href="/api/v1/protein/{{ quote(t.protein_id, safe='') }}/terms">JSON</a> · lookup {{ '%.3f' % t.timing_ms.rich_rows }} ms.</p>
+{% endblock %}
