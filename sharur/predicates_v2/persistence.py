@@ -161,13 +161,15 @@ _RAW_ATOM_COLUMNS = [
 # One canonical atom key (protein, atom, accession) can receive several raw atoms: one KO from
 # both kegg and kofam, a component hit and its system call, several hits of one Pfam. The stored
 # row is the strongest evidence under a total order over its own fields, so it is the same for
-# every annotation read order: relation strength, lowest E-value, highest score, source, facet.
+# every annotation read order: relation strength, highest score, lowest E-value, source, facet.
+# Candidates share one accession, hence one profile: bit scores compare directly, while E-values
+# carry each source's search-space convention (per-genome kegg, dataset-scaled kofam).
 _RELATION_RANK = {"implies": 0, "excludes": 1, "supports": 2, "flags": 3, "unresolved": 4}
 _ATOM_PREFERENCE_SQL = (
     "CASE relation "
     + " ".join(f"WHEN '{name}' THEN {rank}" for name, rank in _RELATION_RANK.items())
     + f" ELSE {len(_RELATION_RANK)} END, "
-    "evidence_evalue ASC NULLS LAST, evidence_score DESC NULLS LAST, "
+    "evidence_score DESC NULLS LAST, evidence_evalue ASC NULLS LAST, "
     "source_db ASC NULLS LAST, facet ASC"
 )
 
@@ -176,8 +178,8 @@ def _atom_preference(atom: SemanticAtom) -> tuple:
     """Sort key matching _ATOM_PREFERENCE_SQL; the smallest key is the stored row."""
     return (
         _RELATION_RANK.get(atom.relation.value, len(_RELATION_RANK)),
-        atom.evidence_evalue is None, atom.evidence_evalue or 0.0,
         atom.evidence_score is None, -(atom.evidence_score or 0.0),
+        atom.evidence_evalue is None, atom.evidence_evalue or 0.0,
         atom.source_db is None, atom.source_db or "",
         atom.facet.value,
     )

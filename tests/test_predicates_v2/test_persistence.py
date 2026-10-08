@@ -774,6 +774,7 @@ def _colliding_atoms() -> list[SemanticAtom]:
         atom(ClaimRelation.implies, "kofam", 1e-40, 150.0),
         atom(ClaimRelation.implies, "kegg", 1e-40, 120.0),
         atom(ClaimRelation.implies, "kegg", None, None),
+        atom(ClaimRelation.implies, "kegg", 1e-60, 140.0),  # lower E-value, lower score
         atom(ClaimRelation.supports, "pfam", 1e-90, 400.0),
     ]
 
@@ -805,7 +806,7 @@ def test_atom_key_collision_keeps_strongest_evidence_for_every_input_order(path)
             SELECT relation, source_db, evidence_evalue, evidence_score FROM semantic_atoms
             WHERE protein_id = 'p1' AND atom_id = 'shared_role'
         """).fetchall())
-    # strongest relation, then lowest E-value, then highest score, then source name
+    # strongest relation, then highest score, then lowest E-value, then source name
     assert stored == {("implies", "kegg", 1e-40, 150.0)}
 
 
