@@ -963,6 +963,51 @@ def preflight(
 
 
 @app.command()
+def compact(
+    db: Path = typer.Option(..., "--db", "-d", help="Source DuckDB, opened read-only."),
+    output: Path = typer.Option(
+        ...,
+        "--output",
+        "-o",
+        help="Required fresh destination; source and sidecars remain in place.",
+    ),
+    threads: int = typer.Option(
+        2, "--threads", min=1, help="CPU workers, bounded by available CPUs."
+    ),
+    memory_limit: str = typer.Option(
+        "8GB",
+        "--memory-limit",
+        help="Bounded DuckDB buffer budget; index construction also needs memory.",
+    ),
+    storage_version: str | None = typer.Option(
+        None,
+        "--storage-version",
+        help="Explicit compatibility target, e.g. v1.0.0; default uses writer format.",
+    ),
+    receipt: Path | None = typer.Option(
+        None, "--receipt", help="Fresh JSON evidence file containing counts and hashes."
+    ),
+):
+    """Create an exact validated physical copy; reseal after choosing its final location."""
+    from sharur.storage.compaction import CompactionError, compact_database  # noqa: PLC0415
+
+    try:
+        result = compact_database(
+            db,
+            output,
+            threads=threads,
+            memory_limit=memory_limit,
+            storage_version=storage_version,
+            receipt=receipt,
+        )
+    except CompactionError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from None
+    typer.echo(json.dumps(result, indent=2))
+    typer.echo("Rebuild the content seal after selecting the copy's final dataset location.")
+
+
+@app.command()
 def seal(
     db: Path = typer.Option(
         Path(DEFAULT_DB),
