@@ -5,6 +5,7 @@
 <div class="crumbs"><a href="/taxa">Tree of life</a>{% if root %}<span class="sep">›</span><a href="/tree?layout={{ layout }}{{ fq }}">All genomes</a>{% endif %}{% for r, n in lineage[:-1] %}{% if r != 'domain' %}<span class="sep">›</span><a href="/tree?root={{ quote(r ~ ':' ~ n, safe='') }}&layout={{ layout }}{{ fq }}">{{ n }}</a>{% endif %}{% endfor %}</div>
 <h1><span class="rank">Tree{% if root_rank %} · {{ root_rank }}{% endif %}</span>{{ root_name or 'All genomes' }}</h1>
 <p class="lede">{{ num(n_genomes) }} genomes in their GTDB taxonomy{% if passed %}, shown from {{ tree.rank }} {{ tree.name }}{% endif %}. Click a clade to open or close it and see its numbers; zoom in from there.{% if chosen %} Rings show the share of each clade's genomes carrying each feature.{% endif %}</p>
+<p class="note">This is a taxonomy cladogram, separate from any sequence-based phylogeny. Genomes nest by the GTDB labels recorded for them in this dataset, from domain to genus; every rank sits one equal step from the next, and clades within a rank are ordered by genome count, so branch lengths and sibling order show membership only. A genome without a label at some rank stops there, in that rank's “Unclassified” clade.{% if chosen %} Feature shares come from the same presence/absence tables as the matrix; an undetected gene in an incomplete genome lowers its clade's share.{% endif %}</p>
 
 <div class="panel tree-controls">
   <div class="tree-row">
