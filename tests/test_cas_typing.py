@@ -140,3 +140,52 @@ def test_write_results_replaces_earlier_calls(tmp_path):
     assert conn.execute("SELECT system_id, prediction FROM crispr_cas_systems").fetchall() == [
         ("cctyper:g:c:1-900", "V-A")]
     assert conn.execute("SELECT COUNT(*) FROM system_proteins WHERE system_source = 'cctyper'").fetchone()[0] == 1
+
+
+def test_staged_dataset_uses_original_minced_reports(tmp_path, data, monkeypatch):
+    """Staging the DB preserves repeat/spacer evidence and scientific trust."""
+    import concurrent.futures
+    import shutil
+    from sharur.storage.schema import SCHEMA
+
+    source = tmp_path / "source"
+    source.mkdir()
+    path = source / "sharur.duckdb"
+    conn = duckdb.connect(str(path))
+    conn.execute(SCHEMA)
+    conn.execute("INSERT INTO bins (bin_id) VALUES ('g')")
+    conn.execute("INSERT INTO contigs (contig_id, bin_id, length) VALUES ('c', 'g', 1000)")
+    conn.execute("INSERT INTO loci (locus_id, locus_type, contig_id, start, end_coord, metadata) "
+                 "VALUES ('a', 'crispr', 'c', 100, 119, ?)",
+                 [json.dumps({"metadata": {"rpt_unit_seq": "ACGT"}})])
+    conn.close()
+    reports = source / "stage05c_crispr"
+    reports.mkdir()
+    (reports / "g_crispr.txt").write_text(
+        "Sequence 'c' (1000 bp)\nCRISPR 1 Range: 100 - 119\n"
+        "100 ACGT AAAA\n108 ACGT CCCC\n116 ACGT\nRepeats: 3\n")
+    staged = tmp_path / "staged"
+    staged.mkdir()
+    copy = staged / "sharur.duckdb"
+    shutil.copy2(path, copy)
+
+    class InlinePool:
+        def __init__(self, **kwargs):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+        def map(self, function, jobs, **kwargs):
+            return [(job[0], []) for job in jobs]
+
+    monkeypatch.setattr(concurrent.futures, "ProcessPoolExecutor", InlinePool)
+    monkeypatch.setattr(ct, "type_repeats", lambda repeats, root: [("I-B", 0.8) for _ in repeats])
+    original = ct.run_dataset(path, cctyper_db=data.root, workers=1)
+    repaired = ct.run_dataset(copy, cctyper_db=data.root, workers=1, dataset_dir=source)
+    assert repaired["arrays"] == original["arrays"]
+    array = repaired["arrays"][0]
+    assert len(array["repeats"]) == 3 and len(array["spacers"]) == 2
+    assert array["repeat_identity"] == 100.0
+    assert array["spacer_identity"] == 0.0
+    assert array["trusted"] is True

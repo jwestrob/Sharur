@@ -587,11 +587,14 @@ def type_arrays(arrays: list[dict[str, Any]], root: Path, pred_prob: float = DEF
 
 
 def run_dataset(db_path: str | Path, *, cctyper_db: str | Path | None = None, workers: int | None = None,
-                genomes: list[str] | None = None, progress=None) -> dict[str, Any]:
+                genomes: list[str] | None = None, dataset_dir: str | Path | None = None,
+                progress=None) -> dict[str, Any]:
     """Type every genome's Cas operons and arrays (read-only on the dataset).
 
     Returns ``{"systems": [...], "arrays": [...], "genomes": n}``; write them
-    with :func:`write_results`.
+    with :func:`write_results`. ``dataset_dir`` locates the original MinCED
+    reports when the database is a staged copy; it defaults to the database
+    directory.
     """
     from concurrent.futures import ProcessPoolExecutor
 
@@ -614,7 +617,7 @@ def run_dataset(db_path: str | Path, *, cctyper_db: str | Path | None = None, wo
                        CASE WHEN n_bins > 1 OR (start = 0 AND n_same > 1) THEN protein_id ELSE contig_id END AS unit,
                        ROW_NUMBER() OVER (PARTITION BY bin_id, contig_id ORDER BY start, end_coord, protein_id) AS pos
                 FROM p ORDER BY bin_id""", params).fetchall()
-        arrays = load_arrays(conn, db_path.parent)
+        arrays = load_arrays(conn, Path(dataset_dir) if dataset_dir is not None else db_path.parent)
     finally:
         conn.close()
     if genomes:
