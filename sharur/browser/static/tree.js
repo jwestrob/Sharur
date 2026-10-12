@@ -277,6 +277,7 @@
   }
   function url(path, params) {
     const q = new URLSearchParams(params);
+    if (data.min_completeness) q.set("min_completeness", data.min_completeness);   // carried into every link
     return path + "?" + q.toString();
   }
   function featureTokens() { return F.map((f) => f.token).join(","); }
@@ -355,6 +356,14 @@
     if (openSel.value) u.searchParams.set("open", openSel.value); else u.searchParams.delete("open");
     history.replaceState(null, "", u);
     draw();
+  });
+
+  const minComp = document.getElementById("tree-mincomp");
+  if (minComp) minComp.addEventListener("change", () => {
+    const v = Math.max(0, Math.min(100, parseFloat(minComp.value) || 0));
+    const u = new URL(location.href);
+    if (v > 0) u.searchParams.set("min_completeness", v); else u.searchParams.delete("min_completeness");
+    location.href = u.toString();
   });
 
   // feature picker

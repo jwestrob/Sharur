@@ -1,10 +1,11 @@
 {% extends "base.html" %}
 {% block title %}{{ (root_name ~ ' · tree') if root_name else 'Taxonomy tree' }}{% endblock %}
 {% block content %}
-{% set fq = '&features=' ~ quote(features, safe=',:') if features else '' %}
+{% set mcq = ('&min_completeness=' ~ ('%g' % min_completeness)) if min_completeness else '' %}
+{% set fq = ('&features=' ~ quote(features, safe=',:') if features else '') ~ mcq %}
 <div class="crumbs"><a href="/taxa">Tree of life</a>{% if root %}<span class="sep">›</span><a href="/tree?layout={{ layout }}{{ fq }}">All genomes</a>{% endif %}{% for r, n in lineage[:-1] %}{% if r != 'domain' %}<span class="sep">›</span><a href="/tree?root={{ quote(r ~ ':' ~ n, safe='') }}&layout={{ layout }}{{ fq }}">{{ n }}</a>{% endif %}{% endfor %}</div>
 <h1><span class="rank">Tree{% if root_rank %} · {{ root_rank }}{% endif %}</span>{{ root_name or 'All genomes' }}</h1>
-<p class="lede">{{ num(n_genomes) }} genomes in their GTDB taxonomy{% if passed %}, shown from {{ tree.rank }} {{ tree.name }}{% endif %}. Click a clade to open or close it and see its numbers; zoom in from there.{% if chosen %} Rings show the share of each clade's genomes carrying each feature.{% endif %}</p>
+<p class="lede">{{ num(n_genomes) }} genomes{% if min_completeness %} at ≥ {{ '%g' % min_completeness }}% completeness{% endif %} in their GTDB taxonomy{% if passed %}, shown from {{ tree.rank }} {{ tree.name }}{% endif %}. Click a clade to open or close it and see its numbers; zoom in from there.{% if chosen %} Rings show the share of each clade's genomes carrying each feature.{% endif %}</p>
 <p class="note">This is a taxonomy cladogram, separate from any sequence-based phylogeny. Genomes nest by the GTDB labels recorded for them in this dataset, from domain to genus; every rank sits one equal step from the next, and clades within a rank are ordered by genome count, so branch lengths and sibling order show membership only. A genome without a label at some rank stops there, in that rank's “Unclassified” clade.{% if chosen %} Feature shares come from the same presence/absence tables as the matrix; an undetected gene in an incomplete genome lowers its clade's share.{% endif %}</p>
 
 <div class="panel tree-controls">
@@ -16,10 +17,13 @@
     <label class="tree-open"><span>Open to</span>
       <select id="tree-open"><option value="">automatic</option>{% for r in open_ranks %}<option value="{{ r }}" {{ 'selected' if payload.open == r }}>{{ r }}</option>{% endfor %}</select>
     </label>
+    <label class="tree-open"><span>Min. completeness %</span>
+      <input type="number" id="tree-mincomp" min="0" max="100" step="5" value="{{ '%g' % min_completeness }}" style="width:5em" aria-label="Minimum genome completeness, percent">
+    </label>
     <span class="count tree-size">{{ num(nodes) }} clades</span>
   </div>
   <div class="facet tree-features"><span>Features</span>
-    {% for f in chosen %}{% set rest = chosen|rejectattr('token', 'equalto', f.token)|map(attribute='token')|join(',') %}<a class="chip" href="/tree?root={{ quote(root, safe='') }}&layout={{ layout }}&features={{ quote(rest, safe=',:') }}" title="Remove · {{ f.kind_label }} {{ f.id }}"><i style="--dot:{{ f.color }}"></i>{{ f.label }} ×</a>{% endfor %}
+    {% for f in chosen %}{% set rest = chosen|rejectattr('token', 'equalto', f.token)|map(attribute='token')|join(',') %}<a class="chip" href="/tree?root={{ quote(root, safe='') }}&layout={{ layout }}&features={{ quote(rest, safe=',:') }}{{ mcq }}" title="Remove · {{ f.kind_label }} {{ f.id }}"><i style="--dot:{{ f.color }}"></i>{{ f.label }} ×</a>{% endfor %}
     {% if chosen|length < max_features %}
     <form class="picker tree-add" autocomplete="off" data-root="{{ root }}" data-layout="{{ layout }}" data-current="{{ features }}">
       <input type="text" class="picker-input" placeholder="add a KO, Pfam family, function, module or system…" aria-label="Add a feature">
@@ -27,7 +31,7 @@
     </form>{% endif %}
   </div>
   {% if presets %}<div class="facet"><span>Presets</span>
-    {% for name, tokens in presets %}<a class="chip" href="/tree?root={{ quote(root, safe='') }}&layout={{ layout }}&features={{ quote(tokens|join(','), safe=',:') }}">{{ name }} <span class="count">{{ tokens|length }}</span></a>{% endfor %}
+    {% for name, tokens in presets %}<a class="chip" href="/tree?root={{ quote(root, safe='') }}&layout={{ layout }}&features={{ quote(tokens|join(','), safe=',:') }}{{ mcq }}">{{ name }} <span class="count">{{ tokens|length }}</span></a>{% endfor %}
   </div>{% endif %}
   {% for note in notes %}<p class="count">{{ note }}</p>{% endfor %}
 </div>

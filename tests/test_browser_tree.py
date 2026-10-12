@@ -56,10 +56,10 @@ def test_search_features_ranks_exact_then_prefix_then_substring():
 def client(tmp_path):
     path = tmp_path / "d.duckdb"
     store = DuckDBStore(str(path))
-    for i, family in enumerate(["F1", "F1", "F2"]):
+    for i, (family, completeness) in enumerate([("F1", 95.0), ("F1", 60.0), ("F2", None)]):
         b = f"g{i}"
-        store.conn.execute("INSERT INTO bins (bin_id, taxonomy) VALUES (?, ?)",
-                           [b, f"d__Archaea;p__P;c__C;o__O;f__{family};g__G{i};s__S{i}"])
+        store.conn.execute("INSERT INTO bins (bin_id, completeness, taxonomy) VALUES (?, ?, ?)",
+                           [b, completeness, f"d__Archaea;p__P;c__C;o__O;f__{family};g__G{i};s__S{i}"])
         store.conn.execute("INSERT INTO contigs (contig_id, bin_id, length) VALUES (?, ?, 5000)", [f"{b}_c", b])
         store.conn.execute("INSERT INTO proteins (protein_id, contig_id, bin_id, start, end_coord, strand, gene_index, "
                            "sequence_length) VALUES (?, ?, ?, 1, 900, '+', 0, 300)", [f"{b}_1", f"{b}_c", b])
@@ -82,3 +82,13 @@ def test_tree_pages(client):
     assert missing.status_code == 200 and "PF99999 is not in this dataset" in missing.text
     found = client.get("/api/tree/features", params={"q": "abc_tr"}).json()
     assert found and found[0]["token"] == "pfam:PF00005"
+
+
+def test_tree_keeps_genomes_at_or_above_a_completeness_threshold(client):
+    page = client.get("/tree", params={"features": "pfam:PF00005", "min_completeness": 80})
+    assert page.status_code == 200
+    assert "1 of 3 genomes at ≥ 80% completeness; 1 without a completeness estimate are left out." in page.text
+    assert '"k": [1]' in page.text or '"k":[1]' in page.text          # g1 (60%) carries PF00005 but is filtered
+    assert "min_completeness=80" in page.text                          # links keep the threshold
+    assert client.get("/tree", params={"min_completeness": 60}).status_code == 200   # at the threshold is kept
+    assert client.get("/tree", params={"min_completeness": 99}).status_code == 404

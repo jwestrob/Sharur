@@ -254,7 +254,8 @@ def register(app: FastAPI, ctx) -> None:
 
     @app.get("/tree", response_class=HTMLResponse)
     def tree_page(request: Request, root: str = Query("", max_length=300), features: str = Query("", max_length=2000),
-                  layout: str = Query("radial"), open: str = Query("", max_length=20)):  # noqa: A002
+                  layout: str = Query("radial"), open: str = Query("", max_length=20),  # noqa: A002
+                  min_completeness: float = Query(0.0, ge=0, le=100)):
         root_rank = root_name = None
         if root:
             if ":" not in root:
@@ -265,7 +266,17 @@ def register(app: FastAPI, ctx) -> None:
         genomes = catalog.clade(root_rank, root_name)
         if not genomes:
             raise HTTPException(404, "No genomes in that clade")
-        chosen, masks, notes = [], [], []
+        notes = []
+        if min_completeness > 0:
+            # the tree, clade counts and feature shares all use the genomes at or above the threshold
+            kept = [g for g in genomes if g.completeness is not None and g.completeness >= min_completeness]
+            unknown = sum(1 for g in genomes if g.completeness is None)
+            notes.append(f"{len(kept):,} of {len(genomes):,} genomes at ≥ {min_completeness:g}% completeness"
+                         + (f"; {unknown:,} without a completeness estimate are left out" if unknown else "") + ".")
+            if not kept:
+                raise HTTPException(404, f"No genomes in that clade at ≥ {min_completeness:g}% completeness")
+            genomes = kept
+        chosen, masks = [], []
         for kind, ident in parse_features(features):
             info, mask, message = resolve(kind, ident)
             if mask is None:
@@ -281,11 +292,11 @@ def register(app: FastAPI, ctx) -> None:
             f["carriers"] = int(tree["k"][i])
         payload = {"tree": shown, "features": chosen, "layout": layout if layout in ("radial", "rect") else "radial",
                    "open": open if open in RANKS else "", "depth": depth(shown) - 1, "root": root,
-                   "ranks": list(RANKS)}
+                   "ranks": list(RANKS), "min_completeness": min_completeness}
         return ctx.render(request, "tree.html", "taxa", payload=payload, tree=shown, passed=passed, lineage=lineage,
                           root=root, root_rank=root_rank, root_name=root_name, chosen=chosen, notes=notes,
                           features=",".join(f["token"] for f in chosen), presets=presets(ctx),
                           layout=payload["layout"], n_genomes=len(genomes), nodes=count_nodes(shown),
-                          max_features=MAX_FEATURES,
+                          max_features=MAX_FEATURES, min_completeness=min_completeness,
                           open_ranks=[r for r in RANKS if r != "domain" and
                                       (shown["rank"] == "root" or RANKS.index(r) > RANKS.index(shown["rank"]))])
