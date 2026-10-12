@@ -222,6 +222,34 @@ def _strings(value: Any, limit: int = 4000) -> list[str]:
     return out
 
 
+# Findings usually cite proteins, contigs and genomes in prose and verification SQL rather than
+# in structured fields; identifier-shaped tokens from these fields become link candidates, and
+# only those naming an actual protein, contig or genome link anywhere.
+_CITING_FIELDS = ("title", "description", "evidence", "elsa_evidence", "provenance", "verification",
+                  "falsification")
+_ID_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.|:\-]{2,299}")
+
+
+def _cited_ids(finding: dict[str, Any], limit: int = 4000) -> set[str]:
+    out: set[str] = set()
+
+    def walk(v: Any) -> None:
+        if len(out) >= limit:
+            return
+        if isinstance(v, str):
+            out.update(t.rstrip(".:-|") for t in _ID_TOKEN.findall(v))
+        elif isinstance(v, dict):
+            for item in v.values():
+                walk(item)
+        elif isinstance(v, (list, tuple)):
+            for item in v:
+                walk(item)
+
+    for key in _CITING_FIELDS:
+        walk(finding.get(key))
+    return out
+
+
 def is_safe_select(sql: str) -> tuple[bool, str]:
     import duckdb  # noqa: PLC0415
 
@@ -377,6 +405,8 @@ class Insight:
             fields = [f.get("protein_ids"), f.get("genes"), f.get("contigs"), f.get("genomes"),
                       f.get("bin_ids"), f.get("evidence")]
             for s in _strings(fields):
+                candidates[s].add(f["_id"])
+            for s in _cited_ids(f):
                 candidates[s].add(f["_id"])
         names = list(candidates)
         proteins: dict[str, str] = {}

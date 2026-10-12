@@ -79,6 +79,10 @@ def _dataset(root, *, embeddings=True, structures=True, findings=True):
                  {"claim": "malicious", "query": "COPY proteins TO 'leak.csv'", "expected": 0},
                  {"claim": "file read", "query": "SELECT * FROM read_csv('/etc/hosts')", "expected": 0}]},
             {"id": "F2", "title": "Contig-level observation", "category": "mobile", "contigs": ["bin|2_c1"]},
+            {"id": "F3", "title": "Prose-only citation", "category": "dark matter",
+             "description": "The 220-aa ORF bin|1_c1_1, unlike its neighbours, carries no domain.",
+             "verification": [{"claim": "one protein", "expected": 1,
+                               "query": "SELECT COUNT(*) FROM proteins WHERE protein_id = 'bin|2_c1_1'"}]},
         ]
         (root / "exploration").mkdir()
         (root / "exploration" / "findings.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\n")
@@ -124,11 +128,15 @@ def test_structures_come_from_explicit_records_only(client):
 def test_findings_link_to_proteins_genomes_clades_and_systems(client):
     insight = client.app.state.insight
     assert [f["id"] for f in insight.findings_for_protein("bin|1_c1_2")] == ["F1"]
-    assert {f["id"] for f in insight.findings_for_genome("bin|1")} == {"F1"}
-    assert {f["id"] for f in insight.findings_for_genome("bin|2")} == {"F2"}      # via its contig
+    # identifiers cited only in prose or verification SQL link too; ordinary words do not
+    assert [f["id"] for f in insight.findings_for_protein("bin|1_c1_1")] == ["F3"]
+    assert [f["id"] for f in insight.findings_for_protein("bin|2_c1_1")] == ["F3"]
+    assert {f["id"] for f in insight.findings_for_genome("bin|1")} == {"F1", "F3"}
+    assert {f["id"] for f in insight.findings_for_genome("bin|2")} == {"F2", "F3"}  # F2 via its contig
     assert [f["id"] for f in insight.findings_for_system("Viperin")] == ["F1"]
-    assert {f["id"] for f in insight.findings_for_clade("class", "Nanoarchaeia")} == {"F1", "F2"}
+    assert {f["id"] for f in insight.findings_for_clade("class", "Nanoarchaeia")} == {"F1", "F2", "F3"}
     assert "Agent findings" in client.get("/genome/bin%7C1").text
+    assert "Prose-only citation" in client.get("/protein/bin%7C1_c1_1").text
     assert "Agent findings" in client.get("/system/defense/Viperin").text
     assert "Agent findings" in client.get("/taxa/class/Nanoarchaeia").text
     index = client.get("/findings")
