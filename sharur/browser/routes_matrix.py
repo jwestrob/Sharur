@@ -342,16 +342,25 @@ def _mask(n: int, genomes: list[Genome]) -> np.ndarray:
     return mask
 
 
+# Optimal leaf ordering flips dendrogram branches so neighbouring rows are as similar as possible
+# (all DPANN genomes, 40 variable KOs: mean adjacent Jaccard distance 0.272 -> 0.253). Its cost
+# grows quadratically (2.3 s at 3,564 rows), so larger matrices keep the plain leaf order.
+OPTIMAL_ORDER_MAX_ROWS = 2000
+
+
 def _jaccard_order(presence: np.ndarray) -> list[int]:
     """Row order from average-linkage clustering on Jaccard distance."""
     n = presence.shape[0]
     if n < 3:
         return list(range(n))
-    from scipy.cluster.hierarchy import leaves_list, linkage  # noqa: PLC0415
+    from scipy.cluster.hierarchy import leaves_list, linkage, optimal_leaf_ordering  # noqa: PLC0415
     from scipy.spatial.distance import pdist  # noqa: PLC0415
 
     dist = np.nan_to_num(pdist(presence.astype(bool), "jaccard"), nan=0.0)
-    return [int(i) for i in leaves_list(linkage(dist, "average"))]
+    tree = linkage(dist, "average")
+    if n <= OPTIMAL_ORDER_MAX_ROWS:
+        tree = optimal_leaf_ordering(tree, dist)
+    return [int(i) for i in leaves_list(tree)]
 
 
 def _taxonomy_key(g: Genome) -> tuple:

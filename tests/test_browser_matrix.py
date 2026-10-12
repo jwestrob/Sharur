@@ -101,3 +101,28 @@ def test_explicit_features_and_completeness_filter():
     assert len(out["genomes"]) == 9
     tsv = mx._tsv(out)
     assert tsv.splitlines()[0].split("\t")[-1] == "K2" and len(tsv.splitlines()) == 10
+
+
+def test_cluster_order_groups_similar_rows_and_orders_leaves_optimally():
+    import numpy as np
+    from scipy.spatial.distance import pdist, squareform
+
+    from sharur.browser.routes_matrix import _jaccard_order
+
+    rng = np.random.default_rng(0)
+    blocks = [rng.random(30) < 0.5 for _ in range(4)]
+    rows = []
+    for i in range(24):                       # four profiles, interleaved, with one flipped bit each
+        row = blocks[i % 4].copy()
+        row[rng.integers(30)] ^= True
+        rows.append(row)
+    presence = np.array(rows)
+    order = _jaccard_order(presence)
+    assert sorted(order) == list(range(24))
+    labels = [i % 4 for i in order]
+    assert sum(a != b for a, b in zip(labels, labels[1:])) == 3     # each profile is one contiguous run
+    d = squareform(pdist(presence, "jaccard"))
+    adjacent = sum(d[a, b] for a, b in zip(order, order[1:]))
+    from scipy.cluster.hierarchy import leaves_list, linkage
+    plain = leaves_list(linkage(pdist(presence, "jaccard"), "average"))
+    assert adjacent <= sum(d[a, b] for a, b in zip(plain, plain[1:])) + 1e-12
