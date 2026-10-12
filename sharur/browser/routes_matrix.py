@@ -68,17 +68,67 @@ class FeatureSet:
     value: np.ndarray               # copies, calls, or module completeness
     threshold: float = 1e-9         # value at which a feature counts as present
     selectable: np.ndarray | None = None  # features offered by automatic picks
+    kinds: list[str] | None = None        # per feature; differs only in a mixed explicit selection
+    thresholds: np.ndarray | None = None  # per feature presence threshold
     index: dict[str, int] = field(init=False)
 
     def __post_init__(self) -> None:
         self.index = {f: i for i, f in enumerate(self.ids)}
         if self.selectable is None:
             self.selectable = np.ones(len(self.ids), dtype=bool)
+        if self.kinds is None:
+            self.kinds = [self.kind] * len(self.ids)
+        if self.thresholds is None:
+            self.thresholds = np.full(len(self.ids), self.threshold, dtype=np.float32)
 
     def carriers(self, genome_mask: np.ndarray) -> np.ndarray:
         """Genomes carrying each feature, among ``genome_mask``."""
-        keep = genome_mask[self.bin_idx] & (self.value >= self.threshold)
+        keep = genome_mask[self.bin_idx] & (self.value >= self.thresholds[self.feat_idx])
         return np.bincount(self.feat_idx[keep], minlength=len(self.ids))
+
+
+def merge_columns(columns: list[tuple[FeatureSet, str]]) -> FeatureSet:
+    """One feature set holding the chosen features of several kinds, in the given order."""
+    ids, labels, names, kinds, thresholds, bins, feats, values = [], [], [], [], [], [], [], []
+    for fs, feature in columns:
+        k = fs.index[feature]
+        key = feature if feature not in ids else f"{fs.kind}:{feature}"
+        j = len(ids)
+        ids.append(key); labels.append(fs.labels[k]); names.append(fs.names[k]); kinds.append(fs.kind)
+        thresholds.append(fs.thresholds[k])
+        rows = fs.feat_idx == k
+        bins.append(fs.bin_idx[rows]); feats.append(np.full(int(rows.sum()), j, dtype=np.int32)); values.append(fs.value[rows])
+    kind = kinds[0] if len(set(kinds)) == 1 else "mixed"
+    return FeatureSet(kind, ids, labels, names, np.concatenate(bins), np.concatenate(feats), np.concatenate(values),
+                      threshold=float(thresholds[0]), kinds=kinds, thresholds=np.array(thresholds, dtype=np.float32))
+
+
+def _loose(feature: str) -> str:
+    return re.sub(r"[-_\s]", "", feature).lower()
+
+
+def resolve_feature(sets, kind: str, token: str) -> tuple[FeatureSet, str] | None:
+    """A typed feature: ``kind:ID`` explicitly, else the selected kind, else any other kind.
+
+    Exact IDs win; otherwise one ID equal up to case, hyphens and underscores (Archaeal_T4P for
+    Archaeal-T4P)."""
+    head, _, rest = token.partition(":")
+    order = [head] if head in KINDS and rest else [kind, *(k for k in KINDS if k != kind)]
+    ident = rest if head in KINDS and rest else token
+    available = []
+    for k in order:
+        try:
+            available.append(sets.get(k))
+        except LookupError:
+            continue
+    for fs in available:
+        if ident in fs.index:
+            return fs, ident
+    for fs in available:
+        close = [f for f in fs.ids if _loose(f) == _loose(ident)]
+        if len(close) == 1:
+            return fs, close[0]
+    return None
 
 
 def _sparse(catalog, rows) -> tuple[list[str], np.ndarray, np.ndarray, np.ndarray]:
@@ -369,10 +419,13 @@ def _taxonomy_key(g: Genome) -> tuple:
 
 def build_matrix(ctx, fs: FeatureSet, groups: list[Group], *, features: list[str] | None = None,
                  module: str = "", pick: str = "", n: int = 40, order: str = "taxonomy",
-                 min_completeness: float = 0.0) -> dict[str, Any]:
+                 min_completeness: float = 0.0, steps: list[int | None] | None = None,
+                 notes: list[str] | None = None) -> dict[str, Any]:
     catalog = ctx.catalog
     n_all = len(catalog.genomes)
-    notes: list[str] = []
+    notes = list(notes or [])
+    explicit_steps, steps = steps, None
+    testable_kind = np.array([k in TESTABLE for k in fs.kinds], dtype=bool)
     dropped = 0
     if min_completeness > 0:
         kept_groups = []
@@ -396,15 +449,14 @@ def build_matrix(ctx, fs: FeatureSet, groups: list[Group], *, features: list[str
     carriers_known = [fs.carriers(m) for m in known]
     sizes = [len(grp.genomes) for grp in groups]
     prevalence = [c / s for c, s in zip(carriers, sizes)]
-    tests = [completeness_test(gs, ck) if fs.kind in TESTABLE else None for gs, ck in zip(testable, carriers_known)]
+    tests = [completeness_test(gs, ck) if testable_kind.any() else None for gs, ck in zip(testable, carriers_known)]
     for test, prev in zip(tests, prevalence):
         if test is not None:
-            # BH across every feature tested in the group (those in at least half its genomes)
-            tested = np.flatnonzero(prev >= 0.5)
+            # BH across every feature tested in the group (single-gene features in at least half its genomes)
+            tested = np.flatnonzero((prev >= 0.5) & testable_kind)
             test["q"] = np.full(len(prev), np.nan)
             test["q"][tested] = bh_qvalues(test["p"][tested], len(tested))
 
-    steps: list[int] | None = None
     fisher: dict[int, tuple[float, float]] = {}
     if module and fs.kind == "ko":
         kos, step_of = module_kos(catalog, module)
@@ -423,6 +475,8 @@ def build_matrix(ctx, fs: FeatureSet, groups: list[Group], *, features: list[str
         missing = [f for f in features if f not in fs.index]
         if missing:
             notes.append(f"Not in this dataset: {', '.join(missing[:12])}")
+        if explicit_steps is not None and any(s is not None for s in explicit_steps):
+            steps = [explicit_steps[features.index(fs.ids[k])] for k in chosen]
         pick = "explicit"
     else:
         selectable = fs.selectable & (sum(carriers) > 0)
@@ -476,7 +530,7 @@ def build_matrix(ctx, fs: FeatureSet, groups: list[Group], *, features: list[str
         keep = (row_of[fs.bin_idx] >= 0) & (col_of[fs.feat_idx] >= 0)
         values[row_of[fs.bin_idx[keep]], col_of[fs.feat_idx[keep]]] = fs.value[keep]
         start += len(grp.genomes)
-    presence = values >= fs.threshold
+    presence = values >= fs.thresholds[chosen][None, :]
 
     # feature order: clustered for automatic single-group picks
     if pick in ("variable", "absences") and len(chosen) > 2:
@@ -505,14 +559,15 @@ def build_matrix(ctx, fs: FeatureSet, groups: list[Group], *, features: list[str
     color_rank = _color_rank(catalog, groups)
     table = []
     for j, k in enumerate(chosen):
-        row: dict[str, Any] = {"id": fs.ids[k], "label": fs.labels[k], "name": fs.names[k], "groups": []}
+        row: dict[str, Any] = {"id": fs.ids[k], "label": fs.labels[k], "name": fs.names[k], "kind": fs.kinds[k],
+                               "threshold": float(fs.thresholds[k]), "groups": []}
         for gi in range(len(groups)):
             col = values[np.array(group_of) == gi, j]
-            present = col >= fs.threshold
+            present = col >= fs.thresholds[k]
             entry = {"carriers": int(carriers[gi][k]), "n": sizes[gi], "share": float(prevalence[gi][k]),
                      "median": float(np.median(col[present])) if present.any() else None}
             test = tests[gi]
-            if test is not None and prevalence[gi][k] >= 0.5:
+            if test is not None and testable_kind[k] and prevalence[gi][k] >= 0.5:
                 entry["expected"] = test["expected"]
                 entry["observed"] = int(carriers_known[gi][k])
                 entry["tested_n"] = test["n"]
@@ -537,7 +592,7 @@ def build_matrix(ctx, fs: FeatureSet, groups: list[Group], *, features: list[str
                      "contamination": g.contamination, "clade": g.taxonomy.get(color_rank) or UNCLASSIFIED,
                      "lineage": "; ".join(n for _, n in g.lineage if n != UNCLASSIFIED)}
                     for g, gi in zip(genome_rows, group_of)],
-        "features": table, "values": values, "notes": notes, "tested": fs.kind in TESTABLE,
+        "features": table, "values": values, "notes": notes, "tested": bool(testable_kind[chosen].any()),
         "missing_completeness": missing_comp,
         "deficit": sorted(deficit & {g.bin_id for g in genome_rows}),
     }
@@ -629,7 +684,45 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         except LookupError as exc:
             return groups, None, str(exc)
         wanted = [f for f in dict.fromkeys(x.strip() for x in re.split(r"[,\s]+", features)) if f]
-        result = build_matrix(ctx, fs, groups, features=wanted, module=module.strip(), pick=pick, n=n, order=order,
+        module = module.strip()
+        if wanted:
+            # explicit columns may mix kinds (a curated system beside a KEGG module); a module
+            # entered with another kind adds its KOs in step order after them
+            columns, steps, missing = [], [], []
+            for token in wanted:
+                found = resolve_feature(sets, kind, token)
+                if found is None:
+                    missing.append(token)
+                elif found not in columns:
+                    columns.append(found)
+                    steps.append(None)
+            notes = [f"Not found as any feature type in this dataset: {', '.join(missing[:12])}"] if missing else []
+            if module:
+                kos, step_of = module_kos(ctx.catalog, module)
+                if not kos:
+                    return groups, None, f"Unknown KEGG module {module}."
+                ko_set = sets.get("ko")
+                present = [(k, s) for k, s in zip(kos, step_of) if k in ko_set.index]
+                if len(present) < len(kos):
+                    notes.append(f"{len(kos) - len(present)} of the module's {len(kos)} KOs occur in no genome "
+                                 "of this dataset")
+                for k, s in present:
+                    columns.append((ko_set, k))
+                    steps.append(s)
+            if not columns:
+                return groups, None, notes[0] if notes else "No features to show for this selection."
+            fs = merge_columns(columns)
+            if fs.kind != "mixed" and all(s is None for s in steps):
+                fs = sets.get(fs.kind)   # one kind: the full set, unchanged behaviour
+                result = build_matrix(ctx, fs, groups, features=[c[1] for c in columns], pick=pick, n=n, order=order,
+                                      min_completeness=min_completeness, notes=notes)
+            else:
+                result = build_matrix(ctx, fs, groups, features=list(fs.ids), pick=pick, n=n, order=order,
+                                      min_completeness=min_completeness, steps=steps, notes=notes)
+            return groups, result, result.get("empty", "")
+        if module and kind != "ko":
+            fs = sets.get("ko")       # a module alone lays out its KOs
+        result = build_matrix(ctx, fs, groups, features=wanted, module=module, pick=pick, n=n, order=order,
                               min_completeness=min_completeness)
         return groups, result, result.get("empty", "")
 
@@ -657,14 +750,16 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                 "kind": kind, "threshold": result["threshold"],
                 "groups": result["groups"], "genomes": genomes,
                 "features": [{"id": f["id"], "label": f["label"], "name": f["name"], "step": f.get("step"),
-                              "url": feature_url(ctx.url, kind, f["id"])} for f in result["features"]],
+                              "kind": f["kind"], "threshold": f["threshold"],
+                              "url": feature_url(ctx.url, f["kind"], f["id"]), "cell_url": cell_url_template(f["kind"])}
+                             for f in result["features"]],
                 "values": [[round(float(v), 3) for v in row] for row in result["values"]],
                 "cell_url": cell_url_template(kind),
             }
         return ctx.render(request, "matrix.html", "taxa", a=a, b=b, kind=kind, features=features, module=module,
                           pick=pick, n=n, order=order, min_completeness=min_completeness, groups=groups,
                           result=result, message=message, payload=payload, KINDS=KINDS, PICKS=PICKS,
-                          external_url=external_url, feature_url=lambda f: feature_url(ctx.url, kind, f),
+                          external_url=external_url, feature_url=lambda f, k=kind: feature_url(ctx.url, k, f),
                           ALPHA=ALPHA, pval=pval)
 
     @app.get("/matrix.tsv")

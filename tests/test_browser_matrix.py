@@ -126,3 +126,46 @@ def test_cluster_order_groups_similar_rows_and_orders_leaves_optimally():
     from scipy.cluster.hierarchy import leaves_list, linkage
     plain = leaves_list(linkage(pdist(presence, "jaccard"), "average"))
     assert adjacent <= sum(d[a, b] for a, b in zip(plain, plain[1:])) + 1e-12
+
+
+def _mixed_sets():
+    """KO set from _ctx plus a curated-system set and a module-completeness set."""
+    ctx, ko = _ctx()
+    sys_pairs = [(f"g{i}", "secretion:Archaeal-T4P", 1.0) for i in range(5)]
+    ids, bins, feats, values = mx._sparse(ctx.catalog, sys_pairs)
+    system = mx.FeatureSet("system", ids, ["Archaeal-T4P"], ["Archaeal-T4P (secretion system)"], bins, feats, values)
+    mod_pairs = [(f"g{i}", "M00052", v) for i, v in enumerate([1.0, 1.0, 0.8, 0.5, 0.5, 0.0, 1.0, 1.0, 1.0, 1.0])]
+    ids, bins, feats, values = mx._sparse(ctx.catalog, mod_pairs)
+    module = mx.FeatureSet("module", ids, ids, ["M00052 name"], bins, feats, values, threshold=mx.MODULE_PRESENT)
+    by_kind = {"ko": ko, "system": system, "module": module}
+
+    class Sets:
+        def get(self, kind):
+            if kind not in by_kind:
+                raise LookupError(kind)
+            return by_kind[kind]
+    return ctx, Sets()
+
+
+def test_features_resolve_across_kinds_and_loose_spelling():
+    _, sets = _mixed_sets()
+    assert mx.resolve_feature(sets, "system", "M00052")[0].kind == "module"         # other kind
+    assert mx.resolve_feature(sets, "system", "secretion:Archaeal_T4P")[1] == "secretion:Archaeal-T4P"
+    assert mx.resolve_feature(sets, "ko", "system:secretion:Archaeal-T4P")[0].kind == "system"
+    assert mx.resolve_feature(sets, "ko", "module:K1") is None                      # explicit kind is binding
+    assert mx.resolve_feature(sets, "ko", "nothing") is None
+
+
+def test_mixed_columns_keep_each_kinds_presence_threshold():
+    ctx, sets = _mixed_sets()
+    fs = mx.merge_columns([mx.resolve_feature(sets, "system", t) for t in ("secretion:Archaeal-T4P", "M00052", "K2")])
+    assert fs.kind == "mixed" and fs.kinds == ["system", "module", "ko"]
+    a = mx.Group("all", "All", None, list(ctx.catalog.genomes))
+    out = mx.build_matrix(ctx, fs, [a], features=list(fs.ids))
+    t4p, m52, k2 = out["features"]
+    assert [t4p["kind"], m52["kind"], k2["kind"]] == ["system", "module", "ko"]
+    assert t4p["groups"][0]["carriers"] == 5
+    assert m52["groups"][0]["carriers"] == 7 and m52["threshold"] == pytest.approx(mx.MODULE_PRESENT)  # 0.5 is absent
+    assert k2["groups"][0]["carriers"] == 4
+    assert out["tested"]                                                    # a KO column is present
+    assert "p" not in t4p["groups"][0] and "p" not in m52["groups"][0]     # multi-gene kinds skip the test

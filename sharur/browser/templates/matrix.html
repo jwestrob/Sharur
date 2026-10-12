@@ -21,8 +21,8 @@
   <label><span>Rows ordered by</span><select name="order">{% for o, label in [('taxonomy', 'Taxonomy'), ('cluster', 'Clustering (Jaccard)'), ('completeness', 'Completeness')] %}<option value="{{ o }}" {{ 'selected' if o == order }}>{{ label }}</option>{% endfor %}</select></label>
   <label><span>Min. completeness %</span><input type="number" name="min_completeness" value="{{ '%g' % min_completeness }}" min="0" max="100" step="5"></label>
   <label class="wide"><span>KEGG module <i class="count">KOs in step order</i></span><input type="text" name="module" value="{{ module }}" placeholder="M00001"></label>
-  <label class="wide"><span>Or these features <i class="count">IDs, comma-separated</i></span><input type="text" name="features" value="{{ features }}" placeholder="K00001, K00002 · PF00005 · defense:CBASS"></label>
-  <div class="wide matrix-submit"><button type="submit">Show matrix</button>{% if payload %}<a class="btn" href="/matrix.tsv?{{ qs }}&order={{ order }}">Download TSV</a>{% set tree_root = groups[0].key if groups and groups[0].rank else '' %}{% set tree_tokens = [] %}{% for f in result.features[:8] %}{% set _ = tree_tokens.append(kind ~ ':' ~ f.id) %}{% endfor %}<a class="btn" href="/tree?root={{ quote(tree_root, safe='') }}&features={{ quote(tree_tokens|join(','), safe=',:') }}" title="The first eight features as rings on the taxonomy tree">Map on tree</a>{% if module and result.pick == 'module' %}<a class="btn" href="/pathway/{{ quote(module, safe='') }}" title="Step diagram and where each step goes missing">Pathway page</a>{% endif %}{% endif %}</div>
+  <label class="wide"><span>Or these features <i class="count">IDs of any type, comma-separated; <code>kind:ID</code> to be explicit</i></span><input type="text" name="features" value="{{ features }}" placeholder="K00001, PF00005, M00052, secretion:Archaeal-T4P"></label>
+  <div class="wide matrix-submit"><button type="submit">Show matrix</button>{% if payload %}<a class="btn" href="/matrix.tsv?{{ qs }}&order={{ order }}">Download TSV</a>{% set tree_root = groups[0].key if groups and groups[0].rank else '' %}{% set tree_tokens = [] %}{% for f in result.features[:8] %}{% set _ = tree_tokens.append(f.kind ~ ':' ~ f.id) %}{% endfor %}<a class="btn" href="/tree?root={{ quote(tree_root, safe='') }}&features={{ quote(tree_tokens|join(','), safe=',:') }}" title="The first eight features as rings on the taxonomy tree">Map on tree</a>{% if module and result.pick == 'module' %}<a class="btn" href="/pathway/{{ quote(module, safe='') }}" title="Step diagram and where each step goes missing">Pathway page</a>{% endif %}{% endif %}</div>
 </form>
 
 {% if message %}<div class="panel"><p class="empty">{{ message }}</p></div>{% endif %}
@@ -31,7 +31,7 @@
 {% if payload %}
 <div class="stats">
   {% for grp in result.groups %}<div class="stat"><b>{{ num(grp.n) }}</b><span>genomes · {% if grp.rank %}<a href="{{ url('taxa', grp.rank, grp.label) }}">{{ grp.label }}</a>{% else %}{{ grp.label }}{% endif %}</span></div>{% endfor %}
-  <div class="stat"><b>{{ result.features|length }}</b><span>{{ KINDS[kind]|lower }} · {{ {'variable': 'most variable', 'absences': 'absences beyond incompleteness', 'differential': 'largest differences', 'module': 'module ' ~ module, 'explicit': 'chosen'}[result.pick] }}</span></div>
+  <div class="stat"><b>{{ result.features|length }}</b><span>{{ (KINDS[result.kind]|lower) if result.kind in KINDS else 'features of several types' }} · {{ {'variable': 'most variable', 'absences': 'absences beyond incompleteness', 'differential': 'largest differences', 'module': 'module ' ~ module, 'explicit': 'chosen'}[result.pick] }}</span></div>
   <div class="stat"><b>{{ result.color_rank }}</b><span>colour strip rank</span></div>
 </div>
 {% if result.missing_completeness %}<div class="banner">{{ num(result.missing_completeness) }} of {{ num(result.genomes|length) }} genomes have no completeness estimate{% if result.missing_completeness == result.genomes|length %}, so absences can't be weighed against incompleteness. Fill it with <code>sharur import-quality</code> (CheckM, CheckM2 or GTDB tables){% endif %}.</div>{% endif %}
@@ -44,7 +44,7 @@
   </div>
   <div class="legend matrix-legend">
     <span><i class="mx-cell" style="background:var(--mx-1)"></i>1 copy</span><span><i class="mx-cell" style="background:var(--mx-2)"></i>2</span><span><i class="mx-cell" style="background:var(--mx-3)"></i>3+</span>
-    {% if kind == 'module' %}<span>module cells: shade = completeness; present at ≥ 75%</span>{% endif %}
+    {% if result.features|selectattr('kind', 'equalto', 'module')|list %}<span>module cells: shade = completeness; present at ≥ 75%</span>{% endif %}
     <span><i class="mx-cell mx-empty"></i>not detected</span><span><i class="mx-cell mx-hatch"></i>not detected, genome &lt; 70% complete</span>
     <span><i class="mx-cell mx-comp"></i>completeness (bar)</span><span class="count">Colour strip: {{ result.color_rank }}. Click a cell for the genome's hits.</span>
   </div>
@@ -60,7 +60,7 @@
       {% if result.tested %}<th title="If every genome carried the feature and reported it with probability equal to its completeness">Absences vs incompleteness</th>{% endif %}
     </tr></thead>
     <tbody>{% for f in result.features %}<tr>
-      <td class="mono"><a href="{{ feature_url(f.id) }}">{{ f.id }}</a>{% set ext = external_url(kind, f.id) %}{% if ext %} <a class="ext" href="{{ ext }}" target="_blank" rel="noopener">↗</a>{% endif %} <a class="ext" href="/tree?features={{ quote(kind ~ ':' ~ f.id, safe=':') }}" title="Map on the taxonomy tree">⌾</a>{% if f.get('step') is not none %} <span class="count">step {{ f.step + 1 }}</span>{% endif %}</td>
+      <td class="mono"><a href="{{ feature_url(f.id, f.kind) }}">{{ f.id }}</a>{% set ext = external_url(f.kind, f.id) %}{% if ext %} <a class="ext" href="{{ ext }}" target="_blank" rel="noopener">↗</a>{% endif %} <a class="ext" href="/tree?features={{ quote(f.kind ~ ':' ~ f.id, safe=':') }}" title="Map on the taxonomy tree">⌾</a>{% if f.get('step') is not none %} <span class="count">step {{ f.step + 1 }}</span>{% endif %}</td>
       <td>{{ f.name }}</td>
       {% for e in f.groups %}<td style="min-width:120px">{{ bar(e.share) }}<span class="count">{{ e.carriers }}/{{ e.n }}</span></td><td class="num count">{{ '%g' % e.median if e.median is not none else '–' }}</td>{% endfor %}
       {% if two %}<td class="num">{{ '%+.0f' % (f.delta * 100) }} pts</td><td class="num count">{{ pval(f.fisher_p) }}</td><td class="num count">{{ pval(f.fisher_q) }}</td>{% endif %}

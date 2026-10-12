@@ -55,7 +55,9 @@
 
   const G = data.genomes, F = data.features, V = data.values;
   const nG = G.length, nF = F.length;
-  const module = data.kind === "module";   // cells hold module completeness
+  // each column carries its own kind: module cells hold completeness, others copies
+  const isModule = (j) => (F[j].kind || data.kind) === "module";
+  const thresholdOf = (j) => (F[j].threshold === undefined ? data.threshold : F[j].threshold);
   const stepped = F.some((f) => f.step !== null && f.step !== undefined);   // KOs laid out by module step
 
   // layout
@@ -95,13 +97,13 @@
   pctx.beginPath(); pctx.moveTo(0, 6); pctx.lineTo(6, 0); pctx.stroke();
   const hatch = ctx.createPattern(pat, "repeat");
 
-  function cellFill(v, completeness) {
-    if (module) {
+  function cellFill(v, completeness, j) {
+    if (isModule(j)) {
       if (v <= 0) return completeness !== null && completeness < 70 ? hatch : C.empty;
       ctx.globalAlpha = 0.25 + 0.75 * v;
-      return v >= data.threshold ? C.c3 : C.c2;
+      return v >= thresholdOf(j) ? C.c3 : C.c2;
     }
-    if (v < data.threshold) return completeness !== null && completeness < 70 ? hatch : C.empty;
+    if (v < thresholdOf(j)) return completeness !== null && completeness < 70 ? hatch : C.empty;
     return v >= 3 ? C.c3 : v >= 2 ? C.c2 : C.c1;
   }
 
@@ -145,7 +147,7 @@
       }
       const row = V[i];
       for (let j = 0; j < nF; j++) {
-        ctx.fillStyle = cellFill(row[j], g.completeness);
+        ctx.fillStyle = cellFill(row[j], g.completeness, j);
         ctx.fillRect(leftW + j * cellW, yy, cellW - (cellW > 7 ? 1 : 0), rowH - (rowH > 4 ? 1 : 0));
         ctx.globalAlpha = 1;
       }
@@ -183,8 +185,8 @@
     return { x, y: yy, i, j: x >= leftW && j < nF ? j : -1, header: yy < headerH };
   }
 
-  function fmt(v) {
-    if (module) return v > 0 ? Math.round(v * 100) + "% complete" : "no steps found";
+  function fmt(v, j) {
+    if (isModule(j)) return v > 0 ? Math.round(v * 100) + "% complete" : "no steps found";
     if (v <= 0) return "not detected";
     return v + (v === 1 ? " copy" : " copies");
   }
@@ -205,7 +207,7 @@
       if (at.j >= 0) {
         const f = F[at.j], div = document.createElement("div");
         div.className = "feat";
-        div.textContent = f.id + " · " + f.name + ": " + fmt(V[at.i][at.j]);
+        div.textContent = f.id + " · " + f.name + ": " + fmt(V[at.i][at.j], at.j);
         tip.appendChild(div);
       }
     } else if (at.j >= 0 && at.header) {
@@ -229,7 +231,7 @@
     const at = locate(ev);
     let href = null;
     if (at.i >= 0 && at.j >= 0) {
-      href = data.cell_url.replace("{g}", encodeURIComponent(G[at.i].id)).replace("{f}", encodeURIComponent(F[at.j].id));
+      href = (F[at.j].cell_url || data.cell_url).replace("{g}", encodeURIComponent(G[at.i].id)).replace("{f}", encodeURIComponent(F[at.j].id));
     } else if (at.i >= 0 && at.x < leftW) {
       href = "/genome/" + encodeURIComponent(G[at.i].id);
     } else if (at.j >= 0 && at.header) {
