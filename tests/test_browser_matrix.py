@@ -169,3 +169,24 @@ def test_mixed_columns_keep_each_kinds_presence_threshold():
     assert k2["groups"][0]["carriers"] == 4
     assert out["tested"]                                                    # a KO column is present
     assert "p" not in t4p["groups"][0] and "p" not in m52["groups"][0]     # multi-gene kinds skip the test
+
+
+def test_categories_resolve_by_id_or_name_and_use_curated_mappings():
+    assert mx.resolve_category("ribosomal_protein") == mx.resolve_category("Ribosomal protein") == "ribosomal_protein"
+    assert mx.resolve_category("no such label") is None
+    pfams = mx.category_members("pfam", "ribosomal_protein")
+    assert "PF00163" in pfams and all(p.startswith("PF") for p in pfams)       # Ribosomal_S4, by accession
+    assert mx.category_members("function", "translation") >= {"translation", "ribosomal_protein"}
+    assert mx.category_members("system", "ribosomal_protein") == set()
+
+
+def test_keyword_and_category_columns_are_ordered_most_widespread_first():
+    ctx, fs = _ctx()
+    assert mx.keyword_members(fs, "K3 NAME") == {"K3"} and mx.keyword_members(fs, "name") == {"K1", "K2", "K3"}
+    words = mx.FeatureSet("ko", ["Ka", "Kb"], ["Ka", "Kb"], ["nonribosomal peptide synthetase", "ribosomal-protein-serine acetyltransferase"],
+                          np.zeros(0, np.int32), np.zeros(0, np.int32), np.zeros(0, np.float32))
+    assert mx.keyword_members(words, "ribosomal") == {"Kb"}            # word starts only
+    a = mx.Group("all", "All", None, list(ctx.catalog.genomes))
+    out = mx.build_matrix(ctx, fs, [a], candidates={"K3", "K1", "K9"}, pick="category", selection="category X")
+    assert [f["id"] for f in out["features"]] == ["K1", "K3"]          # 6 then 3 carriers; K9 occurs nowhere
+    assert out["pick"] == "category" and out["selection"] == "category X"

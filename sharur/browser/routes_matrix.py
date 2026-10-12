@@ -131,6 +131,55 @@ def resolve_feature(sets, kind: str, token: str) -> tuple[FeatureSet, str] | Non
     return None
 
 
+# --------------------------------------------------------------------------- #
+# Keyword and category column searches
+# --------------------------------------------------------------------------- #
+
+# Built-in category searches, offered when their features occur in the dataset.
+PRESETS = [("Ribosomal proteins", "ribosomal_protein"), ("tRNA synthetases", "trna_synthetase"),
+           ("RNA polymerase", "rna_polymerase"), ("Translation factors", "translation_factor"),
+           ("Type IV pilus", "type_iv_pilus"), ("Sec pathway", "sec_pathway"), ("Flagellum", "flagellum"),
+           ("CRISPR-associated", "crispr_associated"), ("Hydrogenases", "hydrogenase")]
+CATEGORY_KINDS = ("ko", "pfam", "function")
+
+
+def resolve_category(text: str) -> str | None:
+    """A function label by ID or name (``ribosomal_protein``, ``Ribosomal protein``)."""
+    text = text.strip()
+    if text in PREDICATE_BY_ID:
+        return text
+    loose = _loose(text)
+    found = [p for p, v in PREDICATE_BY_ID.items() if _loose(p) == loose or _loose(v.name) == loose]
+    return found[0] if len(found) == 1 else None
+
+
+def category_members(kind: str, category: str) -> set[str]:
+    """Features of ``kind`` that Sharur's curated mappings assign to a function label.
+
+    KEGG orthologs follow the local KEGG build (BRITE and EC rules), Pfam families the shipped
+    GO-backed rules; function labels are the label itself and its child labels."""
+    if kind == "ko":
+        from sharur.predicates.mappings.kegg_map import KEGG_TO_PREDICATES  # noqa: PLC0415
+
+        return {ko for ko, preds in KEGG_TO_PREDICATES.items() if category in preds}
+    if kind == "pfam":
+        from sharur.predicates.mappings.pfam_map import PFAM_TO_PREDICATES  # noqa: PLC0415
+
+        return {acc for acc, preds in PFAM_TO_PREDICATES.items() if acc.startswith("PF") and category in preds}
+    if kind == "function":
+        return {category} | {p for p, v in PREDICATE_BY_ID.items() if v.parent == category}
+    return set()
+
+
+def keyword_members(fs: FeatureSet, query: str) -> set[str]:
+    """Features whose ID, label or name has a word starting with every word of ``query``.
+
+    Case-insensitive; matching at word starts keeps "ribosomal" off "nonribosomal"."""
+    words = [re.compile(rf"(?<![a-z0-9]){re.escape(w)}") for w in query.lower().split()]
+    return {f for f, label, name in zip(fs.ids, fs.labels, fs.names)
+            if words and all(w.search(f"{f} {label} {name}".lower()) for w in words)}
+
+
 def _sparse(catalog, rows) -> tuple[list[str], np.ndarray, np.ndarray, np.ndarray]:
     ids = sorted({f for _, f, _ in rows})
     index = {f: i for i, f in enumerate(ids)}
@@ -420,7 +469,8 @@ def _taxonomy_key(g: Genome) -> tuple:
 def build_matrix(ctx, fs: FeatureSet, groups: list[Group], *, features: list[str] | None = None,
                  module: str = "", pick: str = "", n: int = 40, order: str = "taxonomy",
                  min_completeness: float = 0.0, steps: list[int | None] | None = None,
-                 notes: list[str] | None = None) -> dict[str, Any]:
+                 notes: list[str] | None = None, candidates: set[str] | None = None,
+                 selection: str = "") -> dict[str, Any]:
     catalog = ctx.catalog
     n_all = len(catalog.genomes)
     notes = list(notes or [])
@@ -470,6 +520,14 @@ def build_matrix(ctx, fs: FeatureSet, groups: list[Group], *, features: list[str
         keep = [k for k, i in enumerate(chosen) if i >= 0]
         chosen, steps = [chosen[k] for k in keep], [step_of[k] for k in keep]
         pick = "module"
+    elif candidates is not None:
+        # keyword or category matches carried by these genomes, most widespread first
+        total = sum(carriers)
+        idx = [fs.index[f] for f in candidates if f in fs.index and total[fs.index[f]] > 0]
+        idx.sort(key=lambda k: (-int(total[k]), fs.labels[k]))
+        if len(idx) > MAX_FEATURES:
+            notes.append(f"{len(idx)} features match; the {MAX_FEATURES} most widespread are shown.")
+        chosen = idx
     elif features:
         chosen = [fs.index[f] for f in features if f in fs.index]
         missing = [f for f in features if f not in fs.index]
@@ -586,6 +644,7 @@ def build_matrix(ctx, fs: FeatureSet, groups: list[Group], *, features: list[str
     missing_comp = sum(1 for g in genome_rows if g.completeness is None)
     return {
         "kind": fs.kind, "pick": pick, "order": order, "threshold": fs.threshold, "color_rank": color_rank,
+        "selection": selection,
         "groups": [{"key": grp.key, "label": grp.label, "rank": grp.rank, "n": len(grp.genomes)} for grp in groups],
         "genomes": [{"id": g.bin_id, "label": g.label, "group": gi, "completeness": g.completeness,
                      "proteins": g.proteins, "deficit": g.bin_id in deficit,
@@ -669,7 +728,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     ctx.feature_sets = sets   # shared with the taxonomy tree, functional landscape and clade pages
 
     def compute(a: str, b: str, kind: str, features: str, module: str, pick: str, n: int, order: str,
-                min_completeness: float) -> tuple[list[Group], dict[str, Any] | None, str]:
+                min_completeness: float, q: str = "", category: str = "") -> tuple[list[Group], dict[str, Any] | None, str]:
         groups = []
         for token in (a, b):
             if token:
@@ -685,6 +744,9 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             return groups, None, str(exc)
         wanted = [f for f in dict.fromkeys(x.strip() for x in re.split(r"[,\s]+", features)) if f]
         module = module.strip()
+        q, category = q.strip(), category.strip()
+        if (q or category) and not (wanted or module):
+            return groups, *search_matrix(fs, groups, kind, q, category, order, min_completeness)
         if wanted:
             # explicit columns may mix kinds (a curated system beside a KEGG module); a module
             # entered with another kind adds its KOs in step order after them
@@ -726,6 +788,44 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                               min_completeness=min_completeness)
         return groups, result, result.get("empty", "")
 
+    def search_matrix(fs, groups, kind, q, category, order, min_completeness):
+        """Columns from a category (curated function label), a keyword, or both (intersection)."""
+        members: set[str] | None = None
+        parts = []
+        if category:
+            label = resolve_category(category)
+            if label is None:
+                return None, f"Unknown category {category!r}: use a function label such as ribosomal_protein."
+            if kind not in CATEGORY_KINDS:
+                return None, (f"Categories select KEGG orthologs, Pfam families or function labels; "
+                              f"switch Features to one of those for {PREDICATE_BY_ID[label].name}.")
+            members = category_members(kind, label)
+            parts.append(f"category {PREDICATE_BY_ID[label].name}")
+            if not members:
+                hint = " (KO categories come from a local KEGG build: sharur setup-kegg)" if kind == "ko" else ""
+                return None, f"No {KINDS[kind]} carry the category {PREDICATE_BY_ID[label].name}{hint}."
+        if q:
+            found = keyword_members(fs, q)
+            members = found if members is None else members & found
+            parts.append(f"matching \u201c{q}\u201d")
+        result = build_matrix(ctx, fs, groups, candidates=members, pick="category" if category else "keyword",
+                              order=order, min_completeness=min_completeness, selection=" · ".join(parts))
+        return result, result.get("empty", "")
+
+    def presets() -> list[dict[str, Any]]:
+        """Built-in category searches with features in the dataset, for the KO table (Pfam without KEGG)."""
+        out = []
+        for name, label in PRESETS:
+            for kind in ("ko", "pfam"):
+                try:
+                    present = category_members(kind, label) & set(sets.get(kind).index)
+                except LookupError:
+                    continue
+                if len(present) >= 2:
+                    out.append({"name": name, "category": label, "kind": kind, "n": len(present)})
+                    break
+        return out
+
     ctx.matrix_compute = compute
 
     def params(kind, pick, order, n):
@@ -737,9 +837,10 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     def matrix_page(request: Request, a: str = Query("", max_length=500), b: str = Query("", max_length=500),
                     kind: str = Query("ko"), features: str = Query("", max_length=4000),
                     module: str = Query("", max_length=20), pick: str = Query(""), n: int = Query(40),
-                    order: str = Query("taxonomy"), min_completeness: float = Query(0.0, ge=0, le=100)):
+                    order: str = Query("taxonomy"), min_completeness: float = Query(0.0, ge=0, le=100),
+                    q: str = Query("", max_length=200), category: str = Query("", max_length=100)):
         kind, pick, order, n = params(kind, pick, order, n)
-        groups, result, message = compute(a, b, kind, features, module, pick, n, order, min_completeness)
+        groups, result, message = compute(a, b, kind, features, module, pick, n, order, min_completeness, q, category)
         payload = None
         if result and not message:
             from sharur.browser.charts import color_for  # noqa: PLC0415
@@ -758,6 +859,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             }
         return ctx.render(request, "matrix.html", "taxa", a=a, b=b, kind=kind, features=features, module=module,
                           pick=pick, n=n, order=order, min_completeness=min_completeness, groups=groups,
+                          q=q, category=category, presets=presets(),
+                          categories=sorted((v.name, p) for p, v in PREDICATE_BY_ID.items() if v.level == "component"),
                           result=result, message=message, payload=payload, KINDS=KINDS, PICKS=PICKS,
                           external_url=external_url, feature_url=lambda f, k=kind: feature_url(ctx.url, k, f),
                           ALPHA=ALPHA, pval=pval)
@@ -766,9 +869,10 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     def matrix_tsv(a: str = Query("", max_length=500), b: str = Query("", max_length=500), kind: str = Query("ko"),
                    features: str = Query("", max_length=4000), module: str = Query("", max_length=20),
                    pick: str = Query(""), n: int = Query(40), order: str = Query("taxonomy"),
-                   min_completeness: float = Query(0.0, ge=0, le=100)):
+                   min_completeness: float = Query(0.0, ge=0, le=100),
+                   q: str = Query("", max_length=200), category: str = Query("", max_length=100)):
         kind, pick, order, n = params(kind, pick, order, n)
-        _, result, message = compute(a, b, kind, features, module, pick, n, order, min_completeness)
+        _, result, message = compute(a, b, kind, features, module, pick, n, order, min_completeness, q, category)
         if not result or message:
             raise HTTPException(400, message or "Choose a genome or clade (a=...)")
         return Response(_tsv(result), media_type="text/tab-separated-values",

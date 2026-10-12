@@ -165,11 +165,12 @@ def register(app: FastAPI, ctx) -> None:
     def api_matrix(a: str = Query("", max_length=500), b: str = Query("", max_length=500), kind: str = Query("ko"),
                    features: str = Query("", max_length=4000), module: str = Query("", max_length=20),
                    pick: str = Query(""), n: int = Query(40), order: str = Query("taxonomy"),
-                   min_completeness: float = Query(0.0, ge=0, le=100)):
+                   min_completeness: float = Query(0.0, ge=0, le=100),
+                   q: str = Query("", max_length=200), category: str = Query("", max_length=100)):
         compute = getattr(ctx, "matrix_compute", None)
         if compute is None:
             raise HTTPException(404, "Matrix unavailable")
-        _, result, message = compute(a, b, kind, features, module, pick, n, order, min_completeness)
+        _, result, message = compute(a, b, kind, features, module, pick, n, order, min_completeness, q, category)
         if not result or message:
             raise HTTPException(400, message or "Choose a genome or clade (a=...)")
         out = {k: v for k, v in result.items() if k != "values"}

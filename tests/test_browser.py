@@ -159,6 +159,14 @@ def test_matrix_pages(client):
     assert client.get("/matrix", params={"a": "no such clade"}).status_code == 404
     # one genome: no variable features, a clear message
     assert "No features to show" in client.get("/matrix", params={"a": "bin|1", "kind": "pfam"}).text
+    # category (curated function label) and keyword column searches
+    by_category = client.get("/matrix", params={"a": "domain:Archaea", "kind": "pfam", "category": "ABC transporter"})
+    assert 'id="matrix-data"' in by_category.text and "ABC_tran" in by_category.text and "category ABC transporter" in by_category.text
+    by_keyword = client.get("/api/v1/matrix", params={"a": "domain:Archaea", "kind": "pfam", "q": "abc_tran"}).json()
+    assert [f["id"] for f in by_keyword["features"]] == ["PF00005"]
+    assert "Unknown category" in client.get("/matrix", params={"a": "bin|1", "category": "nonsense label"}).text
+    assert 'id="matrix-data"' not in client.get("/matrix", params={"a": "bin|1", "kind": "system",
+                                                                   "category": "ribosomal_protein"}).text
 
 
 def test_json_api(client):

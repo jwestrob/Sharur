@@ -3,7 +3,7 @@
 {% block title %}Presence/absence matrix{% endblock %}
 {% block content %}
 {% set two = result and result.groups and result.groups|length == 2 %}
-{% set qs = 'a=' ~ quote(a, safe='') ~ '&b=' ~ quote(b, safe='') ~ '&kind=' ~ kind ~ '&features=' ~ quote(features, safe=',') ~ '&module=' ~ quote(module, safe='') ~ '&pick=' ~ pick ~ '&n=' ~ n ~ '&min_completeness=' ~ min_completeness %}
+{% set qs = 'a=' ~ quote(a, safe='') ~ '&b=' ~ quote(b, safe='') ~ '&kind=' ~ kind ~ '&features=' ~ quote(features, safe=',') ~ '&module=' ~ quote(module, safe='') ~ '&pick=' ~ pick ~ '&n=' ~ n ~ '&min_completeness=' ~ min_completeness ~ '&q=' ~ quote(q, safe='') ~ '&category=' ~ quote(category, safe='') %}
 <div class="crumbs"><a href="/taxa">Tree of life</a></div>
 <h1><span class="rank">Presence/absence</span>{% if groups %}{{ groups[0].label }}{% if groups|length > 1 %} <span class="vs">vs</span> {{ groups[1].label }}{% endif %}{% else %}Genomes × features{% endif %}</h1>
 <p class="lede">Each row is a genome, each column a feature; cells show copies (or module completeness). Completeness sits beside each row, and absences in genomes below 70% complete are hatched: they weigh less.</p>
@@ -20,10 +20,16 @@
   <label><span>How many</span><input type="number" name="n" value="{{ n }}" min="5" max="150" step="5"></label>
   <label><span>Rows ordered by</span><select name="order">{% for o, label in [('taxonomy', 'Taxonomy'), ('cluster', 'Clustering (Jaccard)'), ('completeness', 'Completeness')] %}<option value="{{ o }}" {{ 'selected' if o == order }}>{{ label }}</option>{% endfor %}</select></label>
   <label><span>Min. completeness %</span><input type="number" name="min_completeness" value="{{ '%g' % min_completeness }}" min="0" max="100" step="5"></label>
+  <label class="wide"><span>Category <i class="count">a function label: its curated KOs, Pfam families or labels</i></span><input type="text" name="category" value="{{ category }}" list="matrix-categories" placeholder="Ribosomal protein"></label>
+  <label class="wide"><span>Keyword <i class="count">words in feature names; narrows a category</i></span><input type="text" name="q" value="{{ q }}" placeholder="ribosomal protein · large subunit · hydrogenase"></label>
+  <datalist id="matrix-categories">{% for name, label in categories %}<option value="{{ label }}">{{ name }}</option>{% endfor %}</datalist>
   <label class="wide"><span>KEGG module <i class="count">KOs in step order</i></span><input type="text" name="module" value="{{ module }}" placeholder="M00001"></label>
   <label class="wide"><span>Or these features <i class="count">IDs of any type, comma-separated; <code>kind:ID</code> to be explicit</i></span><input type="text" name="features" value="{{ features }}" placeholder="K00001, PF00005, M00052, secretion:Archaeal-T4P"></label>
   <div class="wide matrix-submit"><button type="submit">Show matrix</button>{% if payload %}<a class="btn" href="/matrix.tsv?{{ qs }}&order={{ order }}">Download TSV</a>{% set tree_root = groups[0].key if groups and groups[0].rank else '' %}{% set tree_tokens = [] %}{% for f in result.features[:8] %}{% set _ = tree_tokens.append(f.kind ~ ':' ~ f.id) %}{% endfor %}<a class="btn" href="/tree?root={{ quote(tree_root, safe='') }}&features={{ quote(tree_tokens|join(','), safe=',:') }}" title="The first eight features as rings on the taxonomy tree">Map on tree</a>{% if module and result.pick == 'module' %}<a class="btn" href="/pathway/{{ quote(module, safe='') }}" title="Step diagram and where each step goes missing">Pathway page</a>{% endif %}{% endif %}</div>
 </form>
+{% if presets %}<div class="facet matrix-presets"><span>Presets</span>
+  {% for pr in presets %}<a class="chip{{ ' on' if category == pr.category and not q }}" href="/matrix?a={{ quote(a or 'all', safe='') }}{% if b %}&b={{ quote(b, safe='') }}{% endif %}&kind={{ pr.kind }}&category={{ pr.category }}&order={{ order }}{% if min_completeness %}&min_completeness={{ '%g' % min_completeness }}{% endif %}" title="Every {{ 'KEGG ortholog' if pr.kind == 'ko' else 'Pfam family' }} Sharur's curated mappings assign to this function label">{{ pr.name }} <span class="count">{{ pr.n }}</span></a>{% endfor %}
+</div>{% endif %}
 
 {% if message %}<div class="panel"><p class="empty">{{ message }}</p></div>{% endif %}
 {% if result and result.notes %}{% for note in result.notes %}<div class="banner">{{ note }}</div>{% endfor %}{% endif %}
@@ -31,7 +37,7 @@
 {% if payload %}
 <div class="stats">
   {% for grp in result.groups %}<div class="stat"><b>{{ num(grp.n) }}</b><span>genomes · {% if grp.rank %}<a href="{{ url('taxa', grp.rank, grp.label) }}">{{ grp.label }}</a>{% else %}{{ grp.label }}{% endif %}</span></div>{% endfor %}
-  <div class="stat"><b>{{ result.features|length }}</b><span>{{ (KINDS[result.kind]|lower) if result.kind in KINDS else 'features of several types' }} · {{ {'variable': 'most variable', 'absences': 'absences beyond incompleteness', 'differential': 'largest differences', 'module': 'module ' ~ module, 'explicit': 'chosen'}[result.pick] }}</span></div>
+  <div class="stat"><b>{{ result.features|length }}</b><span>{{ (KINDS[result.kind]|lower) if result.kind in KINDS else 'features of several types' }} · {{ result.selection or {'variable': 'most variable', 'absences': 'absences beyond incompleteness', 'differential': 'largest differences', 'module': 'module ' ~ module, 'explicit': 'chosen'}.get(result.pick, '') }}</span></div>
   <div class="stat"><b>{{ result.color_rank }}</b><span>colour strip rank</span></div>
 </div>
 {% if result.missing_completeness %}<div class="banner">{{ num(result.missing_completeness) }} of {{ num(result.genomes|length) }} genomes have no completeness estimate{% if result.missing_completeness == result.genomes|length %}, so absences can't be weighed against incompleteness. Fill it with <code>sharur import-quality</code> (CheckM, CheckM2 or GTDB tables){% endif %}.</div>{% endif %}
