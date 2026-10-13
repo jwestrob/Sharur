@@ -188,7 +188,9 @@ def ribosomal_client(tmp_path):
                 1e-50, 180.0, 90, 210),
                (3, 'bin|1_c1_2', 'pfam', 'PF06325.18', 'PrmA', 'Ribosomal protein L11 methyltransferase (PrmA)',
                 1e-60, 200.0, 10, 200),
-               (4, 'bin|1_c1_2', 'pfam', 'PF00005.31', 'ABC_tran', 'ABC transporter', 1e-20, 80.0, 1, 9);
+               (4, 'bin|1_c1_2', 'pfam', 'PF00005.31', 'ABC_tran', 'ABC transporter', 1e-20, 80.0, 1, 9),
+               (5, 'bin|1_c1_2', 'kofam', 'K02986', 'K02986', 'small subunit ribosomal protein S4', 1e-30, 90.0,
+                NULL, NULL);
     """)
     store.close()
     return TestClient(create_app(path, background=False))
@@ -200,16 +202,19 @@ def test_matrix_ribosomal_pfam_panel(ribosomal_client):
     assert page.status_code == 200 and "panel Ribosomal proteins (Pfam)" in page.text
     assert '<option value="pfam" selected' in page.text                 # the panel sets the feature kind
     api = client.get("/api/v1/matrix", params={"a": "all", "category": "Ribosomal proteins (Pfam)"}).json()
-    assert api["kind"] == "pfam"
-    assert sorted(f["id"] for f in api["features"]) == ["PF03947", "Ribosomal_L2"]
-    assert all(f["name"].startswith("uL2 \u00b7 ") for f in api["features"])
-    assert "Ribosomal proteins (Pfam) <span class=\"count\">2</span>" in page.text      # the preset chip
+    assert api["kind"] == "mixed"                   # Pfam families, and the KO for archaeal uS4
+    cols = {f["id"]: f for f in api["features"]}
+    assert set(cols) == {"PF03947", "Ribosomal_L2", "K02986"}
+    assert cols["PF03947"]["label"] == "uL2 (L2p) \u00b7 L2_C" and cols["Ribosomal_L2"]["label"] == "uL2 (L2p) \u00b7 L2"
+    assert cols["K02986"]["kind"] == "ko" and cols["K02986"]["label"] == "uS4 (S4p)"
+    assert cols["PF03947"]["name"].startswith("uL2 (L2p) \u00b7 ") and "KOfam call" in cols["K02986"]["name"]
+    assert "Ribosomal proteins (Pfam) <span class=\"count\">3</span>" in page.text      # the preset chip
     # the broader category also reaches the L11 methyltransferase, and points to the panel
     broad = client.get("/api/v1/matrix", params={"a": "all", "kind": "pfam", "category": "ribosomal_protein"}).json()
     assert {"PF03947", "Ribosomal_L2", "PF06325"} <= {f["id"] for f in broad["features"]}
     assert any("curated panel Ribosomal proteins (Pfam)" in note for note in broad["notes"])
     tsv = client.get("/matrix.tsv", params={"a": "all", "category": "ribosomal_proteins_pfam"})
-    assert tsv.status_code == 200 and "sharur_matrix_pfam.tsv" in tsv.headers["content-disposition"]
+    assert tsv.status_code == 200 and "K02986" in tsv.text.splitlines()[0]
 
 
 def test_json_api(client):

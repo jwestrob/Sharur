@@ -186,9 +186,13 @@ def test_ribosomal_pfam_panel_holds_ribosomal_protein_families():
     assert mx.resolve_panel("ribosomal_protein") is None                 # the function label stays a category
     rows = [line.split("\t") for line in (mx.PANEL_DIR / "ribosomal_proteins_pfam.tsv").read_text().splitlines()
             if line and not line.startswith("#")]
-    accessions = [r[0] for r in rows]
-    assert len(set(accessions)) == len(rows) and all(len(r) in (3, 4) and r[0][:2] == "PF" for r in rows)
+    accessions = [r[0] for r in rows if r[0][:2] == "PF"]
+    assert len({r[0] for r in rows}) == len(rows) and all(len(r) in (4, 5) for r in rows)
+    assert {r[0] for r in rows} - set(accessions) == {"ko:K02986"} and panel.extra == (("ko", "K02986"),)
     assert panel.proteins["PF03947"] == panel.proteins["Ribosomal_L2_C"] == panel.proteins["Ribosomal_L2"] == "uL2"
+    # universal names carry the traditional ones, whose numbers differ
+    assert panel.describe("PF01247") == "eL33 (L35Ae)" and panel.describe("PF00252") == "uL16 (L10e)"
+    assert panel.describe("K02986") == "uS4 (S4p)" and panel.describe("PF29996") == "aL49"
     # the panel refines the curated Pfam category: its families sit inside it, plus RS4NT (the eS4
     # N-terminal domain, named "RS4NT (NUC023) domain"), and the category's enzymes, factors and
     # shared domains sit outside the panel

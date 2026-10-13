@@ -6,127 +6,132 @@
 # Checked against the Pfam release behind pfam_predicates.tsv: Pfam-A.hmm (24,076 families)
 # and Pfam-A.clans (30,134 families). Matching uses the accession, or the name when an
 # annotation stores the profile name.
-# accession	name	protein	note
-PF00318	Ribosomal_S2	uS2
-PF16122	40S_SA_C	uS2	eukaryotic C-terminal extension
-PF00189	Ribosomal_S3_C	uS3
-PF00163	Ribosomal_S4	uS4	N-terminal domain; the S4 RNA-binding domain is shared
-PF00333	Ribosomal_S5	uS5
-PF03719	Ribosomal_S5_C	uS5
-PF00177	Ribosomal_S7	uS7
-PF00410	Ribosomal_S8	uS8
-PF00380	Ribosomal_S9	uS9
-PF00338	Ribosomal_S10	uS10
-PF00411	Ribosomal_S11	uS11
-PF00164	Ribosom_S12_S23	uS12
-PF00416	Ribosomal_S13	uS13
-PF00253	Ribosomal_S14	uS14
-PF00312	Ribosomal_S15	uS15
-PF08069	Ribosomal_S13_N	uS15	archaeal/eukaryotic N-terminal domain
-PF28936	uS15_N	uS15
-PF00366	Ribosomal_S17	uS17
-PF16205	Ribosomal_S17_N	uS17
-PF00203	Ribosomal_S19	uS19
-PF01250	Ribosomal_S6	bS6
-PF00886	Ribosomal_S16	bS16
-PF01084	Ribosomal_S18	bS18
-PF01649	Ribosomal_S20p	bS20
-PF01165	Ribosomal_S21	bS21
-PF17070	Thx	bTHX
-PF04839	PSRP-3_Ycf65	PSRP-3	cyanobacterial and plastid
-PF01015	Ribosomal_S3Ae	eS1
-PF00900	Ribosomal_S4e	eS4
-PF08071	RS4NT	eS4	N-terminal domain
-PF16121	40S_S4_C	eS4
-PF01092	Ribosomal_S6e	eS6
-PF01251	Ribosomal_S7e	eS7
-PF01201	Ribosomal_S8e	eS8
-PF00833	Ribosomal_S17e	eS17
-PF01090	Ribosomal_S19e	eS19
-PF01249	Ribosomal_S21e	eS21
-PF01282	Ribosomal_S24e	eS24
-PF03297	Ribosomal_S25	eS25
-PF01283	Ribosomal_S26e	eS26
-PF01667	Ribosomal_S27e	eS27
-PF01200	Ribosomal_S28e	eS28
-PF04758	Ribosomal_S30	eS30
-PF01599	Ribosomal_S27	eS31	S27a
-PF00687	Ribosomal_L1	uL1
-PF00181	Ribosomal_L2	uL2
-PF03947	Ribosomal_L2_C	uL2
-PF00297	Ribosomal_L3	uL3
-PF00573	Ribosomal_L4	uL4
-PF14374	Ribos_L4_asso_C	uL4	eukaryotic C-terminal domain
-PF00281	Ribosomal_L5	uL5
-PF00673	Ribosomal_L5_C	uL5
-PF00347	Ribosomal_L6	uL6
-PF00466	Ribosomal_L10	uL10	bacterial L10, archaeal and eukaryotic P0
-PF17777	RL10P_insert	uL10
-PF27436	RL10_C	uL10
-PF00298	Ribosomal_L11	uL11
-PF03946	Ribosomal_L11_N	uL11
-PF00572	Ribosomal_L13	uL13
-PF00238	Ribosomal_L14	uL14
-PF00828	Ribosomal_L27A	uL15, eL18	also archaeal L18e
-PF29471	Ribosomal_uL15_N	uL15
-PF27056	Ribosomal_L15_epsilon	uL15
-PF00252	Ribosomal_L16	uL16
-PF00861	Ribosomal_L18p	uL18
-PF17144	Ribosomal_L5e	uL18	eukaryotic L5, archaeal L18
-PF00237	Ribosomal_L22	uL22
-PF00276	Ribosomal_L23	uL23
-PF03939	Ribosomal_L23eN	uL23	eukaryotic N-terminal domain
-PF16906	Ribosomal_L26	uL24	archaeal and eukaryotic
-PF17136	ribosomal_L24	uL24	bacterial
-PF00831	Ribosomal_L29	uL29
-PF00327	Ribosomal_L30	uL30
-PF08079	Ribosomal_L30_N	uL30	eukaryotic N-terminal domain
-PF01281	Ribosomal_L9_N	bL9
-PF03948	Ribosomal_L9_C	bL9
-PF00542	Ribosomal_L12	bL12
-PF16320	Ribosomal_L12_N	bL12
-PF01196	Ribosomal_L17	bL17
-PF01245	Ribosomal_L19	bL19
-PF00453	Ribosomal_L20	bL20
-PF00829	Ribosomal_L21p	bL21
-PF01386	Ribosomal_L25p	bL25
-PF14693	Ribosomal_TL5_C	bL25
-PF01016	Ribosomal_L27	bL27
-PF00830	Ribosomal_L28	bL28
-PF01197	Ribosomal_L31	bL31
-PF21492	bL31_N	bL31
-PF01783	Ribosomal_L32p	bL32
-PF00471	Ribosomal_L33	bL33
-PF00468	Ribosomal_L34	bL34
-PF01632	Ribosomal_L35p	bL35
-PF00444	Ribosomal_L36	bL36
-PF00428	Ribosomal_60s	P1/P2	archaeal and eukaryotic stalk
-PF01159	Ribosomal_L6e	eL6
-PF03868	Ribosomal_L6e_N	eL6
-PF01248	Ribosomal_L7Ae	eL8, eL30, eS12	archaeal L7Ae also binds box C/D and H/ACA RNAs
-PF01294	Ribosomal_L13e	eL13
-PF01929	Ribosomal_L14e	eL14
-PF00827	Ribosomal_L15e	eL15
-PF17135	Ribosomal_L18	eL18
-PF01280	Ribosomal_L19e	eL19
-PF25476	Ribosomal_L19e_C	eL19
-PF01775	Ribosomal_L18A	eL20
-PF01157	Ribosomal_L21e	eL21
-PF01776	Ribosomal_L22e	eL22
-PF01246	Ribosomal_L24e	eL24
-PF01777	Ribosomal_L27e	eL27
-PF01778	Ribosomal_L28e	eL28
-PF01779	Ribosomal_L29e	eL29
-PF01198	Ribosomal_L31e	eL31
-PF01655	Ribosomal_L32e	eL32
-PF01247	Ribosomal_L35Ae	eL33
-PF01199	Ribosomal_L34e	eL34
-PF01158	Ribosomal_L36e	eL36
-PF01907	Ribosomal_L37e	eL37
-PF01781	Ribosomal_L38e	eL38
-PF00832	Ribosomal_L39	eL39
-PF01020	Ribosomal_L40e	eL40
-PF05162	Ribosomal_L41	eL41
-PF00935	Ribosomal_L44	eL42
-PF01780	Ribosomal_L37ae	eL43
-PF29996	aL49	aL49	archaeal
+# Traditional names follow archaeal usage for u and e proteins (suffix p: bacterial-type numbering,
+# e: eukaryotic-type, Ae: named after a eukaryotic "a" protein such as L35a) and bacterial usage
+# for b proteins. The numbers differ between nomenclatures (eL33 is L35Ae; uL16 is L10e).
+# Rows of another feature kind use kind:ID (a KEGG ortholog where Pfam lacks an archaeal family).
+# accession	name	protein	traditional	note
+PF00318	Ribosomal_S2	uS2	S2p
+PF16122	40S_SA_C	uS2	S2p	eukaryotic C-terminal extension
+PF00189	Ribosomal_S3_C	uS3	S3p
+PF00163	Ribosomal_S4	uS4	S4p	N-terminal domain; the S4 RNA-binding domain is shared
+ko:K02986	K02986	uS4	S4p	archaeal uS4 carries a divergent N-terminal domain and the shared S4 domain; KOfam call
+PF00333	Ribosomal_S5	uS5	S5p
+PF03719	Ribosomal_S5_C	uS5	S5p
+PF00177	Ribosomal_S7	uS7	S7p
+PF00410	Ribosomal_S8	uS8	S8p
+PF00380	Ribosomal_S9	uS9	S9p
+PF00338	Ribosomal_S10	uS10	S10p
+PF00411	Ribosomal_S11	uS11	S11p
+PF00164	Ribosom_S12_S23	uS12	S12p
+PF00416	Ribosomal_S13	uS13	S13p
+PF00253	Ribosomal_S14	uS14	S14p
+PF00312	Ribosomal_S15	uS15	S15p
+PF08069	Ribosomal_S13_N	uS15	S15p	archaeal/eukaryotic N-terminal domain
+PF28936	uS15_N	uS15	S15p
+PF00366	Ribosomal_S17	uS17	S17p
+PF16205	Ribosomal_S17_N	uS17	S17p
+PF00203	Ribosomal_S19	uS19	S19p
+PF01250	Ribosomal_S6	bS6	S6
+PF00886	Ribosomal_S16	bS16	S16
+PF01084	Ribosomal_S18	bS18	S18
+PF01649	Ribosomal_S20p	bS20	S20
+PF01165	Ribosomal_S21	bS21	S21
+PF17070	Thx	bTHX	Thx
+PF04839	PSRP-3_Ycf65	PSRP-3	Ycf65	cyanobacterial and plastid
+PF01015	Ribosomal_S3Ae	eS1	S3Ae
+PF00900	Ribosomal_S4e	eS4	S4e
+PF08071	RS4NT	eS4	S4e	N-terminal domain
+PF16121	40S_S4_C	eS4	S4e
+PF01092	Ribosomal_S6e	eS6	S6e
+PF01251	Ribosomal_S7e	eS7	S7e
+PF01201	Ribosomal_S8e	eS8	S8e
+PF00833	Ribosomal_S17e	eS17	S17e
+PF01090	Ribosomal_S19e	eS19	S19e
+PF01249	Ribosomal_S21e	eS21	S21e
+PF01282	Ribosomal_S24e	eS24	S24e
+PF03297	Ribosomal_S25	eS25	S25e
+PF01283	Ribosomal_S26e	eS26	S26e
+PF01667	Ribosomal_S27e	eS27	S27e
+PF01200	Ribosomal_S28e	eS28	S28e
+PF04758	Ribosomal_S30	eS30	S30e
+PF01599	Ribosomal_S27	eS31	S27Ae	S27a
+PF00687	Ribosomal_L1	uL1	L1p
+PF00181	Ribosomal_L2	uL2	L2p
+PF03947	Ribosomal_L2_C	uL2	L2p
+PF00297	Ribosomal_L3	uL3	L3p
+PF00573	Ribosomal_L4	uL4	L4p
+PF14374	Ribos_L4_asso_C	uL4	L4p	eukaryotic C-terminal domain
+PF00281	Ribosomal_L5	uL5	L5p
+PF00673	Ribosomal_L5_C	uL5	L5p
+PF00347	Ribosomal_L6	uL6	L6p
+PF00466	Ribosomal_L10	uL10	L10p (P0)	bacterial L10, archaeal and eukaryotic P0
+PF17777	RL10P_insert	uL10	L10p (P0)
+PF27436	RL10_C	uL10	L10p (P0)
+PF00298	Ribosomal_L11	uL11	L11p
+PF03946	Ribosomal_L11_N	uL11	L11p
+PF00572	Ribosomal_L13	uL13	L13p
+PF00238	Ribosomal_L14	uL14	L14p
+PF00828	Ribosomal_L27A	uL15, eL18	L15p, L18e	also archaeal L18e
+PF29471	Ribosomal_uL15_N	uL15	L15p
+PF27056	Ribosomal_L15_epsilon	uL15	L15p
+PF00252	Ribosomal_L16	uL16	L10e
+PF00861	Ribosomal_L18p	uL18	L18p
+PF17144	Ribosomal_L5e	uL18	L18p	eukaryotic L5, archaeal L18
+PF00237	Ribosomal_L22	uL22	L22p
+PF00276	Ribosomal_L23	uL23	L23p
+PF03939	Ribosomal_L23eN	uL23	L23p	eukaryotic N-terminal domain
+PF16906	Ribosomal_L26	uL24	L24p	archaeal and eukaryotic
+PF17136	ribosomal_L24	uL24	L24p	bacterial
+PF00831	Ribosomal_L29	uL29	L29p
+PF00327	Ribosomal_L30	uL30	L30p
+PF08079	Ribosomal_L30_N	uL30	L30p	eukaryotic N-terminal domain
+PF01281	Ribosomal_L9_N	bL9	L9
+PF03948	Ribosomal_L9_C	bL9	L9
+PF00542	Ribosomal_L12	bL12	L7/L12
+PF16320	Ribosomal_L12_N	bL12	L7/L12
+PF01196	Ribosomal_L17	bL17	L17
+PF01245	Ribosomal_L19	bL19	L19
+PF00453	Ribosomal_L20	bL20	L20
+PF00829	Ribosomal_L21p	bL21	L21
+PF01386	Ribosomal_L25p	bL25	L25
+PF14693	Ribosomal_TL5_C	bL25	L25
+PF01016	Ribosomal_L27	bL27	L27
+PF00830	Ribosomal_L28	bL28	L28
+PF01197	Ribosomal_L31	bL31	L31
+PF21492	bL31_N	bL31	L31
+PF01783	Ribosomal_L32p	bL32	L32
+PF00471	Ribosomal_L33	bL33	L33
+PF00468	Ribosomal_L34	bL34	L34
+PF01632	Ribosomal_L35p	bL35	L35
+PF00444	Ribosomal_L36	bL36	L36
+PF00428	Ribosomal_60s	P1/P2	L12p (P1)	archaeal and eukaryotic stalk
+PF01159	Ribosomal_L6e	eL6	L6e
+PF03868	Ribosomal_L6e_N	eL6	L6e
+PF01248	Ribosomal_L7Ae	eL8, eL30, eS12	L7Ae, L30e, S12e	archaeal L7Ae also binds box C/D and H/ACA RNAs
+PF01294	Ribosomal_L13e	eL13	L13e
+PF01929	Ribosomal_L14e	eL14	L14e
+PF00827	Ribosomal_L15e	eL15	L15e
+PF17135	Ribosomal_L18	eL18	L18e
+PF01280	Ribosomal_L19e	eL19	L19e
+PF25476	Ribosomal_L19e_C	eL19	L19e
+PF01775	Ribosomal_L18A	eL20	L18Ae (LX)
+PF01157	Ribosomal_L21e	eL21	L21e
+PF01776	Ribosomal_L22e	eL22	L22e
+PF01246	Ribosomal_L24e	eL24	L24e
+PF01777	Ribosomal_L27e	eL27	L27e
+PF01778	Ribosomal_L28e	eL28	L28e
+PF01779	Ribosomal_L29e	eL29	L29e
+PF01198	Ribosomal_L31e	eL31	L31e
+PF01655	Ribosomal_L32e	eL32	L32e
+PF01247	Ribosomal_L35Ae	eL33	L35Ae
+PF01199	Ribosomal_L34e	eL34	L34e
+PF01158	Ribosomal_L36e	eL36	L36e
+PF01907	Ribosomal_L37e	eL37	L37e
+PF01781	Ribosomal_L38e	eL38	L38e
+PF00832	Ribosomal_L39	eL39	L39e
+PF01020	Ribosomal_L40e	eL40	L40e
+PF05162	Ribosomal_L41	eL41	L41e
+PF00935	Ribosomal_L44	eL42	L44e
+PF01780	Ribosomal_L37ae	eL43	L37Ae
+PF29996	aL49	aL49	aL49	archaeal

@@ -92,14 +92,29 @@ class FeatureSet:
 def merge_columns(columns: list[tuple[FeatureSet, str]]) -> FeatureSet:
     """One feature set holding the chosen features of several kinds, in the given order."""
     ids, labels, names, kinds, thresholds, bins, feats, values = [], [], [], [], [], [], [], []
+    picked: dict[int, tuple[FeatureSet, list[tuple[int, int]]]] = {}
     for fs, feature in columns:
         k = fs.index[feature]
         key = feature if feature not in ids else f"{fs.kind}:{feature}"
         j = len(ids)
         ids.append(key); labels.append(fs.labels[k]); names.append(fs.names[k]); kinds.append(fs.kind)
         thresholds.append(fs.thresholds[k])
-        rows = fs.feat_idx == k
-        bins.append(fs.bin_idx[rows]); feats.append(np.full(int(rows.sum()), j, dtype=np.int32)); values.append(fs.value[rows])
+        picked.setdefault(id(fs), (fs, []))[1].append((k, j))
+    for fs, pairs in picked.values():      # one pass per source set, however many columns it gives
+        remap = np.full(len(fs.ids), -1, dtype=np.int32)
+        repeats = []
+        for k, j in pairs:
+            if remap[k] >= 0:
+                repeats.append((k, j))     # the same feature asked for twice
+            else:
+                remap[k] = j
+        new = remap[fs.feat_idx]
+        rows = new >= 0
+        bins.append(fs.bin_idx[rows]); feats.append(new[rows]); values.append(fs.value[rows])
+        for k, j in repeats:
+            rows = fs.feat_idx == k
+            bins.append(fs.bin_idx[rows]); feats.append(np.full(int(rows.sum()), j, dtype=np.int32))
+            values.append(fs.value[rows])
     kind = kinds[0] if len(set(kinds)) == 1 else "mixed"
     return FeatureSet(kind, ids, labels, names, np.concatenate(bins), np.concatenate(feats), np.concatenate(values),
                       threshold=float(thresholds[0]), kinds=kinds, thresholds=np.array(thresholds, dtype=np.float32))
@@ -160,20 +175,54 @@ class Panel:
     name: str
     kind: str
     category: str
-    proteins: dict[str, str]     # accession and profile name -> the protein the family models
+    proteins: dict[str, str]          # accession and profile name -> the protein the family models
+    traditional: dict[str, str]       # same keys -> the protein's traditional name
+    notes: dict[str, str]             # same keys -> curator note
+    extra: tuple[tuple[str, str], ...] = ()   # (kind, ID) rows of another feature kind
+
+    def describe(self, key: str) -> str:
+        """``eL33 (L35Ae)``: the universal name with the traditional one."""
+        protein, old = self.proteins[key], self.traditional.get(key, "")
+        return f"{protein} ({old})" if old and old != protein else protein
 
 
 @lru_cache(maxsize=None)
 def load_panel(panel_id: str) -> Panel:
-    """A panel's rows: accession, profile name, protein, note (``#`` lines are comments)."""
+    """A panel's rows: accession (or ``kind:ID``), profile name, protein, traditional name, note."""
     name, kind, category = PANELS[panel_id]
     proteins: dict[str, str] = {}
+    traditional: dict[str, str] = {}
+    notes: dict[str, str] = {}
+    extra = []
     with (PANEL_DIR / f"{panel_id}.tsv").open() as handle:
         for line in handle:
-            if line.strip() and not line.startswith("#"):
-                accession, profile, protein = line.rstrip("\n").split("\t")[:3]
-                proteins[accession] = proteins[profile] = protein
-    return Panel(panel_id, name, kind, category, proteins)
+            if not line.strip() or line.startswith("#"):
+                continue
+            accession, profile, protein, old, *rest = line.rstrip("\n").split("\t") + [""]
+            other, _, ident = accession.partition(":")
+            keys = [ident] if ident else [accession, profile]
+            if ident:
+                extra.append((other, ident))
+            for key in keys:
+                proteins[key], traditional[key], notes[key] = protein, old, rest[0] if rest else ""
+    return Panel(panel_id, name, kind, category, proteins, traditional, notes, tuple(extra))
+
+
+def _label_panel_columns(panel: Panel, features: list[dict[str, Any]]) -> None:
+    """Columns read ``eL33 (L35Ae)``; a protein drawn from several families adds the family."""
+    per_protein = {}
+    for f in features:
+        per_protein.setdefault(panel.proteins.get(f["id"]), []).append(f)
+    for protein, cols in per_protein.items():
+        if protein is None:
+            continue
+        for f in cols:
+            label = panel.describe(f["id"]).replace(", ", "/")
+            if len(cols) > 1:
+                label += " \u00b7 " + f["label"].removeprefix("Ribosomal_").removeprefix("Ribosom_")
+            note = panel.notes.get(f["id"])
+            f["name"] = f"{panel.describe(f['id'])} \u00b7 {f['name']}" + (f" ({note})" if note else "")
+            f["label"] = label
 
 
 def resolve_panel(text: str) -> Panel | None:
@@ -840,7 +889,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         parts, notes = [], []
         panel = resolve_panel(category) if category else None
         if panel:
-            members = set(panel.proteins)
+            members = set(panel.proteins) - {ident for _, ident in panel.extra}
             parts.append(f"panel {panel.name}")
         elif category:
             label = resolve_category(category)
@@ -863,12 +912,28 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             found = keyword_members(fs, q)
             members = found if members is None else members & found
             parts.append(f"matching \u201c{q}\u201d")
+        extra = _panel_extra(panel, q) if panel else []
+        if extra:
+            # rows of another kind (a KO where Pfam lacks the archaeal family) join as mixed columns
+            columns = [(fs, f) for f in sorted(members & set(fs.index))] + extra
+            fs = merge_columns(columns)
+            members = set(fs.ids)
         result = build_matrix(ctx, fs, groups, candidates=members, pick="category" if category else "keyword",
                               order=order, min_completeness=min_completeness, selection=" · ".join(parts), notes=notes)
         if panel:
-            for f in result.get("features", []):
-                f["name"] = f"{panel.proteins[f['id']]} \u00b7 {f['name']}"
+            _label_panel_columns(panel, result.get("features", []))
         return result, result.get("empty", "")
+
+    def _panel_extra(panel, q):
+        out = []
+        for other, ident in panel.extra:
+            try:
+                ofs = sets.get(other)
+            except LookupError:
+                continue
+            if ident in ofs.index and (not q or ident in keyword_members(ofs, q)):
+                out.append((ofs, ident))
+        return out
 
     def presets() -> list[dict[str, Any]]:
         """Built-in searches with features in the dataset, each on the first of its kinds that has them."""
@@ -881,6 +946,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                 except LookupError:
                     continue
                 present = (set(panel.proteins) if panel else category_members(kind, value)) & set(index)
+                if panel:
+                    present |= {i for _, i in _panel_extra(panel, "")}
                 if len(present) >= 2:
                     title = (f"Hand-checked {KINDS[kind]} that model {PREDICATE_BY_ID[panel.category].name.lower()}s" if panel else
                              f"Every {'KEGG ortholog' if kind == 'ko' else 'Pfam family'} Sharur's curated "
@@ -906,6 +973,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         groups, result, message = compute(a, b, kind, features, module, pick, n, order, min_completeness, q, category)
         if result and result.get("kind") in KINDS:
             kind = result["kind"]     # the kind drawn (a panel or explicit IDs can set it)
+        elif result and category and not (features or module) and resolve_panel(category):
+            kind = resolve_panel(category).kind
         payload = None
         if result and not message:
             from sharur.browser.charts import color_for  # noqa: PLC0415
