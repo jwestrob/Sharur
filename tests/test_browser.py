@@ -169,6 +169,49 @@ def test_matrix_pages(client):
                                                                    "category": "ribosomal_protein"}).text
 
 
+@pytest.fixture
+def ribosomal_client(tmp_path):
+    """One genome with uL2 (its N-terminal profile stored by name), an L11 methyltransferase and ABC_tran."""
+    path = tmp_path / "ribo.duckdb"
+    store = DuckDBStore(str(path))
+    store.conn.execute(f"""
+        INSERT INTO bins (bin_id, completeness, contamination, taxonomy) VALUES ('bin|1', 91.5, 1.2, 'd__Archaea');
+        INSERT INTO contigs (contig_id, bin_id, length, length_source) VALUES ('bin|1_c1', 'bin|1', 9000, 'assembly');
+        INSERT INTO proteins (protein_id, contig_id, bin_id, start, end_coord, strand, gene_index,
+                              sequence, sequence_length, partial)
+        VALUES ('bin|1_c1_1', 'bin|1_c1', 'bin|1', 1, 600, '+', 0, '{SEQ}', 220, '00'),
+               ('bin|1_c1_2', 'bin|1_c1', 'bin|1', 700, 1400, '-', 1, '{SEQ}', 220, '00');
+        INSERT INTO annotations (annotation_id, protein_id, source, accession, name, description, evalue, score,
+                                 start_aa, end_aa)
+        VALUES (1, 'bin|1_c1_1', 'pfam', 'Ribosomal_L2', 'Ribosomal_L2', '', 1e-30, 110.0, 5, 80),
+               (2, 'bin|1_c1_1', 'pfam', 'PF03947.19', 'Ribosomal_L2_C', 'Ribosomal Proteins L2, C-terminal domain',
+                1e-50, 180.0, 90, 210),
+               (3, 'bin|1_c1_2', 'pfam', 'PF06325.18', 'PrmA', 'Ribosomal protein L11 methyltransferase (PrmA)',
+                1e-60, 200.0, 10, 200),
+               (4, 'bin|1_c1_2', 'pfam', 'PF00005.31', 'ABC_tran', 'ABC transporter', 1e-20, 80.0, 1, 9);
+    """)
+    store.close()
+    return TestClient(create_app(path, background=False))
+
+
+def test_matrix_ribosomal_pfam_panel(ribosomal_client):
+    client = ribosomal_client
+    page = client.get("/matrix", params={"a": "all", "kind": "ko", "category": "ribosomal_proteins_pfam"})
+    assert page.status_code == 200 and "panel Ribosomal proteins (Pfam)" in page.text
+    assert '<option value="pfam" selected' in page.text                 # the panel sets the feature kind
+    api = client.get("/api/v1/matrix", params={"a": "all", "category": "Ribosomal proteins (Pfam)"}).json()
+    assert api["kind"] == "pfam"
+    assert sorted(f["id"] for f in api["features"]) == ["PF03947", "Ribosomal_L2"]
+    assert all(f["name"].startswith("uL2 \u00b7 ") for f in api["features"])
+    assert "Ribosomal proteins (Pfam) <span class=\"count\">2</span>" in page.text      # the preset chip
+    # the broader category also reaches the L11 methyltransferase, and points to the panel
+    broad = client.get("/api/v1/matrix", params={"a": "all", "kind": "pfam", "category": "ribosomal_protein"}).json()
+    assert {"PF03947", "Ribosomal_L2", "PF06325"} <= {f["id"] for f in broad["features"]}
+    assert any("curated panel Ribosomal proteins (Pfam)" in note for note in broad["notes"])
+    tsv = client.get("/matrix.tsv", params={"a": "all", "category": "ribosomal_proteins_pfam"})
+    assert tsv.status_code == 200 and "sharur_matrix_pfam.tsv" in tsv.headers["content-disposition"]
+
+
 def test_json_api(client):
     index = client.get("/api/v1").json()
     assert any(e["path"] == "/api/v1/genomes" for e in index["endpoints"])

@@ -175,9 +175,27 @@ def test_categories_resolve_by_id_or_name_and_use_curated_mappings():
     assert mx.resolve_category("ribosomal_protein") == mx.resolve_category("Ribosomal protein") == "ribosomal_protein"
     assert mx.resolve_category("no such label") is None
     pfams = mx.category_members("pfam", "ribosomal_protein")
-    assert "PF00163" in pfams and all(p.startswith("PF") for p in pfams)       # Ribosomal_S4, by accession
+    assert {"PF00163", "Ribosomal_S4"} <= pfams              # by accession, and by the name some annotations store
     assert mx.category_members("function", "translation") >= {"translation", "ribosomal_protein"}
     assert mx.category_members("system", "ribosomal_protein") == set()
+
+
+def test_ribosomal_pfam_panel_holds_ribosomal_protein_families():
+    panel = mx.resolve_panel("Ribosomal proteins (Pfam)")
+    assert panel is mx.resolve_panel("ribosomal_proteins_pfam") and panel.kind == "pfam"
+    assert mx.resolve_panel("ribosomal_protein") is None                 # the function label stays a category
+    rows = [line.split("\t") for line in (mx.PANEL_DIR / "ribosomal_proteins_pfam.tsv").read_text().splitlines()
+            if line and not line.startswith("#")]
+    accessions = [r[0] for r in rows]
+    assert len(set(accessions)) == len(rows) and all(len(r) in (3, 4) and r[0][:2] == "PF" for r in rows)
+    assert panel.proteins["PF03947"] == panel.proteins["Ribosomal_L2_C"] == panel.proteins["Ribosomal_L2"] == "uL2"
+    # the panel refines the curated Pfam category: its families sit inside it, plus RS4NT (the eS4
+    # N-terminal domain, named "RS4NT (NUC023) domain"), and the category's enzymes, factors and
+    # shared domains sit outside the panel
+    assert set(accessions) - mx.category_members("pfam", "ribosomal_protein") == {"PF08071"}
+    outside = {"PF00467": "KOW", "PF00575": "S1", "PF06325": "PrmA", "PF00398": "RrnaAD", "PF07091": "FmrO",
+               "PF02482": "Ribosomal_S30AE", "PF02410": "RsfS", "PF01926": "MMR_HSR1", "PF14404": "Strep_pep"}
+    assert not (set(outside) | set(outside.values())) & set(panel.proteins)
 
 
 def test_keyword_and_category_columns_are_ordered_most_widespread_first():

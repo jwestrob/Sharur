@@ -32,6 +32,8 @@ import io
 import re
 import threading
 from dataclasses import dataclass, field
+from functools import lru_cache
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -135,12 +137,52 @@ def resolve_feature(sets, kind: str, token: str) -> tuple[FeatureSet, str] | Non
 # Keyword and category column searches
 # --------------------------------------------------------------------------- #
 
-# Built-in category searches, offered when their features occur in the dataset.
-PRESETS = [("Ribosomal proteins", "ribosomal_protein"), ("tRNA synthetases", "trna_synthetase"),
-           ("RNA polymerase", "rna_polymerase"), ("Translation factors", "translation_factor"),
-           ("Type IV pilus", "type_iv_pilus"), ("Sec pathway", "sec_pathway"), ("Flagellum", "flagellum"),
-           ("CRISPR-associated", "crispr_associated"), ("Hydrogenases", "hydrogenase")]
+# Built-in searches, offered when their features occur in the dataset: (name, function label or
+# panel, feature kinds tried in order).
+_BOTH = ("ko", "pfam")
+PRESETS = [("Ribosomal proteins (KO)", "ribosomal_protein", ("ko",)),
+           ("Ribosomal proteins (Pfam)", "ribosomal_proteins_pfam", ("pfam",)),
+           ("tRNA synthetases", "trna_synthetase", _BOTH), ("RNA polymerase", "rna_polymerase", _BOTH),
+           ("Translation factors", "translation_factor", _BOTH), ("Type IV pilus", "type_iv_pilus", _BOTH),
+           ("Sec pathway", "sec_pathway", _BOTH), ("Flagellum", "flagellum", _BOTH),
+           ("CRISPR-associated", "crispr_associated", _BOTH), ("Hydrogenases", "hydrogenase", _BOTH)]
 CATEGORY_KINDS = ("ko", "pfam", "function")
+
+# Curated panels: hand-checked feature lists in data/<id>.tsv, each refining the broader curated
+# mapping of one function label. id -> (name, feature kind, function label).
+PANEL_DIR = Path(__file__).with_name("data")
+PANELS = {"ribosomal_proteins_pfam": ("Ribosomal proteins (Pfam)", "pfam", "ribosomal_protein")}
+
+
+@dataclass(frozen=True)
+class Panel:
+    id: str
+    name: str
+    kind: str
+    category: str
+    proteins: dict[str, str]     # accession and profile name -> the protein the family models
+
+
+@lru_cache(maxsize=None)
+def load_panel(panel_id: str) -> Panel:
+    """A panel's rows: accession, profile name, protein, note (``#`` lines are comments)."""
+    name, kind, category = PANELS[panel_id]
+    proteins: dict[str, str] = {}
+    with (PANEL_DIR / f"{panel_id}.tsv").open() as handle:
+        for line in handle:
+            if line.strip() and not line.startswith("#"):
+                accession, profile, protein = line.rstrip("\n").split("\t")[:3]
+                proteins[accession] = proteins[profile] = protein
+    return Panel(panel_id, name, kind, category, proteins)
+
+
+def resolve_panel(text: str) -> Panel | None:
+    """A curated panel by ID or name (``ribosomal_proteins_pfam``, ``Ribosomal proteins (Pfam)``)."""
+    key = re.sub(r"[^a-z0-9]", "", text.lower())
+    for panel_id, (name, _, _) in PANELS.items():
+        if key and key in (re.sub(r"[^a-z0-9]", "", panel_id), re.sub(r"[^a-z0-9]", "", name.lower())):
+            return load_panel(panel_id)
+    return None
 
 
 def resolve_category(text: str) -> str | None:
@@ -165,7 +207,8 @@ def category_members(kind: str, category: str) -> set[str]:
     if kind == "pfam":
         from sharur.predicates.mappings.pfam_map import PFAM_TO_PREDICATES  # noqa: PLC0415
 
-        return {acc for acc, preds in PFAM_TO_PREDICATES.items() if acc.startswith("PF") and category in preds}
+        # keyed by accession and profile name: annotations that store the name match by name
+        return {key for key, preds in PFAM_TO_PREDICATES.items() if category in preds}
     if kind == "function":
         return {category} | {p for p, v in PREDICATE_BY_ID.items() if v.parent == category}
     return set()
@@ -729,6 +772,9 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
 
     def compute(a: str, b: str, kind: str, features: str, module: str, pick: str, n: int, order: str,
                 min_completeness: float, q: str = "", category: str = "") -> tuple[list[Group], dict[str, Any] | None, str]:
+        panel = resolve_panel(category) if category.strip() and not (features.strip() or module.strip()) else None
+        if panel:
+            kind = panel.kind      # a panel lists features of one kind
         groups = []
         for token in (a, b):
             if token:
@@ -791,11 +837,16 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     def search_matrix(fs, groups, kind, q, category, order, min_completeness):
         """Columns from a category (curated function label), a keyword, or both (intersection)."""
         members: set[str] | None = None
-        parts = []
-        if category:
+        parts, notes = [], []
+        panel = resolve_panel(category) if category else None
+        if panel:
+            members = set(panel.proteins)
+            parts.append(f"panel {panel.name}")
+        elif category:
             label = resolve_category(category)
             if label is None:
-                return None, f"Unknown category {category!r}: use a function label such as ribosomal_protein."
+                return None, (f"Unknown category {category!r}: use a function label such as ribosomal_protein "
+                              f"or a curated panel such as ribosomal_proteins_pfam.")
             if kind not in CATEGORY_KINDS:
                 return None, (f"Categories select KEGG orthologs, Pfam families or function labels; "
                               f"switch Features to one of those for {PREDICATE_BY_ID[label].name}.")
@@ -804,25 +855,37 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             if not members:
                 hint = " (KO categories come from a local KEGG build: sharur setup-kegg)" if kind == "ko" else ""
                 return None, f"No {KINDS[kind]} carry the category {PREDICATE_BY_ID[label].name}{hint}."
+            notes += [f"This category follows Pfam names and InterPro GO terms, which also reach enzymes and factors "
+                      f"that act on the ribosome; the curated panel {load_panel(pid).name} lists the families of "
+                      f"the {PREDICATE_BY_ID[label].name.lower()}s themselves."
+                      for pid, (_, pkind, plabel) in PANELS.items() if pkind == kind == "pfam" and plabel == label]
         if q:
             found = keyword_members(fs, q)
             members = found if members is None else members & found
             parts.append(f"matching \u201c{q}\u201d")
         result = build_matrix(ctx, fs, groups, candidates=members, pick="category" if category else "keyword",
-                              order=order, min_completeness=min_completeness, selection=" · ".join(parts))
+                              order=order, min_completeness=min_completeness, selection=" · ".join(parts), notes=notes)
+        if panel:
+            for f in result.get("features", []):
+                f["name"] = f"{panel.proteins[f['id']]} \u00b7 {f['name']}"
         return result, result.get("empty", "")
 
     def presets() -> list[dict[str, Any]]:
-        """Built-in category searches with features in the dataset, for the KO table (Pfam without KEGG)."""
+        """Built-in searches with features in the dataset, each on the first of its kinds that has them."""
         out = []
-        for name, label in PRESETS:
-            for kind in ("ko", "pfam"):
+        for name, value, kinds in PRESETS:
+            panel = load_panel(value) if value in PANELS else None
+            for kind in kinds:
                 try:
-                    present = category_members(kind, label) & set(sets.get(kind).index)
+                    index = sets.get(kind).index
                 except LookupError:
                     continue
+                present = (set(panel.proteins) if panel else category_members(kind, value)) & set(index)
                 if len(present) >= 2:
-                    out.append({"name": name, "category": label, "kind": kind, "n": len(present)})
+                    title = (f"Hand-checked {KINDS[kind]} that model {PREDICATE_BY_ID[panel.category].name.lower()}s" if panel else
+                             f"Every {'KEGG ortholog' if kind == 'ko' else 'Pfam family'} Sharur's curated "
+                             f"mappings assign to this function label")
+                    out.append({"name": name, "category": value, "kind": kind, "n": len(present), "title": title})
                     break
         return out
 
@@ -841,6 +904,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                     q: str = Query("", max_length=200), category: str = Query("", max_length=100)):
         kind, pick, order, n = params(kind, pick, order, n)
         groups, result, message = compute(a, b, kind, features, module, pick, n, order, min_completeness, q, category)
+        if result and result.get("kind") in KINDS:
+            kind = result["kind"]     # the kind drawn (a panel or explicit IDs can set it)
         payload = None
         if result and not message:
             from sharur.browser.charts import color_for  # noqa: PLC0415
@@ -860,7 +925,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         return ctx.render(request, "matrix.html", "taxa", a=a, b=b, kind=kind, features=features, module=module,
                           pick=pick, n=n, order=order, min_completeness=min_completeness, groups=groups,
                           q=q, category=category, presets=presets(),
-                          categories=sorted((v.name, p) for p, v in PREDICATE_BY_ID.items() if v.level == "component"),
+                          categories=[(name, pid) for pid, (name, _, _) in PANELS.items()]
+                          + sorted((v.name, p) for p, v in PREDICATE_BY_ID.items() if v.level == "component"),
                           result=result, message=message, payload=payload, KINDS=KINDS, PICKS=PICKS,
                           external_url=external_url, feature_url=lambda f, k=kind: feature_url(ctx.url, k, f),
                           ALPHA=ALPHA, pval=pval)
@@ -876,4 +942,4 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         if not result or message:
             raise HTTPException(400, message or "Choose a genome or clade (a=...)")
         return Response(_tsv(result), media_type="text/tab-separated-values",
-                        headers={"Content-Disposition": f'attachment; filename="sharur_matrix_{kind}.tsv"'})
+                        headers={"Content-Disposition": f'attachment; filename="sharur_matrix_{result.get("kind", kind)}.tsv"'})
