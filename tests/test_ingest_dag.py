@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from sharur.ingest.dag import IngestDAG, StageNode
-from sharur.ingest.resources import resolve_resource_profile
+from sharur.ingest.resources import CPU_TOKEN, expand_cpu_tokens, resolve_resource_profile
 from sharur.ingest_cli import (
     StagePaths,
     _build_tools_dag,
@@ -356,14 +356,14 @@ def test_slurm_submission_failure_is_terminally_recorded(tmp_path, monkeypatch):
 
 
 
-def _slurm_bundle(tmp_path, monkeypatch, **env):
+def _slurm_bundle(tmp_path, monkeypatch, *, slurm_cpus=None, **env):
     for key in ("SHARUR_SLURM_PARTITION", "SHARUR_SLURM_GPU_PARTITION", "SHARUR_SLURM_EXCLUDE"):
         monkeypatch.delenv(key, raising=False)
     for key, value in env.items():
         monkeypatch.setenv(key, value)
     data_dir = tmp_path / "dataset"
     stages = StagePaths.from_root(data_dir)
-    profile = resolve_resource_profile("slurm")
+    profile = resolve_resource_profile("slurm", slurm_cpus=slurm_cpus)
     dag = _build_tools_dag(
         input_dir=tmp_path / "inputs", data_dir=data_dir, output=data_dir / "sharur.duckdb", stages=stages,
         profile=profile, skip_quast=False, skip_dfast=False, skip_prodigal=False, skip_astra=False,
@@ -413,6 +413,43 @@ def test_slurm_partition_and_exclude_come_from_the_environment(tmp_path, monkeyp
     assert "#SBATCH -p standard" in (bundle / "04.sbatch").read_text()
     assert "#SBATCH -p gpu" in (bundle / "06.sbatch").read_text()
     assert "#SBATCH --exclude=node-1,node-2" in (bundle / "07.sbatch").read_text()
+
+
+def test_slurm_cpus_requests_cpus_per_task_and_stages_use_the_allocation(tmp_path, monkeypatch):
+    dag, bundle, _ = _slurm_bundle(tmp_path, monkeypatch, slurm_cpus=12)
+    scripts = {path.stem: path.read_text() for path in bundle.glob("*.sbatch")}
+    assert {"01", "02", "03", "04", "05a", "05b", "06", "06i", "07", "08"} <= set(scripts)
+    for stage, text in scripts.items():
+        directives = [line for line in text.splitlines() if line.startswith("#SBATCH")]
+        assert "#SBATCH --cpus-per-task=12" in directives, (stage, directives)
+        for forbidden in ("--mem", "--time", "-t ", "--exclusive"):
+            assert forbidden not in "\n".join(directives), (stage, forbidden)
+    assert "--gres=gpu:1" in scripts["06"]
+    # commands keep the token, so each stage uses exactly what Slurm allocated
+    command = dag.nodes["04"].command
+    assert command[command.index("--threads") + 1] == CPU_TOKEN
+    assert expand_cpu_tokens(command, {"SLURM_CPUS_ON_NODE": "12"})[command.index("--threads") + 1] == "12"
+    assert dag.nodes["04"].resource.describe() == "12 CPUs"
+    assert dag.nodes["06"].resource.describe() == "12 CPUs + 1 GPU"
+    # serial stages stay inline and unchanged
+    assert "#SBATCH" not in (bundle / "05c.local.sh").read_text()
+
+
+def test_slurm_cpus_replaces_the_full_node_request(tmp_path, monkeypatch):
+    full, full_bundle, _ = _slurm_bundle(tmp_path / "full", monkeypatch)
+    twelve, _, _ = _slurm_bundle(tmp_path / "twelve", monkeypatch, slurm_cpus=12)
+    assert full.nodes["04"].resource.full_node
+    assert not twelve.nodes["04"].resource.full_node
+    assert twelve.nodes["04"].resource.cpus == 12
+    assert "--cpus-per-task" not in (full_bundle / "04.sbatch").read_text()
+
+
+def test_slurm_cpus_requires_the_slurm_profile_and_a_positive_count():
+    with pytest.raises(ValueError, match="requires the slurm profile"):
+        resolve_resource_profile("local", slurm_cpus=4)
+    with pytest.raises(ValueError, match="at least 1"):
+        resolve_resource_profile("slurm", slurm_cpus=0)
+    assert resolve_resource_profile("slurm").request("04").full_node
 
 
 def test_local_profiles_keep_numeric_worker_counts(tmp_path):

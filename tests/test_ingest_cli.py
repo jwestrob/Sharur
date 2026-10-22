@@ -1,6 +1,9 @@
 from pathlib import Path
 
+from typer.testing import CliRunner
+
 from scripts import ingest
+from sharur.ingest_cli import app
 
 
 def test_ingest_dry_run_plans_all_stages(tmp_path):
@@ -157,3 +160,17 @@ def test_skip_aksha_and_legacy_skip_astra_both_drop_stage04(tmp_path):
             "--mode", "tools", "--dry-run", flag, "--skip-embeddings"])
         assert result.exit_code == 0, result.output
         assert "04_astra_scan.py" not in result.output
+
+
+def test_slurm_cpus_flag_reaches_the_plan_and_needs_the_slurm_profile(tmp_path):
+    base = ["--input-dir", "dummy_dataset", "--data-dir", str(tmp_path / "d"), "--mode", "tools",
+            "--dry-run", "--skip-embeddings"]
+    result = CliRunner().invoke(app, [*base, "--profile", "slurm", "--slurm-cpus", "12"])
+    assert result.exit_code == 0, result.output
+    assert "resources=12 CPUs" in result.output
+    assert "resources=full node" not in result.output
+
+    result = CliRunner().invoke(app, [*base, "--profile", "local", "--slurm-cpus", "12"])
+    assert result.exit_code != 0
+    result = CliRunner().invoke(app, [*base, "--profile", "slurm", "--slurm-cpus", "0"])
+    assert result.exit_code != 0

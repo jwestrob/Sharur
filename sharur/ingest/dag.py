@@ -274,8 +274,9 @@ def render_slurm_script(
     request = node.resource
     if request is None:
         raise ValueError(f"Stage {node.stage_id} has no resource request")
-    # Full-node allocations: no CPU, memory or walltime directives; partition defaults
-    # govern memory and time, and stage commands use $SLURM_CPUS_ON_NODE.
+    # No memory or walltime directives: partition defaults govern them. Full-node requests
+    # carry no CPU directive either; an explicit CPU count becomes --cpus-per-task. Stage
+    # commands use $SLURM_CPUS_ON_NODE, so they follow whatever Slurm allocates.
     partition = os.environ.get("SHARUR_SLURM_GPU_PARTITION" if request.gpus else "SHARUR_SLURM_PARTITION")
     exclude = os.environ.get("SHARUR_SLURM_EXCLUDE")
     lines = ["#!/usr/bin/env bash"]
@@ -287,6 +288,8 @@ def render_slurm_script(
     ]
     if request.gpus:
         lines.append(f"#SBATCH --gres=gpu:{request.gpus}")
+    if request.executor == "slurm" and not request.full_node:
+        lines.append(f"#SBATCH --cpus-per-task={request.cpus}")
     if exclude:
         lines.append(f"#SBATCH --exclude={exclude}")
     lines.extend(["set -euo pipefail", shlex.join(runner_command), ""])

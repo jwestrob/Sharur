@@ -758,6 +758,15 @@ def run(
             help="Execution profile: auto, local (CPU), mps, or slurm",
         ),
     ] = "auto",
+    slurm_cpus: Annotated[
+        int | None,
+        typer.Option(
+            "--slurm-cpus",
+            min=1,
+            help="With --profile slurm: CPUs to request for each stage job (--cpus-per-task); "
+                 "stages use every allocated CPU. Default: full-node jobs with no CPU request",
+        ),
+    ] = None,
     resume: Annotated[
         bool,
         typer.Option(
@@ -793,7 +802,7 @@ def run(
     For the user-facing workflow, see QUICKSTART.md or src/ingest/README.md.
     """
     try:
-        resource_profile = resolve_resource_profile(profile)
+        resource_profile = resolve_resource_profile(profile, slurm_cpus=slurm_cpus)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
     if submit_slurm and resource_profile.name != "slurm":

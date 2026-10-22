@@ -41,6 +41,7 @@ Resource profiles:
 | `--profile local` | All stages local; Stage 06 CPU |
 | `--profile mps` | Stage 06 MPS under a cross-process exclusive lock; other stages local |
 | `--profile slurm` | Generate `slurm/*.sbatch`, local wrappers, logs, and dependency-linked `submit.sh` |
+| `--profile slurm --slurm-cpus N` | Same bundle; each stage job requests N CPUs (`--cpus-per-task`) in place of a full node |
 
 The SLURM profile gives Stage 04 (Aksha) a 72-hour allocation and Stage 06 one CUDA GPU. MinCED remains
 single-threaded and local. Bundle generation does not submit jobs unless

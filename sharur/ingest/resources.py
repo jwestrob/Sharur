@@ -17,10 +17,11 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
 
-# Slurm stages run on full nodes: commands carry this token wherever a worker or thread
-# count belongs, and the stage runner replaces it with $SLURM_CPUS_ON_NODE on the node.
+# Slurm stage commands carry this token wherever a worker or thread count belongs, and the
+# stage runner replaces it with $SLURM_CPUS_ON_NODE on the node: every CPU allocated to the job,
+# whether a full node or the explicit --slurm-cpus request.
 CPU_TOKEN = "@SLURM_CPUS@"
-FULL_NODE = 0  # ResourceRequest.cpus for a full-node Slurm allocation
+FULL_NODE = 0  # ResourceRequest.cpus for a full-node Slurm allocation (no CPU request)
 
 
 def expand_cpu_tokens(command: list[str], env: dict[str, str] | None = None) -> list[str]:
@@ -50,8 +51,11 @@ class ResourceRequest:
         return self.executor == "slurm" and self.cpus == FULL_NODE
 
     def describe(self) -> str:
+        gpus = f" + {self.gpus} GPU" if self.gpus else ""
         if self.full_node:
-            return f"full node{' + ' + str(self.gpus) + ' GPU' if self.gpus else ''}"
+            return f"full node{gpus}"
+        if self.executor == "slurm":
+            return f"{self.cpus} CPUs{gpus}"
         return f"{self.cpus}cpu/{self.memory_gb}GB/{self.accelerator}"
 
 
@@ -170,15 +174,17 @@ def _local_profile(*, mps: bool = False) -> ResourceProfile:
     )
 
 
-def _slurm_profile() -> ResourceProfile:
-    """Full-node Slurm stages; serial stages run inline on the submitting host.
+def _slurm_profile(cpus: int | None = None) -> ResourceProfile:
+    """Slurm stages; serial stages run inline on the submitting host.
 
-    Sbatch scripts carry no CPU, memory or walltime requests: the cluster allocates
-    whole nodes and partition defaults govern memory and time. Parallel stages
-    receive every allocated CPU through :data:`CPU_TOKEN`.
+    By default sbatch scripts carry no CPU, memory or walltime requests: the cluster
+    allocates whole nodes and partition defaults govern memory and time. ``cpus``
+    requests that many CPUs per stage job instead (``--cpus-per-task``), for clusters
+    that allocate by CPU. Either way, parallel stages receive every allocated CPU
+    through :data:`CPU_TOKEN`.
     """
     def node(**extra) -> ResourceRequest:
-        return ResourceRequest(FULL_NODE, 0, "", executor="slurm", **extra)
+        return ResourceRequest(cpus or FULL_NODE, 0, "", executor="slurm", **extra)
 
     requests = {
         # Stage 00 audits inputs serially; MinCED is single-threaded. Both run inline.
@@ -196,8 +202,13 @@ def _slurm_profile() -> ResourceProfile:
     )
 
 
-def resolve_resource_profile(name: str) -> ResourceProfile:
+def resolve_resource_profile(name: str, *, slurm_cpus: int | None = None) -> ResourceProfile:
     normalized = name.lower().strip()
+    if slurm_cpus is not None:
+        if normalized != "slurm":
+            raise ValueError("--slurm-cpus requires the slurm profile")
+        if slurm_cpus < 1:
+            raise ValueError("--slurm-cpus must be at least 1")
     if normalized == "auto":
         normalized = "mps" if _mps_available() else "local"
     if normalized == "local":
@@ -207,7 +218,7 @@ def resolve_resource_profile(name: str) -> ResourceProfile:
             raise ValueError("The mps resource profile requires a usable PyTorch MPS backend")
         return _local_profile(mps=True)
     if normalized == "slurm":
-        return _slurm_profile()
+        return _slurm_profile(slurm_cpus)
     raise ValueError("profile must be one of: auto, local, mps, slurm")
 
 

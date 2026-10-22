@@ -82,8 +82,10 @@ Execution profiles are explicit:
   add `--submit-slurm` only when ready to submit it. Each parallel stage runs as a full-node job
   that passes `$SLURM_CPUS_ON_NODE` to its tool; sbatch scripts carry only the job name, log path,
   GPU request and the partition and node exclusions you set, leaving memory and time to partition
-  defaults. Serial stages (input audit, MinCED) run inline from `submit.sh`. Set the partitions
-  and exclusions once per cluster:
+  defaults. On clusters that allocate by CPU, `--slurm-cpus N` requests N CPUs per stage job
+  (`--cpus-per-task`) in place of a full node; each stage then uses those N CPUs. Serial stages
+  (input audit, MinCED) run inline from `submit.sh`. Set the partitions and exclusions once per
+  cluster:
 
   ```bash
   export SHARUR_SLURM_PARTITION=standard
