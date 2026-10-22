@@ -3,9 +3,9 @@
 CAZyme Classification Pipeline (dbCAN 3-tool consensus)
 
 Recapitulates the standard dbCAN annotation pipeline:
-  Tool 1: DIAMOND blastp vs CAZy.dmnd        (e-value ≤ 1e-18)
-  Tool 2: Astra/HMMER vs dbCAN.hmm           (i-evalue ≤ 1e-15)
-  Tool 3: Astra/HMMER vs dbCAN-sub.hmm       (i-evalue ≤ 1e-15)
+  Tool 1: DIAMOND blastp vs CAZy.dmnd        (e-value ≤ 1e-102)
+  Tool 2: Astra/HMMER vs dbCAN.hmm           (i-evalue ≤ 1e-15, HMM coverage ≥ 0.35)
+  Tool 3: Astra/HMMER vs dbCAN-sub.hmm       (i-evalue ≤ 1e-15, HMM coverage ≥ 0.35)
   Consensus: retain genes called by ≥ 2 of 3 tools
 
 HMMER searches are delegated to Astra (astra search --hmm_in), which handles
@@ -50,8 +50,12 @@ def _log(msg: str) -> None:
     print(msg, flush=True)
 
 # ── dbCAN standard thresholds ──────────────────────────────────────────────────
-DIAMOND_EVALUE = 1e-18
+# run_dbcan and the dbCAN3 server defaults: DIAMOND E < 1e-102; HMMER (dbCAN and
+# dbCAN-sub) E < 1e-15 with HMM coverage > 0.35. A 1e-18 DIAMOND cut passed 11% of
+# the SR-VP archaeal proteome (224,612 / 1,976,915) against 1.35% for dbCAN.hmm.
+DIAMOND_EVALUE = 1e-102
 HMMER_IEVALUE  = 1e-15
+HMMER_COVERAGE = 0.35
 MIN_TOOLS      = 2
 
 CAZY_PREFIX_RE = re.compile(r'^(GH|GT|PL|CE|CBM|AA)\d+')
@@ -248,6 +252,8 @@ def load_diamond_cache(db_path: str,
         fam = row.get('family_class', '')
         ev = float(row.get('evalue', 1.0))
         bs = float(row.get('bitscore', 0.0))
+        if ev > DIAMOND_EVALUE:  # a cache written under a looser cut is refiltered here
+            continue
         if fam and CAZY_PREFIX_RE.match(fam):
             if fam not in hits[pid] or ev < hits[pid][fam][0]:
                 hits[pid][fam] = (ev, bs)
@@ -401,6 +407,20 @@ def run_diamond(prot_dir: str, dbcan_path: Path, threads: int = 4,
 
 # ── Tools 2 & 3: Astra/HMMER ──────────────────────────────────────────────────
 
+def hmm_lengths(hmm_path: Path) -> dict[str, int]:
+    """Profile NAME -> LENG from a HMMER3 text file (for the dbCAN coverage filter)."""
+    lengths: dict[str, int] = {}
+    name = None
+    with open(hmm_path) as fh:
+        for line in fh:
+            if line.startswith("NAME "):
+                name = line.split(None, 1)[1].strip()
+            elif line.startswith("LENG ") and name is not None:
+                lengths[name] = int(line.split()[1])
+                name = None
+    return lengths
+
+
 def parse_hmm_family(hmm_name: str) -> str | None:
     """Extract CAZy family_class from an HMM profile name.
 
@@ -422,7 +442,8 @@ def run_astra_hmm(prot_dir: str, label: str,
                   installed_hmm: str | None = None,
                   hmm_path: Path | None = None,
                   threads: int = 4, ievalue: float = HMMER_IEVALUE,
-                  verbose: bool = True) -> dict[str, dict[str, tuple]]:
+                  verbose: bool = True,
+                  keep_tsv: Path | None = None) -> dict[str, dict[str, tuple]]:
     """Run Astra hmmsearch against an HMM database.
 
     Uses --installed_hmms for Astra-installed databases (e.g., dbCAN),
@@ -458,7 +479,10 @@ def run_astra_hmm(prot_dir: str, label: str,
         shutil.rmtree(out_dir, ignore_errors=True)
         raise RuntimeError(f"HMM search ({label}) wrote no *_hits_df.tsv")
 
-    hits = _parse_astra_tsv(tsvs[0], ievalue)
+    lengths = hmm_lengths(hmm_path) if hmm_path else None
+    hits = _parse_astra_tsv(tsvs[0], ievalue, lengths)
+    if keep_tsv is not None:  # keep the raw per-domain table for audit and reuse
+        shutil.copy2(tsvs[0], keep_tsv)
     shutil.rmtree(out_dir, ignore_errors=True)
 
     if verbose:
@@ -467,21 +491,29 @@ def run_astra_hmm(prot_dir: str, label: str,
 
 
 def load_astra_tsv_cache(tsv_path: Path, ievalue: float = HMMER_IEVALUE,
-                         verbose: bool = True) -> dict[str, dict[str, tuple]] | None:
+                         verbose: bool = True,
+                         lengths: dict[str, int] | None = None) -> dict[str, dict[str, tuple]] | None:
     """Load pre-existing Astra hits TSV. Returns None if file doesn't exist."""
     if not tsv_path.exists():
         return None
     if verbose:
         print(f"Loading cached Astra results from {tsv_path.name}...")
-    return _parse_astra_tsv(tsv_path, ievalue)
+    return _parse_astra_tsv(tsv_path, ievalue, lengths)
 
 
 def _parse_astra_tsv(path: Path,
-                     ievalue_threshold: float) -> dict[str, dict[str, tuple]]:
-    """Parse Astra hits TSV and filter by i-evalue.
+                     ievalue_threshold: float,
+                     lengths: dict[str, int] | None = None,
+                     min_coverage: float = HMMER_COVERAGE) -> dict[str, dict[str, tuple]]:
+    """Parse Astra hits TSV and filter by i-evalue and, given profile lengths, HMM coverage.
 
     Astra columns: sequence_id, hmm_name, bitscore, evalue, c_evalue,
-                   i_evalue, env_from, env_to, dom_bitscore
+                   i_evalue, env_from, env_to, dom_bitscore[, ali_from, ali_to,
+                   hmm_from, hmm_to]
+
+    Coverage is (hmm_to - hmm_from) / profile length, as run_dbcan computes it.
+    A table without HMM coordinates, or a run without profile lengths, is
+    filtered on i-evalue only and says so.
 
     Returns {protein_id: {family_class: (best_i_evalue, best_dom_bitscore)}}.
     """
@@ -498,6 +530,18 @@ def _parse_astra_tsv(path: Path,
     df = df[df['i_evalue'] < ievalue_threshold].copy()
     if df.empty:
         return {}
+    if lengths and {'hmm_from', 'hmm_to'} <= set(df.columns):
+        leng = df['hmm_name'].map(lengths)
+        if leng.isna().any():
+            raise ValueError(f"{path.name}: {int(leng.isna().sum())} hits name profiles absent "
+                             "from the HMM file's NAME/LENG records")
+        before = len(df)
+        df = df[(df['hmm_to'] - df['hmm_from']) / leng >= min_coverage].copy()
+        _log(f"  [{path.name}] HMM coverage >= {min_coverage}: {len(df):,} of {before:,} domain hits")
+        if df.empty:
+            return {}
+    else:
+        _log(f"  [{path.name}] no HMM coordinates or profile lengths: i-evalue filter only")
 
     # Extract family from hmm_name
     df['family'] = df['hmm_name'].apply(parse_hmm_family)
@@ -666,12 +710,13 @@ def classify_cazymes(
         t2 = _time.time()
         _log(f"[cazyme] Tool 2: dbCAN HMM search...")
         hmm_cache = data_dir / "annotations" / "dbCAN_hits_df.tsv"
-        hmm_hits = load_astra_tsv_cache(hmm_cache, verbose=verbose)
+        hmm_hits = load_astra_tsv_cache(hmm_cache, verbose=verbose, lengths=hmm_lengths(dbcan_hmm))
         if hmm_hits is None:
             hmm_hits = run_astra_hmm(
                 prot_dir, "dbCAN_HMM",
                 hmm_path=dbcan_hmm,
                 threads=threads, verbose=verbose,
+                keep_tsv=data_dir / "cazyme_dbcan_hmm_hits.tsv",
             )
         _log(f"[cazyme] Tool 2 done: {len(hmm_hits):,} hits ({_time.time() - t2:.1f}s)")
 
@@ -690,6 +735,7 @@ def classify_cazymes(
                         sub_dir, "dbCAN_sub",
                         hmm_path=dbcan_sub,
                         threads=threads, verbose=verbose,
+                        keep_tsv=data_dir / "cazyme_dbcan_sub_hits.tsv",
                     )
                 finally:
                     shutil.rmtree(sub_dir, ignore_errors=True)

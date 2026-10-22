@@ -10,9 +10,9 @@ The standard dbCAN annotation pipeline uses a **3-tool consensus** approach to m
 
 | Step | Tool | Database | Threshold | Purpose |
 |------|------|----------|-----------|---------|
-| 1 | DIAMOND blastp | `CAZy.dmnd` | e-value <= 1e-18 | Sequence homology to known CAZymes |
-| 2 | HMMER (via Astra) | `dbCAN.hmm` | i-evalue <= 1e-15 | HMM profile matching to CAZy family models |
-| 3 | HMMER (via Astra) | `dbCAN-sub.hmm` | i-evalue <= 1e-15 | Substrate-specific HMM sub-family models |
+| 1 | DIAMOND blastp | `CAZy.dmnd` | e-value <= 1e-102 | Sequence homology to known CAZymes |
+| 2 | HMMER (via Astra) | `dbCAN.hmm` | i-evalue <= 1e-15, HMM coverage >= 0.35 | HMM profile matching to CAZy family models |
+| 3 | HMMER (via Astra) | `dbCAN-sub.hmm` | i-evalue <= 1e-15, HMM coverage >= 0.35 | Substrate-specific HMM sub-family models |
 
 ### Consensus Rule
 
@@ -98,7 +98,7 @@ python scripts/classify_cazymes.py --db data/my_dataset/sharur.duckdb --threads 
 
 1. **Locates databases** in `data/dbcan_db/`, `data/reference/dbcan/`, or `~/.sharur/dbcan/`
 2. **Finds or extracts proteins** from the DuckDB database (prefers `source/proteins_db_ids.faa` if available)
-3. **Tool 1 (DIAMOND):** Runs `diamond blastp --sensitive` against `CAZy.dmnd` with e-value <= 1e-18, or loads cached results from `cazyme_classification.tsv` if present
+3. **Tool 1 (DIAMOND):** Runs `diamond blastp --sensitive` against `CAZy.dmnd` with e-value <= 1e-102 (the run_dbcan default), or loads cached results from `cazyme_diamond_hits.tsv` if present (refiltered to the current cut)
 4. **Tool 2 (Astra/HMMER):** Runs `astra search --installed_hmms dbCAN` against `dbCAN.hmm`, or loads cached results from `annotations/dbCAN_hits_df.tsv`
 5. **Tool 3 (Astra/HMMER):** Subsets proteins to union of step 1+2 hits, runs `astra search --hmm_in dbCAN-sub.hmm` against the subset
 6. **Consensus:** Keeps proteins called by >= 2 tools; records which tools agreed

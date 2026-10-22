@@ -57,10 +57,10 @@ def test_diamond_cache_is_separate_from_the_consensus_table(tmp_path):
     pd.DataFrame([{"protein_id": "p1", "family_class": "GH13", "evalue": 1e-50, "score": 200.0}]).to_csv(
         tmp_path / "cazyme_classification.tsv", sep="\t", index=False)
     assert cc.load_diamond_cache(str(db), verbose=False) is None
-    cc._save_diamond_cache({"p1": {"GH13": (1e-50, 210.0)}}, tmp_path, verbose=False)
+    cc._save_diamond_cache({"p1": {"GH13": (1e-150, 210.0)}}, tmp_path, verbose=False)
     cached = cc.load_diamond_cache(str(db), verbose=False)
     assert list(cached) == ["p1"] and list(cached["p1"]) == ["GH13"]
-    assert cached["p1"]["GH13"][0] == pytest.approx(1e-50) and cached["p1"]["GH13"][1] == 210.0
+    assert cached["p1"]["GH13"][0] == pytest.approx(1e-150) and cached["p1"]["GH13"][1] == 210.0
 
 
 def test_explicit_dbcan_directory(tmp_path, monkeypatch):
@@ -69,3 +69,27 @@ def test_explicit_dbcan_directory(tmp_path, monkeypatch):
     assert cc.get_dbcan_path(tmp_path) == tmp_path
     monkeypatch.setenv("SHARUR_DBCAN_DIR", str(tmp_path))
     assert cc.get_dbcan_path() == tmp_path
+
+
+def test_dbcan_standard_thresholds(tmp_path):
+    # DIAMOND cache rows looser than 1e-102 are refiltered on read
+    db = tmp_path / "sharur.duckdb"
+    cc._save_diamond_cache({"p1": {"GH13": (1e-150, 400.0)}, "p2": {"GT2": (1e-30, 120.0)}}, tmp_path, verbose=False)
+    assert set(cc.load_diamond_cache(str(db), verbose=False)) == {"p1"}
+
+    # HMM coverage = (hmm_to - hmm_from) / profile length >= 0.35, as run_dbcan computes it
+    hmm = tmp_path / "toy.hmm"
+    hmm.write_text("HMMER3/f\nNAME  GH5.hmm\nLENG  100\n//\nHMMER3/f\nNAME  GT2_e1.hmm|GT2:5\nLENG  200\n//\n")
+    assert cc.hmm_lengths(hmm) == {"GH5.hmm": 100, "GT2_e1.hmm|GT2:5": 200}
+    tsv = tmp_path / "hits.tsv"
+    pd.DataFrame([
+        {"sequence_id": "a", "hmm_name": "GH5.hmm", "i_evalue": 1e-30, "dom_bitscore": 90, "hmm_from": 1, "hmm_to": 80},
+        {"sequence_id": "b", "hmm_name": "GH5.hmm", "i_evalue": 1e-30, "dom_bitscore": 50, "hmm_from": 1, "hmm_to": 30},
+        {"sequence_id": "c", "hmm_name": "GT2_e1.hmm|GT2:5", "i_evalue": 1e-20, "dom_bitscore": 70, "hmm_from": 10, "hmm_to": 90},
+        {"sequence_id": "d", "hmm_name": "GT2_e1.hmm|GT2:5", "i_evalue": 1e-5, "dom_bitscore": 20, "hmm_from": 1, "hmm_to": 200},
+    ]).to_csv(tsv, sep="\t", index=False)
+    hits = cc._parse_astra_tsv(tsv, cc.HMMER_IEVALUE, cc.hmm_lengths(hmm))
+    assert {pid: list(fams) for pid, fams in hits.items()} == {"a": ["GH5"], "c": ["GT2"]}
+    assert hits["a"]["GH5"][0] == pytest.approx(1e-30) and hits["c"]["GT2"][1] == 70
+    # without profile lengths the i-evalue filter alone applies
+    assert set(cc._parse_astra_tsv(tsv, cc.HMMER_IEVALUE)) == {"a", "b", "c"}
