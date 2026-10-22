@@ -64,6 +64,17 @@ def test_load_maps_records_and_numbers_loci_per_genome(store, tmp_path):
     assert store.conn.execute("SELECT COUNT(*) FROM loci WHERE locus_type = 'crispr'").fetchone()[0] == 1
 
 
+def test_member_ids_wrapped_by_genbank_are_rejoined(store, tmp_path):
+    # GECCO reads a long locus_tag back with a space where Biopython wrapped it
+    _shard(tmp_path, "s0", {"r0": ("b1", "c1")}, [
+        "r0\tx\t50\t2100\t0.8\t0.95\tNRP\t0\t0.8\t0\t0\t0\t0\tc1 _1;c1_2\t\n"])
+    stats = load_gecco_bgcs(store.conn, tmp_path)
+    assert stats["dropped_members"] == 0
+    assert store.conn.execute(
+        "SELECT protein_id FROM locus_proteins WHERE locus_id = 'b1::bgc1' ORDER BY position").fetchall() == [
+        ("c1_1",), ("c1_2",)]
+
+
 def test_reload_replaces_and_drops_members_from_another_genome(store, tmp_path):
     first = tmp_path / "first"
     _shard(first, "s0", {"r0": ("b1", "c1")}, [

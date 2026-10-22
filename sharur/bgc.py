@@ -8,17 +8,25 @@ records with short IDs, and each shard's ``record_map.tsv`` maps an ID back to
 ``(bin_id, contig_id)``.
 
 Loading replaces every existing BGC locus, so a rerun is idempotent.
+
+Biopython wraps a long qualifier value across lines when it writes GenBank and
+rejoins the lines with a space when GECCO reads them back, so a protein ID
+longer than one line arrives with a space at the wrap. Stored protein IDs are
+FASTA header words and contain no whitespace, so member IDs are read with all
+whitespace removed.
 """
 
 from __future__ import annotations
 
 import csv
 import json
+import re
 from collections import Counter
 from pathlib import Path
 from typing import Any
 
 CALLER = "gecco"
+_WS = re.compile(r"\s+")
 PROBABILITY_COLUMNS = (
     "alkaloid_probability", "nrp_probability", "polyketide_probability",
     "ripp_probability", "saccharide_probability", "terpene_probability",
@@ -65,7 +73,7 @@ def collect_gecco_clusters(gecco_dir: Path) -> tuple[list[dict[str, Any]], dict[
                 if record not in records:
                     raise ValueError(f"{tables[0]}: record {record!r} is absent from {record_map}")
                 bin_id, contig_id = records[record]
-                proteins = [p for p in (row.get("proteins") or "").split(";") if p]
+                proteins = [_WS.sub("", p) for p in (row.get("proteins") or "").split(";") if p.strip()]
                 clusters.append({
                     "bin_id": bin_id,
                     "contig_id": contig_id,
