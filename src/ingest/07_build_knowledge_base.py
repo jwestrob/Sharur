@@ -27,7 +27,7 @@ import pandas as pd
 import typer
 from rich.console import Console
 
-from sharur.contig_context import assemblies_from_stage00, fasta_lengths, parse_partial
+from sharur.contig_context import assemblies_from_stage00, fasta_records, parse_partial
 from sharur.storage.migrations import run_migrations
 from sharur.storage.schema import SCHEMA
 
@@ -575,7 +575,7 @@ class KnowledgeBaseBuilder:
                         "bin_id": bid,
                         "length": length,
                         "gc_content": None,
-                        "is_circular": False,
+                        "is_circular": bool(self._contig_circular.get((cid, bid))),
                         "taxonomy": None,
                         "length_source": length_sources.get((cid, bid), "gene_span"),
                     }
@@ -642,20 +642,24 @@ class KnowledgeBaseBuilder:
 
         Returns the keys whose length came from the assembly. A contig whose
         assembly record is shorter than its gene span keeps the gene span.
+        Circularity recorded in the assembly headers lands in ``self._contig_circular``.
         """
+        self._contig_circular: Dict[tuple, bool] = {}
         assemblies = assemblies_from_stage00(self.outputs.stage00_dir)
         wanted = {bid for (_, bid) in contig_lengths} & set(assemblies)
         if not wanted:
             return {}
         bins = sorted(wanted)
         with ThreadPoolExecutor(max_workers=self.threads) as executor:
-            lengths = dict(zip(bins, executor.map(lambda b: fasta_lengths(assemblies[b]), bins)))
+            records = dict(zip(bins, executor.map(lambda b: fasta_records(assemblies[b]), bins)))
         sources: Dict[tuple, str] = {}
         for (cid, bid), span in list(contig_lengths.items()):
-            length = lengths.get(bid, {}).get(cid)
+            length, circular = records.get(bid, {}).get(cid, (None, None))
             if length is not None and length >= span:
                 contig_lengths[(cid, bid)] = length
                 sources[(cid, bid)] = "assembly"
+                if circular is not None:
+                    self._contig_circular[(cid, bid)] = circular
         console.print(f"  Contig lengths from assemblies: {len(sources):,}/{len(contig_lengths):,} contigs")
         return sources
 

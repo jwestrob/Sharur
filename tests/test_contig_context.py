@@ -9,6 +9,7 @@ import pytest
 
 from sharur.contig_context import (
     backfill_contig_context,
+    contig_circularity,
     describe_edge,
     edge_context,
     fasta_lengths,
@@ -119,6 +120,39 @@ def test_fasta_and_header_parsing(tmp_path):
     assert list(prodigal_partials(faa)) == [("ctg1_1", "10")]
 
 
+@pytest.mark.parametrize(("record", "description", "expected"), [
+    ("SR-VP_A1_90cm_PACBIO-HIFI_METAMDBG_641824_C", "read_count_1", True),
+    ("SR-VP_A1_115cm_PACBIO-HIFI_METAMDBG_409162_RC", "", True),
+    ("SR-VP_A1_115cm_PACBIO-HIFI_METAMDBG_409130_L", "", False),
+    ("ctg409162_11x_rc", "", True),
+    ("ctg402616_2x_l", "", False),
+    ("s1.ctg000001c", "", True),
+    ("ptg000002l", "", False),
+    ("contig_7", "length=5000 circular=yes", True),
+    ("contig_7_C", "circular=no", False),
+    ("tig00000001", "len=4000000 suggestCircular=yes", True),
+    ("NZ_CP000001.1", "Escherichia coli [topology=circular]", True),
+    ("Genome_2_circular_FINAL", "", True),
+    ("Genome_2_noncircular", "", False),
+    ("SR-VP_9_9_2021_81_5A_scaffold_27", "", None),
+    ("bin1_contig1", "", None),
+])
+def test_contig_circularity_marks(record, description, expected):
+    assert contig_circularity(record, description) is expected
+
+
+def test_backfill_sets_circularity_from_assembly_headers(tmp_path):
+    conn = _legacy_db(tmp_path / "legacy.duckdb")
+    conn.execute("UPDATE contigs SET contig_id = 'ctg1_C' WHERE contig_id = 'ctg1'")
+    conn.execute("UPDATE proteins SET contig_id = 'ctg1_C' WHERE contig_id = 'ctg1'")
+    fasta = tmp_path / "bin1.fna"
+    fasta.write_text(">ctg1_C read_count_1\n" + "A" * 1000 + "\n>ctg9 circular=no\n" + "C" * 90 + "\n")
+    stats = backfill_contig_context(conn, assemblies={"bin1": fasta})
+    assert stats["contigs_circular"] == 1
+    assert conn.execute("SELECT contig_id, is_circular FROM contigs ORDER BY 1").fetchall() == [
+        ("ctg1_C", True), ("ctg9", False)]
+
+
 def _legacy_db(path: Path):
     conn = duckdb.connect(str(path))
     conn.execute("""
@@ -144,8 +178,8 @@ def test_backfill_records_assembly_lengths_and_partials(tmp_path):
     faa = tmp_path / "bin1.faa"
     faa.write_text(">ctg1_1 # 1 # 300 # 1 # ID=1_1;partial=10\nMAAA\n")
     stats = backfill_contig_context(conn, assemblies={"bin1": fasta}, protein_faas=[faa], threads=2)
-    assert stats == {"contigs_updated": 1, "contigs_unmatched": 1, "bins_resized": 0,
-                     "proteins_flagged": 1}
+    assert stats == {"contigs_updated": 1, "contigs_unmatched": 1, "contigs_circular": 0,
+                     "bins_resized": 0, "proteins_flagged": 1}
     assert conn.execute("SELECT contig_id, length, length_source FROM contigs ORDER BY 1").fetchall() == [
         ("ctg1", 1000, "assembly"), ("ctg9", 90, "gene_span")]
     assert conn.execute("SELECT partial FROM proteins WHERE protein_id = 'ctg1_1'").fetchone()[0] == "10"
@@ -189,7 +223,7 @@ def test_stage07_reads_assembly_lengths_and_partial_flags(tmp_path):
     data = tmp_path / "data"
     assembly = data / "stage00_prepared" / "genomes" / "bin1.fna"
     assembly.parent.mkdir(parents=True)
-    assembly.write_text(">bin1_contig1\n" + "A" * 5000 + "\n")
+    assembly.write_text(">bin1_contig1 circular=yes\n" + "A" * 5000 + "\n")
     (data / "stage00_prepared" / "processing_manifest.json").write_text(json.dumps(
         {"genomes": [{"genome_id": "bin1", "filename": "bin1.fna", "output_path": str(assembly)}]}))
     faa = data / "stage03_prodigal" / "genomes" / "bin1" / "bin1.faa"
@@ -203,6 +237,7 @@ def test_stage07_reads_assembly_lengths_and_partial_flags(tmp_path):
             ("05b", "stage05b_dbcan"), ("05c", "stage05c_crispr"), ("06", "stage06_embeddings")]})
     module.KnowledgeBaseBuilder(outputs, data / "sharur.duckdb", force=True, threads=1).build()
     conn = duckdb.connect(str(data / "sharur.duckdb"), read_only=True)
-    assert conn.execute("SELECT length, length_source FROM contigs").fetchall() == [(5000, "assembly")]
+    assert conn.execute("SELECT length, length_source, is_circular FROM contigs").fetchall() == [
+        (5000, "assembly", True)]
     assert conn.execute("SELECT protein_id, partial FROM proteins ORDER BY 1").fetchall() == [
         ("bin1_contig1_1", "10"), ("bin1_contig1_2", "00")]

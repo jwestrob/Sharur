@@ -31,6 +31,25 @@ EDGE_GENES = 3
 EDGE_BP = 5000
 _PARTIAL = re.compile(r"(?:^|;)partial=([01]{2})(?:;|$)")
 
+# Circularity an assembler or curator recorded for a contig.
+# Header fields: circular=yes|no (metaMDBG, Flye-style), suggestCircular=yes|no
+# (Canu/Trycycler), [topology=circular|linear] (NCBI-style).
+_CIRC_FIELDS = (
+    re.compile(r"(?:^|\s)(?:circular|suggestCircular)=(yes|no|true|false)\b", re.I),
+    re.compile(r"\[topology=(circular|linear)\]", re.I),
+)
+# Contig-name suffixes: metaMDBG ctg<N>_<cov>x_c|rc|l, the renamed _C|_RC|_L form
+# (SR-VP PacBio sets; _RC contigs match _C contigs in length and completeness),
+# and hifiasm(-meta) [sp]tg<digits>c|l.
+_CIRC_SUFFIXES = (
+    re.compile(r"_\d+x_(rc|c|l)$"),
+    re.compile(r"_(RC|C|L)$"),
+    re.compile(r"(?:^|\.)[a-z]?tg\d+([cl])$"),
+)
+# Curated names carrying a "circular" token (e.g. Genome_2_circular_FINAL).
+_CIRC_TOKEN = re.compile(r"(?:^|[_.\-])circular(?:[_.\-]|$)", re.I)
+_NOT_CIRC_TOKEN = re.compile(r"(?:non|not)[_.\-]?circular", re.I)
+
 
 @dataclass(frozen=True)
 class EdgeContext:
@@ -64,22 +83,48 @@ def _open_text(path: Path):
     return gzip.open(path, "rt") if path.suffix == ".gz" else open(path)
 
 
-def fasta_lengths(path: Path) -> dict[str, int]:
-    """Record ID (first header word) -> sequence length, streamed."""
-    lengths: dict[str, int] = {}
-    current, length = None, 0
+def contig_circularity(record_id: str, description: str = "") -> bool | None:
+    """Circularity recorded in a FASTA header: True, False, or None when unmarked.
+
+    Explicit header fields take precedence over name suffixes, and suffixes over
+    a curated "circular" token in the name.
+    """
+    for pattern in _CIRC_FIELDS:
+        match = pattern.search(description)
+        if match:
+            return match.group(1).lower() in {"yes", "true", "circular"}
+    for pattern in _CIRC_SUFFIXES:
+        match = pattern.search(record_id)
+        if match:
+            return match.group(1).lower() != "l"
+    if _NOT_CIRC_TOKEN.search(record_id):
+        return False
+    return True if _CIRC_TOKEN.search(record_id) else None
+
+
+def fasta_records(path: Path) -> dict[str, tuple[int, bool | None]]:
+    """Record ID (first header word) -> (sequence length, recorded circularity), streamed."""
+    records: dict[str, tuple[int, bool | None]] = {}
+    current, description, length = None, "", 0
     with _open_text(path) as handle:
         for line in handle:
             if line.startswith(">"):
                 if current is not None:
-                    lengths[current] = length
-                fields = line[1:].split(None, 1)
-                current, length = (fields[0] if fields else ""), 0
+                    records[current] = (length, contig_circularity(current, description))
+                fields = line[1:].rstrip("\n").split(None, 1)
+                current = fields[0] if fields else ""
+                description = fields[1] if len(fields) > 1 else ""
+                length = 0
             else:
                 length += len(line.strip())
     if current is not None:
-        lengths[current] = length
-    return lengths
+        records[current] = (length, contig_circularity(current, description))
+    return records
+
+
+def fasta_lengths(path: Path) -> dict[str, int]:
+    """Record ID (first header word) -> sequence length, streamed."""
+    return {record: length for record, (length, _) in fasta_records(path).items()}
 
 
 def parse_partial(header_fields: Iterable[str] | None) -> str | None:
@@ -222,11 +267,13 @@ def describe_edge(context: EdgeContext) -> str:
 
 def backfill_contig_context(conn, *, assemblies: dict[str, Path] | None = None,
                             protein_faas: Iterable[Path] = (), threads: int | None = None) -> dict[str, int]:
-    """Write assembly contig lengths and Prodigal partial flags into a database.
+    """Write assembly contig lengths, circularity and Prodigal partial flags into a database.
 
     ``assemblies`` maps bin_id -> assembly FASTA; only contigs already in that
     bin are updated. A contig whose assembly record is shorter than its gene
     span means the wrong assembly was supplied, and nothing is written.
+    ``is_circular`` takes the circularity the assembly header records
+    (:func:`contig_circularity`); unmarked contigs keep their stored value.
     """
     import os  # noqa: PLC0415
     from concurrent.futures import ThreadPoolExecutor  # noqa: PLC0415
@@ -237,17 +284,20 @@ def backfill_contig_context(conn, *, assemblies: dict[str, Path] | None = None,
 
     run_migrations(conn)
     workers = threads or os.cpu_count() or 1
-    stats = {"contigs_updated": 0, "contigs_unmatched": 0, "bins_resized": 0, "proteins_flagged": 0}
+    stats = {"contigs_updated": 0, "contigs_unmatched": 0, "contigs_circular": 0, "bins_resized": 0,
+             "proteins_flagged": 0}
     with ThreadPoolExecutor(max_workers=workers) as executor:
         bins = sorted(assemblies or {})
-        lengths = list(executor.map(lambda b: fasta_lengths(assemblies[b]), bins))
+        records = list(executor.map(lambda b: fasta_records(assemblies[b]), bins))
         flags = list(executor.map(lambda f: list(prodigal_partials(f)), list(protein_faas)))
     conn.execute("BEGIN TRANSACTION")
     try:
         if bins:
             asm = pd.DataFrame(
-                [(b, cid, n) for b, table in zip(bins, lengths, strict=True) for cid, n in table.items()],
-                columns=["bin_id", "contig_id", "length"])
+                [(b, cid, n, circ) for b, table in zip(bins, records, strict=True)
+                 for cid, (n, circ) in table.items()],
+                columns=["bin_id", "contig_id", "length", "circular"])
+            asm["circular"] = asm["circular"].astype("boolean")
             conn.register("_asm", asm)
             bad = conn.execute(
                 """SELECT c.contig_id, a.length, MAX(p.end_coord) FROM contigs c
@@ -263,6 +313,13 @@ def backfill_contig_context(conn, *, assemblies: dict[str, Path] | None = None,
             stats["contigs_unmatched"] = conn.execute(
                 """SELECT COUNT(*) FROM contigs WHERE bin_id IN (SELECT DISTINCT bin_id FROM _asm)
                    AND COALESCE(length_source, '') <> 'assembly'""").fetchone()[0]
+            conn.execute(
+                """UPDATE contigs SET is_circular = a.circular
+                   FROM _asm a WHERE a.contig_id = contigs.contig_id AND a.bin_id = contigs.bin_id
+                     AND a.circular IS NOT NULL""")
+            stats["contigs_circular"] = conn.execute(
+                """SELECT COUNT(*) FROM contigs c JOIN _asm a USING (contig_id, bin_id)
+                   WHERE a.circular""").fetchone()[0]
             # Stage 07 derives bins.total_length from contig lengths, so a legacy
             # build carries the gene-span sum. Resize only bins whose every
             # contig now has an assembly length.
