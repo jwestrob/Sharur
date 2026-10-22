@@ -295,7 +295,10 @@ def run_diamond(prot_dir: str, dbcan_path: Path, threads: int = 4,
     # Concatenate FAA files, filtering empty sequences and stop codons
     _log(f"[diamond] Concatenating {len(faa_files)} FAA files (filtering empty seqs + stop codons)...")
     t_cat = _time.time()
-    combined = Path(prot_dir).parent / "diamond_combined.faa"
+    # A private directory: the parent of prot_dir is shared ($TMPDIR, or a dataset's
+    # stage03 tree), and two concurrent runs writing one fixed path corrupt each other's query.
+    work_dir = Path(tempfile.mkdtemp(prefix="cazyme_diamond_"))
+    combined = work_dir / "diamond_combined.faa"
     n_written = 0
     n_skipped = 0
     with open(combined, "w") as fout:
@@ -382,9 +385,10 @@ def run_diamond(prot_dir: str, dbcan_path: Path, threads: int = 4,
     err_handle.seek(0)
     stderr_out = err_handle.read()
     err_handle.close()
+    shutil.rmtree(work_dir, ignore_errors=True)
     if proc.returncode != 0:
-        _log(f"Warning: DIAMOND error (rc={proc.returncode}): {stderr_out[:500]}")
-        return {}
+        # fatal: an empty DIAMOND set would silently turn the 3-tool consensus into HMM-only
+        raise RuntimeError(f"DIAMOND failed (rc={proc.returncode}): {stderr_out[-500:]}")
 
     if verbose and stderr_out:
         for line in stderr_out.strip().split('\n')[-3:]:
@@ -443,17 +447,16 @@ def run_astra_hmm(prot_dir: str, label: str,
 
     result = subprocess.run(cmd, capture_output=True, text=True)
 
+    # fatal: a missing tool would silently shrink the consensus
     if result.returncode != 0:
-        print(f"Warning: Astra search ({label}) error: {result.stderr[:500]}")
         shutil.rmtree(out_dir, ignore_errors=True)
-        return {}
+        raise RuntimeError(f"HMM search ({label}) failed (rc={result.returncode}): {result.stderr[-500:]}")
 
     # Find output TSV (name depends on --installed_hmms vs --hmm_in)
     tsvs = list(Path(out_dir).glob("*_hits_df.tsv"))
     if not tsvs:
-        print(f"Warning: No Astra output found for {label}")
         shutil.rmtree(out_dir, ignore_errors=True)
-        return {}
+        raise RuntimeError(f"HMM search ({label}) wrote no *_hits_df.tsv")
 
     hits = _parse_astra_tsv(tsvs[0], ievalue)
     shutil.rmtree(out_dir, ignore_errors=True)
