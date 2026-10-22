@@ -9,7 +9,8 @@ Recapitulates the standard dbCAN annotation pipeline:
   Consensus: retain genes called by ≥ 2 of 3 tools
 
 HMMER searches are delegated to Astra (astra search --hmm_in), which handles
-parallelization and PyHMMER optimization. Only DIAMOND is run directly.
+parallelization and PyHMMER optimization. Only DIAMOND is run directly, in its
+default sensitivity mode with -k 1, as run_dbcan runs it.
 
 If dbCAN-sub.hmm is not available, falls back to 2-tool mode (DIAMOND + dbCAN HMM)
 and requires both tools to agree.
@@ -287,7 +288,7 @@ def _save_diamond_cache(hits: dict, data_dir: Path,
 def run_diamond(prot_dir: str, dbcan_path: Path, threads: int = 4,
                 evalue: float = DIAMOND_EVALUE,
                 verbose: bool = True) -> dict[str, dict[str, tuple]]:
-    """DIAMOND blastp against CAZy.dmnd.
+    """DIAMOND blastp against CAZy.dmnd in default mode, top target only (-k 1).
 
     Returns {protein_id: {family_class: (evalue, bitscore)}}.
     """
@@ -350,7 +351,6 @@ def run_diamond(prot_dir: str, dbcan_path: Path, threads: int = 4,
         "--max-target-seqs", "1",
         "--evalue", str(evalue),
         "--threads", str(threads),
-        "--sensitive",
     ]
 
     # stderr goes to a file: an unread stderr pipe can fill and stall DIAMOND
