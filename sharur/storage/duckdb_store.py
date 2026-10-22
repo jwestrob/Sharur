@@ -135,7 +135,20 @@ class DuckDBStore:
         }
 
     def _initialize_schema(self) -> None:
-        """Create tables if they don't exist, then run pending migrations."""
+        """Bring the file to the current schema, then create missing objects.
+
+        An existing database is migrated first: SCHEMA's index DDL names
+        columns that later migrations add (``defense_systems.contig_id`` at v5),
+        so applying SCHEMA to an older file fails before any migration runs.
+        This matches ``sharur migrate``. A fresh database takes SCHEMA first,
+        because early migrations reference its base tables.
+        """
+        has_tables = self._conn.execute(
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'main' AND table_name = 'proteins'"
+        ).fetchone()[0]
+        if has_tables:
+            run_migrations(self._conn)
         self._conn.execute(SCHEMA)
         run_migrations(self._conn)
 
