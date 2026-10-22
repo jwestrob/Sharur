@@ -144,11 +144,35 @@ def test_backfill_records_assembly_lengths_and_partials(tmp_path):
     faa = tmp_path / "bin1.faa"
     faa.write_text(">ctg1_1 # 1 # 300 # 1 # ID=1_1;partial=10\nMAAA\n")
     stats = backfill_contig_context(conn, assemblies={"bin1": fasta}, protein_faas=[faa], threads=2)
-    assert stats == {"contigs_updated": 1, "contigs_unmatched": 1, "proteins_flagged": 1}
+    assert stats == {"contigs_updated": 1, "contigs_unmatched": 1, "bins_resized": 0,
+                     "proteins_flagged": 1}
     assert conn.execute("SELECT contig_id, length, length_source FROM contigs ORDER BY 1").fetchall() == [
         ("ctg1", 1000, "assembly"), ("ctg9", 90, "gene_span")]
     assert conn.execute("SELECT partial FROM proteins WHERE protein_id = 'ctg1_1'").fetchone()[0] == "10"
     assert conn.execute("SELECT MAX(version) FROM schema_version").fetchone()[0] >= 8
+
+
+def test_backfill_resizes_bins_whose_contigs_all_have_assembly_lengths(tmp_path):
+    conn = _legacy_db(tmp_path / "legacy.duckdb")
+    conn.execute("""
+        CREATE TABLE bins (bin_id VARCHAR PRIMARY KEY, total_length INTEGER, n_contigs INTEGER);
+        INSERT INTO bins VALUES ('bin1', 390, 2), ('bin2', 50, 1);
+        INSERT INTO contigs (contig_id, bin_id, length) VALUES ('ctg2', 'bin2', 50);
+        INSERT INTO proteins (protein_id, contig_id, bin_id, start, end_coord, strand)
+        VALUES ('ctg2_1', 'ctg2', 'bin2', 1, 50, '+');
+    """)
+    full = tmp_path / "bin1.fna"
+    full.write_text(">ctg1\n" + "A" * 1000 + "\n>ctg9\n" + "C" * 120 + "\n")
+    partial = tmp_path / "bin2.fna"
+    partial.write_text(">other\n" + "G" * 80 + "\n")
+
+    stats = backfill_contig_context(conn, assemblies={"bin1": full, "bin2": partial})
+
+    assert stats["bins_resized"] == 1
+    # bin1: every contig now carries its assembly length, so the genome is re-summed.
+    # bin2: its contig has no assembly record, so the gene-span total stays.
+    assert conn.execute("SELECT bin_id, total_length FROM bins ORDER BY 1").fetchall() == [
+        ("bin1", 1120), ("bin2", 50)]
 
 
 def test_backfill_rejects_a_mismatched_assembly(tmp_path):

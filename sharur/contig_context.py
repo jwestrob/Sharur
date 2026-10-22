@@ -237,7 +237,7 @@ def backfill_contig_context(conn, *, assemblies: dict[str, Path] | None = None,
 
     run_migrations(conn)
     workers = threads or os.cpu_count() or 1
-    stats = {"contigs_updated": 0, "contigs_unmatched": 0, "proteins_flagged": 0}
+    stats = {"contigs_updated": 0, "contigs_unmatched": 0, "bins_resized": 0, "proteins_flagged": 0}
     with ThreadPoolExecutor(max_workers=workers) as executor:
         bins = sorted(assemblies or {})
         lengths = list(executor.map(lambda b: fasta_lengths(assemblies[b]), bins))
@@ -263,6 +263,21 @@ def backfill_contig_context(conn, *, assemblies: dict[str, Path] | None = None,
             stats["contigs_unmatched"] = conn.execute(
                 """SELECT COUNT(*) FROM contigs WHERE bin_id IN (SELECT DISTINCT bin_id FROM _asm)
                    AND COALESCE(length_source, '') <> 'assembly'""").fetchone()[0]
+            # Stage 07 derives bins.total_length from contig lengths, so a legacy
+            # build carries the gene-span sum. Resize only bins whose every
+            # contig now has an assembly length.
+            if conn.execute(
+                    "SELECT COUNT(*) FROM information_schema.columns "
+                    "WHERE table_name = 'bins' AND column_name = 'total_length'").fetchone()[0]:
+                stats["bins_resized"] = conn.execute(
+                    """UPDATE bins SET total_length = s.total
+                       FROM (SELECT bin_id, SUM(length) AS total,
+                                    BOOL_AND(length_source = 'assembly') AS complete
+                             FROM contigs
+                             WHERE bin_id IN (SELECT DISTINCT bin_id FROM _asm)
+                             GROUP BY bin_id) s
+                       WHERE bins.bin_id = s.bin_id AND s.complete
+                         AND bins.total_length IS DISTINCT FROM s.total""").fetchone()[0]
             conn.unregister("_asm")
         conn.execute("UPDATE contigs SET length_source = 'gene_span' WHERE length_source IS NULL")
         pairs = [pair for chunk in flags for pair in chunk]

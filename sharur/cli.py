@@ -1161,6 +1161,7 @@ def backfill_contig_context_command(
     typer.echo(f"Assemblies read: {len(assembly_paths):,}; protein files read: {len(faas):,}")
     typer.echo(f"Contig lengths from assemblies: {stats['contigs_updated']:,} "
                f"({stats['contigs_unmatched']:,} contigs in those bins without an assembly record)")
+    typer.echo(f"Genome lengths re-summed from assembly contigs: {stats['bins_resized']:,} bins")
     typer.echo(f"Proteins with Prodigal partial flags: {stats['proteins_flagged']:,}")
     typer.echo("Canonical database state changed. Rebuild dataset.seal.json with `sharur seal --force`.")
 
