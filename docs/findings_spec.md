@@ -75,6 +75,7 @@ Agents do **not** need to hand-author these in normal workflows:
 - `id`
 - `phase`
 - `schema_version`
+- `created_at` / `updated_at`
 - `provenance`
 - `related_findings`
 - `novelty`
@@ -151,6 +152,8 @@ Each line in `findings.jsonl` should normalize to this stored shape:
 | `id` | string | Stable finding ID. Canonical convention: `{phase}-{NNN}` such as `survey-001` or `exploration-014`. |
 | `schema_version` | string | Finding schema version. Current canonical value: `"2.0"`. |
 | `phase` | string | Producing phase, such as `survey`, `exploration`, `characterization`, `defense`, `metabolism`. |
+| `created_at` | string | UTC write time, ISO 8601 to the second (`2026-10-13T18:04:05Z`). Stamped by `append_finding_record` under the file lock; the browser's findings index sorts newest first on it, then on file order. |
+| `updated_at` | string | UTC time of the latest `replace_finding_record` correction. The correction keeps the original `created_at`. |
 | `title` | string | Self-contained one-line summary. |
 | `category` | string | Functional category. |
 | `description` | string | Biological interpretation. |

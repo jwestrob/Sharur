@@ -12,6 +12,7 @@ import json
 import os
 import uuid
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping
 
@@ -24,6 +25,11 @@ from sharur.core.analysis_records import canonicalize_finding_phase
 
 class FindingValidationError(ValueError):
     """Raised when a new canonical finding violates the write contract."""
+
+
+def _utc_now() -> str:
+    """Write timestamp for findings: UTC, second precision, ISO 8601 (e.g. 2026-10-13T18:04:05Z)."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _count_existing_records(path: Path) -> int:
@@ -148,13 +154,16 @@ def append_finding_record(
 
     Strict mode is the default for canonical archives: validation issues abort
     the write. Set ``strict=False`` only for explicitly non-canonical draft
-    spools that will pass through a strict merge step later.
+    spools that will pass through a strict merge step later. A record without
+    ``created_at`` is stamped with the UTC write time.
     """
     path = Path(path)
     with _exclusive_findings_lock(path):
         with path.open("a+", encoding="utf-8") as handle:
             record_count, existing_ids = _read_existing_ids(handle)
             ordinal = record_count + 1
+            # stamped under the lock, so file order and created_at agree
+            finding = {**finding, "created_at": finding.get("created_at") or _utc_now()}
             result = _prepare_with_ordinal(
                 finding,
                 path,
@@ -198,7 +207,8 @@ def replace_finding_record(
     """Atomically replace one canonical finding while preserving line order.
 
     This is the safe correction path for an existing JSONL archive. Unrelated
-    records, including legacy records, are retained byte-for-byte.
+    records, including legacy records, are retained byte-for-byte. The record
+    keeps its original ``created_at`` and gains ``updated_at`` (UTC).
     """
     path = Path(path)
     target_id = str(finding_id)
@@ -223,6 +233,7 @@ def replace_finding_record(
             record_id = record.get("id") if isinstance(record, dict) else None
             if record_id is not None and str(record_id) == target_id:
                 target_line_indexes.append((line_index, record_ordinal))
+                previous = record
 
         if not target_line_indexes:
             raise FindingValidationError(
@@ -241,6 +252,10 @@ def replace_finding_record(
                 f"{target_id!r}"
             )
         raw["id"] = target_id
+        # a correction keeps the original creation time and records when it happened
+        if not raw.get("created_at") and previous.get("created_at"):
+            raw["created_at"] = previous["created_at"]
+        raw["updated_at"] = _utc_now()
 
         line_index, ordinal = target_line_indexes[0]
         result = _prepare_with_ordinal(

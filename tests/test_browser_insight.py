@@ -147,6 +147,27 @@ def test_findings_link_to_proteins_genomes_clades_and_systems(client):
     assert client.get("/finding/NOPE").status_code == 404
 
 
+def test_findings_index_lists_newest_first(tmp_path):
+    db = _dataset(tmp_path / "ds")
+    path = tmp_path / "ds" / "exploration" / "findings.jsonl"
+    rows = [json.loads(line) for line in path.read_text().splitlines()]
+    # F1 predates timestamps; F3 was written before F2
+    rows[1]["created_at"], rows[2]["created_at"] = "2026-10-13T10:00:00Z", "2026-10-13T09:00:00Z"
+    path.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    client = TestClient(create_app(db, background=False))
+    titles = ["Viperin flanks", "Contig-level", "Prose-only"]
+
+    def order(**params):
+        text = client.get("/findings", params=params).text
+        return [t for _, t in sorted((text.index(t), t) for t in titles)]
+
+    assert order() == order(sort="newest") == ["Contig-level", "Prose-only", "Viperin flanks"]
+    assert order(sort="oldest") == ["Viperin flanks", "Prose-only", "Contig-level"]
+    assert order(sort="id") == titles
+    assert "2026-10-13 10:00 UTC" in client.get("/findings").text
+    assert client.get("/findings", params={"sort": "bogus"}).status_code == 422
+
+
 def test_verification_runs_only_safe_selects(client):
     results = client.post("/api/finding/F1/verify").json()["results"]
     statuses = [r["status"] for r in results]

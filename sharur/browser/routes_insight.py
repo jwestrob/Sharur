@@ -184,9 +184,11 @@ def load_findings(dataset_dir: Path) -> list[dict[str, Any]]:
             lines = path.read_text().splitlines()
         except OSError:
             continue
+        record = 0
         for n, line in enumerate(lines, 1):
             if not line.strip():
                 continue
+            record += 1
             try:
                 row = json.loads(line)
             except ValueError:
@@ -197,7 +199,9 @@ def load_findings(dataset_dir: Path) -> list[dict[str, Any]]:
             if fid in seen:
                 fid = f"{fid}@{path.parent.name}"
             seen.add(fid)
+            # _record: position in its file (append order, the canonical ID's number); _seq: global load order
             row["_id"], row["_source"] = fid, str(path.relative_to(dataset_dir))
+            row["_record"], row["_seq"] = record, len(findings)
             findings.append(row)
     return findings
 
@@ -452,6 +456,8 @@ class Insight:
         return {"id": f["_id"], "title": f.get("title") or f["_id"], "category": f.get("category") or "",
                 "phase": f.get("phase") or "", "n_genomes": f.get("n_genomes"),
                 "verifications": len(verification), "source": f["_source"],
+                "record": f.get("_record"), "seq": f.get("_seq", 0),
+                "created_at": f.get("created_at") or "", "updated_at": f.get("updated_at") or "",
                 "url": self.ctx.url("finding", f["_id"])}
 
     def findings_for_protein(self, protein_id: str) -> list[dict[str, Any]]:
@@ -535,8 +541,14 @@ def register(app: FastAPI, ctx) -> Insight:
         return PlainTextResponse(record.path.read_text(), media_type="chemical/x-pdb")
 
     @app.get("/findings", response_class=HTMLResponse)
-    def findings_page(request: Request, q: str = Query("", max_length=200), category: str = Query("")):
+    def findings_page(request: Request, q: str = Query("", max_length=200), category: str = Query(""),
+                      sort: str = Query("newest", pattern="^(newest|oldest|id)$")):
         rows = [insight.summary(f) for f in insight.findings]
+        # newest first: stamped records by created_at, then append order (legacy records carry no timestamp)
+        if sort == "id":
+            rows.sort(key=lambda r: [int(x) if x.isdigit() else x for x in re.split(r"(\d+)", r["id"])])
+        else:
+            rows.sort(key=lambda r: (r["created_at"], r["seq"]), reverse=sort == "newest")
         needle = q.strip().lower()
         if needle:
             rows = [r for r in rows if needle in r["title"].lower() or needle in r["id"].lower()]
@@ -544,7 +556,7 @@ def register(app: FastAPI, ctx) -> Insight:
             rows = [r for r in rows if r["category"] == category]
         categories = sorted({insight.summary(f)["category"] for f in insight.findings if f.get("category")})
         return ctx.render(request, "findings.html", "findings", rows=rows, q=q, category=category,
-                          categories=categories, total=len(insight.findings))
+                          categories=categories, total=len(insight.findings), sort=sort)
 
     @app.get("/finding/{finding_id:path}", response_class=HTMLResponse)
     def finding_page(request: Request, finding_id: str):

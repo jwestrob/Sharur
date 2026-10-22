@@ -6,13 +6,15 @@
 <div class="panel">
   <form class="table-tools" method="get" action="/findings">
     <input name="q" value="{{ q }}" placeholder="Search titles or IDs" style="flex:1">
+    <select name="sort" onchange="this.form.submit()" aria-label="Order">{% for v, label in [('newest', 'Newest first'), ('oldest', 'Oldest first'), ('id', 'By ID')] %}<option value="{{ v }}" {{ 'selected' if v == sort }}>{{ label }}</option>{% endfor %}</select>
     <select name="category" onchange="this.form.submit()"><option value="">All categories</option>{% for c in categories %}<option value="{{ c }}" {{ 'selected' if c == category }}>{{ c|replace('_', ' ') }}</option>{% endfor %}</select>
     <button>Search</button>
   </form>
   {% if rows %}
   <div class="scroll"><table id="findings" data-table>
-    <thead><tr><th data-sort="text">Finding</th><th data-sort="text">Category</th><th data-sort="num" class="num">Genomes</th><th data-sort="num" class="num">Checks</th></tr></thead>
-    <tbody>{% for f in rows %}<tr><td><a href="{{ f.url }}"><b>{{ f.title }}</b></a><div class="sub">{{ f.id }} · {{ f.source }}</div></td>
+    <thead><tr><th data-sort="num" class="num" title="Position in its findings file (append order)">#</th><th data-sort="text">Finding</th><th data-sort="text">Added</th><th data-sort="text">Category</th><th data-sort="num" class="num">Genomes</th><th data-sort="num" class="num">Checks</th></tr></thead>
+    <tbody>{% for f in rows %}<tr><td class="num" data-v="{{ f.seq }}">{{ f.record }}</td><td><a href="{{ f.url }}"><b>{{ f.title }}</b></a><div class="sub">{{ f.id }} · {{ f.source }}</div></td>
+      <td data-v="{{ f.created_at }}" class="sub">{% if f.created_at %}{{ f.created_at[:10] }} {{ f.created_at[11:16] }} UTC{% if f.updated_at %}<div title="Last corrected {{ f.updated_at }}">edited {{ f.updated_at[:10] }}</div>{% endif %}{% else %}–{% endif %}</td>
       <td>{{ f.category|replace('_', ' ') }}</td><td class="num">{{ num(f.n_genomes) if f.n_genomes is not none else '–' }}</td>
       <td class="num" data-v="{{ f.verifications }}">{% if f.verifications %}<span class="tag ok">{{ f.verifications }}</span>{% else %}<span class="tag warn">none</span>{% endif %}</td></tr>{% endfor %}</tbody>
   </table></div>

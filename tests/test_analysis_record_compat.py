@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import multiprocessing
+import re
 import sys
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
@@ -375,6 +376,34 @@ def test_replace_finding_record_preserves_other_lines(tmp_path: Path) -> None:
     assert result.finding["id"] == "exploration-002"
     assert len(lines) == 2
     assert lines[0] == original_first_line
+
+
+def test_writer_stamps_created_at_and_replace_keeps_it(tmp_path: Path) -> None:
+    findings_path = tmp_path / "exploration" / "findings.jsonl"
+    finding = {
+        "title": "Timestamped record",
+        "category": "general",
+        "description": "Before.",
+        "evidence": {},
+        "verification": [
+            {"claim": "one", "query": "SELECT 1", "expected": 1}
+        ],
+    }
+    created = append_finding_record(findings_path, finding).finding["created_at"]
+    stored = json.loads(findings_path.read_text())
+
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", created)
+    assert stored["created_at"] == created and "updated_at" not in stored
+
+    # the caller's dict stays unstamped; a correction carries the original creation time
+    assert "created_at" not in finding
+    result = replace_finding_record(
+        findings_path, "exploration-001", {**finding, "description": "After."}
+    )
+    stored = json.loads(findings_path.read_text())
+
+    assert result.finding["created_at"] == stored["created_at"] == created
+    assert stored["updated_at"] >= created and stored["description"] == "After."
 
 
 def test_replace_finding_record_rejects_missing_id(tmp_path: Path) -> None:
