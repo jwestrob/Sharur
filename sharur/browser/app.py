@@ -450,6 +450,7 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
                           "color": charts.CATEGORY_COLORS.get(category) if category else None})
         edge = c.get("contig_edge")
         genome = catalog.by_bin.get(c["genome"]["bin_id"])
+        hood_loci = _window_loci(hood, genes)
         order = [g["protein_id"] for g in genes]
         here = order.index(protein_id) if protein_id in order else -1
         prev_gene = order[here - 1] if here > 0 else None
@@ -471,11 +472,35 @@ def create_app(db_path: str | Path, *, token: str | None = None, background: boo
         return render(request, "protein.html", "taxa", c=c, g=genome, domains=domains,
                       track=charts.domain_track(length, domains), tracks=tracks,
                       hood=charts.neighborhood(genes, start_edge=hood.get("contig_start_in_window", False),
-                                               end_edge=hood.get("contig_end_in_window", False)),
-                      genes=genes, edge=edge, edge_text=describe_edge(EdgeContext(**edge)) if edge else "",
+                                               end_edge=hood.get("contig_end_in_window", False), features=hood_loci),
+                      hood_loci=hood_loci, genes=genes, edge=edge, edge_text=describe_edge(EdgeContext(**edge)) if edge else "",
                       nearby=nearby, systems_here=systems_here, prev_gene=prev_gene, next_gene=next_gene,
                       sequence=_sequence_view(sequence_rows[0][0] if sequence_rows else None),
                       term_rows=term_rows, semantic_backend=semantic.backend)
+
+    def _window_loci(hood: dict[str, Any], genes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Loci (CRISPR arrays, prophages, islands) on the plotted stretch of the anchor's contig.
+
+        Loci overlapping the genes are kept, and so are loci between the outermost gene and a contig
+        end when the window reaches that end.
+        """
+        if not genes:
+            return []
+        lo, hi = min(g["start"] for g in genes), max(g["end"] for g in genes)
+        out = []
+        for l in catalog.loci:
+            if (l["contig_id"] != hood.get("contig_id") or l["start"] is None or l["end"] is None
+                    or (l["bin_id"] is not None and l["bin_id"] != hood.get("bin_id"))):
+                continue
+            if (l["end"] < lo and not hood.get("contig_start_in_window")) or (
+                    l["start"] > hi and not hood.get("contig_end_in_window")):
+                continue
+            kind = l["type"] or "locus"
+            out.append({"start": l["start"], "end": l["end"], "kind": kind,
+                        "label": genome_ring.MARK_LABELS.get(kind, kind), "title": l["locus_id"],
+                        "color": charts.OVERLAY_COLORS.get(kind, "#9aa3ad"),
+                        "href": _url("crispr", l["locus_id"]) if kind == "crispr" else None})
+        return out
 
     def _top_categories(ids: list[str]) -> dict[str, str]:
         """Most specific biological category per protein, for neighborhood colors."""

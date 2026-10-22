@@ -3,7 +3,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from sharur.browser import create_app
+from sharur.browser import charts, create_app
 from sharur.predicates_v2.persistence import generate_and_persist_v2
 from sharur.storage.duckdb_store import DuckDBStore
 
@@ -88,6 +88,40 @@ def test_token_is_exchanged_for_a_cookie(db):
     exchanged = client.get("/?token=s3cret", follow_redirects=False)
     assert exchanged.status_code == 303 and "token" not in exchanged.headers["location"]
     assert client.get("/").status_code == 200
+
+
+def test_protein_neighborhood_draws_crispr_arrays_in_the_plotted_stretch(db):
+    store = DuckDBStore(str(db))
+    store.conn.execute("""
+        INSERT INTO contigs (contig_id, bin_id, length, length_source) VALUES ('bin|1_c2', 'bin|1', 5000, 'assembly');
+        INSERT INTO loci (locus_id, locus_type, contig_id, start, end_coord, confidence) VALUES
+            ('bin|1_CRISPR1', 'crispr', 'bin|1_c1', 2300, 2700, 1.0),
+            ('bin|1_CRISPR2', 'crispr', 'bin|1_c2', 100, 400, 1.0);
+    """)
+    store.close()
+    page = TestClient(create_app(db, background=False)).get("/protein/bin%7C1_c1_2")
+    assert page.status_code == 200
+    # the array past the last gene sits between it and the contig end, so the plot widens to show it
+    assert '<a href="/crispr/bin%7C1_CRISPR1">' in page.text and "bin|1_CRISPR1 · 2,300–2,700" in page.text
+    assert 'viewBox="0 0 1000 88"' in page.text and "CRISPR array</span>" in page.text
+    assert "bin|1_CRISPR2" not in page.text  # another contig's array
+
+
+def test_neighborhood_features_clip_overlaps_and_widen_for_flanking_ones():
+    genes = [{"protein_id": "g1", "start": 1000, "end": 2000, "strand": "+", "number": 1},
+             {"protein_id": "g2", "start": 3000, "end": 4000, "strand": "-", "number": 2}]
+    plain = charts.neighborhood(genes, start_edge=False, end_edge=False)
+    assert 'viewBox="0 0 1000 72"' in plain and "<rect" not in plain and "976.0,28" in plain
+    inner = charts.neighborhood(genes, start_edge=False, end_edge=False,
+                                features=[{"start": 500, "end": 2500, "kind": "prophage", "label": "Prophage region"}])
+    # overlapping feature is clipped at the first gene, so the genes keep their positions
+    assert 'points="24.0,28' in inner and '<rect x="24.0" y="60"' in inner
+    flank = charts.neighborhood(genes, start_edge=False, end_edge=True,
+                                features=[{"start": 4100, "end": 4300, "kind": "crispr", "label": "CRISPR array"}])
+    # flanking array widens the range: the last gene now ends before the right padding
+    assert '<rect x="' in flank and 'points="24.0,28' in flank and "976.0,28" not in flank
+    # a narrow band at the right edge carries its label on the left, inside the plot
+    assert 'text-anchor="end">CRISPR array</text>' in flank
 
 
 def test_domain_and_contig_pages(client):

@@ -281,20 +281,54 @@ def domain_track(length: int | None, domains: list[dict[str, Any]], width: int =
                   f'class="backbone"/>{"".join(boxes)}{"".join(labels)}</svg>')
 
 
-def neighborhood(genes: list[dict[str, Any]], *, start_edge: bool, end_edge: bool, width: int = 1000) -> Markup:
-    """Genes to scale with strand arrows, numbered to match the legend table."""
+def neighborhood(genes: list[dict[str, Any]], *, start_edge: bool, end_edge: bool, width: int = 1000,
+                 features: list[dict[str, Any]] | None = None) -> Markup:
+    """Genes to scale with strand arrows, numbered to match the legend table.
+
+    ``features`` (``start``, ``end``, ``kind``, ``label``, optional ``color``, ``title`` and ``href``) are drawn as
+    bands below the genes. A feature lying wholly beyond the outermost gene widens the plot to include
+    it; one overlapping the genes is clipped to them.
+    """
     if not genes:
         return Markup("")
+    features = [f for f in features or [] if f.get("start") is not None and f.get("end") is not None]
     lo, hi = min(g["start"] for g in genes), max(g["end"] for g in genes)
+    outside = [f for f in features if f["end"] < lo or f["start"] > hi]
+    lo, hi = min([lo, *(f["start"] for f in outside)]), max([hi, *(f["end"] for f in outside)])
     pad = 24
     scale = (width - 2 * pad) / max(1, hi - lo)
+    bands, lanes = [], []
+    for f in sorted(features, key=lambda f: f["start"]):
+        x1, x2 = pad + (max(f["start"], lo) - lo) * scale, pad + (min(f["end"], hi) - lo) * scale
+        x2 = max(x2, x1 + 3)
+        label = str(f.get("label") or f.get("kind") or "")
+        text_w = 6 * len(label)
+        # label inside a wide band, else beside it: right, or left where the right would leave the plot
+        place = "inside" if x2 - x1 >= text_w + 8 else ("right" if x2 + 4 + text_w <= width else "left")
+        left = x1 - 4 - text_w if place == "left" else x1
+        right = x2 + 4 + text_w if place == "right" else x2
+        lane = next((i for i, free in enumerate(lanes) if left >= free), len(lanes))
+        if lane == len(lanes):
+            lanes.append(0)
+        lanes[lane] = int(right + 8)
+        y = 60 + lane * 16
+        color = f.get("color") or OVERLAY_COLORS.get(f.get("kind"), "#9aa3ad")
+        text = {"inside": f'<text x="{x1 + 4:.1f}" y="{y + 10}" class="band-label">{_e(label)}</text>',
+                "right": f'<text x="{x2 + 4:.1f}" y="{y + 10}" class="axis">{_e(label)}</text>',
+                "left": f'<text x="{x1 - 4:.1f}" y="{y + 10}" class="axis" text-anchor="end">{_e(label)}</text>'}[place]
+        band = (f'<g><title>{_e(f.get("title") or label)} · {f["start"]:,}–{f["end"]:,}</title>'
+                f'<rect x="{x1:.1f}" y="{y}" width="{x2 - x1:.1f}" height="12" rx="3" fill="{color}" opacity=".85"/>'
+                f'{text}</g>')
+        bands.append(f'<a href="{_e(f["href"])}">{band}</a>' if f.get("href") else band)
+    height = 72 + 16 * len(lanes)
     parts = ['<line x1="0" y1="40" x2="{0}" y2="40" class="backbone-line"/>'.format(width)]
     if start_edge:
-        parts.append(f'<line x1="{pad - 10}" y1="14" x2="{pad - 10}" y2="66" class="contig-end"/>'
+        parts.append(f'<line x1="{pad - 10}" y1="14" x2="{pad - 10}" y2="{height - 6}" class="contig-end"/>'
                      f'<text x="{pad - 6}" y="12" class="axis">contig start</text>')
     if end_edge:
-        parts.append(f'<line x1="{width - pad + 10}" y1="14" x2="{width - pad + 10}" y2="66" class="contig-end"/>'
+        parts.append(f'<line x1="{width - pad + 10}" y1="14" x2="{width - pad + 10}" y2="{height - 6}" class="contig-end"/>'
                      f'<text x="{width - pad - 62}" y="12" class="axis">contig end</text>')
+    parts.extend(bands)
     for g in genes:
         x1, x2 = pad + (g["start"] - lo) * scale, pad + (g["end"] - lo) * scale
         head = min(10.0, (x2 - x1) * 0.45)
@@ -310,7 +344,7 @@ def neighborhood(genes: list[dict[str, Any]], *, start_edge: bool, end_edge: boo
             f'<a href="/protein/{quote(g["protein_id"], safe="")}"><g><title>{_e(g["number"])}. '
             f'{_e(g.get("annotation") or "no annotation")}</title><polygon class="{cls}" points="{points}"{fill}/>'
             f'<text x="{(x1 + x2) / 2:.1f}" y="{y + 4}" class="gene-num">{g["number"]}</text></g></a>')
-    return Markup(f'<svg class="hood" viewBox="0 0 {width} 72" role="img" aria-label="Gene neighborhood">'
+    return Markup(f'<svg class="hood" viewBox="0 0 {width} {height}" role="img" aria-label="Gene neighborhood">'
                   f'{"".join(parts)}</svg>')
 
 

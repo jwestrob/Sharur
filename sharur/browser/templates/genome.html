@@ -7,7 +7,7 @@
   <div class="stat"><b>{{ bp(g.length) }}</b><span>assembled</span></div>
   <div class="stat"><b>{{ num(g.contigs) }}</b><span>contigs · N50 {{ bp(g.n50) }}</span></div>
   <div class="stat"><b>{{ num(g.proteins) }}</b><span>proteins</span></div>
-  <div class="stat"><b>{{ pct(g.annotated / (g.proteins or 1)) }}</b><span>with an annotation hit</span></div>
+  <div class="stat"><b>{{ pct(g.annotated / (g.proteins or 1)) }}</b><span>of proteins with an annotation hit</span></div>
   {% if g.completeness is not none %}<div class="stat"><b>{{ num(g.completeness) }}%</b><span>complete · {{ num(g.contamination) }}% contam.</span></div>{% endif %}
 </div>
 

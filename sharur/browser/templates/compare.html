@@ -57,7 +57,7 @@
       <tr><td>Proteins</td><td class="num">{{ num(st_a.proteins|round|int) }}</td><td class="num">{{ num(st_b.proteins|round|int) }}</td></tr>
       <tr><td>Contigs</td><td class="num">{{ num(st_a.contigs|round|int) }}</td><td class="num">{{ num(st_b.contigs|round|int) }}</td></tr>
       <tr><td>N50</td><td class="num">{{ bp(st_a.n50) }}</td><td class="num">{{ bp(st_b.n50) }}</td></tr>
-      <tr><td>With an annotation hit</td><td class="num">{{ pct(st_a.annotated) }}</td><td class="num">{{ pct(st_b.annotated) }}</td></tr>
+      <tr><td>Proteins with an annotation hit</td><td class="num">{{ pct(st_a.annotated) }}</td><td class="num">{{ pct(st_b.annotated) }}</td></tr>
       {% if result.function_counts %}<tr><td>Functional labels present</td><td class="num">{{ num(result.function_counts.a) }}</td><td class="num">{{ num(result.function_counts.b) }}</td></tr>{% endif %}
       {% if result.domain_counts %}<tr><td>Pfam families present</td><td class="num">{{ num(result.domain_counts.a) }}</td><td class="num">{{ num(result.domain_counts.b) }}</td></tr>{% endif %}
     </tbody>

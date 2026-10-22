@@ -13,7 +13,7 @@
     <a class="stat" href="/genomes"><b>{{ num(catalog.totals.genomes) }}</b><span>genomes</span></a>
     <div class="stat"><b>{{ bp(catalog.totals.bases) }}</b><span>{{ o.sequence_label }}</span></div>
     <div class="stat"><b>{{ num(catalog.totals.proteins) }}</b><span>proteins</span></div>
-    <div class="stat"><b>{{ pct(catalog.totals.annotated / (catalog.totals.proteins or 1)) }}</b><span>with an annotation hit</span></div>
+    <div class="stat"><b>{{ pct(catalog.totals.annotated / (catalog.totals.proteins or 1)) }}</b><span>of proteins with an annotation hit</span></div>
     {% if q.scored %}<a class="stat" href="#quality"><b>{{ num(q.tiers.high) }}</b><span>high-quality genomes</span></a>{% endif %}
     <a class="stat" href="/systems"><b>{{ num(total_calls) }}</b><span>curated system calls</span></a>
   </div>
