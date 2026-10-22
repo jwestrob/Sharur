@@ -17,12 +17,17 @@ and requires both tools to agree.
 Usage:
     python scripts/classify_cazymes.py --db data/my_dataset/sharur.duckdb --threads 8
 
+    # Compute on a cluster against a read-only database, load elsewhere:
+    python scripts/classify_cazymes.py --db DB --threads N --results-only --out cazy.tsv
+    python scripts/classify_cazymes.py --db DB --load-results cazy.tsv
+
 References:
     Zheng J, et al. (2023) dbCAN3: automated carbohydrate-active enzyme and
     substrate annotation. Nucleic Acids Res 51(W1):W115-W121.
 """
 
 import argparse
+import os
 import shutil
 import subprocess
 import tempfile
@@ -54,8 +59,18 @@ CAZY_PREFIX_RE = re.compile(r'^(GH|GT|PL|CE|CBM|AA)\d+')
 
 # ── Database discovery ─────────────────────────────────────────────────────────
 
-def get_dbcan_path() -> Path:
-    """Find the dbCAN database directory (must contain CAZy.dmnd + dbCAN.hmm)."""
+def get_dbcan_path(override: str | Path | None = None) -> Path:
+    """Find the dbCAN database directory (must contain CAZy.dmnd + dbCAN.hmm).
+
+    ``override`` or ``$SHARUR_DBCAN_DIR`` names it explicitly; otherwise the
+    standard locations are searched.
+    """
+    explicit = override or os.environ.get("SHARUR_DBCAN_DIR")
+    if explicit:
+        path = Path(explicit)
+        if (path / "CAZy.dmnd").exists() and (path / "dbCAN.hmm").exists():
+            return path
+        raise FileNotFoundError(f"dbCAN directory {path} lacks CAZy.dmnd + dbCAN.hmm")
     candidates = [
         Path(__file__).parent.parent / "data/dbcan_db",
         Path(__file__).parent.parent / "data/reference/dbcan",
@@ -128,22 +143,20 @@ def find_or_extract_proteins(db_path: str, verbose: bool = True) -> tuple:
     tmp_dir = tempfile.mkdtemp(prefix="cazyme_prot_")
     fasta_path = Path(tmp_dir) / "proteins.faa"
 
-    db = duckdb.connect(db_path, read_only=True)
-    batch, offset, written = 100_000, 0, 0
+    # One streamed scan: paging with LIMIT/OFFSET and no ORDER BY can skip or
+    # repeat rows under a parallel scan.
+    db = duckdb.connect(db_path, read_only=True, config={"threads": 4})
+    written = 0
+    cursor = db.execute(
+        "SELECT protein_id, sequence FROM proteins "
+        "WHERE sequence IS NOT NULL AND sequence != '' ORDER BY protein_id"
+    )
     with open(fasta_path, 'w') as f:
-        while True:
-            rows = db.execute(
-                "SELECT protein_id, sequence FROM proteins "
-                f"WHERE sequence IS NOT NULL AND sequence != '' "
-                f"LIMIT {batch} OFFSET {offset}"
-            ).fetchall()
-            if not rows:
-                break
+        while rows := cursor.fetchmany(100_000):
             for pid, seq in rows:
                 f.write(f">{pid}\n{seq}\n")
                 written += 1
-            offset += batch
-            if written % 500_000 == 0:
+            if written % 500_000 < 100_000:
                 _log(f"[cazyme]   extracted {written:,} sequences...")
     db.close()
 
@@ -158,24 +171,26 @@ def _subset_fasta(prot_dir: str, protein_ids: set,
     Returns path to new temp directory containing the subset .faa.
     Caller is responsible for cleanup.
     """
-    faa_files = list(Path(prot_dir).glob("*.faa"))
+    faa_files = sorted(Path(prot_dir).glob("*.faa"))
     if not faa_files:
         raise FileNotFoundError(f"No .faa files in {prot_dir}")
 
     sub_dir = tempfile.mkdtemp(prefix="cazyme_sub_")
     sub_faa = Path(sub_dir) / "subset.faa"
     written = 0
-    with open(faa_files[0]) as fin, open(sub_faa, 'w') as fout:
-        write_this = False
-        for line in fin:
-            if line.startswith('>'):
-                pid = line[1:].split()[0]
-                write_this = pid in protein_ids
-                if write_this:
-                    fout.write(line)
-                    written += 1
-            elif write_this:
-                fout.write(line)
+    with open(sub_faa, 'w') as fout:
+        for faa in faa_files:  # every file: a stage03 directory holds one FAA per genome
+            with open(faa) as fin:
+                write_this = False
+                for line in fin:
+                    if line.startswith('>'):
+                        pid = line[1:].split()[0]
+                        write_this = pid in protein_ids
+                        if write_this:
+                            fout.write(line)
+                            written += 1
+                    elif write_this:
+                        fout.write(line)
 
     if verbose:
         print(f"  Subset for dbCAN-sub: {written:,} / {len(protein_ids):,} "
@@ -199,13 +214,19 @@ def parse_cazy_families(subject_id: str) -> list[str]:
     return families
 
 
+DIAMOND_CACHE = "cazyme_diamond_hits.tsv"
+
+
 def load_diamond_cache(db_path: str,
                        verbose: bool = True) -> dict[str, dict[str, tuple]] | None:
-    """Load cached DIAMOND results from cazyme_classification.tsv if present.
+    """Load cached DIAMOND results from cazyme_diamond_hits.tsv if present.
+
+    The cache has its own file: the consensus table (cazyme_classification.tsv)
+    merges HMM families and must never be read back as DIAMOND evidence.
 
     Returns {protein_id: {family_class: (evalue, bitscore)}} or None if no cache.
     """
-    tsv = Path(db_path).parent / "cazyme_classification.tsv"
+    tsv = Path(db_path).parent / DIAMOND_CACHE
     if not tsv.exists():
         return None
 
@@ -238,7 +259,7 @@ def load_diamond_cache(db_path: str,
 
 def _save_diamond_cache(hits: dict, data_dir: Path,
                         verbose: bool = True) -> None:
-    """Save DIAMOND hits to cazyme_classification.tsv for future reuse."""
+    """Save DIAMOND hits to cazyme_diamond_hits.tsv for future reuse."""
     rows = []
     for pid, fam_dict in hits.items():
         for fam, (ev, bs) in fam_dict.items():
@@ -251,7 +272,7 @@ def _save_diamond_cache(hits: dict, data_dir: Path,
             })
     if rows:
         df = pd.DataFrame(rows)
-        out = data_dir / "cazyme_classification.tsv"
+        out = data_dir / DIAMOND_CACHE
         df.to_csv(out, sep='\t', index=False)
         if verbose:
             print(f"  Saved DIAMOND cache to {out.name}")
@@ -323,9 +344,11 @@ def run_diamond(prot_dir: str, dbcan_path: Path, threads: int = 4,
         "--sensitive",
     ]
 
+    # stderr goes to a file: an unread stderr pipe can fill and stall DIAMOND
+    err_handle = tempfile.TemporaryFile(mode="w+")
     try:
         proc = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            cmd, stdout=subprocess.PIPE, stderr=err_handle,
             text=True, bufsize=1,
         )
     except FileNotFoundError:
@@ -351,13 +374,14 @@ def run_diamond(prot_dir: str, dbcan_path: Path, threads: int = 4,
             if verbose and n_lines % 500_000 == 0:
                 _log(f"  [diamond] Parsed {n_lines:,} hits, {len(hits):,} proteins so far...")
 
-        proc.wait(timeout=60)
-    except subprocess.TimeoutExpired:
+        proc.wait()
+    except BaseException:
         proc.kill()
-        _log("Warning: DIAMOND timed out")
-        return {}
+        raise
 
-    stderr_out = proc.stderr.read() if proc.stderr else ""
+    err_handle.seek(0)
+    stderr_out = err_handle.read()
+    err_handle.close()
     if proc.returncode != 0:
         _log(f"Warning: DIAMOND error (rc={proc.returncode}): {stderr_out[:500]}")
         return {}
@@ -385,6 +409,11 @@ def parse_hmm_family(hmm_name: str) -> str | None:
     return m.group(0) if m else None
 
 
+def _hmm_search_command() -> str:
+    """Aksha is the production HMM-search CLI; legacy astra forwards to it."""
+    return "aksha" if shutil.which("aksha") else "astra"
+
+
 def run_astra_hmm(prot_dir: str, label: str,
                   installed_hmm: str | None = None,
                   hmm_path: Path | None = None,
@@ -403,7 +432,7 @@ def run_astra_hmm(prot_dir: str, label: str,
 
     out_dir = tempfile.mkdtemp(prefix=f"cazyme_{label}_")
 
-    cmd = ["astra", "search", "--prot_in", prot_dir,
+    cmd = [_hmm_search_command(), "search", "--prot_in", prot_dir,
            "--outdir", out_dir, "--threads", str(threads)]
     if installed_hmm:
         cmd.extend(["--installed_hmms", installed_hmm])
@@ -412,15 +441,7 @@ def run_astra_hmm(prot_dir: str, label: str,
     else:
         return {}
 
-    try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True,
-            timeout=43200,  # 12 hours for very large datasets
-        )
-    except subprocess.TimeoutExpired:
-        print(f"Warning: Astra search ({label}) timed out")
-        shutil.rmtree(out_dir, ignore_errors=True)
-        return {}
+    result = subprocess.run(cmd, capture_output=True, text=True)
 
     if result.returncode != 0:
         print(f"Warning: Astra search ({label}) error: {result.stderr[:500]}")
@@ -566,6 +587,9 @@ def classify_cazymes(
     threads: int = 4,
     update_predicates: bool = True,
     verbose: bool = True,
+    dbcan_dir: str | Path | None = None,
+    write_db: bool = True,
+    results_out: str | Path | None = None,
 ) -> pd.DataFrame:
     """Full dbCAN 3-tool consensus CAZyme classification.
 
@@ -578,6 +602,12 @@ def classify_cazymes(
         threads: CPU threads for DIAMOND and Astra
         update_predicates: Whether to update protein_predicates
         verbose: Print progress
+        dbcan_dir: dbCAN release directory (default: $SHARUR_DBCAN_DIR, then
+            the standard locations)
+        write_db: False computes the consensus without opening the database
+            for writing (load it later with ``load_cazyme_results``)
+        results_out: Where to write the consensus table (default:
+            cazyme_classification.tsv beside the database)
 
     Returns:
         DataFrame with consensus classification results
@@ -587,7 +617,7 @@ def classify_cazymes(
 
     # Find databases
     try:
-        dbcan = get_dbcan_path()
+        dbcan = get_dbcan_path(dbcan_dir)
     except FileNotFoundError as e:
         _log(f"Error: {e}")
         return pd.DataFrame()
@@ -627,7 +657,9 @@ def classify_cazymes(
             _save_diamond_cache(diamond_hits, data_dir, verbose=verbose)
         _log(f"[cazyme] Tool 1 done: {len(diamond_hits):,} hits ({_time.time() - t1:.1f}s)")
 
-        # Tool 2: Astra/HMMER vs dbCAN.hmm (use --installed_hmms dbCAN)
+        # Tool 2: HMMER vs dbCAN.hmm from the same release as CAZy.dmnd and
+        # dbCAN_sub.hmm (the HMM-search registry's "dbCAN" entry can be an
+        # older release, so it is the fallback only)
         t2 = _time.time()
         _log(f"[cazyme] Tool 2: dbCAN HMM search...")
         hmm_cache = data_dir / "annotations" / "dbCAN_hits_df.tsv"
@@ -635,7 +667,7 @@ def classify_cazymes(
         if hmm_hits is None:
             hmm_hits = run_astra_hmm(
                 prot_dir, "dbCAN_HMM",
-                installed_hmm="dbCAN",
+                hmm_path=dbcan_hmm,
                 threads=threads, verbose=verbose,
             )
         _log(f"[cazyme] Tool 2 done: {len(hmm_hits):,} hits ({_time.time() - t2:.1f}s)")
@@ -672,9 +704,40 @@ def classify_cazymes(
             print("No CAZymes passed consensus filter")
         return results_df
 
-    # ── Load into database ─────────────────────────────────────────────────
+    out = Path(results_out) if results_out else Path(db_path).parent / "cazyme_classification.tsv"
+    results_df.to_csv(out, sep='\t', index=False)
+    _log(f"[cazyme] Consensus table: {out}")
+    if write_db:
+        load_cazyme_results(db_path, results_df, update_predicates=update_predicates,
+                            n_proteins=n_proteins, verbose=verbose)
+    _log(f"[cazyme] Total {_time.time() - t_total:.1f}s")
+    return results_df
+
+
+def load_cazyme_results(
+    db_path: str,
+    results_df: pd.DataFrame,
+    update_predicates: bool = True,
+    n_proteins: int | None = None,
+    verbose: bool = True,
+) -> dict[str, int]:
+    """Replace source='cazy' annotations with a consensus table and update predicates.
+
+    ``results_df`` is the table ``classify_cazymes`` writes (protein_id,
+    family_class, cazy_class, evalue, score, n_tools, tools). Rows naming
+    proteins absent from the database are dropped and counted.
+    """
     _log(f"[cazyme] Opening DB for annotation loading...")
     db = duckdb.connect(db_path)
+    known = set(r[0] for r in db.execute(
+        "SELECT protein_id FROM proteins WHERE protein_id IN (SELECT UNNEST(?::VARCHAR[]))",
+        [sorted(results_df['protein_id'].astype(str).unique())]).fetchall())
+    unknown = int((~results_df['protein_id'].astype(str).isin(known)).sum())
+    if unknown:
+        _log(f"[cazyme] Dropping {unknown:,} rows for proteins absent from the database")
+        results_df = results_df[results_df['protein_id'].astype(str).isin(known)].copy()
+    if n_proteins is None:
+        n_proteins = db.execute("SELECT COUNT(*) FROM proteins").fetchone()[0]
 
     # Clear existing CAZy annotations
     existing = db.execute(
@@ -778,14 +841,9 @@ def classify_cazymes(
         for fam, cnt in fam_counts.sort_values(ascending=False).head(20).items():
             print(f"  {fam}: {cnt:,}")
 
-    # Save detailed results
-    out = Path(db_path).parent / "cazyme_classification.tsv"
-    results_df.to_csv(out, sep='\t', index=False)
-    if verbose:
-        print(f"\nResults saved to: {out}")
-
     db.close()
-    return results_df
+    return {"annotations": len(insert_df), "proteins": int(results_df['protein_id'].nunique()),
+            "dropped_unknown": unknown}
 
 
 # ── CLI ────────────────────────────────────────────────────────────────────────
@@ -809,17 +867,42 @@ def main():
         help="Skip predicate updates",
     )
     parser.add_argument(
+        "--dbcan-dir", default=None,
+        help="dbCAN release directory (default: $SHARUR_DBCAN_DIR, then standard locations)",
+    )
+    parser.add_argument(
+        "--results-only", action="store_true",
+        help="Compute the consensus table without writing to the database",
+    )
+    parser.add_argument(
+        "--out", default=None,
+        help="Consensus table path (default: cazyme_classification.tsv beside the database)",
+    )
+    parser.add_argument(
+        "--load-results", default=None, metavar="TSV",
+        help="Load a precomputed consensus table into the database and exit",
+    )
+    parser.add_argument(
         "--quiet", action="store_true",
         help="Suppress progress output",
     )
 
     args = parser.parse_args()
 
+    if args.load_results:
+        stats = load_cazyme_results(args.db, pd.read_csv(args.load_results, sep='\t'),
+                                    update_predicates=not args.no_update, verbose=not args.quiet)
+        _log(f"[cazyme] Loaded {stats}")
+        return 0
+
     results = classify_cazymes(
         db_path=args.db,
         threads=args.threads,
         update_predicates=not args.no_update,
         verbose=not args.quiet,
+        dbcan_dir=args.dbcan_dir,
+        write_db=not args.results_only,
+        results_out=args.out,
     )
 
     return 0 if not results.empty else 1
