@@ -12,9 +12,12 @@
 #   all_of: [conditions]      - all conditions must be true
 #   any_of: [conditions]      - at least one condition must be true
 #   none_of: [conditions]     - no condition may be true
+#
+# Every has_atom names a vocabulary predicate (sharur/predicates/vocabulary.py);
+# load_composites rejects unknown atoms, relations, facets and operators.
 
 nife_hydrogenase_validated:
-  description: "NiFe hydrogenase with nickel-binding domain evidence and no implied Complex I subunit"
+  description: "NiFe hydrogenase with nickel-binding domain evidence and no Complex I review flag"
   facet: activity
   requires:
     all_of:
@@ -22,8 +25,9 @@ nife_hydrogenase_validated:
         relation_in: [implies, supports]
       - has_atom: nickel_binding
     none_of:
-      - has_atom: complex_I_subunit
-        relation: implies
+      # HydDB NiFe hit with Complex I-superfamily domains and no NiFeSe_Hases:
+      # a respiratory Complex I (Nuo) homolog until reviewed. Emitted as `flags`.
+      - has_atom: hydrogenase_complex1_review
 
 fefe_hydrogenase_validated:
   description: "FeFe hydrogenase with iron-sulfur domain evidence"

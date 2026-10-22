@@ -19,6 +19,45 @@ HOMONYMS = {
     ("Cas1_AcylT", "defense_system"): "fungal Cas1p capsule O-acetyltransferase, unrelated to CRISPR Cas1",
     ("Cas1_AcylT", "crispr_associated"): "fungal Cas1p capsule O-acetyltransferase, unrelated to CRISPR Cas1",
     ("Cas1_AcylT", "cas_domain"): "fungal Cas1p capsule O-acetyltransferase, unrelated to CRISPR Cas1",
+    ("CobW_C_DAAF9", "cobalamin_biosynthesis"): "dynein axonemal assembly factor 9 domain resembling the CobW C-terminus",
+}
+
+# Families named after some of their members: a founding member's cofactor,
+# complex or substrate, or one of several proteins the description lists. For
+# these pairs the family's wording (name, description, ENZYME names in the
+# description) is no evidence, because it states a property of those members
+# alone; InterPro GO annotation and reviewed-protein consensus still count.
+# Applies to Pfam families only (judge); KEGG wording names one KO.
+# (family name, predicate) -> which members carry the property.
+SUBSET_NAMES = {
+    (family, predicate): reason
+    for family, predicates, reason in [
+        ("NiFeSe_Hases", ("nifese_hydrogenase", "selenium_metabolism"),
+         "all [NiFe] hydrogenase large subunits; the selenocysteine [NiFeSe] enzymes are a few members"),
+        ("SelR", ("selenium_metabolism",),
+         "methionine-R-sulfoxide reductase B family; selenoprotein R (MsrB1) is one member"),
+        ("SepSecS", ("selenium_metabolism",),
+         "SepSecS and the selenium-free Sep-tRNA:Cys-tRNA synthase SepCysS"),
+        ("MbhD", ("nife_hydrogenase", "nife_group4", "mbh_hydrogenase"),
+         "Mrp/Mnh cation/proton antiporter subunit A C-terminal domain; Mbh/Ehb subunit D is one member"),
+        ("MbhE", ("nife_hydrogenase", "nife_group4", "mbh_hydrogenase"),
+         "Mrp/Mnh cation/proton antiporter subunit A C-terminal domain; Mbh subunit E is one member"),
+        ("CbiA", ("cobalamin_biosynthesis", "cofactor_biosynthesis", "chromosome_partitioning", "cell_division"),
+         "nucleotide-binding domain shared by CobQ, CobB, MinD, ParA, Mrp/ApbC and SRP GTPases"),
+        ("cobW", ("cobalamin_biosynthesis", "cofactor_biosynthesis", "nickel_binding"),
+         "G3E GTPases: CobW, HypB, UreG, MeaB and zinc chaperones (YjiA, YeiR, ZNG1)"),
+        ("CobW_C", ("cobalamin_biosynthesis", "cofactor_biosynthesis", "cobalamin_binding", "cobalt_binding"),
+         "C-terminal domain of COG0523 GTPases: CobW and zinc chaperones (YjiA, YeiR, ZNG1)"),
+        ("CbiQ", ("cobalamin_biosynthesis", "cofactor_biosynthesis", "cobalt_binding", "metal_binding"),
+         "energy-coupling factor transporter T component for many substrates (EcfT, BioN, CbiQ, NikQ)"),
+        ("CobN-Mg_chel", ("cobalamin_biosynthesis",),
+         "cobaltochelatase CobN and magnesium chelatase subunit H"),
+        ("TraB_PrgY_gumN", ("conjugation",),
+         "pheromone-shutdown TraB/PrgY of conjugative plasmids, with TIKI metalloproteases, YbaP and archaeal homologs"),
+        ("DegT_DnrJ_EryC1", ("secondary_metabolism",),
+         "sugar aminotransferases for LPS and glycans (DegT, ArnB, PglE); DnrJ/EryC1/StrS antibiotic members are a few"),
+    ]
+    for predicate in predicates
 }
 
 E = {}
@@ -116,7 +155,7 @@ d("sam_binding", ["GO:1904047"], [r"S-adenosyl|\bSAM[- ]binding|\bSAM[- ]depende
 d("radical_sam", ["GO:0051539"], [r"radical ?SAM|Radical_SAM|SPASM|\bRS_|DUF4953"])
 d("coenzyme_a_binding", ["GO:0120225"], [r"\bCoA\b|coenzyme A"])
 d("f420_dependent", [], [r"F420|F_420|coenzyme F420"])
-d("oxygen_binding", ["GO:0019825"], [r"oxygen[- ]binding|globin|hemerythrin|hemocyanin|NiFe_hyd_SSU"])
+d("oxygen_binding", ["GO:0019825"], [r"oxygen[- ]binding|globin|hemerythrin|hemocyanin"])
 d("cytochrome", [], [r"cytochrom|apocytochrom|Apocytochr|\bCyt_|Cytochrom_|COX|\bcyt\b"])
 d("thioredoxin", ["GO:0015035"], [r"thioredoxin|Thioredoxin|\bTrx|Redoxin|DsbA|DsbB|DsbD|Glutaredoxin|glutaredoxin|\bTlpA|AhpC|SCO1|ResA"])
 d("glutaredoxin", ["GO:0015038"], [r"glutaredoxin"])
@@ -231,7 +270,7 @@ d("histone", ["GO:0000786", "GO:0030527"], [r"histone|Histone|CBFD_NFYB|HMF|HMf"
 d("divisome", ["GO:1990586", "GO:0032153"], [r"divisome|Fts[A-Z]|FtsZ|ZipA|ZapA|SepF|Septum|septal"])
 d("ftsz", ["GO:0043093"], [r"FtsZ|Tubulin/FtsZ|Tubulin"])
 d("ribosomal_protein", ["GO:0003735", "GO:0005840"], [r"ribosomal protein|Ribosomal|ribosom.*subunit"])
-d("trna_synthetase", ["GO:0004812", "GO:0043039", "GO:0006418"], [r"tRNA[- ]synthetase|tRNA-synt|aminoacyl[- ]tRNA|tRNA ligase|anticodon[- ]binding|Anticodon|tRNA_anti|tRNA-synt_|DALR|TGS|SelR|tRNA_edit|B3_4|B5|Val_tRNA|FDX-ACB|GAD|tRNA_bind"])
+d("trna_synthetase", ["GO:0004812", "GO:0043039", "GO:0006418"], [r"tRNA[- ]synthetase|tRNA-synt|aminoacyl[- ]tRNA|tRNA ligase|anticodon[- ]binding|Anticodon|tRNA_anti|tRNA-synt_|DALR|TGS|tRNA_edit|B3_4|B5|Val_tRNA|FDX-ACB|GAD|tRNA_bind"])
 d("trna_modification", ["GO:0006400", "GO:0008175", "GO:0030488", "GO:0002098", "GO:0006400"], [r"tRNA", r"queuosine|wybutosine|archaeosine|thiouridine|pseudouridine|TruA|TruB|TruD|RluA|Trm|Tgt|TYW|Tad|TilS|MnmA|MnmE|MnmG|GidA|ThiI|Thg1|Kae1|YgjD|Sua5|YrdC|TsaB|TsaC|TsaD|TsaE|Mia|MiaA|MiaB|QueA|QueC|QueD|QueE|QueF|DUS|Dus|NSUN|PUA|THUMP|TRAM|Elp3|CTU|Ncs|DUF55|Pcc1|Cgi121|KEOPS|Bud32|RtcB|Rtc|CCA|tRNA_NucTran"])
 d("rrna_modification", ["GO:0000154", "GO:0008649", "GO:0031167"], [r"rRNA|RsmA|RsmB|RsmC|RsmD|RsmE|RsmF|RsmG|RsmH|RsmI|RsmJ|RlmA|RlmB|RlmC|RlmD|RlmE|RlmF|RlmG|RlmH|RlmI|RlmJ|RlmK|RlmL|RlmM|RlmN|Fibrillarin|Nop|Nep1|KsgA|Dim1|ErmC|Erm|RrmJ|FtsJ|SpoU|Methyltr_RsmB|RluA|RluB|RluC|RluD|RsuA|TlyA|DUF|Gar1|Nop10|Cbf5|Pseudouridine"])
 d("pseudouridine_synthase", ["GO:0009982", "GO:0001522"], [r"pseudouridine|PseudoU|TruA|TruB|TruD|RluA|RsuA|Pus|Cbf5"])
@@ -456,7 +495,9 @@ d("mcr_complex", ['GO:0050524', 'GO:0015948'], ['methyl[- ]coenzyme M reductase'
 
 d("methanogenesis", ['GO:0015948', 'GO:0050524', 'GO:0019386', 'GO:0019385', 'GO:0019387'], ['methanogen|methyl[- ]coenzyme M|coenzyme M|heterodisulfide|methanopterin|methanofuran|formylmethanofuran|trimethylamine|methylamine', 'MCR_|Mtr[A-H]|MtrH|Fmd|Fwd|Mtd\\b|Mch\\b|FTR\\b|Hdr[A-E]|Frh[ABG]|Mvh[ADG]|Eha\\b|Ehb\\b|MtaA|MtaB|MttB|MtbA|MtmB|CdhC|CdhD|CO_dh'])
 
-d("nickel_binding", ['GO:0016151'], ['nickel|urease|NiFe', 'Ni_|HypA|HypB|UreE|UreG|NikA|NikR|MCR_|CO_dh|CdhC|Ni-'])
+# "NiFe" names the hydrogenase class, which its small subunit, membrane subunits and
+# chaperones carry in their names; the nickel sits in the large subunit (GO, Swiss-Prot).
+d("nickel_binding", ['GO:0016151'], ['nickel|urease', 'Ni_|HypA|HypB|UreE|UreG|NikA|NikR|MCR_|CO_dh|CdhC|Ni-'])
 
 d("iron_sulfur", ['GO:0051536', 'GO:0051539', 'GO:0051537', 'GO:0051538'], ['iron[- ]sulfur|iron[- ]sulphur|4fe-4s|2fe-2s|3fe-4s|radical sam|fe-s cluster', 'Fer[24]|Fe-?S\\b|FeS\\b|Rieske|Radical_SAM|NifU|SufE|IscU|DHODB_Fe-S|Fe-S_bind|Fer4_NifH|Molybdop_Fe4S4|SPASM'])
 

@@ -5,7 +5,9 @@ A (Pfam family, predicate) pair is supported by one of:
 - ``go:<GO id>``: the family's InterPro GO annotation (pfam2go), closed over
   is_a/part_of ancestors, contains a GO anchor of the predicate;
 - ``text:<match>``: the family's Pfam name or description states the predicate
-  (see :mod:`sharur.predicates.mappings.pfam_evidence_spec` for conventions);
+  (see :mod:`sharur.predicates.mappings.pfam_evidence_spec` for conventions;
+  families named after some of their members, ``SUBSET_NAMES``, take no text
+  or ENZYME-name evidence for those members' properties);
 - ``enzyme:<EC> (<name>)``: the description names an enzyme listed in the
   Expasy ENZYME database whose EC class maps to the predicate through
   :data:`sharur.predicates.mappings.kegg_map.EC_TO_PREDICATES`;
@@ -24,7 +26,7 @@ from __future__ import annotations
 import re
 from functools import cache
 
-from sharur.predicates.mappings.pfam_evidence_spec import HOMONYMS
+from sharur.predicates.mappings.pfam_evidence_spec import HOMONYMS, SUBSET_NAMES
 from sharur.predicates.mappings.pfam_evidence_spec import E as EVIDENCE
 
 
@@ -197,7 +199,12 @@ def vetted_match(patterns, text: str, predicate: str = "") -> str | None:
 
 
 def text_evidence(predicate: str, name: str, desc: str) -> str | None:
-    """Return the matched wording when the Pfam name/description states the predicate."""
+    """Return the matched wording when the name/description states the predicate.
+
+    Shared by the Pfam and KEGG builders (KEGG passes KO symbols as ``name``);
+    family-specific exclusions (``HOMONYMS``, ``SUBSET_NAMES``) apply in
+    :func:`judge`, which only Pfam families reach.
+    """
     return vetted_match(_compiled(predicate), f"{name} {desc}", predicate)
 
 
@@ -235,6 +242,11 @@ def judge(predicate: str, name: str, desc: str, go_closure, enzyme_names) -> str
     for go in EVIDENCE.get(predicate, {}).get("go", ()):
         if go in go_closure:
             return f"go:{go}"
+    if (name, predicate) in SUBSET_NAMES:
+        # The family is named after some of its members: its name, description
+        # and ENZYME names state their properties, not the family's. GO above
+        # and reviewed-protein consensus (build time) can still support the pair.
+        return None
     match = text_evidence(predicate, name, desc)
     if match:
         return f"text:{match}"

@@ -30,13 +30,13 @@ installed Pfam-A.hmm, Swiss-Prot 2026_03, KEGG REST ko/brite dated 2026-09-24).
 
 ### Pfam families (`sharur/predicates/mappings/data/pfam_predicates.tsv`, shipped)
 
-30,024 pairs over 17,020 families, built by `scripts/build_pfam_predicate_map.py`.
+29,989 pairs over 17,016 families, built by `scripts/build_pfam_predicate_map.py`.
 
 | Evidence | Pairs | Meaning |
 |---|---|---|
-| `text:<match>` | 23,042 | The family's Pfam name or description states the predicate |
+| `text:<match>` | 23,004 | The family's Pfam name or description states the predicate |
 | `go:<GO id>` | 3,930 | The family's InterPro GO annotation (pfam2go), closed over is_a/part_of ancestors, reaches a GO term anchored to the predicate |
-| `swissprot:...` | 2,837 | Reviewed proteins carrying the family agree (below) |
+| `swissprot:...` | 2,840 | Reviewed proteins carrying the family agree (below) |
 | `enzyme:<EC> (<name>)` | 215 | The description names an Expasy ENZYME enzyme whose EC class maps to the predicate |
 
 GO anchors and text patterns for each predicate live in
@@ -109,6 +109,16 @@ Name and description matching (Pfam, KEGG, VOG) follows one set of rules
   skip it.
 - `HOMONYMS` lists family/predicate pairs where the wording is a known
   homonym.
+- `SUBSET_NAMES` lists Pfam family/predicate pairs where the family is named
+  after some of its members: a founding member's cofactor, complex or substrate
+  (NiFeSe_Hases covers every [NiFe] large subunit; MbhD/MbhE are mostly Mrp
+  antiporter subunit A; CbiQ is the ECF transporter T component for many
+  substrates), or one of several proteins the description lists (CbiA:
+  CobQ/CobB/MinD/ParA; cobW: CobW/HypB/UreG). For these pairs the name,
+  description and ENZYME names in the description are no evidence; InterPro GO
+  and reviewed-protein consensus still count. The check sits in
+  `pfam_evidence.judge`, so KEGG wording (KO symbols such as `cobW`) is judged
+  on its own.
 
 ## Reviewed-protein (Swiss-Prot) consensus
 

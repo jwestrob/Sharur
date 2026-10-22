@@ -24,10 +24,11 @@ from sharur.predicates.mappings.pfam_evidence import (
     SWISSPROT_KO_MAJORITY,
     SWISSPROT_MIN_LOWER_BOUND,
     SWISSPROT_SINGLE,
+    judge,
     text_evidence,
     wilson_lower_bound,
 )
-from sharur.predicates.mappings.pfam_evidence_spec import HOMONYMS
+from sharur.predicates.mappings.pfam_evidence_spec import HOMONYMS, SUBSET_NAMES
 from sharur.predicates.vocabulary import PREDICATE_BY_ID
 
 
@@ -88,7 +89,8 @@ def test_every_pair_reverifies_against_the_snapshot():
             ok = _meets_consensus(pred, detail)
         else:
             ok = False
-        if not ok or (snap["name"], pred) in HOMONYMS:
+        subset = kind in ("text", "enzyme") and (snap["name"], pred) in SUBSET_NAMES
+        if not ok or subset or (snap["name"], pred) in HOMONYMS:
             failures.append((acc, snap["name"], pred, ev))
     assert not failures, failures[:20]
 
@@ -176,11 +178,60 @@ def _families_with(pred):
     ("HNOB", {"cytochrome"}),                                           # heme binding without electron carriage
     ("Lipid_desat", {"monooxygenase"}),                                 # EC 1.14.19 desaturase
     ("TauD", {"monooxygenase"}),                                        # EC 1.14.11 2OG-dependent dioxygenase
+    ("MCRA", {"mcr_complex", "methanogenesis"}),                        # myosin cross-reactive antigen
+    # Families named after some of their members (SUBSET_NAMES) and name tokens
+    # that state another subunit's cofactor.
+    ("NiFeSe_Hases", {"nifese_hydrogenase", "selenium_metabolism"}),    # all [NiFe] large subunits
+    ("SelR", {"selenium_metabolism", "trna_synthetase"}),               # MsrB
+    ("SepSecS", {"selenium_metabolism"}),                               # also SepCysS
+    ("MbhD", {"nife_hydrogenase", "nife_group4", "mbh_hydrogenase"}),   # Mrp/Mnh antiporter subunit A
+    ("MbhE", {"nife_hydrogenase", "nife_group4", "mbh_hydrogenase"}),
+    ("CbiA", {"cobalamin_biosynthesis", "chromosome_partitioning", "cell_division"}),  # CobQ/CobB/MinD/ParA
+    ("cobW", {"cobalamin_biosynthesis", "nickel_binding"}),             # CobW/HypB/UreG/zinc chaperones
+    ("CobW_C", {"cobalamin_biosynthesis", "cobalamin_binding", "cobalt_binding"}),  # COG0523 zinc chaperones
+    ("CobW_C_DAAF9", {"cobalamin_biosynthesis"}),                       # dynein assembly factor DAAF9
+    ("CbiQ", {"cobalamin_biosynthesis", "cobalt_binding"}),             # ECF transporter T component
+    ("CobN-Mg_chel", {"cobalamin_biosynthesis"}),                       # also Mg-chelatase H
+    ("TraB_PrgY_gumN", {"conjugation"}),                                # TIKI/YbaP metalloprotease-like
+    ("DegT_DnrJ_EryC1", {"secondary_metabolism"}),                      # mostly LPS/glycan aminotransferases
+    ("NiFe_hyd_SSU_C", {"nickel_binding", "oxygen_binding"}),           # [NiFe] small subunit
+    ("NiFe_hyd_3_EhaA", {"nickel_binding"}),                            # Eha membrane subunits
+    ("Prd_NiFe_hyd_3_EhaI", {"nickel_binding"}),
+    ("Prd_NiFe_hyd_3_EhaK", {"nickel_binding"}),
+    ("NiFe-hyd_HybE", {"nickel_binding"}),                              # large-subunit chaperone
 ])
 def test_known_false_claims_stay_out(family, absent):
     accs = [acc for acc, (name, _, _) in MAP.items() if name == family]
     for acc in accs:
         assert not absent & set(MAP[acc][1]), (family, MAP[acc][1])
+
+
+def test_subset_names_take_no_wording_evidence():
+    desc = "Nickel-dependent hydrogenase"
+    # The wording matches; judge() refuses it for families named after some members.
+    assert text_evidence("selenium_metabolism", "NiFeSe_Hases", desc) == "NiFeSe"
+    assert judge("selenium_metabolism", "NiFeSe_Hases", desc, set(), {}) is None
+    assert judge("nifese_hydrogenase", "NiFeSe_Hases", desc, set(), {}) is None
+    # Family-wide properties keep their wording and GO evidence.
+    assert judge("hydrogen_metabolism", "NiFeSe_Hases", desc, set(), {}) == "text:NiFe"
+    assert judge("nickel_binding", "NiFeSe_Hases", desc, {"GO:0016151"}, {}) == "go:GO:0016151"
+    assert judge("selenium_metabolism", "SelA", "L-seryl-tRNA selenium transferase", set(), {}) == "text:SelA"
+    assert {pred for _, pred in SUBSET_NAMES} <= set(PREDICATE_BY_ID)
+    worded = {(MAP[acc][0], pred) for acc, pred, ev in PAIRS if ev.startswith(("text:", "enzyme:"))}
+    assert not worded & set(SUBSET_NAMES)
+
+
+def test_subset_names_leave_kegg_wording_alone():
+    # KEGG passes KO symbols as the name; K02234's symbol 'cobW' equals a Pfam family name.
+    assert text_evidence("cobalamin_biosynthesis", "cobW", "cobalamin biosynthesis protein CobW") is not None
+
+
+def test_nifese_hases_carries_only_family_wide_hydrogenase_claims():
+    # PF00374 covers every [NiFe] large subunit; selenocysteine enzymes are a few members.
+    (acc,) = [acc for acc, (name, _, _) in MAP.items() if name == "NiFeSe_Hases"]
+    preds = set(MAP[acc][1])
+    assert {"hydrogenase", "nife_hydrogenase", "nickel_binding"} <= preds
+    assert not {"selenium_metabolism", "nifese_hydrogenase"} & preds
 
 
 def test_substring_collisions_do_not_label_families():

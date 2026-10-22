@@ -2,7 +2,7 @@
 # Pfam: Pfam-A.hmm sha256 8bab3a946e6d99a4 (24076 families); Pfam-A.clans.tsv.gz (30134 families)
 # GO: pfam2go sha256 30274dd59c468d70; go-basic.obo sha256 b08d45b268b8c24c
 # ENZYME: enzyme.dat sha256 6e1f553fcaa15ba7
-# Swiss-Prot: uniprot_sprot.dat.gz 2026_03 sha256 c87208822a56e8ae (553,641 reviewed proteins with Pfam); KEGG gene links swissprot_kegg_ko.tsv sha256 20ab0dd3b910cb82; KO predicates from kegg_predicates.tsv sha256 af73e8717defd6ef
+# Swiss-Prot: uniprot_sprot.dat.gz 2026_03 sha256 c87208822a56e8ae (553,641 reviewed proteins with Pfam); KEGG gene links swissprot_kegg_ko.tsv sha256 bbdfec2875bc9ce7; KO predicates from kegg_predicates.tsv sha256 af73e8717defd6ef
 # accession	name	description	go_anchors	enzymes
 PF00001	7tm_1	7 transmembrane receptor (rhodopsin family)	GO:0007165,GO:0016020,GO:0023052,GO:0038023,GO:0065007	
 PF00002	7tm_2	7 transmembrane receptor (Secretin family)	GO:0007165,GO:0016020,GO:0023052,GO:0038023,GO:0065007	
@@ -1243,7 +1243,6 @@ PF01957	NfeD	NfeD-like C-terminal, partner-binding domain
 PF01958	Asp_DH_C	Aspartate dehydrogenase, C-terminal	GO:0003824,GO:0006163,GO:0006164,GO:0009058,GO:0009117,GO:0009165,GO:0009435,GO:0016491,GO:0016639,GO:0019363,GO:0055086	aspartate dehydrogenase=1.4.1.21
 PF01959	DHQS	3-dehydroquinate synthase II		3-dehydroquinate synthase=4.2.3.4;3-dehydroquinate synthase ii=1.4.1.24
 PF01960	ArgJ	ArgJ family	GO:0003824,GO:0006520,GO:0006526,GO:0008652,GO:0009058,GO:0016740	
-PF01963	TraB_PrgY_gumN	TraB/PrgY/gumN family		
 PF01964	ThiC_Rad_SAM	Radical SAM ThiC family	GO:0005488,GO:0006790,GO:0009058,GO:0009228,GO:0051536	
 PF01967	MoaC	MoaC family	GO:0006777,GO:0009058,GO:0032324	
 PF01968	Hydantoinase_A	Hydantoinase/oxoprolinase	GO:0003824,GO:0016787	
@@ -2298,6 +2297,7 @@ PF03903	Phage_T4_gp36	Phage T4 tail fibre
 PF03904	DUF334	Domain of unknown function (DUF334)		
 PF03906	Phage_T7_tail	Phage T7 tail fibre protein, N-terminal		
 PF03911	Sec61_beta	Sec61beta family		
+PF03912	Psb28	Psb28 protein	GO:0009521,GO:0009523,GO:0009654,GO:0015979,GO:0016020	
 PF03916	NrfD	Polysulphide reductase, NrfD		
 PF03917	GSH_synth_ATP	Eukaryotic glutathione synthase, ATP binding domain	GO:0000166,GO:0003824,GO:0005488,GO:0005524,GO:0006790,GO:0009058,GO:0016874,GO:0019184	glutathione synthase=6.3.2.3
 PF03918	CcmH	Cytochrome C biogenesis protein		
@@ -4185,7 +4185,6 @@ PF07676	PD40	WD40-like Beta Propeller Repeat
 PF07677	A2M_recep	A-macroglobulin receptor binding domain	GO:0005576	
 PF07681	DoxX	DoxX		
 PF07682	SOR	Sulphur oxygenase reductase		
-PF07683	CobW_C	Cobalamin synthesis protein cobW C-terminal domain		
 PF07685	GATase_3	CobB/CobQ-like glutamine amidotransferase domain	GO:0003824	
 PF07687	M20_dimer	Peptidase dimerisation domain		
 PF07690	MFS_1	Major Facilitator Superfamily	GO:0005215,GO:0006810,GO:0022857,GO:0055085	
@@ -7552,7 +7551,6 @@ PF13240	Zn_Ribbon_1	zinc-ribbon domain
 PF13241	NAD_binding_7	Putative NAD(P)-binding		
 PF13242	Hydrolase_like	HAD-hyrolase-like		
 PF13243	SQHop_cyclase_C	Squalene-hopene cyclase C-terminal domain		
-PF13244	MbhD	MBH, subunit D		
 PF13245	AAA_19	AAA domain		
 PF13246	Cation_ATPase	Cation transport ATPase (P-type)		
 PF13247	Fer4_11	4Fe-4S dicluster domain		
@@ -11948,7 +11946,6 @@ PF20489	Birna_RdRp_C	Birnavirus RNA dependent RNA polymerase (VP1), C-terminal
 PF20495	DUF6727	Family of unknown function (DUF6727)		
 PF20498	DUF6728	Family of unknown function (DUF6728)		
 PF20499	DUF6729	Domain of unknown function (DUF6729)		
-PF20501	MbhE	MBH, subunit E		
 PF20502	DNAPKcs_CC1-2	DNA-dependent protein kinase catalytic subunit, CC1/2		protein kinase=2.7.13.1|2.7.13.2|2.7.13.3
 PF20503	DUF6730	Family of unknown function (DUF6730)		
 PF20505	DUF6731	Family of unknown function (DUF6731)		
@@ -13304,7 +13301,6 @@ PF23311	DUF7084	Domain of unknown function (DUF7084)
 PF23312	UBA_SIK3	Protein kinase SIK3 UBA domain		protein kinase=2.7.13.1|2.7.13.2|2.7.13.3
 PF23317	YVC1_C	Calcium channel YVC1-like, C-terminal		
 PF23318	DUF7085	Domain of unknown function (DUF7085)		
-PF23319	CobW_C_DAAF9	DAAF9 CobW_C-like domain		
 PF23322	PPIase_AIP	AH receptor-interacting protein, N-terminal FKBP-type PPIase		
 PF23324	DUF7086	Domain of unknown function (DUF7086)		
 PF23325	TPR_28	GBF1-like, tetratrico peptide repeats		

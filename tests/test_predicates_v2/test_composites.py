@@ -2,9 +2,11 @@
 
 import pytest
 
+from sharur.predicates.vocabulary import PREDICATE_BY_ID
 from sharur.predicates_v2.composites import (
     CompositeDefinition,
     clear_composites_cache,
+    composite_problems,
     evaluate_composites,
     explain_composites,
     load_composites,
@@ -524,3 +526,87 @@ class TestCompositeEvaluation:
         ]
         result = evaluate_composites(atoms, composites)
         assert result == sorted(result)
+
+
+def _named_atoms(condition):
+    """Every has_atom value anywhere in a composite rule."""
+    if isinstance(condition, dict):
+        if "has_atom" in condition:
+            yield condition["has_atom"]
+        for key in ("all_of", "any_of", "none_of"):
+            for child in condition.get(key, ()):
+                yield from _named_atoms(child)
+
+
+class TestCompositeValidation:
+    """Composite rules may only name atoms the vocabulary can emit."""
+
+    def test_every_shipped_composite_names_vocabulary_predicates(self):
+        composites = load_composites()
+        assert len(composites) == 18
+        named = {atom for comp in composites for atom in _named_atoms(comp.requires)}
+        assert named, "no has_atom conditions found"
+        assert not named - set(PREDICATE_BY_ID)
+        assert composite_problems(composites) == []
+
+    def test_unknown_atom_is_rejected_at_load(self, tmp_path):
+        rules = tmp_path / "composites.yaml"
+        rules.write_text(
+            "inert:\n"
+            "  description: exclusion that can never fire\n"
+            "  facet: activity\n"
+            "  requires:\n"
+            "    all_of:\n"
+            "      - has_atom: nife_hydrogenase\n"
+            "    none_of:\n"
+            "      - has_atom: complex_I_subunit\n"
+            "        relation: implies\n"
+        )
+        with pytest.raises(ValueError, match="complex_I_subunit"):
+            load_composites(rules)
+
+    def test_unknown_relation_facet_and_operator_are_reported(self):
+        comp = CompositeDefinition(
+            name="typos",
+            description="",
+            facet="activities",
+            requires={
+                "all_of": [
+                    {"has_atom": "hydrogenase", "relation": "imply"},
+                    {"has_atom": "nickel_binding", "relations_in": ["implies"]},
+                ],
+            },
+        )
+        problems = composite_problems([comp])
+        assert any("facet 'activities'" in p for p in problems)
+        assert any("relation 'imply'" in p for p in problems)
+        assert any("relations_in" in p for p in problems)
+
+    def test_two_property_operators_in_one_condition_are_reported(self):
+        # The evaluator reads only the first property operator of a mapping.
+        comp = CompositeDefinition(
+            name="sized",
+            description="",
+            facet="architecture",
+            requires={"property_gte": {"tm_count": 2}, "property_lte": {"tm_count": 6}},
+        )
+        assert any("one property operator" in p for p in composite_problems([comp]))
+
+    def test_nife_validated_excludes_complex1_review_flag(self):
+        composites = load_composites()
+        atoms = [
+            _atom("nife_hydrogenase", relation=ClaimRelation.implies, source_db="hyddb", source_accession="NiFe"),
+            _atom("nickel_binding", relation=ClaimRelation.supports, source_accession="PF00374"),
+        ]
+        assert "nife_hydrogenase_validated" in evaluate_composites(atoms, composites)
+
+        flagged = atoms + [
+            _atom(
+                "hydrogenase_complex1_review",
+                facet=SemanticFacet.quality_flag,
+                relation=ClaimRelation.flags,
+                source_db="_validation",
+                source_accession="PF00346",
+            ),
+        ]
+        assert "nife_hydrogenase_validated" not in evaluate_composites(flagged, composites)

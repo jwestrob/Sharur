@@ -184,8 +184,10 @@ class TestPfamMapping:
 
     def test_evidence_supported_meanings_are_kept(self):
         """Each family keeps the meanings its Pfam information supports."""
-        preds = get_predicates_for_pfam("PF00374", "NiFeSe_Hases", "NiFeSe hydrogenase")
-        assert {"nife_hydrogenase", "nifese_hydrogenase", "metal_binding"} <= set(preds)
+        # PF00374 covers every [NiFe] large subunit; [NiFeSe] enzymes are a few members.
+        preds = get_predicates_for_pfam("PF00374", "NiFeSe_Hases", "Nickel-dependent hydrogenase")
+        assert {"nife_hydrogenase", "nickel_binding", "metal_binding"} <= set(preds)
+        assert not {"nifese_hydrogenase", "selenium_metabolism"} & set(preds)
 
         preds = get_predicates_for_pfam("PF00485", "PRK", "Phosphoribulokinase")
         assert {"calvin_cycle", "carbon_fixation"} <= set(preds)

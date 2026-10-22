@@ -528,11 +528,15 @@ requires:
     - has_atom: nife_hydrogenase
       relation_in: [implies, supports]
   none_of:
-    - has_atom: complex_I_subunit
-      relation: implies
+    - has_atom: hydrogenase_complex1_review
 ```
 
 When a condition dict contains multiple compound keys (`all_of` + `none_of`), ALL must be satisfied.
+
+Every `has_atom` names a vocabulary predicate. `load_composites()` rejects a rule
+that names an atom outside the vocabulary, an unknown relation or facet, or an
+unknown operator, because such a clause would silently never match (an
+`all_of` clause would never pass and a `none_of` clause would never exclude).
 
 #### Property operators
 
@@ -553,7 +557,7 @@ Operate on the topology dict from SemanticState:
 
 ```yaml
 nife_hydrogenase_validated:
-  description: "NiFe hydrogenase confirmed by PFAM corroboration"
+  description: "NiFe hydrogenase with nickel-binding domain evidence and no Complex I review flag"
   facet: activity
   requires:
     all_of:
@@ -561,15 +565,18 @@ nife_hydrogenase_validated:
         relation_in: [implies, supports]
       - has_atom: nickel_binding
     none_of:
-      - has_atom: complex_I_subunit
-        relation: implies
+      - has_atom: hydrogenase_complex1_review
 ```
 
-### Bundled composites (20 definitions)
+`hydrogenase_complex1_review` is the `flags` atom emitted for a HydDB NiFe hit
+that carries Complex I-superfamily domains (Complex1_49kDa, Complex1_30kDa) and
+lacks NiFeSe_Hases, so the clause names it without a relation filter.
+
+### Bundled composites (18 definitions)
 
 | Name | Purpose |
 |------|---------|
-| `nife_hydrogenase_validated` | NiFe hydrogenase with nickel-binding domain evidence and no implied Complex I subunit |
+| `nife_hydrogenase_validated` | NiFe hydrogenase with nickel-binding domain evidence and no Complex I review flag |
 | `fefe_hydrogenase_validated` | FeFe hydrogenase with iron-sulfur cluster |
 | `energy_conserving_hydrogenase` | Ion-translocating H2-evolving hydrogenase (characterized Group 4 subgroup, Ech, or Mbh) |
 | `novel_membrane_protein` | Unannotated + TM helices |

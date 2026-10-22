@@ -2,7 +2,7 @@
 # Pfam: Pfam-A.hmm sha256 8bab3a946e6d99a4 (24076 families); Pfam-A.clans.tsv.gz (30134 families)
 # GO: pfam2go sha256 30274dd59c468d70; go-basic.obo sha256 b08d45b268b8c24c
 # ENZYME: enzyme.dat sha256 6e1f553fcaa15ba7
-# Swiss-Prot: uniprot_sprot.dat.gz 2026_03 sha256 c87208822a56e8ae (553,641 reviewed proteins with Pfam); KEGG gene links swissprot_kegg_ko.tsv sha256 20ab0dd3b910cb82; KO predicates from kegg_predicates.tsv sha256 af73e8717defd6ef
+# Swiss-Prot: uniprot_sprot.dat.gz 2026_03 sha256 c87208822a56e8ae (553,641 reviewed proteins with Pfam); KEGG gene links swissprot_kegg_ko.tsv sha256 bbdfec2875bc9ce7; KO predicates from kegg_predicates.tsv sha256 af73e8717defd6ef
 # accession	name	predicates	evidence
 PF00001	7tm_1	membrane	membrane=go:GO:0016020
 PF00002	7tm_2	membrane	membrane=go:GO:0016020
@@ -192,7 +192,7 @@ PF00265	TK	atp_binding,kinase,transferase	atp_binding=swissprot:217/217 single-d
 PF00266	Aminotran_5	amino_acid_metabolism,aminotransferase,plp_binding,transferase	amino_acid_metabolism=text:Aminotransferase;aminotransferase=text:Aminotransferase;plp_binding=swissprot:822/829 KOs 23/23 single-domain 712/718;transferase=text:transferase
 PF00267	Porin_1	beta_barrel,outer_membrane,porin,transporter	beta_barrel=go:GO:0015288;outer_membrane=go:GO:0019867;porin=go:GO:0015288;transporter=go:GO:0005215
 PF00268	Ribonuc_red_sm	iron_binding,oxidoreductase,reductase	iron_binding=swissprot:110/112 KOs 2/2 single-domain 109/111;oxidoreductase=text:reductase;reductase=text:reductase
-PF00270	DEAD	atp_binding,dna_repair,helicase,hydrolase,rna_binding	atp_binding=go:GO:0005524;dna_repair=text:DEAD;helicase=text:helicase;hydrolase=swissprot:1560/1730 KOs 92/108 single-domain 11/13;rna_binding=text:DEAD
+PF00270	DEAD	atp_binding,dna_repair,helicase,hydrolase,rna_binding	atp_binding=go:GO:0005524;dna_repair=text:DEAD;helicase=text:helicase;hydrolase=swissprot:1560/1730 KOs 97/113 single-domain 11/13;rna_binding=text:DEAD
 PF00271	Helicase_C	atp_binding,dna_repair,helicase	atp_binding=text:Helicase;dna_repair=text:Helicase;helicase=text:Helicase
 PF00274	Glycolytic	central_metabolism,glycolysis,lyase	central_metabolism=go:GO:0006096;glycolysis=go:GO:0006096;lyase=go:GO:0016829
 PF00275	EPSP_synthase	synthase,transferase	synthase=text:synthase;transferase=go:GO:0016740
@@ -270,7 +270,7 @@ PF00367	PTS_EIIB	atp_binding,kinase,transferase	atp_binding=swissprot:106/106 KO
 PF00368	HMG-CoA_red	dehydrogenase,isoprenoid_biosynthesis,nad_binding,oxidoreductase,reductase	dehydrogenase=swissprot:69/69 KOs 2/2 single-domain 39/39;isoprenoid_biosynthesis=text:HMG-CoA;nad_binding=swissprot:69/69 KOs 2/2 single-domain 39/39;oxidoreductase=go:GO:0016491;reductase=text:reductase
 PF00370	FGGY_N	atp_binding,kinase,transferase	atp_binding=swissprot:614/615 KOs 15/15 single-domain 5/5;kinase=go:GO:0016301;transferase=go:GO:0016740
 PF00372	Hemocyanin_M	copper_binding,metal_binding	copper_binding=text:copper;metal_binding=text:copper
-PF00374	NiFeSe_Hases	hydrogen_metabolism,hydrogenase,metal_binding,nickel_binding,nife_hydrogenase,nifese_hydrogenase,selenium_metabolism	hydrogen_metabolism=text:NiFe;hydrogenase=text:hydrogenase;metal_binding=go:GO:0046872;nickel_binding=go:GO:0016151;nife_hydrogenase=go:GO:0016151;nifese_hydrogenase=text:NiFeSe;selenium_metabolism=text:NiFeSe
+PF00374	NiFeSe_Hases	hydrogen_metabolism,hydrogenase,metal_binding,nickel_binding,nife_hydrogenase	hydrogen_metabolism=text:NiFe;hydrogenase=text:hydrogenase;metal_binding=go:GO:0046872;nickel_binding=go:GO:0016151;nife_hydrogenase=go:GO:0016151
 PF00375	SDF	symporter,transporter	symporter=go:GO:0015293;transporter=go:GO:0005215
 PF00376	MerR	dna_binding,helix_turn_helix,regulator,transcription_factor	dna_binding=go:GO:0003677;helix_turn_helix=go:GO:0003677;regulator=go:GO:0065007;transcription_factor=go:GO:0006355
 PF00378	ECH_1	fatty_acid_degradation,isomerase,lipid_metabolism	fatty_acid_degradation=text:ECH;isomerase=text:isomerase;lipid_metabolism=text:Enoyl
@@ -673,7 +673,7 @@ PF01035	DNA_binding_1	binding,dna_binding,methyltransferase,sam_binding,transfer
 PF01037	AsnC_trans_reg	asnc_family,binding,dna_binding,regulator	asnc_family=text:AsnC;binding=text:binding;dna_binding=text:AsnC;regulator=text:AsnC
 PF01039	Carboxyl_trans	transferase	transferase=text:transferase
 PF01040	UbiA	cofactor_biosynthesis,isoprenoid_biosynthesis,membrane,transferase	cofactor_biosynthesis=text:UbiA;isoprenoid_biosynthesis=text:UbiA;membrane=go:GO:0016020;transferase=go:GO:0016740
-PF01041	DegT_DnrJ_EryC1	aminotransferase,plp_binding,secondary_metabolism,transferase	aminotransferase=text:aminotransferase;plp_binding=swissprot:113/123 KOs 23/23 single-domain 111/120;secondary_metabolism=text:DegT;transferase=text:transferase
+PF01041	DegT_DnrJ_EryC1	aminotransferase,plp_binding,transferase	aminotransferase=text:aminotransferase;plp_binding=swissprot:113/123 KOs 23/23 single-domain 111/120;transferase=text:transferase
 PF01042	Ribonuc_L-PSP	hydrolase,nuclease	hydrolase=text:nuclease;nuclease=text:ribonuclease
 PF01043	SecA_PP_bind	binding,sec_pathway,secretion_component	binding=text:bind;sec_pathway=text:SecA;secretion_component=go:GO:0015031
 PF01047	MarR	dna_binding,marr_family,regulator,transcription_factor	dna_binding=go:GO:0003700;marr_family=text:MarR;regulator=go:GO:0065007;transcription_factor=go:GO:0003700
@@ -1047,7 +1047,7 @@ PF01636	APH	antibiotic_resistance,atp_binding,kinase,phosphotransferase,transfer
 PF01637	ATPase_2	atp_binding,atpase	atp_binding=go:GO:0005524;atpase=text:ATPase
 PF01638	HxlR	dna_binding,helix_turn_helix,regulator	dna_binding=text:helix-turn-helix;helix_turn_helix=text:HxlR;regulator=text:HxlR
 PF01640	Peptidase_C10	hydrolase,protease	hydrolase=go:GO:0016787;protease=go:GO:0008233
-PF01641	SelR	oxidoreductase,reductase,selenium_metabolism,sulfur_metabolism,trna_synthetase	oxidoreductase=go:GO:0016491;reductase=swissprot:229/241 KOs 2/2 single-domain 212/220;selenium_metabolism=text:SelR;sulfur_metabolism=swissprot:241/241 KOs 2/2 single-domain 220/220;trna_synthetase=text:SelR
+PF01641	SelR	oxidoreductase,reductase,sulfur_metabolism	oxidoreductase=go:GO:0016491;reductase=swissprot:229/241 KOs 2/2 single-domain 212/220;sulfur_metabolism=swissprot:241/241 KOs 2/2 single-domain 220/220
 PF01642	MM_CoA_mutase	isomerase,mutase	isomerase=swissprot:30/31 KOs 5/5 single-domain 8/9;mutase=swissprot:30/31 KOs 5/5 single-domain 8/9
 PF01643	Acyl-ACP_TE	esterase,hydrolase	esterase=go:GO:0016788;hydrolase=go:GO:0016787
 PF01644	Chitin_synth_1	glycosyltransferase,synthase,transferase	glycosyltransferase=swissprot:81/81 single-domain 20/20;synthase=text:synthase;transferase=swissprot:81/81 single-domain 20/20
@@ -1059,7 +1059,7 @@ PF01652	IF4E	translation,translation_factor	translation=go:GO:0006412;translatio
 PF01653	DNA_ligase_aden	ligase	ligase=go:GO:0016874
 PF01654	Cyt_bd_oxida_I	complex_subunit,cytochrome,cytochrome_bd_oxidase,electron_transport,heme_binding,oxidase,oxidoreductase,respiration,terminal_oxidase,translocase,transporter	complex_subunit=swissprot:7/8 single-domain 7/8;cytochrome=text:Cyt_;cytochrome_bd_oxidase=go:GO:0070069;electron_transport=go:GO:0009055;heme_binding=text:Cyt_;oxidase=text:oxidase;oxidoreductase=text:oxidase;respiration=go:GO:0009060;terminal_oxidase=text:Cyt_bd;translocase=swissprot:8/8 single-domain 8/8;transporter=swissprot:8/8 single-domain 8/8
 PF01655	Ribosomal_L32e	ribosomal_protein,translation	ribosomal_protein=go:GO:0003735;translation=go:GO:0006412
-PF01656	CbiA	atp_binding,binding,cell_division,chromosome_partitioning,cobalamin_biosynthesis,cofactor_biosynthesis	atp_binding=text:CbiA;binding=text:binding;cell_division=text:MinD;chromosome_partitioning=text:CbiA;cobalamin_biosynthesis=text:CbiA;cofactor_biosynthesis=text:CbiA
+PF01656	CbiA	atp_binding,binding	atp_binding=text:CbiA;binding=text:binding
 PF01658	Inos-1-P_synth	isomerase,synthase	isomerase=swissprot:39/39 single-domain 6/6;synthase=text:synthase
 PF01660	Vmethyltransf	methyltransferase,sam_binding,transferase	methyltransferase=go:GO:0008168;sam_binding=go:GO:0008757;transferase=go:GO:0016740
 PF01663	Phosphodiest	esterase,hydrolase,phosphatase,phosphodiesterase	esterase=text:esterase;hydrolase=text:esterase;phosphatase=text:phosphatase;phosphodiesterase=text:phosphodiesterase
@@ -1243,7 +1243,6 @@ PF01957	NfeD	binding	binding=text:binding
 PF01958	Asp_DH_C	amino_acid_metabolism,dehydrogenase,oxidoreductase	amino_acid_metabolism=text:Aspartate;dehydrogenase=text:dehydrogenase;oxidoreductase=go:GO:0016491
 PF01959	DHQS	aromatic_aa_metabolism,lyase,synthase	aromatic_aa_metabolism=text:3-dehydroquinate;lyase=enzyme:4.2.3.4 (3-dehydroquinate synthase);synthase=text:synthase
 PF01960	ArgJ	acetyltransferase,amino_acid_biosynthesis,transferase	acetyltransferase=swissprot:191/223 single-domain 191/223;amino_acid_biosynthesis=go:GO:0008652;transferase=swissprot:223/223 single-domain 223/223
-PF01963	TraB_PrgY_gumN	conjugation	conjugation=text:TraB
 PF01964	ThiC_Rad_SAM	iron_sulfur,lyase,synthase,thiamine_biosynthesis	iron_sulfur=go:GO:0051536;lyase=swissprot:447/447 KOs 3/3 single-domain 156/156;synthase=swissprot:437/447 KOs 3/3 single-domain 150/156;thiamine_biosynthesis=go:GO:0009228
 PF01967	MoaC	cofactor_biosynthesis,lyase,molybdenum_binding,synthase	cofactor_biosynthesis=go:GO:0006777;lyase=swissprot:374/374 KOs 3/3 single-domain 364/364;molybdenum_binding=text:MoaC;synthase=swissprot:364/374 KOs 2/3 single-domain 358/364
 PF01968	Hydantoinase_A	hydrolase	hydrolase=go:GO:0016787
@@ -1451,7 +1450,7 @@ PF02355	SecD_SecF_C	membrane,sec_pathway,secretion_component	membrane=text:membr
 PF02357	NusG	transcription_factor	transcription_factor=text:NusG
 PF02358	Trehalose_PPase	carbohydrate_active,hydrolase,phosphatase	carbohydrate_active=go:GO:0005975;hydrolase=text:phosphatase;phosphatase=text:phosphatase
 PF02359	CDC48_N	cell_division	cell_division=text:Cell division
-PF02361	CbiQ	abc_transporter,cobalamin_biosynthesis,cobalt_binding,cofactor_biosynthesis,metal_binding,transporter	abc_transporter=swissprot:45/46 KOs 5/5 single-domain 43/44;cobalamin_biosynthesis=text:CbiQ;cobalt_binding=text:Cobalt;cofactor_biosynthesis=text:CbiQ;metal_binding=text:Cobalt;transporter=text:CbiQ
+PF02361	CbiQ	abc_transporter,transporter	abc_transporter=swissprot:45/46 KOs 5/5 single-domain 43/44;transporter=text:CbiQ
 PF02362	B3	binding,dna_binding	binding=go:GO:0005488;dna_binding=go:GO:0003677
 PF02364	Glucan_synthase	synthase	synthase=text:synthase
 PF02365	NAM	transcription_factor	transcription_factor=swissprot:95/106 KOs 13/13 single-domain 95/106
@@ -1517,7 +1516,7 @@ PF02482	Ribosomal_S30AE	ribosomal_protein,translation	ribosomal_protein=text:Rib
 PF02485	Branch	glycosyltransferase,transferase	glycosyltransferase=swissprot:45/45 KOs 6/6 single-domain 28/28;transferase=swissprot:45/45 KOs 6/6 single-domain 28/28
 PF02486	Rep_trans	translation,translation_factor	translation=text:initiation factor;translation_factor=text:initiation factor
 PF02491	SHS2_FTSA	cell_division	cell_division=go:GO:0051301
-PF02492	cobW	binding,cobalamin_biosynthesis,cofactor_biosynthesis,nickel_binding	binding=text:binding;cobalamin_biosynthesis=text:CobW;cofactor_biosynthesis=text:CobW;nickel_binding=text:HypB
+PF02492	cobW	binding	binding=text:binding
 PF02499	DNA_pack_C	hydrolase	hydrolase=swissprot:20/22 co-domains excluded
 PF02501	T2SSI	secretion_component,t2ss_component	secretion_component=go:GO:0009306;t2ss_component=go:GO:0015628
 PF02502	LacAB_rpiB	isomerase	isomerase=go:GO:0016853
@@ -1527,7 +1526,7 @@ PF02505	MCR_D	mcr_complex,methanogenesis,oxidoreductase,reductase	mcr_complex=go
 PF02507	PSI_PsaF	photosynthesis	photosynthesis=go:GO:0015979
 PF02508	Rnf-Nqr	membrane,translocase,transporter	membrane=go:GO:0016020;translocase=swissprot:392/392 KOs 4/4 single-domain 392/392;transporter=swissprot:392/392 KOs 4/4 single-domain 392/392
 PF02511	Thy1	fad_binding,methyltransferase,nucleotide_metabolism,synthase,transferase	fad_binding=swissprot:78/82 single-domain 76/80;methyltransferase=swissprot:78/82 single-domain 76/80;nucleotide_metabolism=go:GO:0009117;synthase=text:synthase;transferase=go:GO:0016740
-PF02514	CobN-Mg_chel	chelatase,cobalamin_biosynthesis,cofactor_biosynthesis,ligase	chelatase=text:Chelatase;cobalamin_biosynthesis=text:CobN;cofactor_biosynthesis=text:CobN;ligase=swissprot:10/10 KOs 2/2 single-domain 4/4
+PF02514	CobN-Mg_chel	chelatase,cofactor_biosynthesis,ligase	chelatase=text:Chelatase;cofactor_biosynthesis=text:CobN;ligase=swissprot:10/10 KOs 2/2 single-domain 4/4
 PF02515	CoA_transf_3	sulfurtransferase,transferase	sulfurtransferase=swissprot:98/108 KOs 14/17 single-domain 98/108;transferase=text:transferase
 PF02516	STT3	carbohydrate_active,glycosyltransferase,magnesium_binding,manganese_binding,membrane,transferase	carbohydrate_active=swissprot:27/27 KOs 3/3 co-domains excluded;glycosyltransferase=swissprot:27/27 KOs 3/3 co-domains excluded;magnesium_binding=swissprot:27/27 KOs 3/3 co-domains excluded;manganese_binding=swissprot:27/27 KOs 3/3 co-domains excluded;membrane=go:GO:0016020;transferase=text:transferase
 PF02517	Rce1-like	protease	protease=text:peptidase
@@ -1657,7 +1656,7 @@ PF02682	CT_C_D	transferase	transferase=text:transferase
 PF02683	DsbD_TM	cytochrome,electron_transport,heme_binding,membrane,respiration	cytochrome=text:Cytochrom;electron_transport=text:Cytochrom;heme_binding=text:Cytochrome;membrane=go:GO:0016020;respiration=text:Cytochrome C
 PF02684	LpxB	glycosyltransferase,ligase,lipid_a_biosynthesis,lps_biosynthesis,synthase,transferase	glycosyltransferase=swissprot:258/258 single-domain 251/251;ligase=text:synthetase;lipid_a_biosynthesis=swissprot:254/258 single-domain 247/251;lps_biosynthesis=go:GO:0009245;synthase=swissprot:254/258 single-domain 247/251;transferase=swissprot:258/258 single-domain 251/251
 PF02685	Glucokinase	atp_binding,glycolysis,kinase,transferase	atp_binding=swissprot:143/143 single-domain 136/136;glycolysis=swissprot:140/143 single-domain 134/136;kinase=go:GO:0016301;transferase=go:GO:0016740
-PF02686	GatC	ligase,synthetase,transferase,trna_modification	ligase=swissprot:500/522 single-domain 500/522;synthetase=swissprot:500/522 single-domain 500/522;transferase=text:transferase;trna_modification=text:tRNA
+PF02686	GatC	ligase,synthetase,transferase,trna_modification	ligase=swissprot:501/522 single-domain 501/522;synthetase=swissprot:501/522 single-domain 501/522;transferase=text:transferase;trna_modification=text:tRNA
 PF02687	FtsX	abc_transporter,cell_division,divisome,membrane,transporter	abc_transporter=swissprot:154/162 KOs 9/9 single-domain 22/23;cell_division=text:FtsX;divisome=text:FtsX;membrane=go:GO:0016020;transporter=text:FtsX
 PF02689	Herpes_Helicase	atp_binding,atpase,helicase,hydrolase	atp_binding=swissprot:19/20 KOs 4/5 single-domain 18/18;atpase=swissprot:19/20 KOs 4/5 single-domain 18/18;helicase=go:GO:0004386;hydrolase=swissprot:19/20 KOs 4/5 single-domain 18/18
 PF02690	Na_Pi_cotrans	phosphate_transporter,symporter,transporter	phosphate_transporter=go:GO:0006817;symporter=swissprot:16/18 KOs 2/2 single-domain 16/18;transporter=go:GO:0005215
@@ -1746,7 +1745,7 @@ PF02816	Alpha_kinase	kinase,serine_threonine_kinase,transferase	kinase=go:GO:001
 PF02817	E3_binding	binding	binding=text:binding
 PF02819	Toxin_9	toxin_domain	toxin_domain=text:Toxin
 PF02821	Staphylokinase	kinase	kinase=text:kinase
-PF02823	ATP-synt_DE_N	atp_binding,atp_synthesis,atpase,complex_subunit,energy_metabolism,synthase	atp_binding=swissprot:656/749 KOs 2/3 single-domain 219/243;atp_synthesis=go:GO:0015986;atpase=swissprot:656/749 KOs 2/3 single-domain 219/243;complex_subunit=swissprot:656/749 KOs 2/3 single-domain 219/243;energy_metabolism=go:GO:0015986;synthase=text:synthase
+PF02823	ATP-synt_DE_N	atp_binding,atp_synthesis,atpase,complex_subunit,energy_metabolism,synthase	atp_binding=swissprot:657/749 KOs 2/3 single-domain 219/243;atp_synthesis=go:GO:0015986;atpase=swissprot:657/749 KOs 2/3 single-domain 219/243;complex_subunit=swissprot:657/749 KOs 2/3 single-domain 219/243;energy_metabolism=go:GO:0015986;synthase=text:synthase
 PF02824	TGS	trna_synthetase	trna_synthetase=text:TGS
 PF02826	2-Hacid_dh_C	binding,cofactor_binding,dehydrogenase,nad_binding,oxidoreductase	binding=go:GO:0005488;cofactor_binding=text:NAD binding;dehydrogenase=text:dehydrogenase;nad_binding=go:GO:0051287;oxidoreductase=text:dehydrogenase
 PF02827	PKI	kinase,transferase	kinase=enzyme:2.7.11.11 (camp-dependent protein kinase);transferase=enzyme:2.7.11.11 (camp-dependent protein kinase)
@@ -2298,6 +2297,7 @@ PF03903	Phage_T4_gp36	phage_related	phage_related=text:Phage
 PF03904	DUF334	hypothetical	hypothetical=text:unknown function
 PF03906	Phage_T7_tail	phage_related	phage_related=text:Phage
 PF03911	Sec61_beta	membrane,sec_pathway,secretion_component	membrane=text:Sec61;sec_pathway=text:Sec61;secretion_component=text:Sec61
+PF03912	Psb28	photosynthesis,photosystem_i,photosystem_ii	photosynthesis=swissprot:39/48 single-domain 39/48;photosystem_i=swissprot:39/48 single-domain 39/48;photosystem_ii=swissprot:39/48 single-domain 39/48
 PF03916	NrfD	oxidoreductase,reductase	oxidoreductase=text:reductase;reductase=text:reductase
 PF03917	GSH_synth_ATP	atp_binding,binding,synthase	atp_binding=go:GO:0005524;binding=go:GO:0005488;synthase=text:synthase
 PF03918	CcmH	cytochrome,electron_transport,heme_binding,respiration	cytochrome=text:Cytochrom;electron_transport=text:Cytochrom;heme_binding=text:Cytochrome;respiration=text:Cytochrome C
@@ -3277,7 +3277,7 @@ PF05875	Ceramidase	amidase,hydrolase	amidase=swissprot:15/15 KOs 3/3 single-doma
 PF05876	GpA_ATPase	atp_binding,atpase,phage_related	atp_binding=go:GO:0016887;atpase=go:GO:0016887;phage_related=text:Phage
 PF05879	RHD3_GTPase	binding,gtp_binding,gtpase,hydrolase	binding=text:binding;gtp_binding=text:GTP;gtpase=text:GTPase;hydrolase=swissprot:90/90 single-domain 4/4
 PF05881	CNPase	esterase,hydrolase	esterase=go:GO:0016788;hydrolase=go:GO:0016787
-PF05889	SepSecS	plp_binding,selenium_metabolism,transferase,trna_modification	plp_binding=swissprot:34/34 KOs 2/2 single-domain 34/34;selenium_metabolism=text:selenium;transferase=go:GO:0016740;trna_modification=text:tRNA
+PF05889	SepSecS	plp_binding,transferase,trna_modification	plp_binding=swissprot:34/34 KOs 2/2 single-domain 34/34;transferase=go:GO:0016740;trna_modification=text:tRNA
 PF05891	Methyltransf_PK	methyltransferase,transferase	methyltransferase=go:GO:0008168;transferase=go:GO:0016740
 PF05893	LuxC	bioluminescence,nad_binding,oxidoreductase,reductase	bioluminescence=go:GO:0008218;nad_binding=swissprot:7/7 single-domain 7/7;oxidoreductase=go:GO:0016491;reductase=text:reductase
 PF05895	DUF859	hypothetical	hypothetical=text:unknown function
@@ -4185,7 +4185,6 @@ PF07676	PD40	repeat_domain,transporter	repeat_domain=text:Beta Propeller;transpo
 PF07677	A2M_recep	binding	binding=text:binding
 PF07681	DoxX	membrane	membrane=text:DoxX
 PF07682	SOR	oxidoreductase,oxygenase,reductase	oxidoreductase=text:reductase;oxygenase=text:oxygenase;reductase=text:reductase
-PF07683	CobW_C	cobalamin_binding,cobalamin_biosynthesis,cobalt_binding,cofactor_biosynthesis	cobalamin_binding=text:Cobalamin;cobalamin_biosynthesis=text:Cobalamin synthesis;cobalt_binding=text:Cobalamin;cofactor_biosynthesis=text:Cobalamin synthesis
 PF07685	GATase_3	glutamine_amidotransferase,ligase,synthase,synthetase,transferase	glutamine_amidotransferase=text:glutamine amidotransferase;ligase=swissprot:346/350 KOs 4/4 single-domain 3/3;synthase=swissprot:344/350 KOs 4/4 single-domain 3/3;synthetase=swissprot:346/350 KOs 4/4 single-domain 3/3;transferase=text:transferase
 PF07687	M20_dimer	hydrolase,peptidase,protease,zinc_binding	hydrolase=text:Peptidase;peptidase=text:Peptidase;protease=text:Peptidase;zinc_binding=swissprot:754/887 KOs 17/30 single-domain 10/10
 PF07690	MFS_1	membrane,mfs_transporter,transporter	membrane=text:MFS;mfs_transporter=text:MFS;transporter=go:GO:0005215
@@ -6695,7 +6694,7 @@ PF11934	DUF3452	hypothetical	hypothetical=text:unknown function
 PF11935	SYMPK_PTA1_N	transcription	transcription=swissprot:6/6 co-domains excluded
 PF11937	DUF3455	hypothetical	hypothetical=text:unknown function
 PF11938	DUF3456	hypothetical	hypothetical=text:DUF3
-PF11939	NiFe-hyd_HybE	chaperone,hydrogen_metabolism,hydrogenase,metal_binding,nickel_binding,stress_response	chaperone=text:chaperon;hydrogen_metabolism=text:NiFe;hydrogenase=text:hydrogenase;metal_binding=text:Ni;nickel_binding=text:NiFe;stress_response=text:chaperon
+PF11939	NiFe-hyd_HybE	chaperone,hydrogen_metabolism,hydrogenase,metal_binding,stress_response	chaperone=text:chaperon;hydrogen_metabolism=text:NiFe;hydrogenase=text:hydrogenase;metal_binding=text:Ni;stress_response=text:chaperon
 PF11940	DUF3458	hypothetical	hypothetical=text:unknown function
 PF11941	DUF3459	hypothetical	hypothetical=text:unknown function
 PF11942	Spt5_N	transcription_factor	transcription_factor=text:Spt
@@ -7552,7 +7551,6 @@ PF13240	Zn_Ribbon_1	zinc_binding	zinc_binding=text:Zn
 PF13241	NAD_binding_7	binding,cobalamin_biosynthesis,cofactor_binding,dehydrogenase,nad_binding,oxidoreductase	binding=text:binding;cobalamin_biosynthesis=swissprot:145/149 KOs 3/4 single-domain 3/3;cofactor_binding=text:NAD(P)-binding;dehydrogenase=swissprot:145/149 KOs 3/4 single-domain 3/3;nad_binding=text:NAD(P)-binding;oxidoreductase=swissprot:148/149 KOs 3/4 single-domain 3/3
 PF13242	Hydrolase_like	hydrolase,magnesium_binding,phosphatase	hydrolase=text:Hydrolase;magnesium_binding=swissprot:108/118 KOs 9/10 single-domain 19/21;phosphatase=swissprot:107/118 KOs 10/10 single-domain 21/21
 PF13243	SQHop_cyclase_C	isomerase	isomerase=swissprot:100/103 KOs 35/38 single-domain 8/8
-PF13244	MbhD	mbh_hydrogenase,nife_group4,nife_hydrogenase	mbh_hydrogenase=text:Mbh;nife_group4=text:MBH;nife_hydrogenase=text:MbhD
 PF13245	AAA_19	aaa_domain,atp_binding,atpase	aaa_domain=text:AAA_;atp_binding=text:AAA;atpase=text:AAA_
 PF13246	Cation_ATPase	atp_binding,atpase,ion_transporter,transporter	atp_binding=text:ATPase;atpase=text:ATPase;ion_transporter=text:Cation;transporter=text:Cation_ATPase
 PF13247	Fer4_11	iron_sulfur,metal_binding	iron_sulfur=text:4Fe-4S;metal_binding=text:Fer4
@@ -8481,7 +8479,7 @@ PF14715	FixP_N	cytochrome,electron_transport,heme_binding,oxidase,oxidoreductase
 PF14716	HHH_8	dna_binding	dna_binding=text:HHH_
 PF14717	DUF4465	hypothetical	hypothetical=text:unknown function
 PF14718	SLT_L	base_excision_repair,cell_wall,dna_repair,peptidoglycan	base_excision_repair=text:glycosylase;cell_wall=text:murein;dna_repair=text:glycosylase;peptidoglycan=text:murein
-PF14720	NiFe_hyd_SSU_C	hydrogen_metabolism,hydrogenase,metal_binding,nickel_binding,nife_hydrogenase,oxygen_binding	hydrogen_metabolism=text:NiFe;hydrogenase=text:hydrogenase;metal_binding=text:Ni;nickel_binding=text:NiFe;nife_hydrogenase=text:NiFe;oxygen_binding=text:NiFe_hyd_SSU
+PF14720	NiFe_hyd_SSU_C	hydrogen_metabolism,hydrogenase,metal_binding,nife_hydrogenase	hydrogen_metabolism=text:NiFe;hydrogenase=text:hydrogenase;metal_binding=text:Ni;nife_hydrogenase=text:NiFe
 PF14722	KRAP_IP3R_bind	binding	binding=go:GO:0005488
 PF14724	mit_SMPDase	esterase,hydrolase	esterase=go:GO:0016788;hydrolase=go:GO:0016787
 PF14725	DUF4466	hypothetical	hypothetical=text:unknown function
@@ -9907,7 +9905,7 @@ PF17363	DUF5388	hypothetical	hypothetical=text:unknown function
 PF17364	DUF5389	hypothetical	hypothetical=text:unknown function
 PF17365	DUF5390	hypothetical	hypothetical=text:unknown function
 PF17366	AGA2	binding	binding=go:GO:0005488
-PF17367	NiFe_hyd_3_EhaA	hydrogen_metabolism,hydrogenase,metal_binding,nickel_binding	hydrogen_metabolism=text:NiFe;hydrogenase=text:hydrogenase;metal_binding=text:Ni;nickel_binding=text:NiFe
+PF17367	NiFe_hyd_3_EhaA	hydrogen_metabolism,hydrogenase,metal_binding	hydrogen_metabolism=text:NiFe;hydrogenase=text:hydrogenase;metal_binding=text:Ni
 PF17369	DUF5391	hypothetical	hypothetical=text:unknown function
 PF17370	DUF5392	hypothetical	hypothetical=text:unknown function
 PF17371	DUF5393	hypothetical	hypothetical=text:unknown function
@@ -11948,7 +11946,6 @@ PF20489	Birna_RdRp_C	rna_polymerase,transcription	rna_polymerase=text:RNA pol;tr
 PF20495	DUF6727	hypothetical	hypothetical=text:unknown function
 PF20498	DUF6728	hypothetical	hypothetical=text:unknown function
 PF20499	DUF6729	hypothetical	hypothetical=text:unknown function
-PF20501	MbhE	mbh_hydrogenase,nife_group4,nife_hydrogenase	mbh_hydrogenase=text:Mbh;nife_group4=text:MBH;nife_hydrogenase=text:MbhE
 PF20502	DNAPKcs_CC1-2	kinase,transferase	kinase=text:kinase;transferase=text:kinase
 PF20503	DUF6730	hypothetical	hypothetical=text:unknown function
 PF20505	DUF6731	hypothetical	hypothetical=text:unknown function
@@ -13304,7 +13301,6 @@ PF23311	DUF7084	hypothetical	hypothetical=text:unknown function
 PF23312	UBA_SIK3	kinase,transferase	kinase=text:kinase;transferase=text:kinase
 PF23317	YVC1_C	calcium_binding,ion_channel,metal_binding,transporter	calcium_binding=text:Calcium;ion_channel=text:channel;metal_binding=text:Calcium;transporter=text:channel
 PF23318	DUF7085	hypothetical	hypothetical=text:unknown function
-PF23319	CobW_C_DAAF9	cobalamin_biosynthesis	cobalamin_biosynthesis=text:CobW
 PF23322	PPIase_AIP	chaperone,isomerase	chaperone=text:PPIase;isomerase=text:PPIase
 PF23324	DUF7086	hypothetical	hypothetical=text:unknown function
 PF23325	TPR_28	repeat_domain,tpr_repeat	repeat_domain=text:repeat;tpr_repeat=text:TPR
@@ -15625,7 +15621,7 @@ PF27307	MJ0565	membrane	membrane=text:integral
 PF27324	MjaV	restriction_enzyme,restriction_modification	restriction_enzyme=text:restriction enzyme;restriction_modification=text:restriction
 PF27330	IsaA-like_N	glycosidase,hydrolase	glycosidase=swissprot:35/35 single-domain 4/4;hydrolase=swissprot:35/35 single-domain 4/4
 PF27338	CbsB	cytochrome,electron_transport,heme_binding,respiration	cytochrome=text:Cytochrom;electron_transport=text:Cytochrom;heme_binding=text:Cytochrome;respiration=text:Cytochrome b
-PF27339	Prd_NiFe_hyd_3_EhaK	hydrogen_metabolism,hydrogenase,membrane,metal_binding,nickel_binding	hydrogen_metabolism=text:NiFe;hydrogenase=text:hydrogenase;membrane=text:membrane;metal_binding=text:Ni;nickel_binding=text:NiFe
+PF27339	Prd_NiFe_hyd_3_EhaK	hydrogen_metabolism,hydrogenase,membrane,metal_binding	hydrogen_metabolism=text:NiFe;hydrogenase=text:hydrogenase;membrane=text:membrane;metal_binding=text:Ni
 PF27346	PcoE	binding,copper_binding,metal_binding	binding=text:binding;copper_binding=text:copper;metal_binding=text:copper
 PF27358	HrpD6	secretion_component	secretion_component=text:secretion
 PF27364	YonB	phage_related	phage_related=text:prophage
@@ -15710,7 +15706,7 @@ PF27639	VMP1_C	membrane	membrane=text:membrane
 PF27643	BZP1_C	dna_binding,regulator,transcription_factor	dna_binding=text:transcription factor;regulator=text:transcription factor;transcription_factor=text:transcription factor
 PF27647	DUF8360	hypothetical	hypothetical=text:unknown function
 PF27655	GDU_TM	membrane,regulator,regulatory	membrane=text:transmembrane;regulator=swissprot:7/7 single-domain 7/7;regulatory=swissprot:7/7 single-domain 7/7
-PF27656	Prd_NiFe_hyd_3_EhaI	hydrogen_metabolism,hydrogenase,membrane,metal_binding,nickel_binding	hydrogen_metabolism=text:NiFe;hydrogenase=text:hydrogenase;membrane=text:membrane;metal_binding=text:Ni;nickel_binding=text:NiFe
+PF27656	Prd_NiFe_hyd_3_EhaI	hydrogen_metabolism,hydrogenase,membrane,metal_binding	hydrogen_metabolism=text:NiFe;hydrogenase=text:hydrogenase;membrane=text:membrane;metal_binding=text:Ni
 PF27657	RRT15	regulator	regulator=text:Regulat
 PF27663	Spore_coat_YutH	kinase,transferase	kinase=text:kinase;transferase=text:kinase
 PF27664	UCP016195	membrane	membrane=text:membrane

@@ -13,7 +13,7 @@ from typing import Any, Optional
 
 import yaml
 
-from sharur.predicates_v2.model import SemanticAtom
+from sharur.predicates_v2.model import ClaimRelation, SemanticAtom, SemanticFacet
 
 # ---------------------------------------------------------------------------
 # Prefer wheel-packaged config, with the source-tree path for editable work.
@@ -75,10 +75,89 @@ def load_composites(path: Optional[Path] = None) -> list[CompositeDefinition]:
             requires=config.get("requires", {}),
         ))
 
+    problems = composite_problems(defs)
+    if problems:
+        raise ValueError(f"{target}: invalid composite rules: " + "; ".join(problems))
+
     if path is None:
         _composites_cache = defs
 
     return defs
+
+
+# ---------------------------------------------------------------------------
+# Validation
+# ---------------------------------------------------------------------------
+_COMPOUND_KEYS = ("all_of", "any_of", "none_of")
+_ATOM_KEYS = ("has_atom", "relation", "relation_in", "source_db")
+_PROPERTY_KEYS = ("property_equals", "property_gte", "property_lte")
+
+
+def composite_problems(
+    composites: list[CompositeDefinition],
+    vocabulary: Optional[set[str]] = None,
+) -> list[str]:
+    """Rule errors that would make a composite clause inert or misread.
+
+    Every ``has_atom`` must name a vocabulary predicate (an unknown name never
+    matches, so an ``all_of`` clause never passes and a ``none_of`` clause never
+    excludes); relations, facets and operator keys must be ones the evaluator
+    knows. Returns one message per problem; empty when every rule is valid.
+    """
+    if vocabulary is None:
+        from sharur.predicates.vocabulary import PREDICATE_BY_ID
+
+        vocabulary = set(PREDICATE_BY_ID)
+    relations = {r.value for r in ClaimRelation}
+    facets = {f.value for f in SemanticFacet}
+    problems: list[str] = []
+
+    def check(condition: Any, where: str) -> None:
+        if not isinstance(condition, dict) or not condition:
+            problems.append(f"{where}: condition must be a non-empty mapping")
+            return
+        unknown = set(condition) - {*_COMPOUND_KEYS, *_ATOM_KEYS, *_PROPERTY_KEYS}
+        if unknown:
+            problems.append(f"{where}: unknown operator(s) {sorted(unknown)}")
+        # The evaluator reads one kind per mapping: compound keys, else has_atom, else properties.
+        kinds = [keys for keys in (_COMPOUND_KEYS, _ATOM_KEYS, _PROPERTY_KEYS)
+                 if any(key in condition for key in keys)]
+        if len(kinds) > 1:
+            problems.append(f"{where}: mixes compound, has_atom and property conditions; "
+                            "nest them under all_of")
+        for key in _COMPOUND_KEYS:
+            if key in condition:
+                children = condition[key]
+                if not isinstance(children, list) or not children:
+                    problems.append(f"{where}.{key}: must be a non-empty list")
+                    continue
+                for i, child in enumerate(children):
+                    check(child, f"{where}.{key}[{i}]")
+        if "has_atom" in condition:
+            atom = condition["has_atom"]
+            if atom not in vocabulary:
+                problems.append(f"{where}: has_atom {atom!r} is not a vocabulary predicate")
+        elif any(key in condition for key in _ATOM_KEYS):
+            problems.append(f"{where}: relation/source_db filters need has_atom")
+        if "relation" in condition and condition["relation"] not in relations:
+            problems.append(f"{where}: unknown relation {condition['relation']!r}")
+        if "relation_in" in condition:
+            listed = condition["relation_in"]
+            if not isinstance(listed, list) or not listed or set(listed) - relations:
+                problems.append(f"{where}: relation_in must list relations from {sorted(relations)}")
+        properties = [key for key in _PROPERTY_KEYS if key in condition]
+        if len(properties) > 1:
+            # The evaluator reads the first property operator only.
+            problems.append(f"{where}: one property operator per condition; nest {properties} under all_of")
+        for key in properties:
+            if not isinstance(condition[key], dict) or not condition[key]:
+                problems.append(f"{where}.{key}: must map property names to values")
+
+    for comp in composites:
+        if comp.facet not in facets:
+            problems.append(f"{comp.name}: unknown facet {comp.facet!r}")
+        check(comp.requires, comp.name)
+    return problems
 
 
 def clear_composites_cache() -> None:
@@ -365,6 +444,7 @@ def _dedupe_witnesses(witnesses: list[dict[str, Any]]) -> list[dict[str, Any]]:
 __all__ = [
     "CompositeDefinition",
     "clear_composites_cache",
+    "composite_problems",
     "evaluate_composites",
     "explain_composites",
     "load_composites",
