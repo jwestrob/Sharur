@@ -307,14 +307,35 @@ Each vocabulary entry has a `level`. **Component** predicates describe what one 
 or domain shows (`toxin`, `restriction_modification`, `t4ss_component`,
 `defense_component`, `abi_domain`). **System** predicates assert a validated
 multi-gene system (`defense_system`, `toxin_antitoxin`, `abortive_infection`,
-`abi_*`, `rm_type_*`, named `defense_*` systems, CBASS, BREX, `type_*_secretion`);
-only system-caller sources (`defensefinder_system`, `txsscan_system`) emit them.
+`abi_*`, `rm_type_*`, named `defense_*` systems, CBASS, BREX, `type_*_secretion`,
+`nitrogenase_locus`); only system callers emit them: the `defensefinder_system`
+and `txsscan_system` sources, and the nitrogenase locus caller (source
+`nitrogenase_locus`).
 Single-gene evidence that would name a system maps to the component equivalent
 (`vocabulary.COMPONENT_EQUIVALENT`), and no component predicate has a system-level
 ancestor, so hierarchy expansion never promotes a gene into a system. Membership in
 a system is recorded as `part_of` (for example `toxin` part_of `toxin_antitoxin`),
 which is informational and never expanded. `secretion_system` is the component-level
 root of secretion machinery; the `type_*_secretion` loci below it are system-level.
+
+### Locus-derived atoms
+
+Composites see one protein's atoms. Gene-order evidence reaches them as context
+atoms that persistence derives from `loci` rows for every chunk
+(`persistence._fetch_context_atoms_by_protein`):
+
+| Locus rows | Members | Atom (relation, source) |
+|---|---|---|
+| `crispr` | ORFs overlapping the array | `in_crispr_array` (`implies`, `_locus`) |
+| `nitrogenase` (call `confirmed`) | Fe protein, alpha, beta, Anf/Vnf delta | `nitrogenase_locus` (`implies`, `nitrogenase_locus`) |
+| `nitrogenase_candidate` (call `contig_edge`) | anchor and partner genes | `nitrogenase_contig_edge` (`flags`, `nitrogenase_locus`) |
+
+The nitrogenase rows come from `sharur/predicates_v2/nitrogenase_loci.py`, which
+every predicate generation (full or subset) reruns over the whole dataset
+before building atoms, so the calls track the current annotations. The rule and
+its call labels are in `docs/predicate_construction.md` ("Nitrogenase loci").
+A composite-only refresh (`refresh_composite_predicates_from_v2`) reads the
+persisted context atoms.
 
 ### Composite predicates (DSL)
 
@@ -589,7 +610,7 @@ lacks NiFeSe_Hases, so the clause names it without a relation filter.
 | `polytopic_transporter` | Transporter + polytopic membrane |
 | `carbon_fixation_active` | RuBisCO + PRK (Calvin cycle) |
 | `methanogenesis_confirmed` | MCR complex present |
-| `nitrogen_fixation_confirmed` | Nitrogenase + nitrogen_fixation |
+| `nitrogen_fixation_confirmed` | Fe protein, alpha or beta subunit of a confirmed nitrogenase locus (`nitrogenase_locus` atom) |
 | `cellulosome_component` | Dockerin or cohesin domain |
 | `secretion_system_validated` | TXSScan system-level validation |
 | `gc_outlier_unannotated` | GC outlier + unannotated (possible HGT) |
@@ -915,7 +936,7 @@ Predicates needing a manual override (e.g. `membrane`, V1 category `transport` b
 ### Original non-goals (V2 v1 scope)
 
 - DSL query language for agents (was future work; `search_by_atoms`/composites now cover much of this)
-- Neighborhood/context-based atoms — V2 is intrinsic (per-protein) only; locus-level semantics remain future work
+- Neighborhood/context-based atoms — composites stay per-protein; locus-level semantics enter as context atoms from `loci` rows (see "Locus-derived atoms")
 - Automatic curation of the review queue — curation is manual (agents add YAML entries)
 - ~~Production switchover~~ — **done** (see note above)
 - Migration of V1 mapping files to YAML — V2 imports the Python dicts; YAML is for overrides/new rules only

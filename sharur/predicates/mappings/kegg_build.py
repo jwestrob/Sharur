@@ -252,6 +252,44 @@ def build(inputs: Path, out_dir: Path, kofam_ko_list: Path | None = None,
     hyddb = load_hyddb_snapshot()
     consensus = load_swissprot_consensus()
 
+    mapped, dropped = judge_kos(kos, placements, memberships, brite_rules=brite_rules,
+                                module_rules=module_rules, hyddb=hyddb, consensus=consensus)
+
+    provenance = {
+        "kegg_release": kegg_release(inputs / "kegg_info.txt"),
+        "built": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "inputs": {
+            "ko_list.tsv": sha256(inputs / "ko_list.tsv"),
+            "modules.txt": sha256(inputs / "modules.txt"),
+            "kofam_ko_list": sha256(kofam_ko_list),
+            **{f"brite/{p.name}": sha256(p) for p in sorted((inputs / "brite").glob("*.json"))},
+        },
+        "rules": {name: sha256(DATA / name) for name in RULE_FILES},
+        "kos": len(kos),
+        "kofam_only_kos": len(retired),
+        "mapped_kos": len(mapped),
+        "pairs": sum(map(len, mapped.values())),
+        "dropped_proposals": len(dropped),
+    }
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    header = _header(provenance["kegg_release"])
+    _write_map(out_dir, header, mapped, kos, placements, memberships)
+    with open(out_dir / "kegg_modules.tsv", "w") as mods:
+        mods.write(header + "# module\tname\tclass\tdefinition\n")
+        for module, entry in sorted(read_module_entries(inputs / "modules.txt").items()):
+            mods.write(f"{module}\t{entry['name']}\t{entry['class']}\t{entry['definition']}\n")
+    provenance["map_sha256"] = sha256(out_dir / "kegg_predicates.tsv")
+    (out_dir / "provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
+    _write_report(report, dropped)
+    log(f"KOs: {len(kos):,}; mapped: {len(mapped):,} KOs, {provenance['pairs']:,} pairs; "
+        f"proposed pairs without evidence: {len(dropped):,}")
+    return provenance
+
+
+def judge_kos(kos: dict[str, tuple[str, str]], placements, memberships, *, brite_rules, module_rules,
+              hyddb, consensus) -> tuple[dict[str, dict[str, str]], list[tuple[str, ...]]]:
+    """Apply the rules to KOs {KO: (symbols, name)}: mapped {KO: {predicate: evidence}} and dropped proposals."""
     proposals = read_proposals()
     for pattern, preds in read_patterns():
         for ko, (symbols, name) in kos.items():
@@ -289,27 +327,15 @@ def build(inputs: Path, out_dir: Path, kofam_ko_list: Path | None = None,
                 component.setdefault(component_level(pred), ev)
         if component:
             mapped[ko] = component
+    return mapped, dropped
 
-    provenance = {
-        "kegg_release": kegg_release(inputs / "kegg_info.txt"),
-        "built": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "inputs": {
-            "ko_list.tsv": sha256(inputs / "ko_list.tsv"),
-            "modules.txt": sha256(inputs / "modules.txt"),
-            "kofam_ko_list": sha256(kofam_ko_list),
-            **{f"brite/{p.name}": sha256(p) for p in sorted((inputs / "brite").glob("*.json"))},
-        },
-        "rules": {name: sha256(DATA / name) for name in RULE_FILES},
-        "kos": len(kos),
-        "kofam_only_kos": len(retired),
-        "mapped_kos": len(mapped),
-        "pairs": sum(map(len, mapped.values())),
-        "dropped_proposals": len(dropped),
-    }
 
-    out_dir.mkdir(parents=True, exist_ok=True)
-    header = (f"# Built locally by sharur setup-kegg from KEGG data ({provenance['kegg_release']}); "
-              "subject to KEGG's terms of use. Do not redistribute.\n")
+def _header(release: str) -> str:
+    return (f"# Built locally by sharur setup-kegg from KEGG data ({release}); "
+            "subject to KEGG's terms of use. Do not redistribute.\n")
+
+
+def _write_map(out_dir: Path, header: str, mapped, kos, placements, memberships) -> None:
     with open(out_dir / "kegg_predicates.tsv", "w") as out, \
             open(out_dir / "kegg_evidence_snapshot.tsv", "w") as snap:
         out.write(header + "# ko\tpredicates\tevidence\n")
@@ -321,19 +347,64 @@ def build(inputs: Path, out_dir: Path, kofam_ko_list: Path | None = None,
             brite = "|".join(f"{h}:{PATH_SEP.join(labels)}" for h, labels in placements.get(ko, ()))
             modules_col = ",".join(m + ("+" if c else "") for m, c in memberships.get(ko, ()))
             snap.write(f"{ko}\t{symbols}\t{name}\t{brite}\t{modules_col}\n")
-    with open(out_dir / "kegg_modules.tsv", "w") as mods:
-        mods.write(header + "# module\tname\tclass\tdefinition\n")
-        for module, entry in sorted(read_module_entries(inputs / "modules.txt").items()):
-            mods.write(f"{module}\t{entry['name']}\t{entry['class']}\t{entry['definition']}\n")
-    provenance["map_sha256"] = sha256(out_dir / "kegg_predicates.tsv")
-    (out_dir / "provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
+
+
+def _write_report(report: Path | None, dropped) -> None:
     if report:
         with open(report, "w") as rep:
             rep.write("ko\tsymbols\tname\tproposed\tresolved\n")
             for row in dropped:
                 rep.write("\t".join(row) + "\n")
-    log(f"KOs: {len(kos):,}; mapped: {len(mapped):,} KOs, {provenance['pairs']:,} pairs; "
-        f"proposed pairs without evidence: {len(dropped):,}")
+
+
+def read_snapshot(path: Path):
+    """An existing build's evidence snapshot -> (KOs {KO: (symbols, name)}, placements, memberships)."""
+    kos: dict[str, tuple[str, str]] = {}
+    placements: dict[str, list] = {}
+    memberships: dict[str, list] = {}
+    for line in path.read_text().splitlines():
+        if not line or line.startswith("#"):
+            continue
+        ko, symbols, name, brite, modules_col = line.split("\t")
+        kos[ko] = (symbols, name)
+        placements[ko] = [(h, tuple(p.split(PATH_SEP)) if p else ())
+                          for h, _, p in (item.partition(":") for item in brite.split("|") if item)]
+        memberships[ko] = [(m.rstrip("+"), m.endswith("+")) for m in modules_col.split(",") if m]
+    return kos, placements, memberships
+
+
+def rejudge(kegg_dir: Path, report: Path | None = None, log=print) -> dict:
+    """Re-apply the current rules to an existing build, from its evidence snapshot.
+
+    The snapshot keeps every mapped KO's KEGG symbols, name, BRITE placements and
+    module memberships, so a rule edit that removes pairs, or adds pairs to KOs the
+    build already maps, is judged exactly as a full build of the same KEGG release
+    would judge it, with no download. KOs the build left unmapped are absent from
+    the snapshot; a rule meant to map a new KO needs ``sharur setup-kegg``.
+    """
+    snapshot = kegg_dir / "kegg_evidence_snapshot.tsv"
+    provenance_path = kegg_dir / "provenance.json"
+    provenance = json.loads(provenance_path.read_text()) if provenance_path.exists() else {}
+    kos, placements, memberships = read_snapshot(snapshot)
+    before = sha256(kegg_dir / "kegg_predicates.tsv")
+    mapped, dropped = judge_kos(kos, placements, memberships, brite_rules=load_brite_rules(),
+                                module_rules=load_module_rules(), hyddb=load_hyddb_snapshot(),
+                                consensus=load_swissprot_consensus())
+    release = provenance.get("kegg_release", "unknown")
+    _write_map(kegg_dir, _header(release), mapped, kos, placements, memberships)
+    provenance.update({
+        "rejudged": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "rejudged_from": "kegg_evidence_snapshot.tsv",
+        "rules": {name: sha256(DATA / name) for name in RULE_FILES},
+        "mapped_kos": len(mapped),
+        "pairs": sum(map(len, mapped.values())),
+        "dropped_proposals": len(dropped),
+        "map_sha256": sha256(kegg_dir / "kegg_predicates.tsv"),
+    })
+    provenance_path.write_text(json.dumps(provenance, indent=2) + "\n")
+    _write_report(report, dropped)
+    log(f"Rejudged {len(kos):,} KOs from the snapshot: mapped {len(mapped):,} KOs, {provenance['pairs']:,} pairs; "
+        f"map sha256 {before[:16]} -> {provenance['map_sha256'][:16]}")
     return provenance
 
 

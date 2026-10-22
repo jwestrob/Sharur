@@ -10,8 +10,13 @@ from pathlib import Path
 
 import pytest
 
-from sharur.predicates.mappings import kegg_map
-from sharur.predicates.mappings.kegg_build import build, load_swissprot_consensus
+from sharur.predicates.mappings import kegg_build, kegg_map
+from sharur.predicates.mappings.kegg_build import (
+    build,
+    load_swissprot_consensus,
+    read_patterns,
+    rejudge,
+)
 from sharur.predicates.mappings.kegg_evidence import (
     load_brite_rules,
     load_hyddb_snapshot,
@@ -139,6 +144,7 @@ def _synthetic_inputs(root: Path) -> tuple[Path, Path]:
         "ko:K90003\tbazA; baz complex subunit A\n"
         "ko:K90004\tbazB; baz complex subunit B\n"
         "ko:K90006\tquxA; unplaced protein\n"
+        "ko:K90007\tnifE; nitrogenase molybdenum-cofactor synthesis protein NifE\n"
     )
     (inputs / "kegg_info.txt").write_text("kegg\tKEGG\n\tbrite 1 2026/01/02\n\tmodule 1 2026/01/03\n\tko 5 2026/01/01\n")
     for hierarchy in {r.hierarchy for r in load_brite_rules()}:
@@ -191,3 +197,48 @@ def test_consensus_table_loads_as_evidence():
     table = load_swissprot_consensus()
     ko, pred, k, n = _rows("kegg_swissprot_consensus.tsv")[0]
     assert table[ko][pred] == f"swissprot:{k}/{n}"
+
+
+def test_nitrogenase_wording_proposes_nitrogen_fixation_only():
+    # Subunit identity comes from module M00175; a KO named for the nitrogenase it
+    # builds or protects (NifE, NifN, VnfE, NifW) is a nitrogen-fixation gene.
+    hits = [preds for pattern, preds in read_patterns() if pattern.search("nitrogenase-stabilizing/protective protein")]
+    assert hits == [["nitrogen_fixation"]]
+
+
+def test_synthetic_nife_takes_no_nitrogenase(tmp_path):
+    inputs, kofam = _synthetic_inputs(tmp_path)
+    build(inputs, tmp_path / "kegg", kofam_ko_list=kofam, log=lambda *_: None)
+    predicates, _ = kegg_map._load_kegg_mapping_file(tmp_path / "kegg" / "kegg_predicates.tsv")
+    assert "nitrogen_fixation" in predicates["K90007"]
+    assert "nitrogenase" not in predicates["K90007"]
+
+
+def test_rejudge_reproduces_the_build(tmp_path):
+    inputs, kofam = _synthetic_inputs(tmp_path)
+    out = tmp_path / "kegg"
+    build(inputs, out, kofam_ko_list=kofam, log=lambda *_: None)
+    built = (out / "kegg_predicates.tsv").read_bytes()
+    snapshot = (out / "kegg_evidence_snapshot.tsv").read_bytes()
+    provenance = rejudge(out, log=lambda *_: None)
+    assert (out / "kegg_predicates.tsv").read_bytes() == built
+    assert (out / "kegg_evidence_snapshot.tsv").read_bytes() == snapshot
+    assert provenance["rejudged_from"] == "kegg_evidence_snapshot.tsv"
+    assert provenance["kegg_release"] == "ko 2026/01/01; brite 2026/01/02; module 2026/01/03"
+
+
+def test_rejudge_applies_a_rule_change_like_a_rebuild(tmp_path, monkeypatch):
+    inputs, kofam = _synthetic_inputs(tmp_path)
+    current = read_patterns()
+    old_rule = [(p, ["nitrogenase", "nitrogen_fixation"] if p.pattern == r"\bnitrogenase\b" else preds)
+                for p, preds in current]
+    monkeypatch.setattr(kegg_build, "read_patterns", lambda: old_rule)
+    stale = tmp_path / "stale"
+    build(inputs, stale, kofam_ko_list=kofam, log=lambda *_: None)
+    assert "nitrogenase" in kegg_map._load_kegg_mapping_file(stale / "kegg_predicates.tsv")[0]["K90007"]
+
+    monkeypatch.setattr(kegg_build, "read_patterns", lambda: current)
+    rejudge(stale, log=lambda *_: None)
+    fresh = tmp_path / "fresh"
+    build(inputs, fresh, kofam_ko_list=kofam, log=lambda *_: None)
+    assert (stale / "kegg_predicates.tsv").read_bytes() == (fresh / "kegg_predicates.tsv").read_bytes()

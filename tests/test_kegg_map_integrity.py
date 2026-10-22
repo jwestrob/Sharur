@@ -175,6 +175,13 @@ def test_proposal_comments_start_with_the_kegg_symbol():
     ("K06281", {"nife_group1", "uptake_hydrogenase"}, {"nife_group2"}),                 # hyaB, hybC
     ("K23549", {"nife_group2"}, {"uptake_hydrogenase", "h2_sensor"}),                   # hupV: 2a/2b/2c/2e
     ("K02588", {"nitrogenase", "nitrogen_fixation"}, set()),                            # nifH
+    ("K02586", {"nitrogenase", "nitrogen_fixation"}, set()),                            # nifD
+    ("K02591", {"nitrogenase", "nitrogen_fixation"}, set()),                            # nifK
+    # Cofactor builders and the protective protein take nitrogen fixation, never the enzyme.
+    ("K02587", {"nitrogenase_maturation", "nitrogen_fixation"}, {"nitrogenase"}),       # nifE
+    ("K02592", {"nitrogenase_maturation", "nitrogen_fixation"}, {"nitrogenase"}),       # nifN
+    ("K22903", {"nitrogenase_maturation", "nitrogen_fixation"}, {"nitrogenase"}),       # vnfE
+    ("K02595", {"nitrogen_fixation"}, {"nitrogenase", "nitrogenase_maturation"}),       # nifW
     ("K02040", {"phosphate_transporter"}, {"sulfate_transporter"}),                     # pstS
     ("K03407", {"sensor_kinase", "chemotaxis"}, {"response_regulator"}),                # cheA
     ("K07659", {"response_regulator", "ompr_family"}, {"sensor_kinase"}),               # ompR

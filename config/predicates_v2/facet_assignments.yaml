@@ -140,6 +140,7 @@ nitrite_reductase: activity
 nitrogen_fixation: activity
 nitrogen_metabolism: activity
 nitrogenase: activity
+nitrogenase_locus: activity
 nitrogenase_maturation: activity
 nitrous_oxide_reductase: activity
 nrps: activity
@@ -599,6 +600,7 @@ cazy_annotated: quality_flag
 confident_hit: quality_flag
 gc_high: quality_flag
 gc_low: quality_flag
+nitrogenase_contig_edge: quality_flag
 gc_outlier: quality_flag
 hyddb_annotated: quality_flag  # override from metabolism
 hyddb_needs_curation: quality_flag

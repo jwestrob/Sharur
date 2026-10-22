@@ -23,8 +23,8 @@ installed Pfam-A.hmm, Swiss-Prot 2026_03, KEGG REST ko/brite dated 2026-09-24).
    written to a report and stay out of the map.
 4. **Components and systems.** Single genes and domains yield component-level
    predicates. System-level predicates (a validated defense system, a paired
-   toxin-antitoxin system, a secretion-system locus) come only from
-   purpose-built system callers.
+   toxin-antitoxin system, a secretion-system locus, a nitrogenase locus) come
+   only from purpose-built system callers.
 
 ## Maps and their evidence
 
@@ -46,7 +46,7 @@ Pfam-A.clans.tsv for families the installed release lacks.
 
 ### KEGG orthologs (built locally by `sharur setup-kegg`)
 
-52,180 pairs over 19,501 KOs in the current local build. KEGG is copyright
+52,177 pairs over 19,501 KOs in the current local build. KEGG is copyright
 Kanehisa Laboratories and KEGG REST is for academic use, so Sharur ships its
 rules and ID-keyed counts only; each user builds the map from KEGG data on their
 own machine (`--inputs` accepts a licensed KEGG copy).
@@ -55,7 +55,7 @@ own machine (`--inputs` accepts a licensed KEGG copy).
 |---|---|---|
 | `ec:<EC>` | 24,795 | KEGG's KO definition lists the EC number |
 | `brite:<hierarchy> <path>` | 12,162 | KEGG places the KO under a BRITE node mapped in `kegg_brite_predicates.tsv` |
-| `text:<match>` | 11,170 | The KO's KEGG symbols or name state the predicate |
+| `text:<match>` | 11,167 | The KO's KEGG symbols or name state the predicate |
 | `swissprot:k/n` | 2,667 | Reviewed proteins linked to the KO agree (shipped table `kegg_swissprot_consensus.tsv`) |
 | `module:<M number>` | 1,321 | The KO is in a KEGG module mapped in `kegg_module_predicates.tsv`, or joined to other components by `+`/`-` in a module definition (`complex_subunit`) |
 | `hyddb:k/n` | 65 | For KOs KEGG names as hydrogenases: HydDB reference labels captured by the KO's KOfam profile |
@@ -64,6 +64,12 @@ BRITE and module rules map component-level predicates only. Module rules cover
 central carbon, fatty acid and cofactor pathways, respiratory and photosynthetic
 complexes, nitrogenase and SOX; modules whose components also serve other
 pathways stay out (for example Hdr, DsrAB, NarGHI, AmoA/PmoA).
+
+Nitrogenase subunits take `nitrogenase` from module M00175 (NifH, NifD, NifK,
+AnfG, VnfD/G/K/H). The word "nitrogenase" in any other KO name proposes
+`nitrogen_fixation` only: NifE, NifN and VnfE build the cofactor
+(`nitrogenase_maturation`, as NifB and NifV do) and NifW protects the MoFe
+protein.
 
 ### CAZy families (`cazy_predicates.tsv`, shipped)
 
@@ -183,6 +189,65 @@ support: whether the protein's KO hits capture HydDB references of the assigned
 subgroup (`hydrogenase_classifications.ko_support`). KOfam support corroborates
 an assignment and leaves it unchanged.
 
+## Nitrogenase loci
+
+`nitrogen_fixation_confirmed` names an enzyme, so it rests on gene order. The
+NifH and NifD/NifK families also hold paralogs that make no nitrogenase:
+CfbC/CfbD (coenzyme F430 synthesis), the Bch/Chl chlorophyllide reductases, and
+NifH-like proteins paired with shorter or KO-unassigned NifD-like partners.
+KOfam assigns K02588 (NifH) to many of those Fe proteins, so the KO alone
+cannot name the enzyme.
+
+`sharur/predicates_v2/nitrogenase_loci.py` calls gene sets on every predicate
+generation and writes them to `loci`/`locus_proteins`. A gene set is
+`confirmed` (`locus_type = 'nitrogenase'`) when:
+
+1. a gene carries the Fe-protein KO (K02588 nifH or K22899 vnfH);
+2. its first two Oxidored_nitro-family genes (Pfam Oxidored_nitro, or a KO of
+   that family) on the same strand within 6 genes downstream fill the alpha and
+   beta slots;
+3. the alpha slot carries K02586 (nifD) or K22896 (vnfD) and the beta slot
+   K02591 (nifK) or K22897 (vnfK). In the methanogen-type operon
+   (nifH-nifI1-nifI2-nifD-nifK) KOfam's best hit for the beta subunit is the
+   NifN group (K02592), so K02592 fills the beta slot when a nifI1/nifI2 gene
+   (K02589/K02590) lies between the Fe protein and the alpha slot;
+4. all three KOs score at or above their KOfam thresholds (KOfam's `ko_list`);
+5. none of the three genes is partial (Prodigal `partial` flag).
+
+The 6-gene window comes from the SR-VP snapshots: every KO-assigned alpha and
+beta partner of a nifH sits 1-5 genes downstream on its strand (alpha +1 to +3,
+beta +2 to +5, with nifI1/nifI2 accounting for +2), and none sits upstream or
+on the other strand.
+
+Every other Fe-protein KO gene, and every alpha/beta KO gene outside a called
+set, becomes a `nitrogenase_candidate` row whose `metadata.call` records what
+was observed:
+
+| Call | Observation |
+|---|---|
+| `contig_edge` | The window runs off a contig end with fewer than two partners found, or a slot gene is partial |
+| `ko_below_threshold` | Nitrogenase gene order with a slot KO below its KOfam threshold |
+| `beta_slot_mismatch` | Fe protein and alpha KOs; the beta slot holds another gene or is empty |
+| `paralog_ko` | A slot carries a CfbD or Bch/Chl reductase KO |
+| `cofactor_ko_partners` | The slots carry NifE/NifN/VnfE KOs |
+| `short_partners` | Two KO-unassigned Oxidored_nitro partners, both shorter than 430 aa |
+| `unassigned_partners` | Two KO-unassigned Oxidored_nitro partners, one of 430 aa or more |
+| `single_partner` | One Oxidored_nitro partner |
+| `upstream_partners` | No partner downstream; two or more Oxidored_nitro genes upstream on the strand |
+| `no_partner` | No Oxidored_nitro gene in the window |
+| `no_fe_protein` | Alpha/beta KO genes with no Fe-protein KO gene within 6 genes upstream |
+
+The 430-aa boundary labels uncalled pairs only: KO-assigned alpha and beta
+partners in the SR-VP snapshots are 439 aa or longer, and the KO-less pairs
+beside Methanomicrobiales NifH-family proteins are 338-395 aa.
+
+V2 generation turns the rows into context atoms. The Fe protein, alpha, beta
+and (Anf/Vnf) delta genes of a confirmed set carry `nitrogenase_locus`
+(system-level, `implies`, source `nitrogenase_locus`), which
+`nitrogen_fixation_confirmed` requires. Anchor and partner genes of a
+`contig_edge` set carry the quality flag `nitrogenase_contig_edge`. Other
+candidate calls stay in `loci` as observations.
+
 ## Provenance and verification
 
 - Every predicate generation appends a `predicate_provenance` row with hashes
@@ -216,3 +281,9 @@ Propose pairs in the proposal files (`pfam_predicate_proposals.tsv`,
 (`kegg_brite_predicates.tsv`, `kegg_module_predicates.tsv`, GO anchors and text
 patterns in `pfam_evidence_spec.py`), then rebuild. The dropped-proposal reports
 list what lacks evidence.
+
+`sharur setup-kegg --rejudge` re-applies edited KEGG rules to the local build
+from its evidence snapshot, with no download. The snapshot holds every mapped
+KO's symbols, name, BRITE placements and module memberships, so the result
+matches a full build of the same KEGG release for rules that remove pairs or
+touch already-mapped KOs; a rule that maps a new KO needs `sharur setup-kegg`.

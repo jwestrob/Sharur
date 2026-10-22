@@ -135,13 +135,17 @@ methanogenesis_confirmed:
         relation_in: [implies, supports]
 
 nitrogen_fixation_confirmed:
-  description: "Nitrogen fixation with nitrogenase"
+  description: "Nitrogenase structural subunit confirmed by gene order: Fe protein, alpha and beta KOs in operon order on one contig"
   facet: activity
   requires:
     all_of:
-      - has_atom: nitrogenase
-        relation_in: [implies, supports]
-      - has_atom: nitrogen_fixation
+      # Emitted only by the nitrogenase locus caller (sharur/predicates_v2/nitrogenase_loci.py)
+      # for the Fe protein, alpha, beta (and Anf/Vnf delta) genes of a confirmed gene set.
+      # Single-gene KO/Pfam evidence carries the component atom `nitrogenase` and never
+      # reaches this composite; truncated gene sets carry `nitrogenase_contig_edge` instead.
+      - has_atom: nitrogenase_locus
+        relation: implies
+        source_db: nitrogenase_locus
 
 cellulosome_component:
   description: "Protein with dockerin or cohesin domain"

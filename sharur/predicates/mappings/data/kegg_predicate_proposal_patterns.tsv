@@ -44,7 +44,9 @@ transcription.*factor|TFIIB|TBP	transcription,dna_binding
 HTH-type|DNA[-/ ].*binding|DNA/RNA-binding	dna_binding
 nucleotide binding protein	nucleotide_binding,binding
 \bhydrogenase\b	hydrogenase,hydrogen_metabolism
-\bnitrogenase\b	nitrogenase,nitrogen_fixation
+# 'nitrogenase' in a KO name places the KO in nitrogen fixation. Subunit identity (nitrogenase)
+# comes from module M00175: NifE, NifN and VnfE build the cofactor and NifW protects the MoFe protein.
+\bnitrogenase\b	nitrogen_fixation
 nitrate.*reductase|nar[GHI]	nitrate_reduction,denitrification
 nitrite.*reductase|nir[SK]	denitrification
 sulfite.*reductase|dsr[AB]	sulfate_reduction,sulfur_metabolism

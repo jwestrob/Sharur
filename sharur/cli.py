@@ -1678,6 +1678,11 @@ def setup_kegg(
         help="KOfam ko_list (downloaded when absent).",
     ),
     report: Optional[Path] = typer.Option(None, "--report", help="TSV of proposed pairs without evidence."),
+    rejudge_build: bool = typer.Option(
+        False, "--rejudge",
+        help="Re-apply the current rules to the existing build from its evidence snapshot (no download). "
+             "Covers rule edits that remove pairs or touch KOs the build already maps.",
+    ),
 ):
     """Fetch KEGG data and build the KO -> predicate map on this machine.
 
@@ -1686,8 +1691,19 @@ def setup_kegg(
     license and can build from their licensed files with --inputs. The built
     files stay local; Sharur ships only its own rules.
     """
-    from sharur.predicates.mappings.kegg_build import setup
-    from sharur.predicates.mappings.kegg_map import default_kegg_dir
+    from sharur.predicates.mappings.kegg_build import rejudge, setup
+    from sharur.predicates.mappings.kegg_map import default_kegg_dir, kegg_dir
+
+    if rejudge_build:
+        existing = directory or kegg_dir()
+        if existing is None or not (existing / "kegg_evidence_snapshot.tsv").exists():
+            typer.echo("No local KEGG build to rejudge; run `sharur setup-kegg` first.", err=True)
+            raise typer.Exit(1)
+        provenance = rejudge(existing, report=report, log=typer.echo)
+        typer.echo(f"Rejudged {existing / 'kegg_predicates.tsv'} (KEGG {provenance.get('kegg_release')}; "
+                   f"map sha256 {provenance['map_sha256'][:16]})")
+        typer.echo("Regenerate predicates for existing datasets to apply it.")
+        return
 
     out = directory or default_kegg_dir()
     typer.echo("KEGG data is fetched under KEGG's terms of use (https://www.kegg.jp/kegg/legal.html): "

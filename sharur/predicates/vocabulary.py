@@ -243,7 +243,7 @@ METABOLISM_PREDICATES = [
     # Nitrogen metabolism
     PredicateVocab("nitrogen_metabolism", "Nitrogen metabolism", "Nitrogen assimilation/dissimilation", "metabolism"),
     PredicateVocab("nitrogen_fixation", "Nitrogen fixation", "N2 fixation - requires nifHDK", "metabolism", "nitrogen_metabolism"),
-    PredicateVocab("nitrogenase_maturation", "Nitrogenase maturation", "FeMo-co biosynthesis (nifBNE)", "metabolism", "nitrogen_metabolism"),
+    PredicateVocab("nitrogenase_maturation", "Nitrogenase maturation", "Nitrogenase cofactor (FeMo-co, FeV-co) biosynthesis: NifB, NifEN, VnfE, NifV", "metabolism", "nitrogen_metabolism"),
     PredicateVocab("nitrification", "Nitrification", "Ammonia to nitrate oxidation", "metabolism", "nitrogen_metabolism"),
     PredicateVocab("denitrification", "Denitrification", "Nitrate to N2 reduction", "metabolism", "nitrogen_metabolism"),
     PredicateVocab("ammonia_assimilation", "Ammonia assimilation", "Ammonia incorporation", "metabolism", "nitrogen_metabolism"),
@@ -710,6 +710,8 @@ SIZE_PREDICATES = [
 ANNOTATION_PREDICATES = [
     PredicateVocab("unannotated", "Unannotated", "No functional annotations", "annotation"),
     PredicateVocab("hypothetical", "Hypothetical", "Hypothetical/uncharacterized annotation", "annotation"),
+    PredicateVocab("nitrogenase_contig_edge", "Nitrogenase genes at contig edge",
+                   "NifH/NifD/NifK-family gene set cut by a contig end; its structure is undetermined", "annotation"),
     PredicateVocab("well_annotated", "Well annotated", "3+ confident annotations", "annotation"),
     PredicateVocab("confident_hit", "Confident hit", "E-value < 1e-10", "annotation"),
     PredicateVocab("weak_hit", "Weak hit", "Only weak annotations (e-value > 1e-5)", "annotation"),
@@ -807,6 +809,9 @@ TOPOLOGY_PREDICATES = [
 ADDITIONAL_PREDICATES = [
     # Additional enzyme subtypes
     PredicateVocab("nitrogenase", "Nitrogenase", "Nitrogen fixation enzyme", "metabolism", "nitrogen_fixation"),
+    PredicateVocab("nitrogenase_locus", "Nitrogenase locus subunit",
+                   "Fe protein, alpha or beta subunit of a nitrogenase locus call: nifH/vnfH, nifD/vnfD and "
+                   "nifK/vnfK KOs in operon order on one contig", "metabolism", "nitrogenase"),
     PredicateVocab("nitrite_reductase", "Nitrite reductase", "Nitrite to NO/ammonia reduction", "metabolism", "denitrification"),
     PredicateVocab("nitric_oxide_reductase", "Nitric oxide reductase", "NO to N2O reduction", "metabolism", "denitrification"),
     PredicateVocab("nitrous_oxide_reductase", "Nitrous oxide reductase", "N2O to N2 reduction", "metabolism", "denitrification"),
@@ -1010,6 +1015,7 @@ _SECRETION_COMPONENTS = {
     "type_vi_secretion": "t6ss_component",
 }
 COMPONENT_EQUIVALENT: dict[str, Optional[str]] = {
+    "nitrogenase_locus": "nitrogenase",
     "defense_system": "defense_component",
     "toxin_antitoxin": "defense_component",
     "abortive_infection": "abi_domain",

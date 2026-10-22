@@ -47,6 +47,9 @@ from sharur.predicates_v2.review_queue import (
     format_review_queue_tsv,
     suggest_facet,
 )
+from sharur.predicates_v2.nitrogenase_loci import LOCUS_TYPES as NITROGENASE_LOCUS_TYPES
+from sharur.predicates_v2.nitrogenase_loci import locus_atoms as nitrogenase_locus_atoms
+from sharur.predicates_v2.nitrogenase_loci import refresh_nitrogenase_loci
 from sharur.predicates_v2.validated_systems import (
     fetch_validated_system_annotations,
     materialize_system_proteins,
@@ -291,6 +294,14 @@ def generate_and_persist_v2(
         _backfill_semantic_terms_if_empty(store)
 
     materialize_system_proteins(store)
+    # Gene-order calls read the whole dataset's annotations, so every generation
+    # (full or subset) re-derives them before atoms are built. The prefetch reader
+    # below reads `loci` on its own cursor while this connection commits chunks, so
+    # rewritten rows are checkpointed first: concurrent readers then see persistent
+    # blocks only (an uncheckpointed block pinned by the reader makes DuckDB's
+    # auto-checkpoint fail with "ConvertToPersistent ... multiple readers active").
+    if refresh_nitrogenase_loci(store)["written"]:
+        store.execute("CHECKPOINT")
 
     start_after: str | None = None
     total_processed = 0
@@ -1645,6 +1656,24 @@ def _fetch_context_atoms_by_protein(
                 source_db="_locus",
             )
         )
+
+    # Nitrogenase gene-order calls (sharur.predicates_v2.nitrogenase_loci).
+    types = ", ".join(f"'{t}'" for t in NITROGENASE_LOCUS_TYPES)
+    nif_rows = store.execute(
+        f"""
+        SELECT lp.protein_id, l.locus_id, l.locus_type, l.metadata
+        FROM locus_proteins lp
+        JOIN loci l ON l.locus_id = lp.locus_id
+        WHERE l.locus_type IN ({types})
+          AND lp.protein_id IN ({placeholders})
+        ORDER BY lp.protein_id, l.locus_id
+        """,
+        protein_ids,
+    )
+    for protein_id, locus_id, locus_type, metadata in nif_rows:
+        atoms = nitrogenase_locus_atoms(protein_id, locus_id, locus_type, metadata)
+        if atoms:
+            atoms_by_protein.setdefault(protein_id, []).extend(atoms)
 
     return atoms_by_protein
 

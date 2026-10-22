@@ -46,6 +46,7 @@ K02592	nitrogenase_maturation	nifN
 K02587	nitrogenase_maturation	nifE
 K02585	nitrogenase_maturation,iron_sulfur	nifB
 K02594	nitrogenase_maturation	nifV
+K22903	nitrogenase_maturation	vnfE
 K02593	nitrogen_fixation	nifT
 K00370	denitrification,nitrate_reduction,molybdenum_binding	narG
 K00371	denitrification,nitrate_reduction,iron_sulfur	narH
