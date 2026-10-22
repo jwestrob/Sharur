@@ -610,3 +610,31 @@ class TestCompositeValidation:
             ),
         ]
         assert "nife_hydrogenase_validated" not in evaluate_composites(flagged, composites)
+
+
+class TestNamedTargetFamilies:
+    """Pfam families named after another protein do not carry that protein's composites."""
+
+    @staticmethod
+    def _atoms_for(name: str):
+        from sharur.predicates.generator import AnnotationRecord, ProteinRecord
+        from sharur.predicates_v2.generator import AtomGenerator
+
+        gen = AtomGenerator(predict_topology=False)
+        protein = ProteinRecord(protein_id="prot_001", sequence_length=300)
+        return gen.generate_atoms(protein, [AnnotationRecord(source="pfam", accession=name, name=name)])
+
+    def test_drat_alone_is_not_nitrogen_fixation_confirmed(self):
+        # DraT ADP-ribosylates the nitrogenase Fe protein; it carries process-level
+        # nitrogen_fixation (GO) and no nitrogenase atom.
+        atoms = self._atoms_for("DRAT")
+        ids = {a.atom_id for a in atoms}
+        assert "nitrogen_fixation" in ids
+        assert not {"nitrogenase", "oxidoreductase", "reductase"} & ids
+        assert "nitrogen_fixation_confirmed" not in evaluate_composites(atoms, load_composites())
+
+    def test_dsrc_family_alone_carries_no_sulfate_reduction(self):
+        # PF04358 also holds TusE; sulfate_reduction comes from DsrAB/AprAB evidence.
+        ids = {a.atom_id for a in self._atoms_for("DsrC")}
+        assert "sulfur_metabolism" in ids
+        assert "sulfate_reduction" not in ids

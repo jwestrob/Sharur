@@ -118,7 +118,13 @@ Name and description matching (Pfam, KEGG, VOG) follows one set of rules
   description and ENZYME names in the description are no evidence; InterPro GO
   and reviewed-protein consensus still count. The check sits in
   `pfam_evidence.judge`, so KEGG wording (KO symbols such as `cobW`) is judged
-  on its own.
+  on its own. DsrC is listed for `sulfate_reduction`: the family also holds the
+  tRNA-thiolation relay TusE.
+- `TARGET_NAMES` lists Pfam family/predicate pairs where the family is named
+  after the protein it acts on (DRAT, the dinitrogenase reductase
+  ADP-ribosyltransferase, regulates the nitrogenase Fe protein). Wording is no
+  evidence for the target's predicate; GO and reviewed-protein consensus still
+  count.
 
 ## Reviewed-protein (Swiss-Prot) consensus
 

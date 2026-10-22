@@ -28,7 +28,7 @@ from sharur.predicates.mappings.pfam_evidence import (
     text_evidence,
     wilson_lower_bound,
 )
-from sharur.predicates.mappings.pfam_evidence_spec import HOMONYMS, SUBSET_NAMES
+from sharur.predicates.mappings.pfam_evidence_spec import HOMONYMS, SUBSET_NAMES, TARGET_NAMES
 from sharur.predicates.vocabulary import PREDICATE_BY_ID
 
 
@@ -89,7 +89,8 @@ def test_every_pair_reverifies_against_the_snapshot():
             ok = _meets_consensus(pred, detail)
         else:
             ok = False
-        subset = kind in ("text", "enzyme") and (snap["name"], pred) in SUBSET_NAMES
+        subset = kind in ("text", "enzyme") and (
+            (snap["name"], pred) in SUBSET_NAMES or (snap["name"], pred) in TARGET_NAMES)
         if not ok or subset or (snap["name"], pred) in HOMONYMS:
             failures.append((acc, snap["name"], pred, ev))
     assert not failures, failures[:20]
@@ -199,6 +200,9 @@ def _families_with(pred):
     ("Prd_NiFe_hyd_3_EhaI", {"nickel_binding"}),
     ("Prd_NiFe_hyd_3_EhaK", {"nickel_binding"}),
     ("NiFe-hyd_HybE", {"nickel_binding"}),                              # large-subunit chaperone
+    ("DsrC", {"sulfate_reduction"}),                                    # also TusE/YccK and RspA
+    # Families named after the protein they act on (TARGET_NAMES).
+    ("DRAT", {"nitrogenase", "oxidoreductase", "reductase"}),           # DraT ADP-ribosylates NifH
 ])
 def test_known_false_claims_stay_out(family, absent):
     accs = [acc for acc, (name, _, _) in MAP.items() if name == family]
@@ -219,6 +223,26 @@ def test_subset_names_take_no_wording_evidence():
     assert {pred for _, pred in SUBSET_NAMES} <= set(PREDICATE_BY_ID)
     worded = {(MAP[acc][0], pred) for acc, pred, ev in PAIRS if ev.startswith(("text:", "enzyme:"))}
     assert not worded & set(SUBSET_NAMES)
+
+
+def test_target_names_take_no_wording_evidence():
+    # DRAT's description names its target, the nitrogenase Fe protein; the family is a transferase.
+    desc = "Dinitrogenase reductase ADP-ribosyltransferase (DRAT)"
+    assert text_evidence("nitrogenase", "DRAT", desc) is not None
+    assert judge("nitrogenase", "DRAT", desc, set(), {}) is None
+    assert judge("reductase", "DRAT", desc, set(), {}) is None
+    # Process-level GO evidence still counts.
+    assert judge("nitrogen_fixation", "DRAT", desc, {"GO:0009399"}, {}) == "go:GO:0009399"
+    assert {pred for _, pred in TARGET_NAMES} <= set(PREDICATE_BY_ID)
+    worded = {(MAP[acc][0], pred) for acc, pred, ev in PAIRS if ev.startswith(("text:", "enzyme:"))}
+    assert not worded & set(TARGET_NAMES)
+
+
+def test_dsrc_family_keeps_sulfur_relay_claims_only():
+    # PF04358 holds DsrC and the tRNA-thiolation relay TusE; only family-wide claims ship.
+    (acc,) = [acc for acc, (name, _, _) in MAP.items() if name == "DsrC"]
+    assert "sulfur_metabolism" in MAP[acc][1]
+    assert "sulfate_reduction" not in MAP[acc][1]
 
 
 def test_subset_names_leave_kegg_wording_alone():

@@ -2554,7 +2554,7 @@ PF04354	ZipA_C	binding,cell_division,divisome	binding=text:binding;cell_division
 PF04355	BamE	membrane,outer_membrane	membrane=go:GO:0016020;outer_membrane=go:GO:0019867
 PF04356	DUF489	hypothetical	hypothetical=text:unknown function
 PF04357	TamB	membrane	membrane=go:GO:0016020
-PF04358	DsrC	sulfate_reduction,sulfur_metabolism	sulfate_reduction=text:DsrC;sulfur_metabolism=text:DsrC
+PF04358	DsrC	sulfur_metabolism	sulfur_metabolism=text:DsrC
 PF04359	DUF493	hypothetical	hypothetical=text:unknown function
 PF04361	DUF494	hypothetical	hypothetical=text:unknown function
 PF04363	DUF496	hypothetical	hypothetical=text:unknown function
@@ -4015,7 +4015,7 @@ PF07352	Phage_Mu_Gam	phage_related	phage_related=text:Phage
 PF07354	Sp38	binding	binding=text:binding
 PF07355	GRDB	oxidoreductase,reductase	oxidoreductase=go:GO:0016491;reductase=text:reductase
 PF07356	DUF1481	hypothetical	hypothetical=text:unknown function
-PF07357	DRAT	nitrogen_fixation,nitrogenase,oxidoreductase,reductase,transferase	nitrogen_fixation=go:GO:0009399;nitrogenase=text:nitrogenase;oxidoreductase=text:reductase;reductase=text:reductase;transferase=go:GO:0016740
+PF07357	DRAT	nitrogen_fixation,transferase	nitrogen_fixation=go:GO:0009399;transferase=go:GO:0016740
 PF07358	DUF1482	hypothetical	hypothetical=text:unknown function
 PF07361	Cytochrom_B562	cytochrome,electron_transport,heme_binding,iron_binding,respiration	cytochrome=text:Cytochrom;electron_transport=go:GO:0009055;heme_binding=go:GO:0020037;iron_binding=go:GO:0005506;respiration=go:GO:0022900
 PF07362	CcdA	antitoxin_domain	antitoxin_domain=text:CcdA

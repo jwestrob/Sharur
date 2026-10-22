@@ -56,6 +56,22 @@ SUBSET_NAMES = {
          "pheromone-shutdown TraB/PrgY of conjugative plasmids, with TIKI metalloproteases, YbaP and archaeal homologs"),
         ("DegT_DnrJ_EryC1", ("secondary_metabolism",),
          "sugar aminotransferases for LPS and glycans (DegT, ArnB, PglE); DnrJ/EryC1/StrS antibiotic members are a few"),
+        ("DsrC", ("sulfate_reduction",),
+         "DsrC-like family: dissimilatory sulfite reductase subunit DsrC with the tRNA-thiolation relay TusE (YccK) and RspA"),
+    ]
+    for predicate in predicates
+}
+
+# Families named after the protein they act on (modify, regulate, mature or
+# protect). Their wording states the target's predicate; as for SUBSET_NAMES,
+# InterPro GO annotation and reviewed-protein consensus still count.
+# (family name, predicate) -> what the family does to the target.
+TARGET_NAMES = {
+    (family, predicate): reason
+    for family, predicates, reason in [
+        ("DRAT", ("nitrogenase", "oxidoreductase", "reductase"),
+         "dinitrogenase reductase ADP-ribosyltransferase DraT (EC 2.4.2.37) inactivates the nitrogenase "
+         "Fe protein; a regulator, not a nitrogenase subunit or an oxidoreductase"),
     ]
     for predicate in predicates
 }
