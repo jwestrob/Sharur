@@ -126,6 +126,19 @@ before treating a migrated legacy database's system surface as available.
 **Method:** DIAMOND (1e-18) + dbCAN.hmm (1e-15) + dbCAN-sub.hmm (1e-15), consensus ≥2 tools.
 **Pipeline:** Optional in Stage 07 before final V2 predicate generation. Enable it with
 `sharur-ingest --enable-cazymes` or standalone Stage 07 `--enable-cazymes`.
+**Existing database:** `--dbcan-dir DIR` (or `$SHARUR_DBCAN_DIR`) names the release directory;
+step 2 uses that release's `dbCAN.hmm`. `--results-only --out cazy.tsv` computes the consensus
+against a read-only database (for a cluster job), and `--load-results cazy.tsv` loads it later
+as `source='cazy'` annotations. The DIAMOND cache lives in `cazyme_diamond_hits.tsv`, apart from
+the consensus table.
+
+## Biosynthetic Gene Clusters (GECCO on stored gene calls)
+**Run:** `scripts/run_gecco_bgcs.py DB --assemblies MAP.tsv --out-dir DIR --shard i/N` writes each
+shard's genomes as GenBank records whose CDS features are the database's own gene calls, then runs
+`gecco run --cds-feature CDS --locus-tag locus_tag`, so every cluster member is a stored protein.
+**Load:** `sharur load-bgcs --db DB --gecco-dir DIR` replaces the `loci` rows with
+`locus_type='bgc'` (the `bgc_loci` view) and their `locus_proteins`. Locus IDs are
+`{bin_id}::bgc{n}`; `metadata` carries the GECCO type, probabilities, domains and version.
 
 ## ESM2 Embeddings
 **Script:** `src/ingest/06_esm2_embeddings.py`

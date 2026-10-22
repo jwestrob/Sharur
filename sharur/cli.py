@@ -1167,6 +1167,44 @@ def backfill_contig_context_command(
     typer.echo("Canonical database state changed. Rebuild dataset.seal.json with `sharur seal --force`.")
 
 
+@app.command(name="load-bgcs")
+def load_bgcs_command(
+    db: Path = typer.Option(Path(DEFAULT_DB), "--db", "-d", help="Path to a writable Sharur DuckDB."),
+    gecco_dir: Path = typer.Option(
+        ..., "--gecco-dir",
+        help="Output root of scripts/run_gecco_bgcs.py (shard dirs with record_map.tsv and *.clusters.tsv)."),
+):
+    """Load GECCO biosynthetic gene clusters into an existing database.
+
+    Replaces every BGC locus (``loci`` rows with locus_type 'bgc', the ``bgc_loci``
+    view) and its member proteins. Writes the canonical database: run in a
+    maintenance window, then reseal.
+    """
+    import duckdb  # noqa: PLC0415
+
+    from sharur.bgc import load_gecco_bgcs  # noqa: PLC0415
+
+    database = db.expanduser().resolve()
+    if not database.is_file():
+        typer.echo(f"DuckDB file does not exist: {database}", err=True)
+        raise typer.Exit(1)
+    connection = duckdb.connect(str(database))
+    try:
+        stats = load_gecco_bgcs(connection, gecco_dir)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    finally:
+        connection.close()
+    typer.echo(f"BGC loci: {stats['clusters']:,} in {stats['genomes']:,} genomes "
+               f"(replaced {stats['replaced']:,}); member proteins {stats['member_proteins']:,}")
+    typer.echo(f"Dropped members absent from the genome's proteins: {stats['dropped_members']:,}; "
+               f"clusters left without members: {stats['skipped_clusters']:,}")
+    for bgc_type, n in stats["by_type"].items():
+        typer.echo(f"  {bgc_type}: {n:,}")
+    typer.echo("Canonical database state changed. Rebuild dataset.seal.json with `sharur seal --force`.")
+
+
 @app.command(name="verify-seal")
 def verify_seal(
     seal_path: Path = typer.Argument(..., help="Path to dataset.seal.json."),
