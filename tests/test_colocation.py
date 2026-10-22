@@ -24,6 +24,7 @@ from sharur.colocation import (
     resolve_conflicts,
     validate_systems,
 )
+import sharur.colocation as colocation
 
 
 if TYPE_CHECKING:
@@ -667,3 +668,28 @@ def test_reintegration_updates_existing_indexed_replicon_columns(
         [f"idx_{table_name}_replicon"],
     ).fetchone()[0] == 1
     conn.close()
+
+
+def test_replicon_over_the_solver_budget_is_skipped_and_reported(monkeypatch) -> None:
+    model = _model(GeneSpec("a", "mandatory"), GeneSpec("b", "mandatory"), gap=1, multi_loci=True)
+    # six separate a+b loci: a multi_loci model enumerates every combination of them
+    crowded = [_hit(f"p{k}{g}", g, 10 * k + j, contig="crowded")
+               for k in range(6) for j, g in enumerate("ab")]
+    plain = [_hit("q1", "a", 1, contig="plain"), _hit("q2", "b", 2, contig="plain")]
+    candidates = _detect_model_systems(crowded + plain, model)
+    n_crowded = sum(1 for c in candidates if c.contig_id == "crowded")
+    assert n_crowded > 3
+
+    monkeypatch.setattr(colocation, "MAX_REPLICON_CANDIDATES", 3)
+    unresolved: list[dict] = []
+    selected = resolve_conflicts(candidates, unresolved=unresolved)
+    assert [s.contig_id for s in selected] == ["plain"]
+    assert unresolved == [{"genome_id": "genome-1", "contig_id": "crowded",
+                           "candidates": n_crowded, "reason": "candidates"}]
+
+    monkeypatch.setattr(colocation, "MAX_REPLICON_CANDIDATES", 10_000)
+    monkeypatch.setattr(colocation, "MAX_SOLVER_STATES", 2)
+    unresolved = []
+    selected = resolve_conflicts(candidates, unresolved=unresolved)
+    assert {s.contig_id for s in selected} <= {"plain"}
+    assert any(u["contig_id"] == "crowded" and u["reason"] == "solver states" for u in unresolved)

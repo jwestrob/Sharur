@@ -1128,7 +1128,34 @@ def _detect_model_systems(
 # ------------------------------------------------------------------ #
 
 
-def resolve_conflicts(hits: list[SystemHit]) -> list[SystemHit]:
+# Exact conflict resolution is exponential in the worst case. A contig rich in
+# type-IV-filament genes gives multi_loci models thousands of cluster
+# combinations: MacSyFinder 2.1.4 runs its best-solution search for hours on
+# such a replicon (its --timeout then drops the replicon), and so would the
+# exact solver here. A replicon whose candidates or solver states exceed these
+# budgets is skipped and reported, and no systems are called on it.
+MAX_REPLICON_CANDIDATES = 5_000
+MAX_SOLVER_STATES = 2_000_000
+
+
+class ConflictBudgetExceeded(RuntimeError):
+    """The exact solver for one conflict component exceeded MAX_SOLVER_STATES."""
+
+
+def _record_unresolved(unresolved: list[dict] | None, replicon_key: tuple[str, str],
+                       n_candidates: int, reason: str) -> None:
+    genome_id, contig_id = replicon_key
+    logger.warning(
+        f"  Skipping replicon {genome_id} / {contig_id}: {n_candidates} candidate systems exceed "
+        f"the exact conflict-solver budget ({reason}); no systems are called on it"
+    )
+    if unresolved is not None:
+        unresolved.append({"genome_id": genome_id, "contig_id": contig_id,
+                           "candidates": n_candidates, "reason": reason})
+
+
+def resolve_conflicts(hits: list[SystemHit],
+                      unresolved: list[dict] | None = None) -> list[SystemHit]:
     """Select a deterministic maximum-score set of compatible systems.
 
     Compatibility follows MacSyFinder's model:
@@ -1145,6 +1172,8 @@ def resolve_conflicts(hits: list[SystemHit]) -> list[SystemHit]:
 
     Args:
         hits: All candidate SystemHits across all models and genomes.
+        unresolved: Receives one dict per replicon skipped because it exceeds
+            MAX_REPLICON_CANDIDATES or MAX_SOLVER_STATES.
 
     Returns:
         The selected non-conflicting subset.
@@ -1162,8 +1191,13 @@ def resolve_conflicts(hits: list[SystemHit]) -> list[SystemHit]:
             by_replicon[replicon_key],
             key=_system_sort_key,
         )
+        if len(replicon_hits) > MAX_REPLICON_CANDIDATES:
+            _record_unresolved(unresolved, replicon_key, len(replicon_hits), "candidates")
+            continue
         conflicts = _conflict_masks(replicon_hits)
         remaining = set(range(len(replicon_hits)))
+        replicon_selected: list[SystemHit] = []
+        within_budget = True
 
         while remaining:
             seed = min(remaining)
@@ -1179,12 +1213,19 @@ def resolve_conflicts(hits: list[SystemHit]) -> list[SystemHit]:
                     frontier.extend(sorted(neighbors))
 
             component_indices = sorted(component)
-            selected_indices = _solve_conflict_component(
-                replicon_hits,
-                conflicts,
-                component_indices,
-            )
-            selected.extend(replicon_hits[index] for index in selected_indices)
+            try:
+                selected_indices = _solve_conflict_component(
+                    replicon_hits,
+                    conflicts,
+                    component_indices,
+                )
+            except ConflictBudgetExceeded:
+                _record_unresolved(unresolved, replicon_key, len(replicon_hits), "solver states")
+                within_budget = False
+                break
+            replicon_selected.extend(replicon_hits[index] for index in selected_indices)
+        if within_budget:
+            selected.extend(replicon_selected)
 
     return sorted(selected, key=_system_sort_key)
 
@@ -1319,6 +1360,8 @@ def _solve_conflict_component(
         with_pivot = tuple(sorted((pivot, *memo[with_mask])))
         memo[mask] = _better_solution(hits, with_pivot, memo[without_mask])
         stack.pop()
+        if len(memo) > MAX_SOLVER_STATES:
+            raise ConflictBudgetExceeded(f"{len(memo)} solver states")
     return memo[component_mask]
 
 
@@ -1489,13 +1532,17 @@ def validate_systems(
         )
 
     # Phase 5: Conflict resolution
-    selected_hits = resolve_conflicts(candidate_hits)
+    unresolved: list[dict] = []
+    selected_hits = resolve_conflicts(candidate_hits, unresolved=unresolved)
+    if unresolved and verbose:
+        logger.info(f"  {len(unresolved)} replicons skipped by the conflict-solver budget")
 
     if verbose:
         logger.info(f"  {len(selected_hits)} systems after conflict resolution")
 
     # Build output DataFrames
     systems_df, genes_df = _build_output_dataframes(selected_hits, source)
+    systems_df.attrs["unresolved_replicons"] = unresolved
 
     elapsed = time.time() - t0
     if verbose:
