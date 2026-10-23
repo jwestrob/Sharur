@@ -23,7 +23,7 @@ CLASS_LABELS = {"NiFe": "[NiFe]", "FeFe": "[FeFe]", "Fe": "[Fe]"}
 GROUPS = (("NiFe", "1"), ("NiFe", "2"), ("NiFe", "3"), ("NiFe", "4"), ("FeFe", "A"), ("FeFe", "B"), ("FeFe", "C"),
           ("Fe", ""))
 EVIDENCE = {
-    "curated": "catalytic domain observed, or hydrogenase genes nearby",
+    "curated": "catalytic domain observed, or hydrogenase-specific genes nearby",
     "assigned": "every nearest-reference assignment",
 }
 INTERPRETATION = {
@@ -101,8 +101,10 @@ def register(app, ctx) -> None:
                     "interpretation": interp, "role": role, "pident": pident, "domains": domains,
                     "cleared": cleared, "curation_reason": reason, "ko_support": ko or "none",
                     "verdict": verdict, "hydrogenase_markers": sorted(nb.hydrogenase) if nb else [],
+                    "complex_i_like_markers": sorted(nb.complex_i_like) if nb else [],
                     "complex_i_markers": sorted(nb.complex_i) if nb else [],
                     "hydrogenase_genes": nb.hydrogenase_genes if nb else set(),
+                    "complex_i_like_genes": nb.complex_i_like_genes if nb else set(),
                     "complex_i_genes": nb.complex_i_genes if nb else set(),
                     "curated": outcome == "assigned" and (cleared or verdict == "supported"),
                     "release": release, "version": version})
@@ -246,6 +248,8 @@ def register(app, ctx) -> None:
                         gene["cls"] = "gene hyd-marker"
                     elif pid in c["complex_i_genes"]:
                         gene["cls"] = "gene c1-marker"
+                    elif pid in c["complex_i_like_genes"]:
+                        gene["cls"] = "gene c1-like-marker"
                     else:
                         gene["cls"] = "gene" if gene["label"] else "gene dark"
                 svg = ctx.locus_row_svg({"arrays": []}, genes, lo, hi, c["strand"] == "-", label="Hydrogenase locus")

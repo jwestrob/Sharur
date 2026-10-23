@@ -11,14 +11,14 @@
   <div class="stat"><b>{{ num(s.proteins) }}</b><span>proteins with a HydDB HMM hit</span></div>
   <div class="stat"><b>{{ num(s.assigned) }}</b><span>assigned a subgroup by nearest reference</span></div>
   <div class="stat"><b>{{ num(s.cleared) }}</b><span>catalytic domain observed</span></div>
-  <div class="stat"><b>{{ num(s.flagged) }}</b><span>need curation · {{ num(s.flagged_verdicts.get('supported', 0)) }} with hydrogenase genes nearby, {{ num(s.flagged_verdicts.get('complex_i_context', 0)) }} with Complex I genes nearby</span></div>
+  <div class="stat"><b>{{ num(s.flagged) }}</b><span>need curation · {{ num(s.flagged_verdicts.get('supported', 0)) }} with hydrogenase-specific genes nearby, {{ num(s.flagged_verdicts.get('complex_i_context', 0)) }} with Complex I genes nearby, {{ num(s.flagged_verdicts.get('complex_i_homolog_only', 0)) }} with only Complex I-like hydrogenase subunits nearby</span></div>
   <div class="stat"><b>{{ num(s.ko.get('subgroup', 0)) }}</b><span>KOfam hit corroborates the subgroup{% if s.ko.get('compatible') %} · {{ num(s.ko.compatible) }} compatible{% endif %}</span></div>
   <div class="stat"><b>{{ num(s.genomes) }}</b><span>genomes with a curated call ({{ pct(s.genomes / ((catalog.genomes|length) or 1)) }})</span></div>
 </div>
 
 <div class="grid g-side">
   <div class="panel">
-    <h2>Groups <span class="hint">curated calls: catalytic domain observed, or hydrogenase genes nearby · bars show genomes</span></h2>
+    <h2>Groups <span class="hint">curated calls: catalytic domain observed, or hydrogenase-specific genes nearby · bars show genomes</span></h2>
     <div class="scroll"><table>
       <thead><tr><th>Group</th><th class="num">Calls</th><th class="num">Curated</th><th>Genomes with a curated call</th></tr></thead>
       <tbody>{% for g in s.groups %}<tr>
@@ -35,8 +35,9 @@
       <dt>Assigned to a subgroup</dt><dd>nearest HydDB reference; provisional</dd>
       <dt>Catalytic domain observed</dt><dd>NiFeSe_Hases or Fe_hyd on the protein</dd>
       <dt>KOfam corroborates</dt><dd>a KOfam hit captures that subgroup's references</dd>
-      <dt>Hydrogenase genes nearby</dt><dd>KEGG hydrogenase or maturation KOs, or catalytic domains, within 6 genes; no nuo genes</dd>
-      <dt>Complex I genes nearby</dt><dd>KOfam nuoA–N within 6 genes; no hydrogenase genes</dd>
+      <dt>Hydrogenase-specific genes nearby</dt><dd>catalytic domains, maturation genes (hyp, HycI-family proteases) or [NiFe] Group 1–3 / [FeFe] subunit KOs within 6 genes; no Complex I genes</dd>
+      <dt>Complex I genes nearby</dt><dd>KOfam Complex I KOs (nuo, ndh, Fpo, Fqo) within 6 genes; no hydrogenase-specific genes</dd>
+      <dt>Only Complex I-like subunits nearby</dt><dd>Hyc, Hyf, Ech, Eha, Ehb, Mbh or diaphorase subunits alone; these are Complex I homologs, so the call stays unresolved</dd>
     </dl>
     <p class="note">A named complex (Ech, Hyc, Mbh…) needs its subunit genes; a physiological role needs the genome's metabolic context. Subgroup roles follow Søndergaard et al. 2016, Table 1.</p>
   </div>

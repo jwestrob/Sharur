@@ -115,7 +115,8 @@ def ko_text_evidence(predicate: str, symbols: str, name: str) -> str | None:
     return text_evidence(predicate, symbols, EC_SUFFIX.sub("", name))
 
 
-HYDROGENASE_NAME = re.compile(r"(?<![a-z])(hydrogenase|hydrogenlyase)|EC:[^\]]*\b1\.12\.", re.IGNORECASE)
+# An EC number starts after "EC:" or a space: "[EC:3.1.12.1]" (Cas4, an exonuclease) is no EC 1.12.
+HYDROGENASE_NAME = re.compile(r"(?<![a-z])(hydrogenase|hydrogenlyase)|EC:(?:[^\]]*\s)?1\.12\.", re.IGNORECASE)
 HYDDB_TYPE_PREDICATES = {"NiFe": "nife_hydrogenase", "FeFe": "fefe_hydrogenase", "Fe": "fe_only_hydrogenase"}
 
 

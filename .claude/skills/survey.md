@@ -490,14 +490,21 @@ Group 4 hydrogenases and Complex I homologs alike.
 **When the survey finds hydrogenases, dispatch `.claude/skills/hydrogenase.md`.** It
 curates flagged calls by neighborhood:
 
-- **Hydrogenase context:** hycB–G/hycA (K15827–K15833), hyfA–J (K12136–K12145),
-  echA–F (K14086–K14091), Eha/Ehb/Coo subunit names, maturation genes (HypA–F
-  K04651–K04656, K03605), catalytic-domain Pfams on neighbors.
-- **Complex I context:** nuoA–N (K00330–K00343); Complex1_49kDa/30kDa, Oxidored_q4/q5_N/q6 on neighbors.
+- **Hydrogenase-specific context (`supported`):** catalytic-domain Pfams on neighbors
+  (NiFeSe_Hases, Fe_hyd_lg_C, Fe_hyd_SSU), maturation genes (hypA–F, hypX, the HycI-family
+  maturation proteases), and [NiFe] Group 1–3 / [FeFe] subunit KOs.
+- **Complex I context:** Complex I KOs (nuoA–N, ndhA–N, Fpo, Fqo).
+- **Complex I-like hydrogenase subunits only (`complex_i_homolog_only`):** Hyc, Hyf, Ech, Eha,
+  Ehb or Mbh subunit KOs and names. These subunits are Complex I homologs, so the call stays
+  unresolved.
+
+Pfam Complex I-superfamily families (Complex1_49kDa/30kDa, Oxidored_q4/q5_N/q6) on neighbors
+count on neither side. The full marker tables live in `sharur/hydrogenase/neighborhood.py`.
 
 **Report with curation context:** "N proteins assigned to HydDB subgroups by nearest
 reference (A with the catalytic domain for their type); of B review-flagged calls, C have
-hydrogenase neighborhood context and D sit in Complex I context."
+hydrogenase-specific neighborhood context, D sit in Complex I context, and E have only
+Complex I-like hydrogenase subunits nearby."
 
 ---
 

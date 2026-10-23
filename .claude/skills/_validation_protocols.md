@@ -179,13 +179,17 @@ flag. Review flags mark calls that need neighborhood evidence; they neither excl
 hydrogenase nor validate one.
 
 **When you encounter hydrogenases, dispatch or follow `.claude/skills/hydrogenase.md`**,
-which curates every review-flagged call by its ±6-gene neighborhood (Complex I nuoA–N
-versus hydrogenase complex and maturation genes) and reports raw, domain-cleared, and
-neighborhood-supported counts measured on the dataset at hand.
+which curates every review-flagged call by its ±6-gene neighborhood and reports raw,
+domain-cleared, and neighborhood-supported counts measured on the dataset at hand. Support
+rests on hydrogenase-specific neighbors (catalytic domains, maturation genes, [NiFe] Group 1–3
+and [FeFe] subunit KOs) against Complex I KOs (nuo, ndh, Fpo, Fqo). Group 4 complex subunits
+(hyf, hyc, ech, eha, ehb, mbh) are Complex I homologs: alone they give the verdict
+`complex_i_homolog_only`, an unresolved call.
 
 **In reports, state the curation method:** "N proteins assigned to HydDB subgroups by
 nearest reference; A carry the catalytic domain for their type; of B review-flagged calls,
-C have hydrogenase neighborhood context and D sit in Complex I context."
+C have hydrogenase-specific neighborhood context, D sit in Complex I context, and E have only
+Complex I-like hydrogenase subunits nearby."
 
 ---
 

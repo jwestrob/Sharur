@@ -15,6 +15,7 @@ CASES = {
     "maturation": ("K04651", "K04651"),        # hypA: KEGG names it a hydrogenase -> supported
     "nuo": ("K00333", "K00333"),               # nuoD -> Complex I context
     "small_subunit": ("PF01058", "Oxidored_q6"),  # shared with [NiFe] small subunits -> no marker
+    "hyf": ("K12137", "K12137"),               # hyfB, a NuoL/M/N homolog -> Complex I-like subunits only
 }
 
 
@@ -53,12 +54,12 @@ def db(tmp_path):
 def test_neighborhood_verdicts_read_kegg_hydrogenase_and_nuo_kos(db):
     store = DuckDBStore(str(db), read_only=True)
     try:
-        contexts = neighborhood_contexts(store, ["maturation_1", "nuo_1", "small_subunit_1", "loose"])
+        contexts = neighborhood_contexts(store, ["maturation_1", "nuo_1", "small_subunit_1", "hyf_1", "loose"])
     finally:
         store.close()
     assert {k: v.verdict for k, v in contexts.items()} == {
         "maturation_1": "supported", "nuo_1": "complex_i_context", "small_subunit_1": "no_markers",
-        "loose": "no_position"}
+        "hyf_1": "complex_i_homolog_only", "loose": "no_position"}
     assert contexts["maturation_1"].hydrogenase_genes == {"maturation_2"}
 
 
@@ -69,5 +70,9 @@ def test_hydrogenase_pages(db):
     assert page.status_code == 200 and "need curation" in page.text and "[NiFe] 4e" in page.text
     calls = client.get("/hydrogenases/calls", params={"class": "NiFe", "evidence": "flagged", "verdict": "complex_i_context"})
     assert calls.status_code == 200 and "nuo_1" in calls.text and "maturation_1" not in calls.text
+    hyf = client.get("/hydrogenases/calls", params={"class": "NiFe", "verdict": "complex_i_homolog_only"})
+    assert hyf.status_code == 200 and "hyf_1" in hyf.text and "nuo_1" not in hyf.text
+    assert "K12137 hyfB" in hyf.text and "c1-like-marker" in hyf.text
+    assert "1 with only Complex I-like hydrogenase subunits nearby" in page.text
     assert "Hydrogenases" in client.get("/systems").text
     assert "by nearest HydDB reference" in client.get("/protein/maturation_1").text

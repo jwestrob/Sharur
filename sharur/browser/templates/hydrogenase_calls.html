@@ -9,13 +9,13 @@
     {% for k in ('class', 'group', 'genome', 'clade', 'rank') if params[k] %}<input type="hidden" name="{{ k }}" value="{{ params[k] }}">{% endfor %}
     <select name="subgroup" onchange="this.form.submit()"><option value="">All subgroups</option>{% for cls, sub, label in subgroups if not params['class'] or cls == params['class'] %}<option value="{{ sub }}" {{ 'selected' if sub == params.subgroup }}>{{ label }}</option>{% endfor %}</select>
     <select name="evidence" onchange="this.form.submit()">
-      {% for k, label in [('', 'Every assignment'), ('curated', 'Curated: catalytic domain or hydrogenase genes nearby'), ('cleared', 'Catalytic domain observed'), ('flagged', 'Need curation')] %}<option value="{{ k }}" {{ 'selected' if k == params.evidence }}>{{ label }}</option>{% endfor %}
+      {% for k, label in [('', 'Every assignment'), ('curated', 'Curated: catalytic domain or hydrogenase-specific genes nearby'), ('cleared', 'Catalytic domain observed'), ('flagged', 'Need curation')] %}<option value="{{ k }}" {{ 'selected' if k == params.evidence }}>{{ label }}</option>{% endfor %}
     </select>
     <select name="verdict" onchange="this.form.submit()"><option value="">Any neighborhood</option>{% for v in verdicts %}<option value="{{ v }}" {{ 'selected' if v == params.verdict }}>{{ verdict_labels[v] }}</option>{% endfor %}</select>
     <select name="flank" onchange="this.form.submit()">{% for f in [3000, 6000, 12000, 20000] %}<option value="{{ f }}" {{ 'selected' if f == params.flank }}>±{{ (f / 1000)|int }} kb</option>{% endfor %}</select>
     <span class="count" style="margin-left:auto">page {{ page }} of {{ pages }} · {{ num(total) }} calls</span>
   </form>
-  <div class="legend" style="margin:0 0 12px"><span><i class="lg-hyd"></i>the call</span><span><i class="lg-hyd-marker"></i>hydrogenase or maturation gene</span><span><i class="lg-c1"></i>Complex I gene (nuoA–N)</span><span><i style="background:var(--gene)"></i>other gene</span><span><i style="background:var(--gene-dark);border:1px dashed var(--ink-3)"></i>no annotation</span></div>
+  <div class="legend" style="margin:0 0 12px"><span><i class="lg-hyd"></i>the call</span><span><i class="lg-hyd-marker"></i>hydrogenase-specific or maturation gene</span><span><i class="lg-c1-like"></i>Complex I-like hydrogenase subunit (hyc, hyf, ech, eha, ehb, mbh, diaphorase)</span><span><i class="lg-c1"></i>Complex I gene (nuo, ndh, Fpo, Fqo)</span><span><i style="background:var(--gene)"></i>other gene</span><span><i style="background:var(--gene-dark);border:1px dashed var(--ink-3)"></i>no annotation</span></div>
   <div class="stack">
   {% for c, svg in rows %}
     <div class="stack-item">
@@ -25,7 +25,7 @@
         <span class="sub hyd-chips">
           <b>{{ c.label }}</b>{% if c.pident is not none %} · {{ '%.0f' % c.pident }}% id{% endif %}
           {% if c.cleared %}<span class="tag ok" title="{{ c.curation_reason }}">catalytic domain</span>{% else %}<span class="tag warn" title="{{ c.curation_reason }}">needs curation</span>{% endif %}
-          <span class="tag v-tag v-{{ c.verdict }}" title="{% if c.hydrogenase_markers %}hydrogenase: {{ c.hydrogenase_markers|join(', ') }}{% endif %}{% if c.hydrogenase_markers and c.complex_i_markers %}; {% endif %}{% if c.complex_i_markers %}Complex I: {{ c.complex_i_markers|join(', ') }}{% endif %}">{{ verdict_labels[c.verdict] }}</span>
+          <span class="tag v-tag v-{{ c.verdict }}" title="{{ [('hydrogenase-specific: ' ~ c.hydrogenase_markers|join(', ')) if c.hydrogenase_markers else '', ('Complex I-like hydrogenase subunits: ' ~ c.complex_i_like_markers|join(', ')) if c.complex_i_like_markers else '', ('Complex I: ' ~ c.complex_i_markers|join(', ')) if c.complex_i_markers else '']|select|join('; ') }}">{{ verdict_labels[c.verdict] }}</span>
           {% if c.ko_support in ('subgroup', 'compatible') %}<span class="tag" title="{{ ko_labels[c.ko_support] }}">KOfam {{ c.ko_support }}</span>{% endif %}
         </span>
       </div>

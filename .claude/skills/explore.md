@@ -722,7 +722,7 @@ For explicit provenance chaining (building a DAG of analytical steps):
 
 ```python
 e1 = b.log_provenance("Count hydrogenases", "42 found")
-e2 = b.log_provenance("Check neighborhoods", "12 with Hyf operon", parent_ids=[e1.entry_id])
+e2 = b.log_provenance("Check neighborhoods", "12 with hyp maturation genes nearby", parent_ids=[e1.entry_id])
 e3 = b.log_provenance("Statistical test", "p=0.003", parent_ids=[e1.entry_id, e2.entry_id])
 
 # Render the full DAG including hypotheses

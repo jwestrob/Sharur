@@ -173,29 +173,44 @@ for verdict in VERDICTS:
 # each context also lists its markers: contexts[pid].hydrogenase, contexts[pid].complex_i
 ```
 
-Markers, by side:
+Markers come in three kinds (tables in `sharur/hydrogenase/neighborhood.py`; each KO carries its
+KEGG symbol, which `tests/test_hydrogenase_neighborhood.py` checks against the local KEGG snapshot):
 
-- **Hydrogenase:** every KO KEGG names as a hydrogenase (`kegg_hyddb_snapshot.tsv`, 121 KOs,
-  hyp maturation genes included), the Hyc/Hyf/Ech KOs, the NiFeSe_Hases / Fe_hyd_lg_C / Fe_hyd_SSU
-  catalytic domains, and Ech/Eha/Ehb/Hyc/Hyf/Coo gene names.
-- **Complex I:** KOfam nuoA–N (K00330–K00343). KOfam calibrates these profiles against their
-  hydrogenase relatives. Pfam Complex I-superfamily families (Oxidored_q6, Complex1_30kDa,
-  Complex1_49kDa, Oxidored_q4, Oxidored_q5_N) count on neither side: hydrogenase complexes carry
-  them too, Oxidored_q6 covering [NiFe] small subunits. On DPANN, Oxidored_q6 sits beside 699 of
-  1,258 calls that carry the catalytic domain.
+- **Hydrogenase-specific** (`SPECIFIC_KOS`, catalytic and maturation Pfams): the NiFeSe_Hases /
+  Fe_hyd_lg_C / Fe_hyd_SSU catalytic domains; maturation genes (hypA–F, hypX, the HycI-family
+  maturation proteases hyaD/hybD, hycI and frhD, Pfam HycI and HycH); and KEGG's subunit KOs of the
+  [NiFe] Group 1–3, [FeFe] and [Fe] hydrogenases. A Complex I module carries none of these.
+- **Complex I-like hydrogenase subunits** (`COMPLEX_I_LIKE_KOS`, Ech/Eha/Ehb/Hyc/Hyf subunit
+  Pfams): the Hyc, Hyf, Ech, Eha, Ehb and Mbh subunits, the FHL formate dehydrogenase fdhF, and the
+  NuoE/F/G-type diaphorase subunits. Each is a Complex I homolog or part of a Complex I-related
+  complex (hyfB/D/F carry the NuoL/M/N family, hyfG captures Group 4a large subunits, hox
+  diaphorase subunits carry the NuoE/F/G families), so a Complex I module can draw these KOs. They
+  record context and leave the call unresolved.
+- **Complex I** (`COMPLEX_I_KOS`): KOfam nuoA–N and the fused nuo KOs, ndhA–N, Fpo and Fqo
+  (their FrhB-family F subunits stay out), and the mitochondrial core subunits. Mrp/Mnh antiporter
+  KOs count on neither side, because Mbh-type Group 4 hydrogenases carry Mrp modules.
 
-Verdicts: `supported` (hydrogenase markers only), `complex_i_context` (Complex I markers only),
-`mixed` (both), `no_markers` (neither), `no_position`. Report the counts per verdict for this
-dataset. Rates differ widely between datasets and lineages; compute them, and cite them only for
-the dataset measured.
+Pfam Complex I-superfamily families (Oxidored_q6, Complex1_30kDa, Complex1_49kDa, Oxidored_q4,
+Oxidored_q5_N) count on neither side: hydrogenase complexes carry them too, Oxidored_q6 covering
+[NiFe] small subunits. On DPANN, Oxidored_q6 sits beside 699 of 1,258 calls that carry the
+catalytic domain.
+
+Verdicts: `supported` (a hydrogenase-specific marker, no Complex I marker), `complex_i_context` (a
+Complex I marker, no hydrogenase-specific marker), `mixed` (both), `complex_i_homolog_only`
+(Complex I-like hydrogenase subunits alone; unresolved), `no_markers`, `no_position`. Complex
+I-like subunits set the verdict only when neither informative kind is nearby, so hyf genes beside
+nuo genes read `complex_i_context`. Report the counts per verdict for this dataset. Rates differ
+widely between datasets and lineages; compute them, and cite them only for the dataset measured.
 
 ### Step 4: Interpret by subgroup
 
 Use the Table 1 interpretation stored in `reference_role` and `interpretation_status`.
-For Group 4 complexes, name a complex (Ech, Hyc, Hyf, Eha, Ehb, Coo) only when its
-subunit genes appear in the neighborhood, and pair the name with the HydDB subgroup
-label from `reference_label`. When neighborhood genes and the reference label point to
-different subgroups, report both and mark the case unresolved.
+For Group 4 complexes, name a complex (Ech, Hyc, Hyf, Eha, Ehb, Coo) for a cleared or
+`supported` call whose neighborhood carries that complex's subunit genes, and pair the name
+with the HydDB subgroup label from `reference_label`. A `complex_i_homolog_only` call has
+subunit KOs that a Complex I module draws as well: report its module as Complex I-like and
+unresolved. When neighborhood genes and the reference label point to different subgroups,
+report both and mark the case unresolved.
 
 ### Step 5: Metabolic context
 
@@ -286,7 +301,7 @@ for an [FeFe] enzyme needs the downstream NuoF-domain gene, as in HydDB.
 | "Assigned to [NiFe] Group X by nearest reference" | `hydrogenase_classifications.outcome = 'assigned'` |
 | "Catalytic domain observed" | `curation_status = 'domain_check_cleared'` |
 | "KOfam hit corroborates the subgroup" | `ko_support = 'subgroup'` |
-| "Supported Group 4 hydrogenase" | Step 3 neighborhood verdict `supported` |
+| "Supported Group 4 hydrogenase" | Step 3 neighborhood verdict `supported` (a hydrogenase-specific marker nearby) |
 | Named complex (Ech, Hyc, ...) | Subunit genes of that complex in the neighborhood |
 | Physiological role in this organism | Above, plus genome-level metabolic context |
 

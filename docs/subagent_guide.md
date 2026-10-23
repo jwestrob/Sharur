@@ -66,7 +66,8 @@ BAD   "Only credit hydrogenase with NiFeSe_Hases."
 GOOD  "hyddb group 4 / energy_conserving / ech_hydrogenase: the group-4
        catalytic subunit shares the Complex1_49kDa superfamily with Complex I
        NuoD. Credit a group-4 hydrogenase when its neighborhood carries
-       hydrogenase complex or maturation genes rather than nuoA-N."
+       maturation genes or a catalytic domain and no Complex I KOs; hyf/hyc/ech
+       subunits are Complex I homologs and leave the call unresolved."
 ```
 
 The general form: **when you observe X, the trap is Y, so require Z — and state

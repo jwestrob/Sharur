@@ -1,0 +1,50 @@
+# Hydrogenase neighborhood verdicts, old rule (38b0093) vs new rule (this branch), SR-VP databases opened read-only (2026-10-23).
+# python scripts/compare_hydrogenase_neighborhood.py --old-rev 38b0093 --db data/srvp_archaea/sharur.duckdb --db data/srvp_bacteria_pb/sharur.duckdb
+# "credible" = assigned calls whose catalytic-domain check cleared or whose neighborhood verdict is supported.
+dataset	calls	verdict	old_rule	new_rule	change
+srvp_archaea	all classified	supported	1550	1300	-250
+srvp_archaea	all classified	complex_i_context	470	621	+151
+srvp_archaea	all classified	mixed	491	350	-141
+srvp_archaea	all classified	complex_i_homolog_only	0	233	+233
+srvp_archaea	all classified	no_markers	922	929	+7
+srvp_archaea	assigned, needs curation	supported	322	180	-142
+srvp_archaea	assigned, needs curation	complex_i_context	330	398	+68
+srvp_archaea	assigned, needs curation	mixed	191	128	-63
+srvp_archaea	assigned, needs curation	complex_i_homolog_only	0	127	+127
+srvp_archaea	assigned, needs curation	no_markers	390	400	+10
+srvp_archaea	assigned, needs curation	credible (domain cleared or supported)	322	180	-142
+srvp_archaea	assigned Group 4	supported	479	231	-248
+srvp_archaea	assigned Group 4	complex_i_context	332	420	+88
+srvp_archaea	assigned Group 4	mixed	317	234	-83
+srvp_archaea	assigned Group 4	complex_i_homolog_only	0	233	+233
+srvp_archaea	assigned Group 4	no_markers	426	436	+10
+srvp_archaea	assigned Group 4	credible (domain cleared or supported)	654	512	-142
+srvp_archaea	assigned Group 4, needs curation	supported	300	158	-142
+srvp_archaea	assigned Group 4, needs curation	complex_i_context	330	398	+68
+srvp_archaea	assigned Group 4, needs curation	mixed	191	128	-63
+srvp_archaea	assigned Group 4, needs curation	complex_i_homolog_only	0	127	+127
+srvp_archaea	assigned Group 4, needs curation	no_markers	379	389	+10
+srvp_archaea	assigned Group 4, needs curation	credible (domain cleared or supported)	300	158	-142
+srvp_bacteria_pb	all classified	supported	1518	1088	-430
+srvp_bacteria_pb	all classified	complex_i_context	2040	2166	+126
+srvp_bacteria_pb	all classified	mixed	301	175	-126
+srvp_bacteria_pb	all classified	complex_i_homolog_only	0	429	+429
+srvp_bacteria_pb	all classified	no_markers	183	184	+1
+srvp_bacteria_pb	assigned, needs curation	supported	458	94	-364
+srvp_bacteria_pb	assigned, needs curation	complex_i_context	1976	2072	+96
+srvp_bacteria_pb	assigned, needs curation	mixed	120	24	-96
+srvp_bacteria_pb	assigned, needs curation	complex_i_homolog_only	0	363	+363
+srvp_bacteria_pb	assigned, needs curation	no_markers	9	10	+1
+srvp_bacteria_pb	assigned, needs curation	credible (domain cleared or supported)	458	94	-364
+srvp_bacteria_pb	assigned Group 4	supported	528	100	-428
+srvp_bacteria_pb	assigned Group 4	complex_i_context	1976	2071	+95
+srvp_bacteria_pb	assigned Group 4	mixed	120	25	-95
+srvp_bacteria_pb	assigned Group 4	complex_i_homolog_only	0	427	+427
+srvp_bacteria_pb	assigned Group 4	no_markers	14	15	+1
+srvp_bacteria_pb	assigned Group 4	credible (domain cleared or supported)	540	176	-364
+srvp_bacteria_pb	assigned Group 4, needs curation	supported	391	27	-364
+srvp_bacteria_pb	assigned Group 4, needs curation	complex_i_context	1976	2070	+94
+srvp_bacteria_pb	assigned Group 4, needs curation	mixed	114	20	-94
+srvp_bacteria_pb	assigned Group 4, needs curation	complex_i_homolog_only	0	363	+363
+srvp_bacteria_pb	assigned Group 4, needs curation	no_markers	8	9	+1
+srvp_bacteria_pb	assigned Group 4, needs curation	credible (domain cleared or supported)	391	27	-364
