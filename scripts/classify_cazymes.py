@@ -8,7 +8,7 @@ Recapitulates the standard dbCAN annotation pipeline:
   Tool 3: Astra/HMMER vs dbCAN-sub.hmm       (i-evalue ≤ 1e-15, HMM coverage ≥ 0.35)
   Consensus: retain genes called by ≥ 2 of 3 tools
 
-HMMER searches are delegated to Astra (astra search --hmm_in), which handles
+HMMER searches are delegated to Aksha (aksha search --hmm_in), which handles
 parallelization and PyHMMER optimization. Only DIAMOND is run directly, in its
 default sensitivity mode with -k 1, as run_dbcan runs it.
 
@@ -22,18 +22,40 @@ Usage:
     python scripts/classify_cazymes.py --db DB --threads N --results-only --out cazy.tsv
     python scripts/classify_cazymes.py --db DB --load-results cazy.tsv
 
+    # A protein FASTA (file or directory of .faa) in place of a database:
+    python scripts/classify_cazymes.py --proteins all.faa --threads N --results-only --out cazy.tsv
+
+Sharded runs (Slurm arrays; scripts/submit_cazy_shards.sh submits all three):
+    --stage search --shard-index i --n-shards N --work-dir W
+        dbCAN.hmm profile part i against every protein; shard 0 also runs DIAMOND on
+        every protein.
+    --stage sub --shard-index i --n-shards N --work-dir W     (after every search shard)
+        dbCAN-sub profile part i against the candidates from all search shards.
+    --stage merge --n-shards N --work-dir W --out cazy.tsv    (after every sub shard)
+        Consensus over the combined hits.
+
+    Neither search splits the proteins. HMMER i-evalues scale with the number of
+    target sequences in a search (Z), so the HMM searches split the profiles and every
+    part searches the single-process target set. DIAMOND's top target for a protein in
+    default mode depends on the other proteins in its run, so DIAMOND runs once on
+    every protein, as in the single-process run. The merged consensus table equals
+    the single-process table.
+
 References:
     Zheng J, et al. (2023) dbCAN3: automated carbohydrate-active enzyme and
     substrate annotation. Nucleic Acids Res 51(W1):W115-W121.
 """
 
 import argparse
+import heapq
+import json
 import mmap
 import os
 import shutil
 import subprocess
 import tempfile
 import re
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from collections import defaultdict
 
@@ -95,7 +117,46 @@ def get_dbcan_path(override: str | Path | None = None) -> Path:
     )
 
 
+def dbcan_hmm_files(dbcan: Path) -> tuple[Path, Path, bool]:
+    """(dbCAN.hmm, dbCAN-sub HMM, whether the sub-family file is usable)."""
+    # dbCAN releases name the sub-family profiles dbCAN_sub.hmm; older docs used dbCAN-sub.hmm.
+    sub = next((dbcan / n for n in ("dbCAN-sub.hmm", "dbCAN_sub.hmm") if (dbcan / n).exists()),
+               dbcan / "dbCAN-sub.hmm")
+    return dbcan / "dbCAN.hmm", sub, sub.exists() and sub.stat().st_size > 0
+
+
 # ── Protein extraction ─────────────────────────────────────────────────────────
+
+def count_fasta_records(prot_dir: str) -> int:
+    """Header lines across the directory's .faa files."""
+    n = 0
+    for faa in sorted(Path(prot_dir).glob("*.faa")):
+        with open(faa, "rb") as fh:
+            n += sum(1 for line in fh if line.startswith(b">"))
+    return n
+
+
+def resolve_proteins(db_path: str | None, proteins: str | None = None,
+                     verbose: bool = True) -> tuple:
+    """(prot_dir, n_proteins, is_temp) from an explicit FASTA, or else from the database.
+
+    ``proteins`` names a protein FASTA file or a directory of .faa files and needs
+    no database.
+    """
+    if proteins is None:
+        return find_or_extract_proteins(db_path, verbose)
+    path = Path(proteins).resolve()
+    if path.is_dir():
+        prot_dir, is_temp = str(path), False
+    elif path.is_file():
+        prot_dir, is_temp = tempfile.mkdtemp(prefix="cazyme_prot_"), True
+        (Path(prot_dir) / "proteins.faa").symlink_to(path)
+    else:
+        raise FileNotFoundError(f"protein input {path} does not exist")
+    n = count_fasta_records(prot_dir)
+    _log(f"[cazyme] Using protein input {path} ({n:,} records)")
+    return prot_dir, n, is_temp
+
 
 def find_or_extract_proteins(db_path: str, verbose: bool = True) -> tuple:
     """Find existing source .faa or extract proteins from database.
@@ -226,14 +287,17 @@ DIAMOND_CACHE = "cazyme_diamond_hits.tsv"
 
 def load_diamond_cache(db_path: str,
                        verbose: bool = True) -> dict[str, dict[str, tuple]] | None:
-    """Load cached DIAMOND results from cazyme_diamond_hits.tsv if present.
+    """Load cached DIAMOND results from cazyme_diamond_hits.tsv beside the database.
 
     The cache has its own file: the consensus table (cazyme_classification.tsv)
     merges HMM families and must never be read back as DIAMOND evidence.
 
     Returns {protein_id: {family_class: (evalue, bitscore)}} or None if no cache.
     """
-    tsv = Path(db_path).parent / DIAMOND_CACHE
+    return _read_diamond_cache(Path(db_path).parent / DIAMOND_CACHE, verbose)
+
+
+def _read_diamond_cache(tsv: Path, verbose: bool = True) -> dict[str, dict[str, tuple]] | None:
     if not tsv.exists():
         return None
 
@@ -280,17 +344,46 @@ def _save_diamond_cache(hits: dict, data_dir: Path,
                 'bitscore': bs,
             })
     if rows:
-        df = pd.DataFrame(rows)
+        df = pd.DataFrame(rows).sort_values(['protein_id', 'family_class'], kind='stable')
         out = data_dir / DIAMOND_CACHE
         df.to_csv(out, sep='\t', index=False)
         if verbose:
             print(f"  Saved DIAMOND cache to {out.name}")
 
 
+def _add_diamond_line(hits: dict, line: str) -> bool:
+    """Fold one outfmt-6 line (qseqid sseqid pident evalue bitscore) into ``hits``.
+
+    The first line with a family's lowest E-value wins, so a protein's result
+    depends on its own lines alone.
+    """
+    fields = line.rstrip('\n').split('\t')
+    if len(fields) < 5:
+        return False
+    qid, sid = fields[0], fields[1]
+    ev, bs = float(fields[3]), float(fields[4])
+    for fam in parse_cazy_families(sid):
+        if fam not in hits[qid] or ev < hits[qid][fam][0]:
+            hits[qid][fam] = (ev, bs)
+    return True
+
+
+def parse_diamond_tsv(path: Path) -> dict[str, dict[str, tuple]]:
+    """{protein_id: {family_class: (evalue, bitscore)}} from saved DIAMOND outfmt-6 output."""
+    hits: dict[str, dict[str, tuple]] = defaultdict(dict)
+    with open(path) as fh:
+        for line in fh:
+            _add_diamond_line(hits, line)
+    return dict(hits)
+
+
 def run_diamond(prot_dir: str, dbcan_path: Path, threads: int = 4,
                 evalue: float = DIAMOND_EVALUE,
-                verbose: bool = True) -> dict[str, dict[str, tuple]]:
+                verbose: bool = True,
+                raw_out: Path | None = None) -> dict[str, dict[str, tuple]]:
     """DIAMOND blastp against CAZy.dmnd in default mode, top target only (-k 1).
+
+    ``raw_out`` keeps DIAMOND's outfmt-6 lines.
 
     Returns {protein_id: {family_class: (evalue, bitscore)}}.
     """
@@ -310,6 +403,18 @@ def run_diamond(prot_dir: str, dbcan_path: Path, threads: int = 4,
     combined = work_dir / "diamond_combined.faa"
     n_written = 0
     n_skipped = 0
+
+    def flush(header, seq_lines):
+        nonlocal n_written, n_skipped
+        if header is None:
+            return
+        if seq_lines:
+            fout.write(header)
+            fout.writelines(seq_lines)
+            n_written += 1
+        else:
+            n_skipped += 1
+
     with open(combined, "w") as fout:
         for faa in faa_files:
             with open(faa) as fin:
@@ -317,30 +422,14 @@ def run_diamond(prot_dir: str, dbcan_path: Path, threads: int = 4,
                 seq_lines: list[str] = []
                 for line in fin:
                     if line.startswith(">"):
-                        # Write previous record if it had sequence
-                        if header is not None:
-                            if seq_lines:
-                                fout.write(header)
-                                for sl in seq_lines:
-                                    fout.write(sl)
-                                n_written += 1
-                            else:
-                                n_skipped += 1
+                        flush(header, seq_lines)
                         header = line
                         seq_lines = []
                     else:
                         cleaned = line.rstrip("\n").replace("*", "")
                         if cleaned:
                             seq_lines.append(cleaned + "\n")
-                # Write last record
-                if header is not None:
-                    if seq_lines:
-                        fout.write(header)
-                        for sl in seq_lines:
-                            fout.write(sl)
-                        n_written += 1
-                    else:
-                        n_skipped += 1
+                flush(header, seq_lines)
     fasta_path = str(combined)
     _log(f"[diamond] Concatenated in {_time.time() - t_cat:.1f}s ({n_written:,} seqs, {n_skipped} empty skipped)")
 
@@ -353,6 +442,7 @@ def run_diamond(prot_dir: str, dbcan_path: Path, threads: int = 4,
         "--max-target-seqs", "1",
         "--evalue", str(evalue),
         "--threads", str(threads),
+        "--tmpdir", str(work_dir),
     ]
 
     # stderr goes to a file: an unread stderr pipe can fill and stall DIAMOND
@@ -363,24 +453,19 @@ def run_diamond(prot_dir: str, dbcan_path: Path, threads: int = 4,
             text=True, bufsize=1,
         )
     except FileNotFoundError:
+        shutil.rmtree(work_dir, ignore_errors=True)
         _log("Warning: diamond not found on PATH")
         return {}
 
     hits: dict[str, dict[str, tuple]] = defaultdict(dict)
     n_lines = 0
+    raw = open(raw_out, "w") if raw_out is not None else None
     try:
         for line in proc.stdout:
-            line = line.rstrip('\n')
-            if not line:
+            if raw is not None:
+                raw.write(line)
+            if not _add_diamond_line(hits, line):
                 continue
-            fields = line.split('\t')
-            if len(fields) < 5:
-                continue
-            qid, sid = fields[0], fields[1]
-            ev, bs = float(fields[3]), float(fields[4])
-            for fam in parse_cazy_families(sid):
-                if fam not in hits[qid] or ev < hits[qid][fam][0]:
-                    hits[qid][fam] = (ev, bs)
             n_lines += 1
             if verbose and n_lines % 500_000 == 0:
                 _log(f"  [diamond] Parsed {n_lines:,} hits, {len(hits):,} proteins so far...")
@@ -389,6 +474,9 @@ def run_diamond(prot_dir: str, dbcan_path: Path, threads: int = 4,
     except BaseException:
         proc.kill()
         raise
+    finally:
+        if raw is not None:
+            raw.close()
 
     err_handle.seek(0)
     stderr_out = err_handle.read()
@@ -399,7 +487,8 @@ def run_diamond(prot_dir: str, dbcan_path: Path, threads: int = 4,
         raise RuntimeError(f"DIAMOND failed (rc={proc.returncode}): {stderr_out[-500:]}")
 
     if verbose and stderr_out:
-        for line in stderr_out.strip().split('\n')[-3:]:
+        lines = stderr_out.strip().split('\n')
+        for line in [l for l in lines[:-3] if l.startswith("Algorithm")] + lines[-3:]:
             _log(f"  {line}")
 
     if verbose:
@@ -421,6 +510,34 @@ def hmm_lengths(hmm_path: Path) -> dict[str, int]:
                 lengths[name] = int(m.group(2))
                 name = None
     return lengths
+
+
+def hmm_profile_order(hmm_path: Path) -> dict[str, int]:
+    """Profile NAME -> position in a HMMER3 text file; names must be unique."""
+    with open(hmm_path, "rb") as fh, mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+        names = [m.group(1).decode() for m in re.finditer(rb"^NAME\s+(\S+)", mm, re.M)]
+    order = {name: k for k, name in enumerate(names)}
+    if len(order) != len(names):
+        raise ValueError(f"{hmm_path}: profile names repeat, so shard rows cannot be ordered")
+    return order
+
+
+def write_hmm_part(hmm_path: Path, part: int, n_parts: int, out: Path) -> int:
+    """Write profiles part, part + n_parts, part + 2 n_parts, ... of ``hmm_path`` to ``out``.
+
+    Striding spreads each family's consecutive subfamily profiles over every part,
+    which balances the search cost. Returns the number of profiles written.
+    """
+    with open(hmm_path, "rb") as fh, mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+        starts = [m.start() for m in re.finditer(rb"^HMMER3", mm, re.M)]
+        n_names = sum(1 for _ in re.finditer(rb"^NAME\s", mm, re.M))
+        if not starts or len(starts) != n_names:
+            raise ValueError(f"{hmm_path}: {len(starts)} HMMER3 records but {n_names} NAME lines")
+        ends = starts[1:] + [len(mm)]
+        with open(out, "wb") as fout:
+            for k in range(part, len(starts), n_parts):
+                fout.write(mm[starts[k]:ends[k]])
+    return len(range(part, len(starts), n_parts))
 
 
 def parse_hmm_family(hmm_name: str) -> str | None:
@@ -647,7 +764,10 @@ def apply_consensus(diamond: dict, hmm: dict, sub: dict,
                 'tools': tools_str,
             })
 
-    df = pd.DataFrame(rows) if rows else pd.DataFrame()
+    # sorted rows: the table is identical however the hits were gathered
+    df = (pd.DataFrame(rows).sort_values(['protein_id', 'family_class'], kind='stable',
+                                         ignore_index=True)
+          if rows else pd.DataFrame())
 
     if verbose:
         n_d, n_h, n_s = len(diamond), len(hmm), len(sub)
@@ -663,14 +783,44 @@ def apply_consensus(diamond: dict, hmm: dict, sub: dict,
 
 # ── Main pipeline ──────────────────────────────────────────────────────────────
 
+def _artifact_dir(db_path: str | None, results_out: str | Path | None) -> Path:
+    """Where the consensus table and the per-tool side files go: beside the database,
+    or beside ``results_out`` for a run on a protein FASTA alone."""
+    if db_path:
+        return Path(db_path).parent
+    if results_out:
+        return Path(results_out).resolve().parent
+    raise ValueError("a run on --proteins without --db needs --out")
+
+
+def _log_dbcan(dbcan: Path) -> tuple[Path, Path, bool]:
+    dbcan_hmm, dbcan_sub, has_sub = dbcan_hmm_files(dbcan)
+    _log(f"dbCAN databases: {dbcan}")
+    _log(f"  CAZy.dmnd:     yes")
+    _log(f"  dbCAN.hmm:     yes ({dbcan_hmm.stat().st_size / 1e6:.0f} MB)")
+    _log(f"  dbCAN-sub.hmm: {'yes' if has_sub else 'NO — 2-tool mode'}"
+         f"{f' ({dbcan_sub.stat().st_size / 1e6:.0f} MB)' if has_sub else ''}")
+    return dbcan_hmm, dbcan_sub, has_sub
+
+
+def _write_results(results_df: pd.DataFrame, out: Path, db_path: str | None, write_db: bool,
+                   update_predicates: bool, n_proteins: int, verbose: bool) -> None:
+    results_df.to_csv(out, sep='\t', index=False)
+    _log(f"[cazyme] Consensus table: {out}")
+    if write_db:
+        load_cazyme_results(db_path, results_df, update_predicates=update_predicates,
+                            n_proteins=n_proteins, verbose=verbose)
+
+
 def classify_cazymes(
-    db_path: str,
+    db_path: str | None,
     threads: int = 4,
     update_predicates: bool = True,
     verbose: bool = True,
     dbcan_dir: str | Path | None = None,
     write_db: bool = True,
     results_out: str | Path | None = None,
+    proteins: str | None = None,
 ) -> pd.DataFrame:
     """Full dbCAN 3-tool consensus CAZyme classification.
 
@@ -679,7 +829,7 @@ def classify_cazymes(
     and updates predicates.
 
     Args:
-        db_path: Path to sharur.duckdb
+        db_path: Path to sharur.duckdb (optional with ``proteins`` and ``write_db=False``)
         threads: CPU threads for DIAMOND and Astra
         update_predicates: Whether to update protein_predicates
         verbose: Print progress
@@ -689,6 +839,8 @@ def classify_cazymes(
             for writing (load it later with ``load_cazyme_results``)
         results_out: Where to write the consensus table (default:
             cazyme_classification.tsv beside the database)
+        proteins: Protein FASTA file or directory of .faa files to classify
+            (default: discovered beside, or extracted from, the database)
 
     Returns:
         DataFrame with consensus classification results
@@ -703,36 +855,23 @@ def classify_cazymes(
         _log(f"Error: {e}")
         return pd.DataFrame()
 
-    dbcan_hmm = dbcan / "dbCAN.hmm"
-    # dbCAN releases name the sub-family profiles dbCAN_sub.hmm; older docs used dbCAN-sub.hmm.
-    dbcan_sub = next((dbcan / n for n in ("dbCAN-sub.hmm", "dbCAN_sub.hmm") if (dbcan / n).exists()),
-                     dbcan / "dbCAN-sub.hmm")
-    has_sub = dbcan_sub.exists() and dbcan_sub.stat().st_size > 0
+    dbcan_hmm, dbcan_sub, has_sub = _log_dbcan(dbcan) if verbose else dbcan_hmm_files(dbcan)
+    data_dir = _artifact_dir(db_path, results_out)
 
-    if verbose:
-        _log(f"dbCAN databases: {dbcan}")
-        _log(f"  CAZy.dmnd:     yes")
-        _log(f"  dbCAN.hmm:     yes ({dbcan_hmm.stat().st_size / 1e6:.0f} MB)")
-        _log(f"  dbCAN-sub.hmm: {'yes' if has_sub else 'NO — 2-tool mode'}"
-             f"{f' ({dbcan_sub.stat().st_size / 1e6:.0f} MB)' if has_sub else ''}")
-
-    # Prepare proteins (find existing .faa or extract from DB)
+    # Prepare proteins (explicit FASTA, existing .faa beside the database, or extract from it)
     _log(f"[cazyme] Finding protein sequences...")
-    prot_dir, n_proteins, is_temp = find_or_extract_proteins(db_path, verbose)
+    prot_dir, n_proteins, is_temp = resolve_proteins(db_path, proteins, verbose)
     if prot_dir is None:
         if verbose:
             _log("No protein sequences found")
         return pd.DataFrame()
     _log(f"[cazyme] {n_proteins:,} proteins ready ({_time.time() - t_total:.1f}s)")
 
-    data_dir = Path(db_path).parent
-    source_dir = data_dir / "source"
-
     try:
         # Tool 1: DIAMOND (use cached results if available)
         t1 = _time.time()
         _log(f"[cazyme] Tool 1: DIAMOND search...")
-        diamond_hits = load_diamond_cache(db_path, verbose=verbose)
+        diamond_hits = _read_diamond_cache(data_dir / DIAMOND_CACHE, verbose=verbose)
         if diamond_hits is None:
             diamond_hits = run_diamond(prot_dir, dbcan, threads=threads, verbose=verbose)
             _save_diamond_cache(diamond_hits, data_dir, verbose=verbose)
@@ -787,14 +926,284 @@ def classify_cazymes(
             print("No CAZymes passed consensus filter")
         return results_df
 
-    out = Path(results_out) if results_out else Path(db_path).parent / "cazyme_classification.tsv"
-    results_df.to_csv(out, sep='\t', index=False)
-    _log(f"[cazyme] Consensus table: {out}")
-    if write_db:
-        load_cazyme_results(db_path, results_df, update_predicates=update_predicates,
-                            n_proteins=n_proteins, verbose=verbose)
+    out = Path(results_out) if results_out else data_dir / "cazyme_classification.tsv"
+    _write_results(results_df, out, db_path, write_db, update_predicates, n_proteins, verbose)
     _log(f"[cazyme] Total {_time.time() - t_total:.1f}s")
     return results_df
+
+
+# ── Sharded runs ───────────────────────────────────────────────────────────────
+#
+# search shard i: dbCAN.hmm profile part i against every protein; shard 0 also runs
+#   DIAMOND on every protein. DIAMOND's top target for a protein (default mode, -k 1)
+#   depends on the other proteins in its run, so its query stays whole.
+# sub shard i (after every search shard): dbCAN-sub profile part i against the
+#   candidate subset built from all search shards.
+# merge (after every sub shard): rebuild each tool's single-process table and apply
+#   the consensus.
+#
+# HMMER reports i-evalue = P-value x Z, with Z the number of target sequences in the
+# search. Splitting profiles keeps each search's target set, and so its Z, equal to
+# the single-process run's: the whole proteome for dbCAN.hmm and the whole candidate
+# subset for dbCAN-sub. Part i holds every N-th profile from profile i. Aksha writes
+# each profile's rows together, in profile order, so the merge restores the
+# single-process table row for row by a stable sort on profile position, and ties
+# between rows resolve the same way too.
+
+HMM_TSV_HEADER = ("sequence_id\thmm_name\tbitscore\tevalue\tc_evalue\ti_evalue\t"
+                  "env_from\tenv_to\tdom_bitscore\tali_from\tali_to\thmm_from\thmm_to\n")
+
+
+def _shard_dir(work_dir: Path, stage: str, index: int) -> Path:
+    return Path(work_dir) / f"{stage}_{index:04d}"
+
+
+def _proteome_fingerprint(prot_dir: str) -> dict:
+    faas = sorted(Path(prot_dir).glob("*.faa"))
+    return {"records": count_fasta_records(prot_dir), "bytes": sum(f.stat().st_size for f in faas)}
+
+
+def _mark_done(shard_dir: Path, info: dict) -> None:
+    tmp = shard_dir / "DONE.json.tmp"
+    tmp.write_text(json.dumps(info, indent=1) + "\n")
+    tmp.replace(shard_dir / "DONE.json")
+
+
+def finished_shards(work_dir: Path, stage: str, n_shards: int) -> list[dict]:
+    """Every shard's completion record for ``stage``; raises if one is missing or disagrees."""
+    infos = []
+    for i in range(n_shards):
+        done = _shard_dir(work_dir, stage, i) / "DONE.json"
+        if not done.exists():
+            raise RuntimeError(f"{stage} shard {i} of {n_shards} has not finished ({done} missing)")
+        infos.append(json.loads(done.read_text()))
+    for info in infos:
+        for key in ("n_shards", "proteins", "dbcan_dir"):
+            if info[key] != infos[0][key]:
+                raise RuntimeError(f"{stage} shards disagree on {key}: {infos[0][key]} vs {info[key]}")
+    if infos[0]["n_shards"] != n_shards:
+        raise RuntimeError(f"{stage} shards were run with {infos[0]['n_shards']} shards, not {n_shards}")
+    return infos
+
+
+def _hmm_part_search(target_dir: str, hmm_path: Path, part: int, n_parts: int, label: str,
+                     threads: int, out_tsv: Path, verbose: bool) -> None:
+    """Search profile part ``part`` of ``hmm_path`` against every sequence in ``target_dir``."""
+    tmp = Path(tempfile.mkdtemp(prefix=f"cazyme_{label}_part_"))
+    try:
+        part_hmm = tmp / f"{hmm_path.stem}_part{part}.hmm"
+        if write_hmm_part(hmm_path, part, n_parts, part_hmm) == 0:
+            out_tsv.write_text(HMM_TSV_HEADER)
+            return
+        run_astra_hmm(target_dir, f"{label}_part{part}", hmm_path=part_hmm,
+                      threads=threads, verbose=verbose, keep_tsv=out_tsv)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _parse_shard_file(kind: str, path: str, lengths: dict | None, order: dict | None):
+    """DIAMOND hits (a dict) for ``diamond``; ``_astra_best_rows`` for an HMM part table."""
+    if kind == "diamond":
+        return parse_diamond_tsv(Path(path))
+    return _astra_best_rows(Path(path), HMMER_IEVALUE, lengths, order=order)
+
+
+def _parse_files(jobs: list[tuple], threads: int) -> list:
+    """Parse (kind, path, profile lengths, profile order) jobs, one file per worker process."""
+    if threads > 1 and len(jobs) > 1:
+        with ProcessPoolExecutor(max_workers=min(threads, len(jobs))) as pool:
+            return list(pool.map(_parse_shard_file, *zip(*[(k, str(p), l, o) for k, p, l, o in jobs])))
+    return [_parse_shard_file(kind, str(path), lengths, order) for kind, path, lengths, order in jobs]
+
+
+def _fold_in_order(parts: list[dict]) -> dict[str, dict[str, tuple]]:
+    """Fold the search shards' DIAMOND hits (shard 0 holds them all)."""
+    out: dict[str, dict[str, tuple]] = {}
+    for hits in parts:
+        for pid, fams in hits.items():
+            cur = out.setdefault(pid, {})
+            for fam, val in fams.items():
+                if fam not in cur or val[0] < cur[fam][0]:
+                    cur[fam] = val
+    return out
+
+
+def combine_hmm_tables(parts: list[Path], hmm_path: Path, out: Path) -> Path:
+    """Write the profile-part tables as one table in the single-process row order.
+
+    Each part lists its profiles' rows together, in profile-file order, as Aksha
+    writes them; a k-way merge on profile position restores the single-process
+    table. A part out of profile order stops the merge.
+    """
+    order = hmm_profile_order(hmm_path)
+
+    def keyed_rows(part: Path):
+        last = -1
+        with open(part) as fh:
+            if fh.readline() != HMM_TSV_HEADER:
+                raise ValueError(f"{part}: unexpected header")
+            for line in fh:
+                if not line.strip():
+                    continue
+                name = line.split("\t", 2)[1]
+                if name not in order:
+                    raise ValueError(f"{part}: profile {name} is absent from {hmm_path}")
+                key = order[name]
+                if key < last:
+                    raise ValueError(f"{part}: rows are out of profile order at {name}")
+                last = key
+                yield key, line if line.endswith("\n") else line + "\n"
+
+    with open(out, "w") as fout:
+        fout.write(HMM_TSV_HEADER)
+        for _, line in heapq.merge(*(keyed_rows(p) for p in parts), key=lambda kv: kv[0]):
+            fout.write(line)
+    return out
+
+
+def shard_candidates(work_dir: Path, n_shards: int, dbcan: Path, threads: int = 1) -> tuple[set, int, int]:
+    """Proteins with a DIAMOND or dbCAN.hmm hit in any search shard (the dbCAN-sub subset),
+    with the DIAMOND and dbCAN.hmm protein counts."""
+    dbcan_hmm, _, _ = dbcan_hmm_files(dbcan)
+    hmm_len = hmm_lengths(dbcan_hmm)
+    jobs = [("diamond", _shard_dir(work_dir, "search", i) / "diamond.tsv", None, None) for i in range(n_shards)]
+    jobs += [("hmm", _shard_dir(work_dir, "search", i) / "dbcan_hmm.tsv", hmm_len, None) for i in range(n_shards)]
+    parsed = _parse_files(jobs, threads)
+    diamond = set().union(*parsed[:n_shards])
+    hmm = set().union(*(set(f['sequence_id']) for f in parsed[n_shards:] if f is not None))
+    return diamond | hmm, len(diamond), len(hmm)
+
+
+def shard_search(prot_dir: str, dbcan: Path, index: int, n_shards: int, work_dir: Path,
+                 threads: int = 4, verbose: bool = True) -> dict:
+    """Search shard ``index``: dbCAN.hmm profile part on every protein; shard 0 adds DIAMOND."""
+    t0 = _time.time()
+    out = _shard_dir(work_dir, "search", index)
+    out.mkdir(parents=True, exist_ok=True)
+    dbcan_hmm, _, _ = dbcan_hmm_files(dbcan)
+    info = {"stage": "search", "index": index, "n_shards": n_shards,
+            "proteins": _proteome_fingerprint(prot_dir), "dbcan_dir": str(dbcan.resolve())}
+
+    t1 = _time.time()
+    if index == 0:
+        _log(f"[cazyme] search shard 0/{n_shards}: DIAMOND on every protein...")
+        run_diamond(prot_dir, dbcan, threads=threads, verbose=verbose, raw_out=out / "diamond.tsv")
+    else:
+        (out / "diamond.tsv").write_text("")
+    t_diamond = _time.time() - t1
+
+    _log(f"[cazyme] search shard {index}/{n_shards}: dbCAN.hmm profile part {index} on every protein...")
+    t2 = _time.time()
+    _hmm_part_search(prot_dir, dbcan_hmm, index, n_shards, "dbCAN_HMM", threads,
+                     out / "dbcan_hmm.tsv", verbose)
+    t_hmm = _time.time() - t2
+
+    info["seconds"] = {"diamond": round(t_diamond, 1), "dbcan_hmm": round(t_hmm, 1),
+                       "total": round(_time.time() - t0, 1)}
+    _mark_done(out, info)
+    _log(f"[cazyme] search shard {index}/{n_shards} done: {info['seconds']}")
+    return info
+
+
+def shard_sub(prot_dir: str, dbcan: Path, index: int, n_shards: int, work_dir: Path,
+              threads: int = 4, verbose: bool = True) -> dict:
+    """Sub shard ``index``: dbCAN-sub profile part on the candidates from every search shard."""
+    t0 = _time.time()
+    searched = finished_shards(work_dir, "search", n_shards)
+    fingerprint = _proteome_fingerprint(prot_dir)
+    if fingerprint != searched[0]["proteins"]:
+        raise RuntimeError(f"protein input {fingerprint} differs from the search shards' "
+                           f"{searched[0]['proteins']}")
+    _, dbcan_sub, has_sub = dbcan_hmm_files(dbcan)
+    out = _shard_dir(work_dir, "sub", index)
+    out.mkdir(parents=True, exist_ok=True)
+
+    candidates, n_diamond, n_hmm = shard_candidates(work_dir, n_shards, dbcan, threads)
+    _log(f"[cazyme] sub shard {index}/{n_shards}: {len(candidates):,} candidates "
+         f"({n_diamond:,} DIAMOND, {n_hmm:,} dbCAN.hmm)")
+    if has_sub and candidates:
+        sub_dir = _subset_fasta(prot_dir, candidates, verbose=verbose)
+        try:
+            _hmm_part_search(sub_dir, dbcan_sub, index, n_shards, "dbCAN_sub", threads,
+                             out / "dbcan_sub.tsv", verbose)
+        finally:
+            shutil.rmtree(sub_dir, ignore_errors=True)
+
+    info = {"stage": "sub", "index": index, "n_shards": n_shards, "proteins": fingerprint,
+            "dbcan_dir": str(dbcan.resolve()), "candidates": len(candidates), "has_sub": has_sub,
+            "seconds": {"total": round(_time.time() - t0, 1)}}
+    _mark_done(out, info)
+    _log(f"[cazyme] sub shard {index}/{n_shards} done: {info['seconds']}")
+    return info
+
+
+def merge_shards(work_dir: Path, n_shards: int, dbcan: Path, data_dir: Path,
+                 threads: int = 1, verbose: bool = True) -> tuple[pd.DataFrame, int]:
+    """Consensus over every shard's hits; writes the single-process run's side files
+    (DIAMOND cache, raw HMM tables) to ``data_dir``. Returns (table, protein records)."""
+    searched = finished_shards(work_dir, "search", n_shards)
+    subbed = finished_shards(work_dir, "sub", n_shards)
+    if subbed[0]["proteins"] != searched[0]["proteins"]:
+        raise RuntimeError("sub shards searched a different protein input than the search shards")
+    dbcan_hmm, dbcan_sub, _ = dbcan_hmm_files(dbcan)
+
+    hmm_parts = [_shard_dir(work_dir, "search", i) / "dbcan_hmm.tsv" for i in range(n_shards)]
+    sub_parts = [_shard_dir(work_dir, "sub", i) / "dbcan_sub.tsv" for i in range(n_shards)]
+    has_sub_tables = all(p.exists() for p in sub_parts)  # dbCAN-sub ran (a release with it, and candidates)
+    jobs = [("diamond", _shard_dir(work_dir, "search", i) / "diamond.tsv", None, None) for i in range(n_shards)]
+    jobs += [("hmm", p, hmm_lengths(dbcan_hmm), hmm_profile_order(dbcan_hmm)) for p in hmm_parts]
+    if has_sub_tables:
+        sub_len, sub_order = hmm_lengths(dbcan_sub), hmm_profile_order(dbcan_sub)
+        jobs += [("sub", p, sub_len, sub_order) for p in sub_parts]
+    parsed = _parse_files(jobs, threads)
+    diamond_hits = _fold_in_order(parsed[:n_shards])
+    hmm_hits = _hits_from_rows(parsed[n_shards:2 * n_shards])
+    sub_hits = _hits_from_rows(parsed[2 * n_shards:]) if has_sub_tables else {}
+    _log(f"[cazyme] merged {n_shards} shards: {len(diamond_hits):,} DIAMOND, {len(hmm_hits):,} "
+         f"dbCAN.hmm, {len(sub_hits):,} dbCAN-sub proteins ({subbed[0]['candidates']:,} candidates)")
+
+    _save_diamond_cache(diamond_hits, data_dir, verbose=verbose)
+    combine_hmm_tables(hmm_parts, dbcan_hmm, data_dir / "cazyme_dbcan_hmm_hits.tsv")
+    if has_sub_tables:
+        combine_hmm_tables(sub_parts, dbcan_sub, data_dir / "cazyme_dbcan_sub_hits.tsv")
+
+    _log(f"[cazyme] Applying {MIN_TOOLS}-tool consensus filter...")
+    return apply_consensus(diamond_hits, hmm_hits, sub_hits, verbose=verbose), searched[0]["proteins"]["records"]
+
+
+def run_stage(stage: str, db_path: str | None, proteins: str | None, work_dir: str | Path,
+              n_shards: int, shard_index: int | None = None, threads: int = 4,
+              dbcan_dir: str | Path | None = None, results_out: str | Path | None = None,
+              write_db: bool = False, update_predicates: bool = True,
+              verbose: bool = True) -> pd.DataFrame | dict:
+    """One step of a sharded run: ``search`` or ``sub`` for shard ``shard_index``, or ``merge``."""
+    t0 = _time.time()
+    dbcan = get_dbcan_path(dbcan_dir)
+    work_dir = Path(work_dir)
+    if stage == "merge":
+        if verbose:
+            _log_dbcan(dbcan)
+        data_dir = _artifact_dir(db_path, results_out)
+        results_df, n_proteins = merge_shards(work_dir, n_shards, dbcan, data_dir, threads, verbose)
+        if results_df.empty:
+            _log("No CAZymes passed consensus filter")
+            return results_df
+        out = Path(results_out) if results_out else data_dir / "cazyme_classification.tsv"
+        _write_results(results_df, out, db_path, write_db, update_predicates, n_proteins, verbose)
+        _log(f"[cazyme] merge done ({_time.time() - t0:.1f}s)")
+        return results_df
+
+    if shard_index is None or not 0 <= shard_index < n_shards:
+        raise ValueError(f"--shard-index must lie in [0, {n_shards})")
+    prot_dir, _, is_temp = resolve_proteins(db_path, proteins, verbose)
+    if prot_dir is None:
+        raise RuntimeError("no protein sequences found")
+    try:
+        step = shard_search if stage == "search" else shard_sub
+        return step(prot_dir, dbcan, shard_index, n_shards, work_dir, threads, verbose)
+    finally:
+        if is_temp:
+            shutil.rmtree(prot_dir, ignore_errors=True)
 
 
 def load_cazyme_results(
@@ -938,8 +1347,12 @@ def main():
         epilog=__doc__,
     )
     parser.add_argument(
-        "--db", required=True,
-        help="Path to sharur.duckdb",
+        "--db", default=None,
+        help="Path to sharur.duckdb (needed to load results; optional with --proteins)",
+    )
+    parser.add_argument(
+        "--proteins", default=None,
+        help="Protein FASTA file or directory of .faa files (default: beside or from --db)",
     )
     parser.add_argument(
         "--threads", type=int, default=4,
@@ -969,8 +1382,34 @@ def main():
         "--quiet", action="store_true",
         help="Suppress progress output",
     )
+    shards = parser.add_argument_group("sharded runs (one Slurm array task per shard)")
+    shards.add_argument(
+        "--stage", choices=("search", "sub", "merge"), default=None,
+        help="search: dbCAN.hmm profile part i on every protein (shard 0 adds DIAMOND); "
+             "sub: dbCAN-sub profile part i on the candidates (after every search shard); "
+             "merge: consensus over all shards (after every sub shard)",
+    )
+    shards.add_argument("--n-shards", type=int, default=None, help="Number of shards N")
+    shards.add_argument("--shard-index", type=int, default=None,
+                        help="Shard i in [0, N) for --stage search/sub (e.g. $SLURM_ARRAY_TASK_ID)")
+    shards.add_argument("--work-dir", default=None, help="Directory holding the shard outputs")
 
     args = parser.parse_args()
+    if args.db is None and (args.proteins is None or args.load_results):
+        parser.error("--db is required unless --proteins names the input")
+    if args.db is None and not args.results_only and (args.stage in (None, "merge")):
+        parser.error("loading results needs --db; add --results-only to only write the table")
+
+    if args.stage:
+        if args.n_shards is None or args.n_shards < 1 or args.work_dir is None:
+            parser.error("--stage needs --n-shards N (N >= 1) and --work-dir")
+        result = run_stage(
+            args.stage, args.db, args.proteins, args.work_dir, args.n_shards,
+            shard_index=args.shard_index, threads=args.threads, dbcan_dir=args.dbcan_dir,
+            results_out=args.out, write_db=not args.results_only,
+            update_predicates=not args.no_update, verbose=not args.quiet,
+        )
+        return 0 if args.stage != "merge" or not result.empty else 1
 
     if args.load_results:
         stats = load_cazyme_results(args.db, pd.read_csv(args.load_results, sep='\t'),
@@ -986,6 +1425,7 @@ def main():
         dbcan_dir=args.dbcan_dir,
         write_db=not args.results_only,
         results_out=args.out,
+        proteins=args.proteins,
     )
 
     return 0 if not results.empty else 1

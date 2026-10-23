@@ -130,7 +130,14 @@ before treating a migrated legacy database's system surface as available.
 step 2 uses that release's `dbCAN.hmm`. `--results-only --out cazy.tsv` computes the consensus
 against a read-only database (for a cluster job), and `--load-results cazy.tsv` loads it later
 as `source='cazy'` annotations. The DIAMOND cache lives in `cazyme_diamond_hits.tsv`, apart from
-the consensus table.
+the consensus table. `--proteins FASTA` runs on a protein file with no database.
+**Sharded (Slurm):** `scripts/submit_cazy_shards.sh -n N -w WORK -s "SBATCH OPTS" -- CLASSIFIER_ARGS`
+submits a search array (dbCAN.hmm profile part i on every protein; task 0 also runs DIAMOND on every
+protein), a dbCAN-sub array (profile part i on the candidate subset) and a merge job, chained with
+`afterok`. HMM steps split profiles because HMMER i-evalues scale with the number of target sequences
+(Z), and DIAMOND's default-mode top target depends on the other queries in its run, so no step splits
+the proteins; the merged table equals the single-process table.
+Details: `src/ingest/DBCAN_PIPELINE.md`.
 
 ## Biosynthetic Gene Clusters (GECCO on stored gene calls)
 **Run:** `scripts/run_gecco_bgcs.py DB --assemblies MAP.tsv --out-dir DIR --shard i/N` writes each
