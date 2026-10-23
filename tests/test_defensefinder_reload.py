@@ -172,3 +172,22 @@ def test_model_families_stay_comparable_across_release_renames(tmp_path):
     assert aligned["UG13a"] == "DRT-like_UG"
     assert aligned["GasderMIN"] == "Gasdermin"
     assert aligned["RM_Type_I"] == "RM_Type_I"
+
+
+def test_stamp_fingerprint_ignores_columns_added_after_the_snapshot():
+    """Regeneration may add predicate_provenance columns (reconcile support); stamps that existed before
+    keep their values, so the unchanged-stamps check must not flag the new nullable columns."""
+    import duckdb
+    from sharur.defensefinder.refresh import _columns, _fingerprint
+
+    conn = duckdb.connect()
+    conn.execute("CREATE TABLE predicate_provenance (generation_id BIGINT, scope VARCHAR, pfam_map_sha256 VARCHAR)")
+    conn.execute("INSERT INTO predicate_provenance VALUES (1, 'full', 'a'), (2, 'subset', 'a')")
+    cols = _columns(conn, "predicate_provenance")
+    before = _fingerprint(conn, "predicate_provenance", "WHERE generation_id <= 2", columns=cols)
+    conn.execute("ALTER TABLE predicate_provenance ADD COLUMN reconciled_from BIGINT")
+    conn.execute("INSERT INTO predicate_provenance VALUES (3, 'subset', 'a', NULL)")
+    assert _fingerprint(conn, "predicate_provenance", "WHERE generation_id <= 2", columns=cols) == before
+    assert _fingerprint(conn, "predicate_provenance", "WHERE generation_id <= 2") != before  # whole-row hash shifts
+    conn.execute("UPDATE predicate_provenance SET pfam_map_sha256 = 'b' WHERE generation_id = 1")
+    assert _fingerprint(conn, "predicate_provenance", "WHERE generation_id <= 2", columns=cols) != before

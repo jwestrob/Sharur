@@ -338,11 +338,20 @@ def _snapshot(conn, profile_family, system_family: dict[str, str]) -> Snapshot:
     return snap
 
 
-def _fingerprint(conn, table: str, where: str = "") -> tuple[int, int]:
+def _fingerprint(conn, table: str, where: str = "", columns: list[str] | None = None) -> tuple[int, int]:
+    """Row count and an order-free hash of a table. With ``columns``, only those columns are hashed, so a
+    column added later (e.g. by a schema migration) does not change the fingerprint of unchanged rows."""
+    row = ("struct_pack(" + ", ".join(f'"{c}" := t."{c}"' for c in columns) + ")") if columns else "t"
     count, digest = conn.execute(
-        f'SELECT COUNT(*), COALESCE(SUM(hash(t)::HUGEINT), 0) FROM "{table}" t {where}'
+        f'SELECT COUNT(*), COALESCE(SUM(hash({row})::HUGEINT), 0) FROM "{table}" t {where}'
     ).fetchone()
     return int(count), int(digest)
+
+
+def _columns(conn, table: str) -> list[str]:
+    return [r[0] for r in conn.execute(
+        "SELECT column_name FROM information_schema.columns WHERE table_schema = 'main' AND table_name = ? "
+        "ORDER BY ordinal_position", [table]).fetchall()]
 
 
 def _max_generation(conn) -> int:
@@ -351,14 +360,20 @@ def _max_generation(conn) -> int:
     return int(conn.execute(f"SELECT COALESCE(MAX(generation_id), 0) FROM {_APPENDED}").fetchone()[0])
 
 
-def _fingerprints(conn, provenance_max: int) -> dict[str, tuple[int, int]]:
-    """Fingerprints of everything the reload must leave unchanged."""
+def _fingerprints(conn, provenance_max: int,
+                  provenance_columns: list[str] | None = None) -> dict[str, tuple[int, int]]:
+    """Fingerprints of everything the reload must leave unchanged.
+
+    ``provenance_columns``: the predicate_provenance columns present before the reload. Regeneration appends
+    a stamp and may add columns to that table (sharur.predicates.provenance.ensure_table); the stamps that
+    existed before must keep their values in those original columns."""
     prints = {}
     for table in _tables(conn):
         if table in _REPLACED:
             continue
         if table == _APPENDED:
-            prints[table] = _fingerprint(conn, table, f"WHERE generation_id <= {provenance_max}")
+            prints[table] = _fingerprint(conn, table, f"WHERE generation_id <= {provenance_max}",
+                                         columns=provenance_columns)
         elif table == "annotations":
             prints[table] = _fingerprint(
                 conn, table, f"WHERE source NOT IN ('{SOURCE}', '{SYSTEM_SOURCE}')"
@@ -605,7 +620,8 @@ def reload_defensefinder(
             affected = sorted(scope)
             _set_affected(conn, affected)
             logger.info("Fingerprinting rows outside %s affected proteins", f"{len(affected):,}")
-            prints_before = _fingerprints(conn, provenance_max)
+            provenance_columns = _columns(conn, _APPENDED) if _APPENDED in _tables(conn) else None
+            prints_before = _fingerprints(conn, provenance_max, provenance_columns)
         finally:
             conn.close()
 
@@ -637,7 +653,7 @@ def reload_defensefinder(
                     conn.execute(f'DROP TABLE "{table}"')
             _set_affected(conn, affected)
             logger.info("Validating")
-            prints_after = _fingerprints(conn, provenance_max)
+            prints_after = _fingerprints(conn, provenance_max, provenance_columns)
             for table, before in sorted(prints_before.items()):
                 scope = ("outside regenerated proteins" if table in _PROTEIN_SCOPED
                          else "stamps before this reload" if table == _APPENDED
