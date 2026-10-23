@@ -15,8 +15,9 @@ annotations, `system_proteins`) and regenerates V2 semantics and the V1
 compatibility cache for every protein whose DefenseFinder evidence changes.
 
 The command stages a copy of the database, validates it, and reports the
-difference: annotation rows, systems per type, genomes with any system, and
-system types and profile families gained or lost. Without --publish the copy
+difference: annotation rows, systems per model and per model family (the
+definitions folder, comparable across releases that rename models), genomes
+with any system, and system and profile families gained or lost. Without --publish the copy
 is discarded. With --publish it atomically replaces the database, keeps the
 prior file as a backup beside it, and re-seals when a dataset seal exists.
 
@@ -60,6 +61,9 @@ def main() -> int:
     parser.add_argument("--models", required=True, type=Path,
                         help="defense-finder-models directory (metadata.yml, definitions/, profiles/) "
                              "used for the search")
+    parser.add_argument("--previous-models", type=Path,
+                        help="defense-finder-models directory that produced the current systems; "
+                             "maps their model names to families in the report")
     parser.add_argument("--publish", action="store_true",
                         help="Replace the database after validation (default: dry run)")
     parser.add_argument("--work-dir", type=Path,
@@ -92,6 +96,7 @@ def main() -> int:
         reseal=not args.no_reseal,
         report_dir=args.report_dir,
         label=args.label,
+        previous_models=args.previous_models,
     )
     print(report.to_text())
     return 0

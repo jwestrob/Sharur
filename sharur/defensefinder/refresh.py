@@ -26,7 +26,6 @@ import os
 import re
 import shutil
 import time
-from collections import Counter
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -36,6 +35,7 @@ import pandas as pd
 from sharur.defensefinder.selection import (
     SOURCE,
     SOURCE_VERSIONS_TABLE,
+    ModelSet,
     SelectionParams,
     SelectionStats,
     annotation_rows,
@@ -70,7 +70,10 @@ class Snapshot:
     genomes_with_system: int = 0
     systems_by_type: dict[str, int] = field(default_factory=dict)
     genomes_by_type: dict[str, int] = field(default_factory=dict)
+    systems_by_family: dict[str, int] = field(default_factory=dict)
+    genomes_by_family: dict[str, int] = field(default_factory=dict)
     proteins_by_accession: dict[str, int] = field(default_factory=dict)
+    proteins_by_profile_family: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -87,7 +90,7 @@ class ReloadReport:
     sensitivity: dict[str, int] = field(default_factory=dict)
     before: Snapshot = field(default_factory=Snapshot)
     after: Snapshot = field(default_factory=Snapshot)
-    profile_family: dict[str, str] = field(default_factory=dict)
+    previous_model_version: str | None = None
     affected_proteins: int = 0
     unresolved_replicons: int = 0
     checks: dict[str, str] = field(default_factory=dict)
@@ -97,46 +100,50 @@ class ReloadReport:
     elapsed_s: float = 0.0
 
     # --- derived views ------------------------------------------------- #
-    def family_of(self, accession: str) -> str:
-        """Defense family of a profile: the file-stem prefix before ``__``."""
-        stem = self.profile_family.get(accession, accession)
-        return stem.split("__", 1)[0]
-
-    def proteins_by_family(self, snapshot: Snapshot) -> dict[str, int]:
-        """Proteins per profile family (a protein hit by two profiles of one family counts once
-        per profile, so this is an upper bound; exact counts are in the families TSV)."""
-        counts: Counter[str] = Counter()
-        for accession, n in snapshot.proteins_by_accession.items():
-            counts[self.family_of(accession)] += n
-        return dict(counts)
-
-    def type_changes(self) -> pd.DataFrame:
-        types = sorted(set(self.before.systems_by_type) | set(self.after.systems_by_type))
+    @staticmethod
+    def _changes(key: str, before: dict[str, int], after: dict[str, int],
+                 genomes_before: dict[str, int], genomes_after: dict[str, int]) -> pd.DataFrame:
+        keys = sorted(set(before) | set(after))
         frame = pd.DataFrame({
-            "system_type": types,
-            "systems_before": [self.before.systems_by_type.get(t, 0) for t in types],
-            "systems_after": [self.after.systems_by_type.get(t, 0) for t in types],
-            "genomes_before": [self.before.genomes_by_type.get(t, 0) for t in types],
-            "genomes_after": [self.after.genomes_by_type.get(t, 0) for t in types],
+            key: keys,
+            "systems_before": [before.get(k, 0) for k in keys],
+            "systems_after": [after.get(k, 0) for k in keys],
+            "genomes_before": [genomes_before.get(k, 0) for k in keys],
+            "genomes_after": [genomes_after.get(k, 0) for k in keys],
         })
         frame["delta"] = frame["systems_after"] - frame["systems_before"]
-        return frame.sort_values(["delta", "system_type"], ascending=[False, True],
-                                 key=lambda s: s.abs() if s.name == "delta" else s)
+        order = frame["delta"].abs().sort_values(ascending=False, kind="stable").index
+        return frame.loc[order].reset_index(drop=True)
+
+    def type_changes(self) -> pd.DataFrame:
+        """Systems per model (system_type). Model renames between releases appear here."""
+        b, a = self.before, self.after
+        return self._changes("system_type", b.systems_by_type, a.systems_by_type,
+                             b.genomes_by_type, a.genomes_by_type)
+
+    def family_changes(self) -> pd.DataFrame:
+        """Systems per model family (definitions folder), comparable across releases."""
+        b, a = self.before, self.after
+        return self._changes("family", b.systems_by_family, a.systems_by_family,
+                             b.genomes_by_family, a.genomes_by_family)
 
     def to_text(self) -> str:
         b, a = self.before, self.after
+        families = self.family_changes()
+        gained = families[(families.systems_before == 0) & (families.systems_after > 0)]
+        lost = families[(families.systems_before > 0) & (families.systems_after == 0)]
         types = self.type_changes()
-        gained = types[(types.systems_before == 0) & (types.systems_after > 0)]
-        lost = types[(types.systems_before > 0) & (types.systems_after == 0)]
-        fam_before = self.proteins_by_family(b)
-        fam_after = self.proteins_by_family(a)
+        new_types = int(((types.systems_before == 0) & (types.systems_after > 0)).sum())
+        gone_types = int(((types.systems_before > 0) & (types.systems_after == 0)).sum())
+        fam_before, fam_after = b.proteins_by_profile_family, a.proteins_by_profile_family
         fam_gained = sorted(set(fam_after) - set(fam_before))
         fam_lost = sorted(set(fam_before) - set(fam_after))
         s = self.stats
         lines = [
             f"DefenseFinder reload {'DRY RUN' if self.dry_run else 'PUBLISHED'}: {self.database}",
             f"Model set: {self.model_family} {self.model_version or '(unversioned)'} "
-            f"({self.profile_count:,} profiles)",
+            f"({self.profile_count:,} profiles); before-state families from "
+            f"{self.previous_model_version or 'the same set'}",
             f"Hits: {self.hits_path} (sha256 {self.hits_sha256[:12]})",
             f"Selection: {json.dumps(asdict(self.params), sort_keys=True)}",
             f"  raw domain rows {s.raw_rows:,}; failed GA/search threshold {s.failed_threshold:,}; "
@@ -147,18 +154,22 @@ class ReloadReport:
             f"Selection sensitivity (raw rows kept): {self.sensitivity}",
             f"defensefinder annotation rows: {b.annotation_rows:,} -> {a.annotation_rows:,} "
             f"(proteins {b.annotation_proteins:,} -> {a.annotation_proteins:,})",
-            f"Systems: {b.systems:,} -> {a.systems:,}; system types {len(b.systems_by_type)} -> "
-            f"{len(a.systems_by_type)}; genomes with any system "
-            f"{b.genomes_with_system:,} -> {a.genomes_with_system:,}",
+            f"Systems: {b.systems:,} -> {a.systems:,}; genomes with any system "
+            f"{b.genomes_with_system:,} -> {a.genomes_with_system:,}; system families "
+            f"{len(b.systems_by_family)} -> {len(a.systems_by_family)}; models (system_type) "
+            f"{len(b.systems_by_type)} -> {len(a.systems_by_type)} ({new_types} newly called, "
+            f"{gone_types} no longer called, including release renames; per-model table in TSV)",
             f"defensefinder_system annotation rows: {b.system_annotation_rows:,} -> "
             f"{a.system_annotation_rows:,}",
-            f"System types newly called ({len(gained)}): "
-            + ", ".join(f"{r.system_type} ({r.systems_after})" for r in gained.itertuples()),
-            f"System types no longer called ({len(lost)}): "
-            + ", ".join(f"{r.system_type} ({r.systems_before})" for r in lost.itertuples()),
-            "Largest system-count changes: "
-            + ", ".join(f"{r.system_type} {r.systems_before}->{r.systems_after}"
-                        for r in types.head(12).itertuples()),
+            f"System families newly called ({len(gained)}): "
+            + ", ".join(f"{r.family} ({r.systems_after} systems, {r.genomes_after} genomes)"
+                        for r in gained.itertuples()),
+            f"System families no longer called ({len(lost)}): "
+            + ", ".join(f"{r.family} ({r.systems_before} systems, {r.genomes_before} genomes)"
+                        for r in lost.itertuples()),
+            "Largest family changes (systems): "
+            + ", ".join(f"{r.family} {r.systems_before}->{r.systems_after}"
+                        for r in families.head(12).itertuples()),
             f"Profile families with hits, newly present ({len(fam_gained)}): {', '.join(fam_gained)}",
             f"Profile families with hits, no longer present ({len(fam_lost)}): {', '.join(fam_lost)}",
             f"Proteins with regenerated semantics: {self.affected_proteins:,}",
@@ -187,17 +198,19 @@ class ReloadReport:
         types = report_dir / f"{label}_systems_by_type.tsv"
         self.type_changes().to_csv(types, sep="\t", index=False)
         written.append(types)
+        families = report_dir / f"{label}_systems_by_family.tsv"
+        self.family_changes().to_csv(families, sep="\t", index=False)
+        written.append(families)
 
-        accessions = sorted(set(self.before.proteins_by_accession)
-                            | set(self.after.proteins_by_accession))
-        fam = pd.DataFrame({
-            "accession": accessions,
-            "family": [self.family_of(acc) for acc in accessions],
-            "proteins_before": [self.before.proteins_by_accession.get(acc, 0) for acc in accessions],
-            "proteins_after": [self.after.proteins_by_accession.get(acc, 0) for acc in accessions],
+        b, a = self.before, self.after
+        keys = sorted(set(b.proteins_by_profile_family) | set(a.proteins_by_profile_family))
+        profile_families = pd.DataFrame({
+            "profile_family": keys,
+            "proteins_before": [b.proteins_by_profile_family.get(k, 0) for k in keys],
+            "proteins_after": [a.proteins_by_profile_family.get(k, 0) for k in keys],
         })
-        profiles = report_dir / f"{label}_profiles.tsv"
-        fam.to_csv(profiles, sep="\t", index=False)
+        profiles = report_dir / f"{label}_profile_families.tsv"
+        profile_families.to_csv(profiles, sep="\t", index=False)
         written.append(profiles)
 
         record = report_dir / f"{label}_reload.json"
@@ -205,6 +218,7 @@ class ReloadReport:
             "database": str(self.database), "dry_run": self.dry_run,
             "hits_path": str(self.hits_path), "hits_sha256": self.hits_sha256,
             "model_family": self.model_family, "model_version": self.model_version,
+            "previous_model_version": self.previous_model_version,
             "profile_count": self.profile_count, "params": asdict(self.params),
             "selection": self.stats.to_dict(), "sensitivity": self.sensitivity,
             "before": asdict(self.before), "after": asdict(self.after),
@@ -229,7 +243,42 @@ def _tables(conn) -> list[str]:
     ).fetchall()]
 
 
-def _snapshot(conn) -> Snapshot:
+# Type IV restriction: defense-finder-models 2.x RM_Type_IV / RM_Type_IV_1 (profiles
+# RM_Type_IV__*) became McrBC, GmrSD_RM_Type_IV and Other_Type_IV in 3.x.
+_TYPE_IV_SUCCESSORS = {"McrBC", "GmrSD_RM_Type_IV", "Other_Type_IV"}
+
+
+def model_families(model_set: ModelSet | None) -> dict[str, str]:
+    """Model name -> family (its definitions folder), comparable across releases.
+
+    RM models are keyed by restriction type: 2.x keeps them all in ``RM/RM/``
+    (``RM_Type_I``, ``RM_Type_IIG_2``, ``RM_Type_IV_1``), 3.x splits them into
+    ``RM/RM_Type_I/`` .. ``RM/RM_Type_III/`` with chemistry-specific model names
+    (``N6_RM_Type_I``) and moves Type IV into McrBC, GmrSD_RM_Type_IV and Other_Type_IV.
+    """
+    if model_set is None or model_set.root is None:
+        return {}
+    families: dict[str, str] = {}
+    definitions = model_set.root / "definitions"
+    for xml in sorted(definitions.rglob("*.xml")):
+        relative = xml.relative_to(definitions).parts
+        family = xml.parent.name if len(relative) > 2 else xml.stem
+        if relative[0] == "RM" and family == "RM":
+            family = re.sub(r"_\d+$", "", xml.stem)
+        if family in _TYPE_IV_SUCCESSORS:
+            family = "RM_Type_IV"
+        families[xml.stem] = family
+    return families
+
+
+def profile_family_of(name_to_stem: dict[str, str]):
+    """Profile NAME -> family: the profile file stem's prefix before ``__``."""
+    def family(accession: str) -> str:
+        return name_to_stem.get(accession, accession).split("__", 1)[0]
+    return family
+
+
+def _snapshot(conn, profile_family, system_family: dict[str, str]) -> Snapshot:
     snap = Snapshot()
     snap.annotation_rows, snap.annotation_proteins = conn.execute(
         "SELECT COUNT(*), COUNT(DISTINCT protein_id) FROM annotations WHERE source = ?", [SOURCE]
@@ -237,19 +286,28 @@ def _snapshot(conn) -> Snapshot:
     snap.system_annotation_rows = conn.execute(
         "SELECT COUNT(*) FROM annotations WHERE source = ?", [SYSTEM_SOURCE]
     ).fetchone()[0]
-    snap.proteins_by_accession = dict(conn.execute(
-        "SELECT accession, COUNT(DISTINCT protein_id) FROM annotations WHERE source = ? GROUP BY 1",
-        [SOURCE],
-    ).fetchall())
+    pairs = conn.execute(
+        "SELECT DISTINCT protein_id, accession FROM annotations WHERE source = ?", [SOURCE]
+    ).fetchdf()
+    if not pairs.empty:
+        snap.proteins_by_accession = pairs.groupby("accession")["protein_id"].nunique().to_dict()
+        pairs["family"] = pairs["accession"].map(profile_family)
+        snap.proteins_by_profile_family = (
+            pairs.groupby("family")["protein_id"].nunique().to_dict()
+        )
     if SYSTEM_TABLE in _tables(conn):
-        snap.systems, snap.genomes_with_system = conn.execute(
-            f"SELECT COUNT(*), COUNT(DISTINCT genome_id) FROM {SYSTEM_TABLE}"
-        ).fetchone()
-        for system_type, n, genomes in conn.execute(
-            f"SELECT system_type, COUNT(*), COUNT(DISTINCT genome_id) FROM {SYSTEM_TABLE} GROUP BY 1"
-        ).fetchall():
-            snap.systems_by_type[system_type] = n
-            snap.genomes_by_type[system_type] = genomes
+        systems = conn.execute(f"SELECT system_type, genome_id FROM {SYSTEM_TABLE}").fetchdf()
+        snap.systems = len(systems)
+        snap.genomes_with_system = int(systems["genome_id"].nunique())
+        if not systems.empty:
+            snap.systems_by_type = systems.groupby("system_type").size().to_dict()
+            snap.genomes_by_type = systems.groupby("system_type")["genome_id"].nunique().to_dict()
+            systems["family"] = systems["system_type"].map(lambda t: system_family.get(t, t))
+            snap.systems_by_family = systems.groupby("family").size().to_dict()
+            snap.genomes_by_family = systems.groupby("family")["genome_id"].nunique().to_dict()
+    for key in ("systems_by_type", "genomes_by_type", "systems_by_family", "genomes_by_family",
+                "proteins_by_accession", "proteins_by_profile_family"):
+        setattr(snap, key, {str(k): int(v) for k, v in getattr(snap, key).items()})
     return snap
 
 
@@ -345,6 +403,7 @@ def reload_defensefinder(
     report_dir: str | Path | None = None,
     label: str | None = None,
     regenerate_semantics: bool = True,
+    previous_models: str | Path | None = None,
     _before_publish=None,
 ) -> ReloadReport:
     """Rebuild DefenseFinder annotations and systems in a staged copy; publish when asked."""
@@ -358,12 +417,19 @@ def reload_defensefinder(
             f"{models} has no definitions/ beside its profiles; system calling needs the full "
             "defense-finder-models directory"
         )
+    previous_set = load_model_set(previous_models) if previous_models is not None else None
     report = ReloadReport(
         database=db, dry_run=dry_run, hits_path=hits_file, params=params,
         model_family=model_set.family, model_version=model_set.version,
         profile_count=len(model_set.profiles),
-        profile_family={p.name: p.stem for p in model_set.profiles},
+        previous_model_version=previous_set.version if previous_set else None,
     )
+    # Profile NAMEs -> file stems from both releases; the current one wins on conflict.
+    name_to_stem = {p.name: p.stem for p in (previous_set.profiles if previous_set else [])}
+    name_to_stem.update({p.name: p.stem for p in model_set.profiles})
+    profile_family = profile_family_of(name_to_stem)
+    families_after = model_families(model_set)
+    families_before = {**families_after, **model_families(previous_set)}
     config = {"threads": threads, "memory_limit": memory_limit}
 
     from sharur.storage.migrations import MIGRATIONS, get_current_version
@@ -441,7 +507,7 @@ def reload_defensefinder(
                   f"{stats.unknown_profile:,} hit rows name profiles absent from the model set "
                   f"{stats.unknown_profile_names[:5]}")
 
-            report.before = _snapshot(conn)
+            report.before = _snapshot(conn, profile_family, families_before)
             before_members = {r[0] for r in conn.execute(
                 "SELECT DISTINCT protein_id FROM annotations WHERE source IN (?, ?)",
                 [SOURCE, SYSTEM_SOURCE],
@@ -544,7 +610,7 @@ def reload_defensefinder(
                       f"{before[0]:,} rows, {scope}")
             report.new_tables = sorted(set(_tables(conn)) - tables_before)
 
-            report.after = _snapshot(conn)
+            report.after = _snapshot(conn, profile_family, families_after)
             check("annotation_rows_loaded", report.after.annotation_rows == stats.loaded_rows,
                   f"{report.after.annotation_rows:,} defensefinder rows; {stats.loaded_rows:,} selected")
             check("systems_persisted", report.after.systems == len(systems_df),

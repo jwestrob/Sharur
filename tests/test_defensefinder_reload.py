@@ -73,9 +73,13 @@ class TestReload:
         assert report.sensitivity["applied"] == 5
         assert report.new_tables == ["annotation_source_versions"]
         text = report.to_text()
-        assert "System types newly called (1): Toy (1)" in text
+        assert "System families newly called (1): Toy (1 systems, 1 genomes)" in text
+        assert report.after.systems_by_family == {"Solo": 1, "Toy": 1}
+        assert report.after.proteins_by_profile_family == {
+            "Anti": 1, "Solo": 1, "Toy": 3}
         assert {p.name for p in reports.iterdir()} == {
-            "toy_reload_summary.txt", "toy_systems_by_type.tsv", "toy_profiles.tsv", "toy_reload.json",
+            "toy_reload_summary.txt", "toy_systems_by_type.tsv", "toy_systems_by_family.tsv",
+            "toy_profile_families.tsv", "toy_reload.json",
         }
 
     def test_publish_replaces_rows_systems_and_semantics(self, db_path, hits_path, family):
@@ -137,3 +141,27 @@ class TestReload:
         with pytest.raises(ReloadValidationError, match="absent from proteins"):
             reload_defensefinder(db_path, bad, family, dry_run=False)
         assert _sha(db_path) == digest
+
+
+def test_model_families_stay_comparable_across_release_renames(tmp_path):
+    from sharur.defensefinder.refresh import model_families
+    from sharur.defensefinder.selection import load_model_set
+
+    old = write_model_set(tmp_path / "v2", version="2.0.2")
+    new = write_model_set(tmp_path / "v3", version="3.1.0")
+    rm_xml = '<model inter_gene_max_space="5"><gene name="Toy__ToyA" presence="mandatory"/></model>'
+    for path in (old / "definitions" / "RM" / "RM" / "RM_Type_I.xml",
+                 old / "definitions" / "RM" / "RM" / "RM_Type_IIG_2.xml",
+                 old / "definitions" / "RM" / "RM" / "RM_Type_IV_1.xml",
+                 new / "definitions" / "RM" / "RM_Type_I" / "N6_RM_Type_I.xml",
+                 new / "definitions" / "RM" / "RM_Type_IIG" / "N6_RM_Type_IIG.xml",
+                 new / "definitions" / "RM" / "McrBC" / "McrBC.xml",
+                 new / "definitions" / "DefenseFinder" / "Other_Type_IV" / "Other_Type_IV.xml"):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(rm_xml)
+
+    before, after = model_families(load_model_set(old)), model_families(load_model_set(new))
+    assert before["RM_Type_I"] == after["N6_RM_Type_I"] == "RM_Type_I"
+    assert before["RM_Type_IIG_2"] == after["N6_RM_Type_IIG"] == "RM_Type_IIG"
+    assert before["RM_Type_IV_1"] == after["McrBC"] == after["Other_Type_IV"] == "RM_Type_IV"
+    assert after["Toy"] == "Toy"
