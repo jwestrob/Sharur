@@ -111,7 +111,7 @@ class TestSelection:
     def test_profile_scope_matches_the_callers_default_subfamilies(self):
         from sharur.colocation import DEFAULT_MODEL_SUBFAMILIES
 
-        assert sel.DEFAULT_SUBFAMILIES == DEFAULT_MODEL_SUBFAMILIES["defensefinder"]
+        assert DEFAULT_MODEL_SUBFAMILIES["defensefinder"] == sel.DEFAULT_SUBFAMILIES
 
 
 class TestAnnotationRows:
