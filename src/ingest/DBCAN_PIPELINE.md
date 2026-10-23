@@ -11,8 +11,8 @@ The standard dbCAN annotation pipeline uses a **3-tool consensus** approach to m
 | Step | Tool | Database | Threshold | Purpose |
 |------|------|----------|-----------|---------|
 | 1 | DIAMOND blastp (default mode, `-k 1`) | `CAZy.dmnd` | e-value <= 1e-102 | Sequence homology to known CAZymes |
-| 2 | HMMER (via Aksha) | `dbCAN.hmm` | i-evalue <= 1e-15, HMM coverage >= 0.35 | HMM profile matching to CAZy family models |
-| 3 | HMMER (via Aksha) | `dbCAN-sub.hmm` | i-evalue <= 1e-15, HMM coverage >= 0.35 | Substrate-specific HMM sub-family models |
+| 2 | HMMER (via Aksha) | `dbCAN.hmm` | i-evalue < 1e-15 at run_dbcan's Z, HMM coverage > 0.35 | HMM profile matching to CAZy family models |
+| 3 | HMMER (via Aksha) | `dbCAN-sub.hmm` | i-evalue < 1e-15 at run_dbcan's Z, HMM coverage > 0.35 | Substrate-specific HMM sub-family models |
 
 These are the run_dbcan settings, including DIAMOND's default sensitivity mode.
 
@@ -162,11 +162,22 @@ Each step is also a plain command (`--stage search|sub --shard-index i --n-shard
 then `--stage merge --n-shards N --work-dir W --out cazy.tsv`), so a shard can be rerun alone.
 Every shard searches afresh; the caches above serve single-process runs.
 
-**Why no step splits the proteins.** HMMER reports i-evalue = P-value x Z, where Z is the number
-of target sequences in the search (pyhmmer's default, which Aksha uses). A search over 1/N of the
-proteins therefore reports i-evalues N times smaller and passes extra hits at the 1e-15 cut. Each
-HMM part searches the same targets as the single-process run (every protein for `dbCAN.hmm`, the
-whole candidate subset for `dbCAN_sub.hmm`), so Z, every i-evalue and every call are unchanged.
+**E-value scale.** HMMER reports i-evalue = P-value x Z. Aksha uses pyhmmer's default, Z = the
+number of target sequences searched. run_dbcan fixes Z at the number of profiles in the HMM file
+(875 for `dbCAN.hmm` and 25,618 for `dbCAN_sub.hmm` in the 2025-09-13 release; hmmscan's
+convention, kept by its pyhmmer port in `dbcan/annotation/pyhmmer_search.py`). The parse multiplies
+each Aksha i-evalue by n_profiles / n_targets (`dbcan_ievalue_scale`) before the 1e-15 cut, so the
+cut and the reported i-evalues are run_dbcan's. Coverage is (hmm_to - hmm_from + 1) / LENG > 0.35,
+also as run_dbcan computes it. The kept raw tables (`cazyme_dbcan_hmm_hits.tsv`,
+`cazyme_dbcan_sub_hits.tsv`) hold Aksha's own values.
+
+On Aksha's raw Z, the SR-VP archaeal `dbCAN.hmm` search (1,976,915 proteins) was 2,259x stricter
+than run_dbcan, and the bacterial one (2,914,401) 3,331x.
+
+**Why no step splits the proteins.** On the raw Z, a search over 1/N of the proteins reports
+i-evalues N times smaller. Each HMM part searches the same targets as the single-process run (every
+protein for `dbCAN.hmm`, the whole candidate subset for `dbCAN_sub.hmm`), so Z, every i-evalue and
+every call are unchanged.
 Part i holds every N-th profile from profile i, which spreads each family's consecutive subfamily
 profiles over all parts and balances the work. Aksha writes each profile's rows together in
 profile order; the merge reduces each part in parallel and breaks ties by profile position and row,

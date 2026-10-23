@@ -4,8 +4,8 @@ CAZyme Classification Pipeline (dbCAN 3-tool consensus)
 
 Recapitulates the standard dbCAN annotation pipeline:
   Tool 1: DIAMOND blastp vs CAZy.dmnd        (e-value ≤ 1e-102)
-  Tool 2: Astra/HMMER vs dbCAN.hmm           (i-evalue ≤ 1e-15, HMM coverage ≥ 0.35)
-  Tool 3: Astra/HMMER vs dbCAN-sub.hmm       (i-evalue ≤ 1e-15, HMM coverage ≥ 0.35)
+  Tool 2: Astra/HMMER vs dbCAN.hmm           (i-evalue < 1e-15 at run_dbcan Z, HMM coverage > 0.35)
+  Tool 3: Astra/HMMER vs dbCAN-sub.hmm       (i-evalue < 1e-15 at run_dbcan Z, HMM coverage > 0.35)
   Consensus: retain genes called by ≥ 2 of 3 tools
 
 HMMER searches are delegated to Aksha (aksha search --hmm_in), which handles
@@ -78,6 +78,10 @@ def _log(msg: str) -> None:
 # run_dbcan and the dbCAN3 server defaults: DIAMOND E < 1e-102; HMMER (dbCAN and
 # dbCAN-sub) E < 1e-15 with HMM coverage > 0.35. A 1e-18 DIAMOND cut passed 11% of
 # the SR-VP archaeal proteome (224,612 / 1,976,915) against 1.35% for dbCAN.hmm.
+# run_dbcan (bcb-unl/run_dbcan, dbcan/annotation/pyhmmer_search.py) searches every input
+# protein with HMMER Z fixed at the HMM file's profile count (875 dbCAN.hmm, 25,618
+# dbCAN-sub in the 2025-09-13 release) and keeps domains with i-evalue < 1e-15 and
+# (hmm_to - hmm_from + 1) / LENG > 0.35; dbcan_ievalue_scale converts Aksha's Z.
 DIAMOND_EVALUE = 1e-102
 HMMER_IEVALUE  = 1e-15
 HMMER_COVERAGE = 0.35
@@ -512,6 +516,24 @@ def hmm_lengths(hmm_path: Path) -> dict[str, int]:
     return lengths
 
 
+def dbcan_ievalue_scale(hmm_path: Path, n_targets: int, n_profiles: int | None = None) -> float:
+    """Factor that moves Aksha i-evalues onto run_dbcan's scale.
+
+    i-evalue = P-value x Z. Aksha (pyhmmer's default) sets Z to the number of target
+    sequences searched; run_dbcan fixes Z at the number of profiles in the HMM file
+    (hmmscan's convention, kept by its pyhmmer port), so its E-values do not depend
+    on how many proteins are searched. Multiplying by n_profiles / n_targets gives
+    run_dbcan's i-evalue for every domain row.
+    """
+    if n_targets <= 0:
+        raise ValueError(f"{hmm_path.name}: no target sequences to scale E-values by")
+    if n_profiles is None:
+        n_profiles = len(hmm_lengths(hmm_path))
+    if n_profiles <= 0:
+        raise ValueError(f"{hmm_path.name} has no NAME/LENG profile records")
+    return n_profiles / n_targets
+
+
 def hmm_profile_order(hmm_path: Path) -> dict[str, int]:
     """Profile NAME -> position in a HMMER3 text file; names must be unique."""
     with open(hmm_path, "rb") as fh, mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ) as mm:
@@ -562,11 +584,15 @@ def run_astra_hmm(prot_dir: str, label: str,
                   hmm_path: Path | None = None,
                   threads: int = 4, ievalue: float = HMMER_IEVALUE,
                   verbose: bool = True,
-                  keep_tsv: Path | None = None) -> dict[str, dict[str, tuple]]:
+                  keep_tsv: Path | None = None,
+                  ievalue_scale: float = 1.0) -> dict[str, dict[str, tuple]]:
     """Run Astra hmmsearch against an HMM database.
 
     Uses --installed_hmms for Astra-installed databases (e.g., dbCAN),
     or --hmm_in for custom HMM files (e.g., dbCAN-sub.hmm).
+
+    ``ievalue_scale`` multiplies each i-evalue before the cut (``dbcan_ievalue_scale``
+    puts it on run_dbcan's scale); the kept raw table holds Aksha's own values.
 
     Returns {protein_id: {family_class: (i_evalue, dom_bitscore)}}.
     """
@@ -599,7 +625,7 @@ def run_astra_hmm(prot_dir: str, label: str,
         raise RuntimeError(f"HMM search ({label}) wrote no *_hits_df.tsv")
 
     lengths = hmm_lengths(hmm_path) if hmm_path else None
-    hits = _parse_astra_tsv(tsvs[0], ievalue, lengths)
+    hits = _parse_astra_tsv(tsvs[0], ievalue, lengths, ievalue_scale=ievalue_scale)
     if keep_tsv is not None:  # keep the raw per-domain table for audit and reuse
         shutil.copy2(tsvs[0], keep_tsv)
     shutil.rmtree(out_dir, ignore_errors=True)
@@ -611,13 +637,14 @@ def run_astra_hmm(prot_dir: str, label: str,
 
 def load_astra_tsv_cache(tsv_path: Path, ievalue: float = HMMER_IEVALUE,
                          verbose: bool = True,
-                         lengths: dict[str, int] | None = None) -> dict[str, dict[str, tuple]] | None:
+                         lengths: dict[str, int] | None = None,
+                         ievalue_scale: float = 1.0) -> dict[str, dict[str, tuple]] | None:
     """Load pre-existing Astra hits TSV. Returns None if file doesn't exist."""
     if not tsv_path.exists():
         return None
     if verbose:
         print(f"Loading cached Astra results from {tsv_path.name}...")
-    return _parse_astra_tsv(tsv_path, ievalue, lengths)
+    return _parse_astra_tsv(tsv_path, ievalue, lengths, ievalue_scale=ievalue_scale)
 
 
 ASTRA_COLUMNS = {'sequence_id', 'hmm_name', 'i_evalue', 'dom_bitscore', 'hmm_from', 'hmm_to'}
@@ -627,9 +654,14 @@ def _astra_best_rows(path: Path,
                      ievalue_threshold: float,
                      lengths: dict[str, int] | None = None,
                      min_coverage: float = HMMER_COVERAGE,
-                     order: dict[str, int] | None = None) -> pd.DataFrame | None:
+                     order: dict[str, int] | None = None,
+                     ievalue_scale: float = 1.0) -> pd.DataFrame | None:
     """Filtered Astra rows reduced to one per (protein, family): the lowest i-evalue,
     the earliest row on a tie.
+
+    i-evalues are multiplied by ``ievalue_scale`` before the cut and are reported
+    on that scale. Coverage is (hmm_to - hmm_from + 1) / LENG > ``min_coverage``,
+    as run_dbcan computes it.
 
     Columns: sequence_id, family, i_evalue, dom_bitscore, prof, row. ``row`` is the
     row's position in ``path``; ``prof`` is its profile's position in ``order`` (0
@@ -647,7 +679,9 @@ def _astra_best_rows(path: Path,
         return None
     df['row'] = np.arange(len(df))
 
-    # Filter by i-evalue
+    # Filter by i-evalue, on run_dbcan's Z when a scale is given
+    if ievalue_scale != 1.0:
+        df['i_evalue'] = df['i_evalue'] * ievalue_scale
     df = df[df['i_evalue'] < ievalue_threshold]
     if df.empty:
         return None
@@ -657,8 +691,8 @@ def _astra_best_rows(path: Path,
             raise ValueError(f"{path.name}: {int(leng.isna().sum())} hits name profiles absent "
                              "from the HMM file's NAME/LENG records")
         before = len(df)
-        df = df[(df['hmm_to'] - df['hmm_from']) / leng >= min_coverage]
-        _log(f"  [{path.name}] HMM coverage >= {min_coverage}: {len(df):,} of {before:,} domain hits")
+        df = df[(df['hmm_to'] - df['hmm_from'] + 1) / leng > min_coverage]
+        _log(f"  [{path.name}] HMM coverage > {min_coverage}: {len(df):,} of {before:,} domain hits")
         if df.empty:
             return None
     else:
@@ -699,21 +733,23 @@ def _hits_from_rows(frames: list[pd.DataFrame | None]) -> dict[str, dict[str, tu
 def _parse_astra_tsv(path: Path,
                      ievalue_threshold: float,
                      lengths: dict[str, int] | None = None,
-                     min_coverage: float = HMMER_COVERAGE) -> dict[str, dict[str, tuple]]:
+                     min_coverage: float = HMMER_COVERAGE,
+                     ievalue_scale: float = 1.0) -> dict[str, dict[str, tuple]]:
     """Parse Astra hits TSV and filter by i-evalue and, given profile lengths, HMM coverage.
 
     Astra columns: sequence_id, hmm_name, bitscore, evalue, c_evalue,
                    i_evalue, env_from, env_to, dom_bitscore[, ali_from, ali_to,
                    hmm_from, hmm_to]
 
-    Coverage is (hmm_to - hmm_from) / profile length, as run_dbcan computes it.
+    Coverage is (hmm_to - hmm_from + 1) / profile length, as run_dbcan computes it.
     A table without HMM coordinates, or a run without profile lengths, is
     filtered on i-evalue only and says so.
 
     Returns {protein_id: {family_class: (best_i_evalue, best_dom_bitscore)}}, the
     first row with the lowest i-evalue for each protein and family.
     """
-    return _hits_from_rows([_astra_best_rows(path, ievalue_threshold, lengths, min_coverage)])
+    return _hits_from_rows([_astra_best_rows(path, ievalue_threshold, lengths, min_coverage,
+                                             ievalue_scale=ievalue_scale)])
 
 
 # ── Consensus ──────────────────────────────────────────────────────────────────
@@ -883,13 +919,16 @@ def classify_cazymes(
         t2 = _time.time()
         _log(f"[cazyme] Tool 2: dbCAN HMM search...")
         hmm_cache = data_dir / "annotations" / "dbCAN_hits_df.tsv"
-        hmm_hits = load_astra_tsv_cache(hmm_cache, verbose=verbose, lengths=hmm_lengths(dbcan_hmm))
+        hmm_scale = dbcan_ievalue_scale(dbcan_hmm, count_fasta_records(prot_dir))
+        hmm_hits = load_astra_tsv_cache(hmm_cache, verbose=verbose, lengths=hmm_lengths(dbcan_hmm),
+                                        ievalue_scale=hmm_scale)
         if hmm_hits is None:
             hmm_hits = run_astra_hmm(
                 prot_dir, "dbCAN_HMM",
                 hmm_path=dbcan_hmm,
                 threads=threads, verbose=verbose,
                 keep_tsv=data_dir / "cazyme_dbcan_hmm_hits.tsv",
+                ievalue_scale=hmm_scale,
             )
         _log(f"[cazyme] Tool 2 done: {len(hmm_hits):,} hits ({_time.time() - t2:.1f}s)")
 
@@ -909,6 +948,7 @@ def classify_cazymes(
                         hmm_path=dbcan_sub,
                         threads=threads, verbose=verbose,
                         keep_tsv=data_dir / "cazyme_dbcan_sub_hits.tsv",
+                        ievalue_scale=dbcan_ievalue_scale(dbcan_sub, count_fasta_records(sub_dir)),
                     )
                 finally:
                     shutil.rmtree(sub_dir, ignore_errors=True)
@@ -942,10 +982,11 @@ def classify_cazymes(
 # merge (after every sub shard): rebuild each tool's single-process table and apply
 #   the consensus.
 #
-# HMMER reports i-evalue = P-value x Z, with Z the number of target sequences in the
-# search. Splitting profiles keeps each search's target set, and so its Z, equal to
-# the single-process run's: the whole proteome for dbCAN.hmm and the whole candidate
-# subset for dbCAN-sub. Part i holds every N-th profile from profile i. Aksha writes
+# HMMER reports i-evalue = P-value x Z. Aksha sets Z to the number of target sequences
+# in the search; the parse multiplies by n_profiles / n_targets (dbcan_ievalue_scale)
+# to reach run_dbcan's fixed Z = number of profiles in the HMM file. Splitting profiles
+# keeps each search's target set, and so its Z, equal to the single-process run's: the
+# whole proteome for dbCAN.hmm and the whole candidate subset for dbCAN-sub. Part i holds every N-th profile from profile i. Aksha writes
 # each profile's rows together, in profile order, so the merge restores the
 # single-process table row for row by a stable sort on profile position, and ties
 # between rows resolve the same way too.
@@ -1001,19 +1042,22 @@ def _hmm_part_search(target_dir: str, hmm_path: Path, part: int, n_parts: int, l
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def _parse_shard_file(kind: str, path: str, lengths: dict | None, order: dict | None):
+def _parse_shard_file(kind: str, path: str, lengths: dict | None, order: dict | None,
+                      ievalue_scale: float = 1.0):
     """DIAMOND hits (a dict) for ``diamond``; ``_astra_best_rows`` for an HMM part table."""
     if kind == "diamond":
         return parse_diamond_tsv(Path(path))
-    return _astra_best_rows(Path(path), HMMER_IEVALUE, lengths, order=order)
+    return _astra_best_rows(Path(path), HMMER_IEVALUE, lengths, order=order, ievalue_scale=ievalue_scale)
 
 
 def _parse_files(jobs: list[tuple], threads: int) -> list:
-    """Parse (kind, path, profile lengths, profile order) jobs, one file per worker process."""
+    """Parse (kind, path, profile lengths, profile order, i-evalue scale) jobs, one file
+    per worker process."""
     if threads > 1 and len(jobs) > 1:
         with ProcessPoolExecutor(max_workers=min(threads, len(jobs))) as pool:
-            return list(pool.map(_parse_shard_file, *zip(*[(k, str(p), l, o) for k, p, l, o in jobs])))
-    return [_parse_shard_file(kind, str(path), lengths, order) for kind, path, lengths, order in jobs]
+            return list(pool.map(_parse_shard_file, *zip(*[(k, str(p), l, o, z) for k, p, l, o, z in jobs])))
+    return [_parse_shard_file(kind, str(path), lengths, order, scale)
+            for kind, path, lengths, order, scale in jobs]
 
 
 def _fold_in_order(parts: list[dict]) -> dict[str, dict[str, tuple]]:
@@ -1061,13 +1105,16 @@ def combine_hmm_tables(parts: list[Path], hmm_path: Path, out: Path) -> Path:
     return out
 
 
-def shard_candidates(work_dir: Path, n_shards: int, dbcan: Path, threads: int = 1) -> tuple[set, int, int]:
+def shard_candidates(work_dir: Path, n_shards: int, dbcan: Path, n_records: int,
+                     threads: int = 1) -> tuple[set, int, int]:
     """Proteins with a DIAMOND or dbCAN.hmm hit in any search shard (the dbCAN-sub subset),
-    with the DIAMOND and dbCAN.hmm protein counts."""
+    with the DIAMOND and dbCAN.hmm protein counts. ``n_records`` is the searched proteome size."""
     dbcan_hmm, _, _ = dbcan_hmm_files(dbcan)
     hmm_len = hmm_lengths(dbcan_hmm)
-    jobs = [("diamond", _shard_dir(work_dir, "search", i) / "diamond.tsv", None, None) for i in range(n_shards)]
-    jobs += [("hmm", _shard_dir(work_dir, "search", i) / "dbcan_hmm.tsv", hmm_len, None) for i in range(n_shards)]
+    scale = dbcan_ievalue_scale(dbcan_hmm, n_records, len(hmm_len))
+    jobs = [("diamond", _shard_dir(work_dir, "search", i) / "diamond.tsv", None, None, 1.0) for i in range(n_shards)]
+    jobs += [("hmm", _shard_dir(work_dir, "search", i) / "dbcan_hmm.tsv", hmm_len, None, scale)
+             for i in range(n_shards)]
     parsed = _parse_files(jobs, threads)
     diamond = set().union(*parsed[:n_shards])
     hmm = set().union(*(set(f['sequence_id']) for f in parsed[n_shards:] if f is not None))
@@ -1118,11 +1165,13 @@ def shard_sub(prot_dir: str, dbcan: Path, index: int, n_shards: int, work_dir: P
     out = _shard_dir(work_dir, "sub", index)
     out.mkdir(parents=True, exist_ok=True)
 
-    candidates, n_diamond, n_hmm = shard_candidates(work_dir, n_shards, dbcan, threads)
+    candidates, n_diamond, n_hmm = shard_candidates(work_dir, n_shards, dbcan, fingerprint["records"], threads)
     _log(f"[cazyme] sub shard {index}/{n_shards}: {len(candidates):,} candidates "
          f"({n_diamond:,} DIAMOND, {n_hmm:,} dbCAN.hmm)")
+    sub_records = 0
     if has_sub and candidates:
         sub_dir = _subset_fasta(prot_dir, candidates, verbose=verbose)
+        sub_records = count_fasta_records(sub_dir)  # Aksha's Z for this search
         try:
             _hmm_part_search(sub_dir, dbcan_sub, index, n_shards, "dbCAN_sub", threads,
                              out / "dbcan_sub.tsv", verbose)
@@ -1130,7 +1179,8 @@ def shard_sub(prot_dir: str, dbcan: Path, index: int, n_shards: int, work_dir: P
             shutil.rmtree(sub_dir, ignore_errors=True)
 
     info = {"stage": "sub", "index": index, "n_shards": n_shards, "proteins": fingerprint,
-            "dbcan_dir": str(dbcan.resolve()), "candidates": len(candidates), "has_sub": has_sub,
+            "dbcan_dir": str(dbcan.resolve()), "candidates": len(candidates),
+            "sub_records": sub_records, "has_sub": has_sub,
             "seconds": {"total": round(_time.time() - t0, 1)}}
     _mark_done(out, info)
     _log(f"[cazyme] sub shard {index}/{n_shards} done: {info['seconds']}")
@@ -1150,11 +1200,16 @@ def merge_shards(work_dir: Path, n_shards: int, dbcan: Path, data_dir: Path,
     hmm_parts = [_shard_dir(work_dir, "search", i) / "dbcan_hmm.tsv" for i in range(n_shards)]
     sub_parts = [_shard_dir(work_dir, "sub", i) / "dbcan_sub.tsv" for i in range(n_shards)]
     has_sub_tables = all(p.exists() for p in sub_parts)  # dbCAN-sub ran (a release with it, and candidates)
-    jobs = [("diamond", _shard_dir(work_dir, "search", i) / "diamond.tsv", None, None) for i in range(n_shards)]
-    jobs += [("hmm", p, hmm_lengths(dbcan_hmm), hmm_profile_order(dbcan_hmm)) for p in hmm_parts]
+    hmm_len = hmm_lengths(dbcan_hmm)
+    hmm_scale = dbcan_ievalue_scale(dbcan_hmm, searched[0]["proteins"]["records"], len(hmm_len))
+    jobs = [("diamond", _shard_dir(work_dir, "search", i) / "diamond.tsv", None, None, 1.0) for i in range(n_shards)]
+    jobs += [("hmm", p, hmm_len, hmm_profile_order(dbcan_hmm), hmm_scale) for p in hmm_parts]
     if has_sub_tables:
+        if "sub_records" not in subbed[0]:
+            raise RuntimeError("sub shards predate run_dbcan E-value scaling; rerun the sub stage")
         sub_len, sub_order = hmm_lengths(dbcan_sub), hmm_profile_order(dbcan_sub)
-        jobs += [("sub", p, sub_len, sub_order) for p in sub_parts]
+        sub_scale = dbcan_ievalue_scale(dbcan_sub, subbed[0]["sub_records"], len(sub_len))
+        jobs += [("sub", p, sub_len, sub_order, sub_scale) for p in sub_parts]
     parsed = _parse_files(jobs, threads)
     diamond_hits = _fold_in_order(parsed[:n_shards])
     hmm_hits = _hits_from_rows(parsed[n_shards:2 * n_shards])

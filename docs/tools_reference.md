@@ -123,7 +123,7 @@ before treating a migrated legacy database's system surface as available.
 ## CAZyme Classification (dbCAN 3-tool consensus)
 **Script:** `scripts/classify_cazymes.py`
 **Requires:** `data/dbcan_db/` with CAZy.dmnd, dbCAN.hmm, dbCAN-sub.hmm
-**Method:** DIAMOND (default mode, `-k 1`, 1e-102) + dbCAN.hmm (1e-15, HMM coverage ≥0.35) + dbCAN-sub.hmm (1e-15, coverage ≥0.35), consensus ≥2 tools: the run_dbcan defaults.
+**Method:** DIAMOND (default mode, `-k 1`, 1e-102) + dbCAN.hmm (i-evalue < 1e-15, HMM coverage > 0.35) + dbCAN-sub.hmm (same), consensus ≥2 tools: the run_dbcan defaults. HMM i-evalues are rescaled to run_dbcan's Z (the HMM file's profile count; Aksha's raw Z is the number of proteins searched).
 **Pipeline:** Optional in Stage 07 before final V2 predicate generation. Enable it with
 `sharur-ingest --enable-cazymes` or standalone Stage 07 `--enable-cazymes`.
 **Existing database:** `--dbcan-dir DIR` (or `$SHARUR_DBCAN_DIR`) names the release directory;

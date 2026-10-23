@@ -77,7 +77,7 @@ def test_dbcan_standard_thresholds(tmp_path):
     cc._save_diamond_cache({"p1": {"GH13": (1e-150, 400.0)}, "p2": {"GT2": (1e-30, 120.0)}}, tmp_path, verbose=False)
     assert set(cc.load_diamond_cache(str(db), verbose=False)) == {"p1"}
 
-    # HMM coverage = (hmm_to - hmm_from) / profile length >= 0.35, as run_dbcan computes it
+    # HMM coverage = (hmm_to - hmm_from + 1) / profile length > 0.35, as run_dbcan computes it
     hmm = tmp_path / "toy.hmm"
     hmm.write_text("HMMER3/f\nNAME  GH5.hmm\nLENG  100\n//\nHMMER3/f\nNAME  GT2_e1.hmm|GT2:5\nLENG  200\n//\n")
     assert cc.hmm_lengths(hmm) == {"GH5.hmm": 100, "GT2_e1.hmm|GT2:5": 200}
@@ -93,3 +93,28 @@ def test_dbcan_standard_thresholds(tmp_path):
     assert hits["a"]["GH5"][0] == pytest.approx(1e-30) and hits["c"]["GT2"][1] == 70
     # without profile lengths the i-evalue filter alone applies
     assert set(cc._parse_astra_tsv(tsv, cc.HMMER_IEVALUE)) == {"a", "b", "c"}
+
+
+def test_ievalue_scale_moves_the_cut(tmp_path):
+    """i-evalues are rescaled before the 1e-15 cut and reported on the new scale."""
+    tsv = tmp_path / "hits.tsv"
+    pd.DataFrame([
+        {"sequence_id": "a", "hmm_name": "GH5.hmm", "i_evalue": 1e-13, "dom_bitscore": 90, "hmm_from": 1, "hmm_to": 80},
+        {"sequence_id": "b", "hmm_name": "GH5.hmm", "i_evalue": 1e-16, "dom_bitscore": 80, "hmm_from": 1, "hmm_to": 80},
+    ]).to_csv(tsv, sep="\t", index=False)
+    assert set(cc._parse_astra_tsv(tsv, cc.HMMER_IEVALUE)) == {"b"}
+    hits = cc._parse_astra_tsv(tsv, cc.HMMER_IEVALUE, ievalue_scale=1e-3)
+    assert set(hits) == {"a", "b"} and hits["a"]["GH5"][0] == pytest.approx(1e-16)
+    assert cc._parse_astra_tsv(tsv, cc.HMMER_IEVALUE, ievalue_scale=100.0) == {}
+
+
+def test_coverage_boundary_matches_run_dbcan(tmp_path):
+    """(hmm_to - hmm_from + 1) / LENG must exceed 0.35: 35/100 fails, 36/100 passes."""
+    hmm = tmp_path / "toy.hmm"
+    hmm.write_text("HMMER3/f\nNAME  GH5.hmm\nLENG  100\n//\n")
+    tsv = tmp_path / "hits.tsv"
+    pd.DataFrame([
+        {"sequence_id": "x", "hmm_name": "GH5.hmm", "i_evalue": 1e-30, "dom_bitscore": 90, "hmm_from": 11, "hmm_to": 45},
+        {"sequence_id": "y", "hmm_name": "GH5.hmm", "i_evalue": 1e-30, "dom_bitscore": 90, "hmm_from": 11, "hmm_to": 46},
+    ]).to_csv(tsv, sep="\t", index=False)
+    assert set(cc._parse_astra_tsv(tsv, cc.HMMER_IEVALUE, cc.hmm_lengths(hmm))) == {"y"}

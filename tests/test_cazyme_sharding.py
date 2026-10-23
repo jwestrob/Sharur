@@ -173,3 +173,36 @@ def test_profile_parts_cover_every_profile_once(tmp_path):
             out = tmp_path / f"part{n}_{p}.hmm"
             assert cc.write_hmm_part(hmm, p, n, out) == len(names[p::n])
             assert out.read_text() == "".join(record[name] for name in names[p::n])
+
+
+def test_run_dbcan_z_makes_protein_split_hmm_search_agree(toy):
+    """On run_dbcan's Z (the profile count) an HMM search gives the same calls however
+    the proteins are split, unlike Aksha's raw Z (the control above)."""
+    faa, dbcan, tmp = toy
+    hmm = dbcan / "dbCAN.hmm"
+    prot_dir, _, _ = cc.resolve_proteins(None, str(faa), verbose=False)
+    whole = cc.run_astra_hmm(prot_dir, "whole", hmm_path=hmm, threads=1, verbose=False,
+                             ievalue_scale=cc.dbcan_ievalue_scale(hmm, cc.count_fasta_records(prot_dir)))
+    lines = faa.read_text().splitlines(keepends=True)
+    split: dict = {}
+    for i in range(3):
+        d = tmp / f"zchunk{i}"
+        d.mkdir()
+        (d / "p.faa").write_text("".join(lines[2 * j] + lines[2 * j + 1] for j in range(i, len(lines) // 2, 3)))
+        part = cc.run_astra_hmm(str(d), "chunk", hmm_path=hmm, threads=1, verbose=False,
+                                ievalue_scale=cc.dbcan_ievalue_scale(hmm, cc.count_fasta_records(str(d))))
+        split.update(part)
+    assert set(split) == set(whole)
+    for pid, fams in whole.items():
+        assert set(split[pid]) == set(fams)
+        for fam, (ev, sc) in fams.items():
+            assert split[pid][fam][0] == pytest.approx(ev, rel=0.02) and split[pid][fam][1] == sc
+
+
+def test_dbcan_ievalue_scale_is_profiles_over_targets(tmp_path):
+    hmm = tmp_path / "x.hmm"
+    _hmm_file(hmm, [(f"GH{i}.hmm", 50) for i in range(8)])
+    assert cc.dbcan_ievalue_scale(hmm, 2000) == pytest.approx(8 / 2000)
+    assert cc.dbcan_ievalue_scale(hmm, 4, n_profiles=8) == 2.0
+    with pytest.raises(ValueError):
+        cc.dbcan_ievalue_scale(hmm, 0)
