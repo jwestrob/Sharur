@@ -848,6 +848,48 @@ def compute_predicates(
         )
 
 
+@app.command(name="reconcile-predicates")
+def reconcile_predicates(
+    db: str = typer.Option(DEFAULT_DB, "--db", "-d", help="Path to DuckDB database"),
+    old_kegg_map: Path = typer.Option(..., "--old-kegg-map",
+                                      help="The kegg_predicates.tsv the database's predicates were generated with "
+                                           "(copy it aside before `sharur setup-kegg --rejudge`)"),
+):
+    """
+    Bring predicates current after a KEGG-map-only change, without a full regeneration.
+
+    Checks that only the KEGG map (or its rule files) changed since the last full generation and that
+    --old-kegg-map is the map that generation recorded (sha256). Regenerates exactly the proteins
+    carrying a KO whose predicate set changed, then records a `reconciled` generation, so
+    `sharur describe` / `preflight` report the predicates as current. Refuses when anything else changed.
+
+    Example:
+        cp data/reference/kegg/kegg_predicates.tsv /tmp/kegg_predicates.before.tsv
+        sharur setup-kegg --rejudge
+        sharur reconcile-predicates --db data/DATASET/sharur.duckdb --old-kegg-map /tmp/kegg_predicates.before.tsv
+    """
+    from sharur.operators.predicates_v2 import generate_v2
+    from sharur.predicates.provenance import ReconcileError, reconcile
+    from sharur.storage.duckdb_store import DuckDBStore
+
+    db_path = Path(db)
+    if not db_path.exists():
+        typer.echo(f"DB not found: {db}", err=True)
+        raise typer.Exit(1)
+    store = DuckDBStore(db_path=db_path)
+    try:
+        result = reconcile(store, old_kegg_map,
+                           lambda ids: generate_v2(store, protein_ids=ids, update_legacy_predicates=True))
+    except ReconcileError as exc:
+        typer.echo(f"Not reconciled: {exc}", err=True)
+        raise typer.Exit(2)
+    if result["state"] == "current":
+        typer.echo("Predicates already match the installed maps; nothing to do.")
+        return
+    typer.echo(f"Reconciled generation {result['generation_id']} (base {result['base_generation']}): "
+               f"{len(result['accessions'])} KOs changed, {result['proteins']} proteins regenerated.")
+
+
 # ------------------------------------------------------------------ #
 # Predicates command (list available predicates)
 # ------------------------------------------------------------------ #

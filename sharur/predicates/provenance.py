@@ -56,12 +56,23 @@ PROVENANCE_COLUMNS = (
     "v2_config_sha256 VARCHAR NOT NULL",
     "sharur_version VARCHAR NOT NULL",
     "git_commit VARCHAR",
+    "reconciled_from BIGINT",          # scope=reconciled: the base generation it brings current
+    "reconciled_accessions VARCHAR",   # scope=reconciled: JSON list of accessions whose mapping changed
 )
 CREATE_SQL = f"CREATE TABLE IF NOT EXISTS predicate_provenance ({', '.join(PROVENANCE_COLUMNS)})"
+_LATER_COLUMNS = ("reconciled_from BIGINT", "reconciled_accessions VARCHAR")
 
 # Fields compared by map_status; everything else is context.
 COMPARED = ("pfam_map_sha256", "kegg_map_sha256", "kegg_rules_sha256", "cazy_map_sha256", "vog_rules_sha256",
             "vocabulary_sha256", "v2_config_sha256")
+# Generations that describe the whole database: a full run, or a verified reconcile of one (see reconcile()).
+BASE_SCOPES = ("full", "reconciled")
+# Map fields a reconcile can bring current. Predicate generation reads KEGG only through the built map
+# (kegg_predicates.tsv); the KEGG rule files act only through that build, so a KO-level diff of the built
+# map covers both. Map-derived predicates are evaluated per protein; locus atoms (nitrogenase_loci) and
+# validated-system atoms use fixed KO sets and caller tables, not the map. Regenerating the proteins that
+# carry a changed KO is therefore complete. Any other changed field needs a full regeneration.
+RECONCILABLE = ("kegg_map_sha256", "kegg_rules_sha256")
 
 
 def _sha256_file(path: Path) -> str:
@@ -128,9 +139,12 @@ def current_maps() -> dict[str, Any]:
 
 def ensure_table(store) -> None:
     store.execute(CREATE_SQL)
+    for column in _LATER_COLUMNS:  # tables created before these columns existed
+        store.execute(f"ALTER TABLE predicate_provenance ADD COLUMN IF NOT EXISTS {column}")
 
 
-def record_generation(store, *, scope: str, protein_count: int, semantic_fingerprint: str | None = None) -> dict:
+def record_generation(store, *, scope: str, protein_count: int, semantic_fingerprint: str | None = None,
+                      reconciled_from: int | None = None, reconciled_accessions: list[str] | None = None) -> dict:
     """Append one provenance row for a predicate generation and return it."""
     ensure_table(store)
     row = {
@@ -139,6 +153,8 @@ def record_generation(store, *, scope: str, protein_count: int, semantic_fingerp
         "protein_count": protein_count,
         "semantic_fingerprint": semantic_fingerprint or None,
         **current_maps(),
+        "reconciled_from": reconciled_from,
+        "reconciled_accessions": json.dumps(reconciled_accessions) if reconciled_accessions is not None else None,
     }
     next_id = store.execute("SELECT COALESCE(MAX(generation_id), 0) + 1 FROM predicate_provenance")[0][0]
     columns = ["generation_id", *row]
@@ -150,18 +166,24 @@ def record_generation(store, *, scope: str, protein_count: int, semantic_fingerp
 
 
 def latest_stamps(store) -> dict[str, Any] | None:
-    """The latest full generation and any subset generations after it, or None."""
+    """The latest base generation (full, or a verified reconcile) and any subset generations after it, or None."""
     tables = {r[0] for r in store.execute(
         "SELECT table_name FROM information_schema.tables WHERE table_name = 'predicate_provenance'")}
     if not tables:
         return None
+    present = {r[0] for r in store.execute(
+        "SELECT column_name FROM information_schema.columns WHERE table_name = 'predicate_provenance'")}
     columns = [c.split()[0] for c in PROVENANCE_COLUMNS]
-    rows = [dict(zip(columns, r, strict=True)) for r in store.execute(
-        f"SELECT {', '.join(columns)} FROM predicate_provenance ORDER BY generation_id")]
-    full = [r for r in rows if r["scope"] == "full"]
-    if not full:
+    selected = [c for c in columns if c in present]
+    rows = []
+    for r in store.execute(f"SELECT {', '.join(selected)} FROM predicate_provenance ORDER BY generation_id"):
+        row = dict.fromkeys(columns)
+        row.update(zip(selected, r, strict=True))
+        rows.append(row)
+    base = [r for r in rows if r["scope"] in BASE_SCOPES]
+    if not base:
         return {"full": None, "subsets": rows}
-    last = full[-1]
+    last = base[-1]
     return {"full": last, "subsets": [r for r in rows if r["generation_id"] > last["generation_id"]]}
 
 
@@ -184,3 +206,59 @@ def map_status(store) -> MapStatus:
     changed = tuple(field for field in COMPARED if stamp.get(field) != installed.get(field))
     mixed = sum(1 for sub in stamps["subsets"] if any(sub.get(f) != stamp.get(f) for f in COMPARED))
     return MapStatus("stale" if changed else "current", changed, stamp, installed, mixed)
+
+
+def kegg_map_changes(old_map: Path, new_map: Path) -> list[str]:
+    """KOs whose predicate set differs between two built KEGG maps (added, removed or changed)."""
+    from sharur.predicates.mappings.kegg_map import _load_kegg_mapping_file
+
+    old, _ = _load_kegg_mapping_file(Path(old_map))
+    new, _ = _load_kegg_mapping_file(Path(new_map))
+    return sorted(ko for ko in old.keys() | new.keys() if old.get(ko, []) != new.get(ko, []))
+
+
+class ReconcileError(RuntimeError):
+    """The database cannot be brought current by a scoped regeneration."""
+
+
+def reconcile(store, old_kegg_map: Path, regenerate) -> dict[str, Any]:
+    """Bring a database's predicates current after a KEGG-map-only change, without a full regeneration.
+
+    Verifies that the database's latest base stamp differs from the installed maps only in KEGG fields and
+    that ``old_kegg_map`` is the map that stamp recorded (by sha256). Then regenerates exactly the proteins
+    carrying a KO whose predicate set changed (``regenerate(protein_ids)``, normally
+    ``generate_v2(store, protein_ids, update_legacy_predicates=True)``) and records a ``reconciled``
+    generation, which map_status treats as current. Raises ReconcileError instead of guessing.
+    """
+    from sharur.predicates.mappings.kegg_map import KEGG_MAPPING_FILE
+
+    stamps = latest_stamps(store)
+    if not stamps or stamps["full"] is None:
+        raise ReconcileError("no full generation stamp: run a full `sharur compute-predicates` first")
+    base = stamps["full"]
+    installed = current_maps()
+    changed = [f for f in COMPARED if base.get(f) != installed.get(f)]
+    if not changed:
+        return {"state": "current", "base_generation": base["generation_id"], "proteins": 0, "accessions": []}
+    blocking = [f for f in changed if f not in RECONCILABLE]
+    if blocking:
+        raise ReconcileError(f"{', '.join(blocking)} changed; only a full regeneration covers that")
+    if KEGG_MAPPING_FILE is None:
+        raise ReconcileError("no local KEGG build installed")
+    old_sha = _sha256_file(Path(old_kegg_map))
+    if old_sha != base.get("kegg_map_sha256"):
+        raise ReconcileError(f"{old_kegg_map} (sha256 {old_sha[:16]}) is not the KEGG map the database was "
+                             f"stamped with ({str(base.get('kegg_map_sha256'))[:16]})")
+    kos = kegg_map_changes(Path(old_kegg_map), KEGG_MAPPING_FILE)
+    proteins: list[str] = []
+    if kos:
+        proteins = [r[0] for r in store.execute(
+            "SELECT DISTINCT protein_id FROM annotations WHERE source = 'kegg' AND accession IN "
+            "(SELECT UNNEST(?::VARCHAR[])) ORDER BY 1", [kos])]
+    if proteins:
+        regenerate(proteins)
+    row = record_generation(store, scope="reconciled", protein_count=len(proteins),
+                            semantic_fingerprint=base.get("semantic_fingerprint"),
+                            reconciled_from=base["generation_id"], reconciled_accessions=kos)
+    return {"state": "reconciled", "base_generation": base["generation_id"], "generation_id": row["generation_id"],
+            "changed_fields": changed, "accessions": kos, "proteins": len(proteins)}

@@ -41,9 +41,11 @@ Scope, measured read-only on 2026-10-23:
 
 Commands:
 
-1. Rejudge the local KEGG map from its evidence snapshot (writes `data/reference/kegg/`):
+1. Keep the KEGG map the databases were stamped with, then rejudge the local map from its evidence
+   snapshot (writes `data/reference/kegg/`):
 
    ```bash
+   cp data/reference/kegg/kegg_predicates.tsv data/reference/kegg/kegg_predicates.before_2026-10-23.tsv
    sharur setup-kegg --rejudge
    python -m pytest tests/test_kegg_map_integrity.py tests/test_kegg_rules.py -q
    ```
@@ -51,21 +53,25 @@ Commands:
    Expect `map sha256 05c167889aaeb14d -> 98e78993f0b4a5bd`. `test_kegg_map_integrity.py`
    fails on K05986 until this step runs.
 
-2. Refresh predicates for the 109 affected proteins:
+2. Reconcile every dataset whose predicates were stamped with the old map. `sharur
+   reconcile-predicates` checks that only the KEGG map (or its rule files) changed since the last
+   full generation and that `--old-kegg-map` is the stamped map (sha256). It diffs the two maps by
+   KO, regenerates exactly the proteins carrying a changed KO, and records a `reconciled`
+   generation, so `sharur describe` reports the predicates as current. It refuses rather than
+   guesses when anything else changed.
 
    ```bash
-   python - <<'EOF'
-   from sharur.operators import Sharur
-   b = Sharur("data/srvp_bacteria_pb/sharur.duckdb")
-   ids = [r[0] for r in b.store.execute(
-       "SELECT DISTINCT protein_id FROM annotations WHERE source = 'kegg' AND accession = 'K05986'")]
-   assert len(ids) == 109, len(ids)
-   b.generate_v2(protein_ids=ids, update_legacy_predicates=True)
-   b.store.close()
-   EOF
+   for ds in srvp_bacteria_pb srvp_archaea dpann omni_production; do
+     sharur reconcile-predicates --db data/$ds/sharur.duckdb \
+       --old-kegg-map data/reference/kegg/kegg_predicates.before_2026-10-23.tsv
+   done
    ```
 
-   Verify (expect 0; a scratch copy of the 109 proteins gave 0 and kept `endonuclease` and
+   Expected: `srvp_bacteria_pb` regenerates the 109 K05986 proteins; the others regenerate 0 and
+   record a reconciled stamp. A dataset stamped with a different map, or with other changed maps,
+   reports why it was not reconciled and needs `sharur compute-predicates`.
+
+   Verify on `srvp_bacteria_pb` (expect 0; a scratch copy gave 0 and kept `endonuclease` and
    `nuclease` on all 109):
 
    ```sql
@@ -76,18 +82,9 @@ Commands:
           OR list_contains(pp.predicates, 'phage_terminase'));
    ```
 
-3. Reseal:
+3. Reseal each written dataset:
 
    ```bash
    sharur seal --db data/srvp_bacteria_pb/sharur.duckdb
    sharur verify-seal data/srvp_bacteria_pb/dataset.seal.json
    ```
-
-Predicate stamps: both commits edit KEGG rule files (`kegg_hyddb_snapshot.tsv`,
-`kegg_swissprot_consensus.tsv`) and step 1 changes the KEGG map, so `sharur describe` reports
-every dataset's predicates as stale against the installed maps. The content difference is the
-K05986 change above. A full regeneration clears the stamp for one dataset:
-
-```bash
-sharur compute-predicates --db data/DATASET/sharur.duckdb --chunk-size 100000 --workers N
-```

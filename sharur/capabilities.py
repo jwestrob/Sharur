@@ -452,6 +452,12 @@ def _predicate_map_check(store: DuckDBStore) -> Capability:
         "later_subset_generations_on_other_maps": status.mixed_subsets,
     })
     if status.state == "stale":
+        from sharur.predicates.provenance import RECONCILABLE
+
+        if set(status.changed) <= set(RECONCILABLE):
+            remediation = ("Only the KEGG map changed: `sharur reconcile-predicates --db DATASET/sharur.duckdb "
+                           "--old-kegg-map PATH` regenerates just the proteins whose KOs changed. "
+                           "Otherwise: " + remediation)
         return Capability(
             "predicate_maps", CapabilityState.stale,
             f"Predicates were generated with other maps than those installed ({', '.join(evidence['changed'])} changed).",
