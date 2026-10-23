@@ -66,17 +66,17 @@ class TestReload:
         assert report.checks
         assert all(v.startswith("PASS") for v in report.checks.values())
         assert report.model_version == VERSION
-        assert (report.before.annotation_rows, report.after.annotation_rows) == (1, 5)
+        assert (report.before.annotation_rows, report.after.annotation_rows) == (1, 4)
+        assert report.stats.out_of_scope_profile == 1      # the anti-defense hit on p4
         assert report.before.systems_by_type == {"Solo": 1}
         assert report.after.systems_by_type == {"Solo": 1, "Toy": 1}
         assert report.stats.failed_coverage == 1
-        assert report.sensitivity["applied"] == 5
+        assert report.sensitivity["applied"] == 4
         assert report.new_tables == ["annotation_source_versions"]
         text = report.to_text()
         assert "System families newly called (1): Toy (1 systems, 1 genomes)" in text
         assert report.after.systems_by_family == {"Solo": 1, "Toy": 1}
-        assert report.after.proteins_by_profile_family == {
-            "Anti": 1, "Solo": 1, "Toy": 3}
+        assert report.after.proteins_by_profile_family == {"Solo": 1, "Toy": 3}
         assert {p.name for p in reports.iterdir()} == {
             "toy_reload_summary.txt", "toy_systems_by_type.tsv", "toy_systems_by_family.tsv",
             "toy_profile_families.tsv", "toy_reload.json",
@@ -95,13 +95,12 @@ class TestReload:
         assert report.backup.exists()
         assert _query(db_path, "SELECT protein_id, accession FROM annotations "
                                "WHERE source = 'defensefinder' ORDER BY 1") == [
-            ("p1", "Toy__ToyA"), ("p2", "ToyB_internal"), ("p3", "Solo__SoloA"),
-            ("p4", "Anti__AntiX"), ("p7", "Toy__ToyA"),
+            ("p1", "Toy__ToyA"), ("p2", "ToyB_internal"), ("p3", "Solo__SoloA"), ("p7", "Toy__ToyA"),
         ]
         systems = _query(db_path, "SELECT system_type, protein_ids FROM defense_systems ORDER BY 1")
         assert systems == [("Solo", "p3"), ("Toy", "p1,p2")]
         assert _query(db_path, "SELECT model_version, loaded_rows FROM annotation_source_versions") == [
-            (VERSION, 5)]
+            (VERSION, 4)]
         # The former Solo member lost every DefenseFinder-derived atom; others are untouched.
         assert _query(db_path, "SELECT COUNT(*) FROM semantic_atoms WHERE protein_id = 'p5' "
                                "AND source_db LIKE 'defensefinder%'")[0][0] == 0

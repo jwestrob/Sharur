@@ -76,6 +76,10 @@ SELECTION_RULE = (
     "and profile coverage >= coverage_profile"
 )
 
+# Sub-families DefenseFinder 2.0.1 runs by default (defense_finder/__init__.py run()):
+# DefenseFinder and RM. Anti-defense (ADF) models and their profiles run only with -a.
+DEFAULT_SUBFAMILIES: tuple[str, ...] = ("DefenseFinder", "RM")
+
 #: Environment variable naming a defense-finder-models directory (or its profiles/).
 MODELS_ENV = "SHARUR_DEFENSEFINDER_MODELS"
 
@@ -145,12 +149,16 @@ class SelectionParams:
     e_value_search: float = MACSYFINDER_E_VALUE_SEARCH
     i_evalue_sel: float = DEFAULT_I_EVALUE_SEL
     coverage_profile: float = DEFAULT_COVERAGE_PROFILE
+    # Load hits only for profiles that these definitions/ sub-families reference: the
+    # models DefenseFinder runs by default, which the co-location caller also runs.
+    subfamilies: tuple[str, ...] = DEFAULT_SUBFAMILIES
 
 
 @dataclass
 class SelectionStats:
     raw_rows: int = 0
     unknown_profile: int = 0
+    out_of_scope_profile: int = 0
     missing_alignment: int = 0
     failed_threshold: int = 0
     failed_i_evalue: int = 0
@@ -243,6 +251,30 @@ def find_model_set(explicit: str | Path | None = None) -> ModelSet:
     )
 
 
+_GENE_NAME_RE = re.compile(r'<gene\s+name="([^"]+)"')
+
+
+def referenced_profiles(model_set: ModelSet, subfamilies: tuple[str, ...]) -> set[str] | None:
+    """Profile NAMEs and stems the given sub-families' models reference (exchangeables too).
+
+    None when the model set carries no definitions (a flat profile directory) or no
+    sub-families are named: every profile is then in scope.
+    """
+    if not subfamilies or model_set.root is None:
+        return None
+    definitions = model_set.root / "definitions"
+    if not definitions.is_dir():
+        return None
+    from sharur.colocation import _definition_roots
+
+    stems: set[str] = set()
+    for root in _definition_roots(definitions, tuple(subfamilies)):
+        for xml in root.rglob("*.xml"):
+            stems.update(_GENE_NAME_RE.findall(xml.read_text(errors="replace")))
+    names = {p.name for p in model_set.profiles if p.stem in stems}
+    return stems | names
+
+
 def read_hits(path: str | Path) -> pd.DataFrame:
     """Read an Aksha/Astra per-domain hits table."""
     return pd.read_csv(
@@ -274,6 +306,9 @@ def select_hits(
     joined = hits.merge(model_set.frame(), on="hmm_name", how="left", validate="many_to_one")
     joined.index = hits.index
     known = joined["_profile_length"].notna()
+    scope = referenced_profiles(model_set, params.subfamilies)
+    in_scope = joined["hmm_name"].isin(scope) if scope is not None else known | True
+    considered = known & in_scope
     hmm_from = pd.to_numeric(joined["hmm_from"], errors="coerce")
     hmm_to = pd.to_numeric(joined["hmm_to"], errors="coerce")
     coverage = (hmm_to - hmm_from + 1) / joined["_profile_length"]
@@ -291,14 +326,15 @@ def select_hits(
         threshold_pass = full_evalue <= params.e_value_search
     ie_pass = i_evalue <= params.i_evalue_sel
     cov_pass = coverage >= params.coverage_profile
-    keep = known & has_alignment & threshold_pass & ie_pass & cov_pass
+    keep = considered & has_alignment & threshold_pass & ie_pass & cov_pass
 
     stats.unknown_profile = int((~known).sum())
-    stats.missing_alignment = int((known & ~has_alignment).sum())
-    stats.failed_threshold = int((known & has_alignment & ~threshold_pass).sum())
-    stats.failed_i_evalue = int((known & has_alignment & threshold_pass & ~ie_pass).sum())
+    stats.out_of_scope_profile = int((known & ~in_scope).sum())
+    stats.missing_alignment = int((considered & ~has_alignment).sum())
+    stats.failed_threshold = int((considered & has_alignment & ~threshold_pass).sum())
+    stats.failed_i_evalue = int((considered & has_alignment & threshold_pass & ~ie_pass).sum())
     stats.failed_coverage = int(
-        (known & has_alignment & threshold_pass & ie_pass & ~cov_pass).sum()
+        (considered & has_alignment & threshold_pass & ie_pass & ~cov_pass).sum()
     )
     stats.selected_rows = int(keep.sum())
     stats.unknown_profile_names = sorted(joined.loc[~known, "hmm_name"].dropna().unique())[:20]
@@ -306,11 +342,13 @@ def select_hits(
     gates = pd.DataFrame(
         {
             "hmm_name": joined["hmm_name"],
-            "known_profile": known,
+            # known profile referenced by the called sub-families
+            "known_profile": considered,
+            "in_scope": in_scope,
             "has_ga": has_ga,
             "profile_coverage": coverage,
             "pass_threshold": threshold_pass,
-            "pass_ga_only": known & has_ga & ga_pass if params.use_ga else known & False,
+            "pass_ga_only": considered & has_ga & ga_pass if params.use_ga else considered & False,
             "pass_i_evalue": ie_pass,
             "pass_coverage": cov_pass,
             "selected": keep,

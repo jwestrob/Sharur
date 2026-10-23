@@ -99,6 +99,21 @@ class TestSelection:
         assert stats.missing_alignment == 1
 
 
+    def test_antidefense_only_profiles_are_out_of_scope(self, model_set):
+        # Anti__AntiX is referenced only by an ADF model; DefenseFinder searches it with -a only.
+        kept, stats = _kept(model_set, hit("p1", "Anti__AntiX", score=90.0), hit("p2", "Solo__SoloA"))
+        assert kept == [("p2", "Solo__SoloA")]
+        assert stats.out_of_scope_profile == 1
+        everything, _ = _kept(model_set, hit("p1", "Anti__AntiX", score=90.0),
+                              subfamilies=("DefenseFinder", "RM", "ADF"))
+        assert everything == [("p1", "Anti__AntiX")]
+
+    def test_profile_scope_matches_the_callers_default_subfamilies(self):
+        from sharur.colocation import DEFAULT_MODEL_SUBFAMILIES
+
+        assert sel.DEFAULT_SUBFAMILIES == DEFAULT_MODEL_SUBFAMILIES["defensefinder"]
+
+
 class TestAnnotationRows:
     def test_fam_variant_dedup_still_applies(self, model_set):
         rows, stats = sel.build_annotations(
@@ -140,6 +155,7 @@ class TestAnnotationRows:
         ).fetchone()
         assert record[:6] == ("defensefinder", "defense-finder-models", VERSION, 6, 1, 1)
         assert '"coverage_profile": 0.4' in record[6]
+        assert '"subfamilies": ["DefenseFinder", "RM"]' in record[6]
 
     def test_model_set_resolution_prefers_explicit_then_environment(self, tmp_path, monkeypatch):
         family = write_model_set(tmp_path / "env_models", version="1.2.3")

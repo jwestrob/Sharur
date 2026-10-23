@@ -153,7 +153,8 @@ class ReloadReport:
             f"Selection: {json.dumps(asdict(self.params), sort_keys=True)}",
             f"  raw domain rows {s.raw_rows:,}; failed GA/search threshold {s.failed_threshold:,}; "
             f"failed i-Evalue {s.failed_i_evalue:,}; failed coverage {s.failed_coverage:,}; "
-            f"unknown profile {s.unknown_profile:,}; no alignment {s.missing_alignment:,}",
+            f"unknown profile {s.unknown_profile:,}; profile outside {'/'.join(self.params.subfamilies)} "
+            f"models {s.out_of_scope_profile:,}; no alignment {s.missing_alignment:,}",
             f"  selected {s.selected_rows:,}; FAM-variant dedup removed {s.fam_dedup_removed:,}; "
             f"loaded {s.loaded_rows:,}",
             f"Selection sensitivity (raw rows kept): {self.sensitivity}",
@@ -408,7 +409,7 @@ def selection_sensitivity(gates: pd.DataFrame, hits: pd.DataFrame,
             | (known & ~gates["has_ga"] & ie_pass & (cov >= 0.5))
         ).sum()),
         "ie_cov0.4_without_ga": int((known & ie_pass & (cov >= 0.4)).sum()),
-        "legacy_full_evalue_le_1e-15": int((full_evalue <= 1e-15).sum()),
+        "legacy_full_evalue_le_1e-15": int((known & (full_evalue <= 1e-15)).sum()),
     }
 
 

@@ -727,10 +727,12 @@ class KnowledgeBaseBuilder:
         rows, stats = df_selection.build_annotations(raw, model_set, params)
         logger.info(
             "  defensefinder: %s raw domain rows -> %s selected (threshold %s, i-Evalue %s, "
-            "coverage %s, unknown profile %s, no alignment %s) -> %s after FAM dedup",
+            "coverage %s, unknown profile %s, outside the called models %s, no alignment %s) "
+            "-> %s after FAM dedup",
             f"{stats.raw_rows:,}", f"{stats.selected_rows:,}", f"{stats.failed_threshold:,}",
             f"{stats.failed_i_evalue:,}", f"{stats.failed_coverage:,}",
-            f"{stats.unknown_profile:,}", f"{stats.missing_alignment:,}", f"{stats.loaded_rows:,}",
+            f"{stats.unknown_profile:,}", f"{stats.out_of_scope_profile:,}",
+            f"{stats.missing_alignment:,}", f"{stats.loaded_rows:,}",
         )
         n_rows = self._insert_annotation_frame(rows)
         df_selection.record_source_version(
