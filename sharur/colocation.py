@@ -317,12 +317,34 @@ def parse_models(models_dir: Path) -> dict[str, SystemModel]:
     return models
 
 
-def parse_models_for_family(models_dir: Path, model_family: str) -> dict[str, SystemModel]:
+def _definition_roots(definitions_dir: Path, subfamilies: tuple[str, ...] | None) -> list[Path]:
+    """Definition subtrees to parse: all of ``definitions/`` or the named sub-families.
+
+    A sub-family matches its exact directory name or a numbered split of it
+    (defense-finder-models 1.x shipped ``DefenseFinder_1`` .. ``DefenseFinder_5``).
+    """
+    if not subfamilies:
+        return [definitions_dir]
+    return [
+        child
+        for child in sorted(definitions_dir.iterdir())
+        if child.is_dir()
+        and any(child.name == sub or child.name.startswith(f"{sub}_") for sub in subfamilies)
+    ]
+
+
+def parse_models_for_family(
+    models_dir: Path,
+    model_family: str,
+    subfamilies: tuple[str, ...] | None = None,
+) -> dict[str, SystemModel]:
     """Parse XML models for a specific family (e.g. 'defense-finder-models', 'TXSScan').
 
     Args:
         models_dir: Root models directory (e.g. ~/.macsyfinder/models).
         model_family: Directory name under models_dir (e.g. 'defense-finder-models').
+        subfamilies: Limit parsing to these ``definitions/`` sub-families
+            (e.g. ('DefenseFinder', 'RM')); None parses every definition.
 
     Returns:
         Dict mapping model name to SystemModel.
@@ -338,7 +360,10 @@ def parse_models_for_family(models_dir: Path, model_family: str) -> dict[str, Sy
         return {}
 
     models: dict[str, SystemModel] = {}
-    for xml_path in sorted(definitions_dir.rglob("*.xml")):
+    xml_paths = sorted(
+        xml for root in _definition_roots(definitions_dir, subfamilies) for xml in root.rglob("*.xml")
+    )
+    for xml_path in xml_paths:
         model = _parse_model_xml(xml_path, family=model_family)
         if model is not None:
             models[model.name] = model
@@ -1391,12 +1416,24 @@ def _model_family_for_source(source: str) -> str:
     return mapping.get(source, source)
 
 
+# Model sub-families a caller runs by default. DefenseFinder 2.0.1 runs MacSyFinder on
+# 'defense-finder-models/DefenseFinder' and 'defense-finder-models/RM' (plus the
+# separate CasFinder package); the anti-defense 'ADF' models run only with
+# -a/--antidefensefinder (defense_finder/__init__.py run()). ADF models describe
+# phage-encoded inhibitors of defense, which do not belong in defense_systems.
+DEFAULT_MODEL_SUBFAMILIES: dict[str, tuple[str, ...]] = {
+    "defensefinder": ("DefenseFinder", "RM"),
+}
+
+
 def validate_systems(
     db_path: str | Path,
     models_dir: str | Path | None = None,
     source: str = "defensefinder",
     model_family: str | None = None,
     verbose: bool = True,
+    subfamilies: tuple[str, ...] | None = None,
+    connect_config: dict | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Run co-location validation on HMM hits from DuckDB.
 
@@ -1412,6 +1449,10 @@ def validate_systems(
         model_family: Model family directory name (e.g. 'defense-finder-models',
                       'TXSScan'). Auto-detected from source if None.
         verbose: Log progress messages.
+        subfamilies: ``definitions/`` sub-families to call; defaults to
+                     ``DEFAULT_MODEL_SUBFAMILIES[source]`` (every definition when the
+                     source has no entry).
+        connect_config: DuckDB connection settings (e.g. threads, memory_limit).
 
     Returns:
         (systems_df, genes_df) — DataFrames matching the output schema of
@@ -1443,9 +1484,12 @@ def validate_systems(
         model_family = _model_family_for_source(source)
 
     # Phase 1: Parse models
+    if subfamilies is None:
+        subfamilies = DEFAULT_MODEL_SUBFAMILIES.get(source)
     if verbose:
-        logger.info(f"Parsing {model_family} models from {models_dir / model_family}...")
-    models = parse_models_for_family(models_dir, model_family)
+        scope = f" (sub-families {', '.join(subfamilies)})" if subfamilies else ""
+        logger.info(f"Parsing {model_family} models from {models_dir / model_family}{scope}...")
+    models = parse_models_for_family(models_dir, model_family, subfamilies)
     if not models:
         raise RuntimeError(
             f"No parseable models found for family {model_family!r} under {models_dir}"
@@ -1456,7 +1500,7 @@ def validate_systems(
     # Phase 2: Load hits from DuckDB
     if verbose:
         logger.info(f"Loading HMM hits (source='{source}') from {db_path}...")
-    conn = duckdb.connect(str(db_path), read_only=True)
+    conn = duckdb.connect(str(db_path), read_only=True, config=connect_config or {})
     all_hits = load_hits(conn, source)
     conn.close()
 
@@ -1761,6 +1805,7 @@ def integrate_defense_results(
     db_path: str | Path,
     systems_df: pd.DataFrame,
     genes_df: pd.DataFrame,
+    connect_config: dict | None = None,
 ) -> set[str]:
     """Load defense system validation results into the Sharur database.
 
@@ -1775,6 +1820,7 @@ def integrate_defense_results(
         source_label="defensefinder_system",
         raw_source="defensefinder",
         activity="Defense",
+        connect_config=connect_config,
     )
 
 
@@ -1807,6 +1853,7 @@ def _integrate_results(
     source_label: str,
     raw_source: str,
     activity: str | None,
+    connect_config: dict | None = None,
 ) -> set[str]:
     """Generic integration: create/replace system table + annotations.
 
@@ -1814,7 +1861,7 @@ def _integrate_results(
     scripts, producing the same table schemas for backward compatibility.
     """
     db_path = Path(db_path)
-    conn = duckdb.connect(str(db_path))
+    conn = duckdb.connect(str(db_path), config=connect_config or {})
 
     _assert_system_dataframe_invariants(conn, systems_df, genes_df)
     existing_tables = {str(row[0]) for row in conn.execute("SHOW TABLES").fetchall()}
