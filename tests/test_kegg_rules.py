@@ -29,6 +29,7 @@ from sharur.predicates.mappings.kegg_map import (
     get_predicates_for_kegg,
 )
 from sharur.predicates.mappings.pfam_evidence import (
+    EVIDENCE,
     SWISSPROT_COVERAGE,
     SWISSPROT_EXCLUDED,
     SWISSPROT_MIN_LOWER_BOUND,
@@ -128,6 +129,27 @@ def test_ec_classes(ec, present, absent):
     preds = set(get_predicates_for_ec(ec))
     assert present <= preds
     assert not absent & preds
+
+
+def test_generic_endonuclease_go_anchors_endonuclease_alone():
+    # Reviewed proteins vote with the predicates whose GO anchors their experimental GO terms reach.
+    anchored = {pred for pred, spec in EVIDENCE.items() if "GO:0004519" in spec["go"]}
+    assert anchored == {"endonuclease"}
+
+
+def test_nuclease_s1_ko_maps_to_neither_cas_nuclease_nor_phage_terminase(tmp_path):
+    # K05986 (nuclease S1/P1): its reviewed proteins agree on endonuclease activity, which made
+    # every carrier a cas_nuclease and phage_terminase while GO:0004519 anchored both.
+    assert "endonuclease" in load_swissprot_consensus()["K05986"]
+    assert not {"cas_nuclease", "phage_terminase"} & set(load_swissprot_consensus()["K05986"])
+
+    inputs, kofam = _synthetic_inputs(tmp_path)
+    with open(inputs / "ko_list.tsv", "a") as handle:
+        handle.write("ko:K05986\tnucS; single-strand nuclease [EC:3.1.30.1]\n")
+    build(inputs, tmp_path / "kegg", kofam_ko_list=kofam, log=lambda *_: None)
+    predicates, evidence = kegg_map._load_kegg_mapping_file(tmp_path / "kegg" / "kegg_predicates.tsv")
+    assert evidence["K05986"]["endonuclease"] == "swissprot:6/6"
+    assert not {"cas_nuclease", "phage_terminase", "cas_domain", "crispr_associated"} & set(predicates["K05986"])
 
 
 # --------------------------------------------------------------------------- #
