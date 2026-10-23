@@ -230,14 +230,58 @@ def inspect_synteny_dataset_identity(
             seal_path=seal_path,
             seal_dataset_id=seal_dataset_id,
         )
-    matches = inspection.dataset_id == seal_dataset_id
+    if inspection.dataset_id == seal_dataset_id:
+        return SyntenyDatasetIdentityInspection(
+            state="match",
+            compatible=True,
+            sidecar_dataset_id=inspection.dataset_id,
+            seal_path=seal_path,
+            seal_dataset_id=seal_dataset_id,
+        )
+    # The seal also covers artifacts ELSA never reads (findings ledgers, annotation tables, embedding
+    # sidecars), so a reseal alone does not make a run stale. ELSA's inputs are the gene layout (which
+    # proteins, on which contigs, at which coordinates) and their embeddings; the sidecar records the layout
+    # it used in elsa_genes. A run whose layout equals the live proteins table is still valid.
+    layout_ok, layout_error = _gene_layout_matches(database, inspection)
     return SyntenyDatasetIdentityInspection(
-        state="match" if matches else "mismatch",
-        compatible=matches,
+        state="inputs_match" if layout_ok else "mismatch",
+        compatible=layout_ok,
         sidecar_dataset_id=inspection.dataset_id,
         seal_path=seal_path,
         seal_dataset_id=seal_dataset_id,
+        error=layout_error,
     )
+
+
+def _gene_layout_matches(database: Path, inspection: SyntenySidecarInspection) -> tuple[bool, str | None]:
+    """Whether the sidecar run's gene layout equals the live proteins table (count and order-free hash of
+    protein_id, contig_id, start, end)."""
+    if inspection.active_run_id is None:
+        return False, "sidecar has no active run"
+    try:
+        side = duckdb.connect(str(inspection.path), read_only=True)
+        try:
+            sidecar_print = side.execute(
+                "SELECT COUNT(*), COALESCE(SUM(hash(protein_id, contig_id, CAST(start_bp AS BIGINT), "
+                "CAST(end_bp AS BIGINT))::HUGEINT), 0) FROM elsa_genes WHERE run_id = ?",
+                [inspection.active_run_id],
+            ).fetchone()
+        finally:
+            side.close()
+        core = duckdb.connect(str(database), read_only=True)
+        try:
+            live_print = core.execute(
+                "SELECT COUNT(*), COALESCE(SUM(hash(protein_id, contig_id, CAST(start AS BIGINT), "
+                "CAST(end_coord AS BIGINT))::HUGEINT), 0) FROM proteins"
+            ).fetchone()
+        finally:
+            core.close()
+    except Exception as exc:  # noqa: BLE001 - any failure means the run cannot be shown compatible
+        return False, f"{type(exc).__name__}: {exc}"
+    if tuple(sidecar_print) == tuple(live_print):
+        return True, None
+    return False, (f"gene layout differs: sidecar {sidecar_print[0]:,} genes, live {live_print[0]:,} proteins "
+                   "(or coordinates changed)")
 
 
 def _fetch_dicts(
