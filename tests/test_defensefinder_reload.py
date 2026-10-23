@@ -144,7 +144,7 @@ class TestReload:
 
 
 def test_model_families_stay_comparable_across_release_renames(tmp_path):
-    from sharur.defensefinder.refresh import model_families
+    from sharur.defensefinder.refresh import align_families, model_families
     from sharur.defensefinder.selection import load_model_set
 
     old = write_model_set(tmp_path / "v2", version="2.0.2")
@@ -156,7 +156,11 @@ def test_model_families_stay_comparable_across_release_renames(tmp_path):
                  new / "definitions" / "RM" / "RM_Type_I" / "N6_RM_Type_I.xml",
                  new / "definitions" / "RM" / "RM_Type_IIG" / "N6_RM_Type_IIG.xml",
                  new / "definitions" / "RM" / "McrBC" / "McrBC.xml",
-                 new / "definitions" / "DefenseFinder" / "Other_Type_IV" / "Other_Type_IV.xml"):
+                 new / "definitions" / "DefenseFinder" / "Other_Type_IV" / "Other_Type_IV.xml",
+                 old / "definitions" / "DefenseFinder" / "All_UG" / "UG13a.xml",
+                 new / "definitions" / "DefenseFinder" / "DRT-like_UG" / "UG13a.xml",
+                 old / "definitions" / "DefenseFinder" / "GasderMIN" / "GasderMIN.xml",
+                 new / "definitions" / "DefenseFinder" / "Gasdermin" / "bGSDM.xml"):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(rm_xml)
 
@@ -165,3 +169,7 @@ def test_model_families_stay_comparable_across_release_renames(tmp_path):
     assert before["RM_Type_IIG_2"] == after["N6_RM_Type_IIG"] == "RM_Type_IIG"
     assert before["RM_Type_IV_1"] == after["McrBC"] == after["Other_Type_IV"] == "RM_Type_IV"
     assert after["Toy"] == "Toy"
+    aligned = align_families(before, after)
+    assert aligned["UG13a"] == "DRT-like_UG"
+    assert aligned["GasderMIN"] == "Gasdermin"
+    assert aligned["RM_Type_I"] == "RM_Type_I"

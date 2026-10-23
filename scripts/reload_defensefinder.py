@@ -80,7 +80,8 @@ def main() -> int:
     parser.add_argument("--no-reseal", action="store_true",
                         help="Leave an existing dataset seal untouched after publishing")
     args = parser.parse_args()
-    logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
+    logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s: %(message)s")
+    logging.getLogger("sharur.defensefinder").setLevel(logging.INFO)
 
     params = SelectionParams(e_value_search=MACSYFINDER_E_VALUE_SEARCH,
                              i_evalue_sel=args.i_evalue, coverage_profile=args.coverage)

@@ -22,10 +22,12 @@ dataset seal exists.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
 import time
+from collections import Counter
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -53,6 +55,9 @@ SYSTEM_TABLE = "defense_systems"
 _PROTEIN_SCOPED = ("semantic_atoms", "semantic_state", "semantic_terms", "protein_predicates")
 _REPLACED = (SYSTEM_TABLE, SOURCE_VERSIONS_TABLE)
 _APPENDED = "predicate_provenance"
+
+
+logger = logging.getLogger(__name__)
 
 
 class ReloadValidationError(RuntimeError):
@@ -271,6 +276,27 @@ def model_families(model_set: ModelSet | None) -> dict[str, str]:
     return families
 
 
+def align_families(previous: dict[str, str], current: dict[str, str]) -> dict[str, str]:
+    """Previous-release model -> family, named as the current release names it.
+
+    A previous family takes the current family most of its shared model names carry
+    (2.x All_UG/UG13a -> 3.x DRT-like_UG/UG13a), else a case-insensitive match
+    (GasderMIN -> Gasdermin), else keeps its own name.
+    """
+    votes: dict[str, Counter[str]] = {}
+    for model, family in previous.items():
+        if model in current:
+            votes.setdefault(family, Counter())[current[model]] += 1
+    by_lower = {family.lower(): family for family in set(current.values())}
+    rename = {}
+    for family in set(previous.values()):
+        if family in votes:
+            rename[family] = votes[family].most_common(1)[0][0]
+        else:
+            rename[family] = by_lower.get(family.lower(), family)
+    return {model: rename[family] for model, family in previous.items()}
+
+
 def profile_family_of(name_to_stem: dict[str, str]):
     """Profile NAME -> family: the profile file stem's prefix before ``__``."""
     def family(accession: str) -> str:
@@ -429,7 +455,8 @@ def reload_defensefinder(
     name_to_stem.update({p.name: p.stem for p in model_set.profiles})
     profile_family = profile_family_of(name_to_stem)
     families_after = model_families(model_set)
-    families_before = {**families_after, **model_families(previous_set)}
+    families_before = {**families_after,
+                       **align_families(model_families(previous_set), families_after)}
     config = {"threads": threads, "memory_limit": memory_limit}
 
     from sharur.storage.migrations import MIGRATIONS, get_current_version
@@ -481,8 +508,11 @@ def reload_defensefinder(
 
     source_state = _db_state(db)
     staging = stage_dir / f"{db.name}.defensefinder-reload.staging"
+    spill = staging.with_name(staging.name + ".tmp")
     for stale in (staging, staging.with_name(staging.name + ".wal")):
         stale.unlink(missing_ok=True)
+    shutil.rmtree(spill, ignore_errors=True)
+    logger.info("Copying %s to %s", db, staging)
     shutil.copy2(db, staging)
     if _db_state(db) != source_state:
         staging.unlink(missing_ok=True)
@@ -507,6 +537,7 @@ def reload_defensefinder(
                   f"{stats.unknown_profile:,} hit rows name profiles absent from the model set "
                   f"{stats.unknown_profile_names[:5]}")
 
+            logger.info("Snapshot before")
             report.before = _snapshot(conn, profile_family, families_before)
             before_members = {r[0] for r in conn.execute(
                 "SELECT DISTINCT protein_id FROM annotations WHERE source IN (?, ?)",
@@ -515,6 +546,7 @@ def reload_defensefinder(
             tables_before = set(_tables(conn))
             provenance_max = _max_generation(conn)
 
+            logger.info("Replacing %s defensefinder rows", f"{report.before.annotation_rows:,}")
             conn.execute("BEGIN TRANSACTION")
             conn.execute("DELETE FROM annotations WHERE source = ?", [SOURCE])
             next_id = conn.execute(
@@ -541,6 +573,7 @@ def reload_defensefinder(
 
         from sharur.colocation import integrate_defense_results, validate_systems
 
+        logger.info("Calling systems")
         systems_df, genes_df = validate_systems(
             db_path=staging, models_dir=model_set.models_dir, model_family=model_set.family,
             source=SOURCE, verbose=False, connect_config=config,
@@ -570,10 +603,12 @@ def reload_defensefinder(
                                  if (cleaned := value.strip().strip("'\"")))
             affected = sorted(scope)
             _set_affected(conn, affected)
+            logger.info("Fingerprinting rows outside %s affected proteins", f"{len(affected):,}")
             prints_before = _fingerprints(conn, provenance_max)
         finally:
             conn.close()
 
+        logger.info("Integrating %s systems", f"{len(systems_df):,}")
         integrated = integrate_defense_results(staging, systems_df, genes_df, connect_config=config)
         outside = set(integrated) - scope
         check("caller_scope_covered", not outside,
@@ -584,6 +619,7 @@ def reload_defensefinder(
             from sharur.predicates_v2.persistence import generate_and_persist_v2
             from sharur.storage.duckdb_store import DuckDBStore
 
+            logger.info("Regenerating semantics for %s proteins", f"{len(affected):,}")
             store = DuckDBStore(staging, threads=threads, memory_limit=memory_limit)
             try:
                 generate_and_persist_v2(store, protein_ids=affected, update_legacy_predicates=True,
@@ -599,6 +635,7 @@ def reload_defensefinder(
                 ).fetchone()[0]:
                     conn.execute(f'DROP TABLE "{table}"')
             _set_affected(conn, affected)
+            logger.info("Validating")
             prints_after = _fingerprints(conn, provenance_max)
             for table, before in sorted(prints_before.items()):
                 scope = ("outside regenerated proteins" if table in _PROTEIN_SCOPED
@@ -672,4 +709,5 @@ def reload_defensefinder(
     finally:
         for leftover in (staging, staging.with_name(staging.name + ".wal")):
             leftover.unlink(missing_ok=True)
+        shutil.rmtree(spill, ignore_errors=True)
         report.elapsed_s = time.monotonic() - started
