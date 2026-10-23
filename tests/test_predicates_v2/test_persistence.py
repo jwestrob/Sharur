@@ -971,3 +971,26 @@ def test_review_queue_is_aggregated_from_persisted_atoms(tmp_path):
     row = next(line for line in lines if "UNMAPPED_X" in line).split("\t")
     assert row[:4] == ["UNMAPPED_X", "pfam", "2", "1"]
     assert row[5] == "p1;p2"
+
+
+def test_batch_insert_types_sparse_list_columns_from_every_row():
+    """A list column that is empty in all but a few of 25,000 rows still inserts.
+
+    DuckDB infers object-column types from a row sample; typed from empty lists
+    alone, the batch failed on the first string ("VARCHAR -> NULL").
+    """
+    store = DuckDBStore()
+    store.conn.execute("CREATE TABLE sparse_lists (protein_id VARCHAR, flags VARCHAR[])")
+    rows = [(f"p{i}", ["flag"] if i in {1234, 7777, 20001} else []) for i in range(25_000)]
+
+    persistence._insert_dataframe(
+        store,
+        view_name="_sparse_batch",
+        rows=rows,
+        columns=["protein_id", "flags"],
+        sql="INSERT INTO sparse_lists SELECT protein_id, flags FROM _sparse_batch",
+    )
+
+    assert store.conn.execute(
+        "SELECT COUNT(*), COUNT(*) FILTER (WHERE len(flags) > 0) FROM sparse_lists"
+    ).fetchone() == (25_000, 3)

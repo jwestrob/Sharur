@@ -2505,6 +2505,12 @@ def _insert_dataframe(
         return
 
     frame = pd.DataFrame.from_records(rows, columns=columns)
+    # DuckDB types object columns (lists, strings) from pandas_analyze_sample
+    # rows (default 1,000). A sparse list column, a few non-empty lists among
+    # thousands of empty ones, is then typed from empty lists and the insert
+    # fails on the first string ("Failed to cast value ... VARCHAR -> NULL").
+    # Subset regenerations of more than 1,000 proteins hit this; analyze every row.
+    store.conn.execute(f"SET pandas_analyze_sample = {max(len(frame), 1000)}")
     store.conn.register(view_name, frame)
     try:
         store.conn.execute(sql)
