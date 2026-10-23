@@ -98,8 +98,8 @@ def build_search_command(
     ]
     db = database.upper()
     # PFAM, HydDB and DefenseFinder carry GA thresholds on every profile.
-    # DefenseFinder's GA values are permissive, so the load-time e-value
-    # filter in stage 07 stays as a safety net.
+    # For DefenseFinder this is MacSyFinder's own search threshold; Stage 07
+    # then applies MacSyFinder's i-Evalue and profile-coverage selection.
     if use_cutoffs and db in GA_DATABASES:
         cmd.append("--cut_ga")
     # MacSyFinder-compatible hmmsearch output for --previous-run co-location validation.

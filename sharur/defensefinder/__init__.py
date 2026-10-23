@@ -1,0 +1,48 @@
+"""DefenseFinder profile-hit selection and staged reload of DefenseFinder evidence."""
+
+from sharur.defensefinder.selection import (
+    DEFAULT_COVERAGE_PROFILE,
+    DEFAULT_I_EVALUE_SEL,
+    DEFENSEFINDER_COVERAGE_PROFILE,
+    MACSYFINDER_COVERAGE_PROFILE,
+    MACSYFINDER_E_VALUE_SEARCH,
+    MACSYFINDER_I_EVALUE_SEL,
+    MODELS_ENV,
+    SELECTION_RULE,
+    ModelSet,
+    ProfileInfo,
+    SelectionParams,
+    SelectionStats,
+    annotation_rows,
+    build_annotations,
+    dedup_fam_variants,
+    find_model_set,
+    load_model_set,
+    read_hits,
+    record_source_version,
+    select_hits,
+)
+
+
+__all__ = [
+    "DEFAULT_COVERAGE_PROFILE",
+    "DEFAULT_I_EVALUE_SEL",
+    "DEFENSEFINDER_COVERAGE_PROFILE",
+    "MACSYFINDER_COVERAGE_PROFILE",
+    "MACSYFINDER_E_VALUE_SEARCH",
+    "MACSYFINDER_I_EVALUE_SEL",
+    "MODELS_ENV",
+    "SELECTION_RULE",
+    "ModelSet",
+    "ProfileInfo",
+    "SelectionParams",
+    "SelectionStats",
+    "annotation_rows",
+    "build_annotations",
+    "dedup_fam_variants",
+    "find_model_set",
+    "load_model_set",
+    "read_hits",
+    "record_source_version",
+    "select_hits",
+]

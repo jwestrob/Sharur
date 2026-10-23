@@ -279,7 +279,7 @@ That is all you need. The five default databases cover all standard annotation:
 | PFAM | Protein domain families | `--cut_ga` (gathering thresholds) |
 | KOFAM | KEGG orthologs | `--cut_ga --cascade` (per-profile adaptive) |
 | HydDB | Hydrogenase subgroups | `--cut_ga` |
-| DefenseFinder | Defense systems (CRISPR Cas proteins, RM, CBASS, etc.) | `--cut_ga` (permissive; Stage 07 applies e-value 1e-15 filter) |
+| DefenseFinder | Defense systems (CRISPR Cas proteins, RM, CBASS, etc.) | `--cut_ga` (Stage 07 adds MacSyFinder's i-Evalue and profile-coverage selection) |
 | dbCAN | CAZyme domain HMMs | No GA; Stage 07 applies e-value filter |
 
 **Non-default databases (opt-in via `-d`):**
@@ -454,11 +454,23 @@ checkpointed V2 generation.
 | pfam | 1e-5 | Safety net; already clean via `--cut_ga` |
 | kegg | 1e-5 | Safety net; already clean via `--cut_ga --cascade` |
 | hyddb | 1e-5 | Safety net; already clean via `--cut_ga` |
-| defensefinder | 1e-15 | Strict; superfamily HMMs are permissive at GA threshold |
 | txsscan | 1e-10 | No GA thresholds; secretion system HMMs |
 | vogdb | 1e-15 | No GA thresholds; e-value filter required |
 | cant_hyd | 1e-10 | No `--cut_ga` |
 | cazy | 1e-5 | dbCAN has own thresholds |
+
+**DefenseFinder hit selection.** `defensefinder` rows follow MacSyFinder/DefenseFinder
+rules, read from the installed packages (macsylib 1.0.4 `MacsyDefaults`, DefenseFinder
+2.0.1 CLI): a domain passes the profile's GA line (full-sequence score >= GA1, domain
+score >= GA2; full-sequence E <= 0.1 for a profile without GA), then i-Evalue <= 1e-3 and
+profile coverage `(hmm_to - hmm_from + 1) / LENG` >= 0.4, followed by FAM-variant dedup.
+GA and LENG come from the installed defense-finder-models directory
+(`--defensefinder-models`, `$SHARUR_DEFENSEFINDER_MODELS`, then
+`~/.macsyfinder/models/defense-finder-models`); the same directory supplies the system
+definitions, and its version is recorded in `annotation_source_versions`. Search with
+per-genome E-values (Aksha `--write_macsyfinder`), as DefenseFinder runs one genome at a
+time. To rebuild an existing database's DefenseFinder layer from a new hits table, use
+`scripts/reload_defensefinder.py` (dry run by default; `--publish` replaces the database).
 
 **Common errors:**
 - "FileExistsError: sharur.duckdb exists" -- add `--force` to overwrite.
