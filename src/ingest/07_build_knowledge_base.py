@@ -28,6 +28,7 @@ import typer
 from rich.console import Console
 
 from sharur.contig_context import assemblies_from_stage00, fasta_records, parse_partial
+from sharur.defensefinder import selection as df_selection
 from sharur.storage.migrations import run_migrations
 from sharur.storage.schema import SCHEMA
 
@@ -63,14 +64,15 @@ def find_reference(dirs: List[Path], name: str) -> Optional[Path]:
 # --------------------------------------------------------------------------- #
 # Default e-value thresholds applied at load time.
 # Databases with --cut_ga (PFAM, KOFAM, HydDB) are already clean; these
-# thresholds act as a safety net.  Databases WITHOUT --cut_ga
-# (DefenseFinder, VOGdb, CANT-HYD) rely on this filter.
+# thresholds act as a safety net.  VOGdb and CANT-HYD have no GA lines and
+# rely on this filter.  DefenseFinder hits use MacSyFinder/DefenseFinder
+# per-hit selection instead (GA bit thresholds, i-Evalue <= 1e-3, profile
+# coverage >= 0.4; see sharur.defensefinder.selection for the sources).
 # --------------------------------------------------------------------------- #
 DEFAULT_EVALUE_THRESHOLDS: Dict[str, float] = {
     "pfam": 1e-5,            # Already clean via --cut_ga (max ~3e-4)
     "kegg": 1e-5,            # --cut_ga --cascade; this is a safety net only
     "hyddb": 1e-5,           # Already clean via --cut_ga
-    "defensefinder": 1e-15,  # Has GA but values are permissive; superfamily HMMs need strict e-value
     "vogdb": 1e-15,          # No GA thresholds (0/48,439 profiles); e-value filter required
     "cant_hyd": 1e-10,       # No --cut_ga
     "cazy": 1e-5,            # dbCAN has own thresholds
@@ -123,73 +125,10 @@ def _resolve_thread_count(requested: Optional[int] = None) -> int:
         raise ValueError(f"Thread count from {source} must be positive (got {threads})")
     return threads
 
-# Regex for DefenseFinder accessions with numbered FAM variants.
-# Matches trailing _FAM_N or _FAMN (where N is one or more digits) at the
-# end of an accession string.  Example matches:
-#   RM_Type_II__Type_II_MTases_FAM_1  → group prefix = RM_Type_II__Type_II_MTases
-#   RM_Type_III__Type_III_MTases_FAM10 → group prefix = RM_Type_III__Type_III_MTases
-# Does NOT match component-level suffixes like MkoA_B (no leading _FAM).
-_DEFENSEFINDER_FAM_RE = re.compile(r"_FAM_?\d+$")
-
-
-def _dedup_defensefinder_fam_variants(df: "pd.DataFrame") -> "pd.DataFrame":
-    """Deduplicate DefenseFinder hits that differ only by FAM variant number.
-
-    DefenseFinder has ~40+ Type_II_MTases_FAM_* HMM profiles that all detect
-    variations of the same Rossmann methyltransferase fold.  When a single
-    protein is scanned, it matches many FAMs simultaneously, inflating hit
-    counts (e.g. 27 unique MTase proteins → 259 annotation rows).
-
-    This function groups hits by (protein_id, accession-with-FAM-suffix-stripped)
-    and keeps only the best-scoring hit per group.  Accessions that do NOT end
-    in a _FAM_N pattern are left untouched.
-
-    Args:
-        df: DataFrame with at least columns 'protein_id', 'accession', 'score', 'evalue'.
-
-    Returns:
-        DataFrame with redundant FAM variant rows removed.
-    """
-    if df.empty:
-        return df
-
-    # Compute the dedup group key by stripping trailing _FAM_N
-    df = df.copy()
-    df["_dedup_group"] = df["accession"].apply(
-        lambda x: _DEFENSEFINDER_FAM_RE.sub("", x) if isinstance(x, str) else x
-    )
-
-    # Identify rows that actually have FAM variants (group key differs from accession)
-    has_fam = df["_dedup_group"] != df["accession"]
-
-    if not has_fam.any():
-        df.drop(columns=["_dedup_group"], inplace=True)
-        return df
-
-    # Split: rows without FAM suffix pass through; rows with FAM suffix get deduped
-    no_fam_df = df[~has_fam].drop(columns=["_dedup_group"])
-
-    fam_df = df[has_fam].copy()
-
-    # For each (protein_id, dedup_group), keep the row with the highest score.
-    # Break ties by lowest e-value.  NaN scores sort last (ascending=False puts
-    # NaN at the bottom), so real scores are preferred.
-    fam_df = fam_df.sort_values(
-        ["score", "evalue"], ascending=[False, True], na_position="last"
-    )
-    fam_deduped = fam_df.drop_duplicates(
-        subset=["protein_id", "_dedup_group"], keep="first"
-    ).drop(columns=["_dedup_group"])
-
-    n_removed = len(fam_df) - len(fam_deduped)
-    if n_removed > 0:
-        logger.info(
-            f"  defensefinder: deduplicated {n_removed:,} redundant FAM variant hits "
-            f"({len(fam_df):,} → {len(fam_deduped):,} FAM rows)"
-        )
-
-    result = pd.concat([no_fam_df, fam_deduped], ignore_index=True)
-    return result
+# DefenseFinder FAM-variant dedup lives with the rest of DefenseFinder selection so
+# Stage 07 and scripts/reload_defensefinder.py load identical rows.
+_DEFENSEFINDER_FAM_RE = df_selection.FAM_VARIANT_RE
+_dedup_defensefinder_fam_variants = df_selection.dedup_fam_variants
 
 
 def _dedup_kegg_best_hit(df: "pd.DataFrame") -> "pd.DataFrame":
@@ -267,11 +206,16 @@ class PipelineOutputs:
 class KnowledgeBaseBuilder:
     def __init__(self, outputs: PipelineOutputs, db_path: Path, force: bool = False,
                  enable_cazymes: bool = False, threads: Optional[int] = None,
-                 pipeline_depth: int = 2):
+                 pipeline_depth: int = 2, defensefinder_models: Optional[Path] = None):
         self.outputs = outputs
         self.db_path = db_path
         self.force = force
         self.enable_cazymes = enable_cazymes
+        # defense-finder-models directory for hit selection (GA, LENG) and system
+        # calling; resolved on first use (explicit, $SHARUR_DEFENSEFINDER_MODELS,
+        # then ~/.macsyfinder/models/defense-finder-models).
+        self.defensefinder_models = defensefinder_models
+        self._defensefinder_model_set: Optional[df_selection.ModelSet] = None
         self.threads = _resolve_thread_count(threads)
         if pipeline_depth < 1:
             raise ValueError("pipeline_depth must be positive")
@@ -743,6 +687,57 @@ class KnowledgeBaseBuilder:
         }
 
     # --- annotations ---------------------------------------------------- #
+    _ANNOTATION_INSERT_COLUMNS = [
+        "annotation_id", "protein_id", "source", "accession", "name", "description",
+        "evalue", "score", "start_aa", "end_aa",
+    ]
+
+    def _insert_annotation_frame(self, df: pd.DataFrame) -> int:
+        """Append annotation rows with fresh annotation IDs; returns the row count."""
+        next_id = self.conn.execute("SELECT COALESCE(MAX(annotation_id), 0) FROM annotations").fetchone()[0]
+        df = df.reindex(columns=self._ANNOTATION_INSERT_COLUMNS, fill_value=None)
+        df["annotation_id"] = range(next_id + 1, next_id + 1 + len(df))
+        self.conn.register("tmp_adf", df)
+        self.conn.execute(
+            """
+            INSERT INTO annotations (
+                annotation_id, protein_id, source, accession, name, description, evalue,
+                score, start_aa, end_aa
+            ) SELECT * FROM tmp_adf
+            """,
+        )
+        self.conn.unregister("tmp_adf")
+        self.stats["annotations"] += len(df)
+        return len(df)
+
+    def _resolve_defensefinder_models(self) -> df_selection.ModelSet:
+        if self._defensefinder_model_set is None:
+            self._defensefinder_model_set = df_selection.find_model_set(self.defensefinder_models)
+            model_set = self._defensefinder_model_set
+            console.print(
+                f"  DefenseFinder models: {model_set.family} {model_set.version or '(unversioned)'}, "
+                f"{len(model_set.profiles):,} profiles from {model_set.profiles_dir}"
+            )
+        return self._defensefinder_model_set
+
+    def _load_defensefinder_hits(self, tsv: Path, raw: pd.DataFrame) -> int:
+        """Select DefenseFinder hits as MacSyFinder would, load them, and record the model set."""
+        model_set = self._resolve_defensefinder_models()
+        params = df_selection.SelectionParams()
+        rows, stats = df_selection.build_annotations(raw, model_set, params)
+        logger.info(
+            "  defensefinder: %s raw domain rows -> %s selected (threshold %s, i-Evalue %s, "
+            "coverage %s, unknown profile %s, no alignment %s) -> %s after FAM dedup",
+            f"{stats.raw_rows:,}", f"{stats.selected_rows:,}", f"{stats.failed_threshold:,}",
+            f"{stats.failed_i_evalue:,}", f"{stats.failed_coverage:,}",
+            f"{stats.unknown_profile:,}", f"{stats.missing_alignment:,}", f"{stats.loaded_rows:,}",
+        )
+        n_rows = self._insert_annotation_frame(rows)
+        df_selection.record_source_version(
+            self.conn, model_set, params, stats, tsv, df_selection.file_sha256(tsv)
+        )
+        return n_rows
+
     def _load_annotations(self) -> None:
         # Astra PFAM/KOFAM TSV
         tsv_files = list(self.outputs.stage04_dir.rglob("*_hits_df.tsv")) if self.outputs.stage04_dir.exists() else []
@@ -774,6 +769,15 @@ class KnowledgeBaseBuilder:
                     source = "txsscan"
                 else:
                     source = tsv.stem.split("_")[0].lower()
+                if source == "defensefinder":
+                    # MacSyFinder/DefenseFinder per-hit selection (GA, i-Evalue,
+                    # profile coverage) and FAM-variant dedup.
+                    n_rows = self._load_defensefinder_hits(tsv, df)
+                    console.print(
+                        f"    {source}: {n_rows:,} annotations from {tsv.name} "
+                        f"({time.time()-t_ann:.1f}s)"
+                    )
+                    continue
                 original_name = df.get("hmm_name", None)
                 # Normalize columns and avoid duplicate labels
                 df = df.rename(
@@ -851,12 +855,6 @@ class KnowledgeBaseBuilder:
                             f"({len(df):,} retained)"
                         )
 
-                # DefenseFinder FAM variant dedup: keep best hit per
-                # (protein_id, system_component) when multiple _FAM_N
-                # profiles match the same protein.
-                if source == "defensefinder":
-                    df = _dedup_defensefinder_fam_variants(df)
-
                 # KEGG best-hit dedup: keep only the top-scoring KO per
                 # protein.  KOFAM profiles for enzyme superfamilies (PKS,
                 # P450, etc.) produce dozens of hits per protein from
@@ -864,32 +862,8 @@ class KnowledgeBaseBuilder:
                 if source == "kegg":
                     df = _dedup_kegg_best_hit(df)
 
-                keep = [
-                    "annotation_id",
-                    "protein_id",
-                    "source",
-                    "accession",
-                    "name",
-                    "description",
-                    "evalue",
-                    "score",
-                    "start_aa",
-                    "end_aa",
-                ]
-                next_id = self.conn.execute("SELECT COALESCE(MAX(annotation_id), 0) FROM annotations").fetchone()[0]
-                df = df.reindex(columns=keep, fill_value=None)
-                df["annotation_id"] = range(next_id + 1, next_id + 1 + len(df))
-                self.conn.register("tmp_adf", df)
-                self.conn.execute(
-                    """
-                    INSERT INTO annotations (
-                        annotation_id, protein_id, source, accession, name, description, evalue,
-                        score, start_aa, end_aa
-                    ) SELECT * FROM tmp_adf
-                    """,
-                )
-                self.stats["annotations"] += len(df)
-                console.print(f"    {source}: {len(df):,} annotations from {tsv.name} ({time.time()-t_ann:.1f}s)")
+                n_rows = self._insert_annotation_frame(df)
+                console.print(f"    {source}: {n_rows:,} annotations from {tsv.name} ({time.time()-t_ann:.1f}s)")
             except Exception as exc:
                 logger.exception(f"Failed to load annotations from {tsv}")
                 console.print(f"    [red]FAILED: {tsv.name}: {exc}[/red]")
@@ -1278,9 +1252,19 @@ class KnowledgeBaseBuilder:
                 validate_systems,
             )
 
+            models_dir = model_family = None
+            if source == "defensefinder" and (
+                self._defensefinder_model_set is not None or self.defensefinder_models is not None
+            ):
+                # Call systems with the same model set whose GA/LENG selected the hits.
+                model_set = self._resolve_defensefinder_models()
+                if model_set.models_dir is not None:
+                    models_dir, model_family = model_set.models_dir, model_set.family
             systems_df, genes_df = validate_systems(
                 db_path=str(self.db_path),
+                models_dir=models_dir,
                 source=source,
+                model_family=model_family,
                 verbose=True,
             )
 
@@ -1430,6 +1414,15 @@ def main(
         min=1,
         help="Bounded V2 chunks overlapped across read/transform/write",
     ),
+    defensefinder_models: Optional[Path] = typer.Option(
+        None,
+        "--defensefinder-models",
+        help=(
+            "defense-finder-models directory used for DefenseFinder hit selection (GA, profile "
+            "lengths) and system calling; defaults to $SHARUR_DEFENSEFINDER_MODELS, then "
+            "~/.macsyfinder/models/defense-finder-models"
+        ),
+    ),
 ) -> None:
     logging.basicConfig(level=logging.INFO)
     if resume_v2 and restart_v2:
@@ -1464,6 +1457,7 @@ def main(
         enable_cazymes=enable_cazymes,
         threads=threads,
         pipeline_depth=pipeline_depth,
+        defensefinder_models=defensefinder_models,
     )
     if resume_v2:
         stats = builder.resume_v2()
