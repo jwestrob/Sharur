@@ -28,6 +28,7 @@ References:
 """
 
 import argparse
+import mmap
 import os
 import shutil
 import subprocess
@@ -39,6 +40,7 @@ from collections import defaultdict
 import time as _time
 
 import duckdb
+import numpy as np
 import pandas as pd
 
 import sys
@@ -411,12 +413,12 @@ def hmm_lengths(hmm_path: Path) -> dict[str, int]:
     """Profile NAME -> LENG from a HMMER3 text file (for the dbCAN coverage filter)."""
     lengths: dict[str, int] = {}
     name = None
-    with open(hmm_path) as fh:
-        for line in fh:
-            if line.startswith("NAME "):
-                name = line.split(None, 1)[1].strip()
-            elif line.startswith("LENG ") and name is not None:
-                lengths[name] = int(line.split()[1])
+    with open(hmm_path, "rb") as fh, mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+        for m in re.finditer(rb"^(NAME|LENG)[ \t]+(\S+)", mm, re.M):
+            if m.group(1) == b"NAME":
+                name = m.group(2).decode()
+            elif name is not None:
+                lengths[name] = int(m.group(2))
                 name = None
     return lengths
 
@@ -501,6 +503,82 @@ def load_astra_tsv_cache(tsv_path: Path, ievalue: float = HMMER_IEVALUE,
     return _parse_astra_tsv(tsv_path, ievalue, lengths)
 
 
+ASTRA_COLUMNS = {'sequence_id', 'hmm_name', 'i_evalue', 'dom_bitscore', 'hmm_from', 'hmm_to'}
+
+
+def _astra_best_rows(path: Path,
+                     ievalue_threshold: float,
+                     lengths: dict[str, int] | None = None,
+                     min_coverage: float = HMMER_COVERAGE,
+                     order: dict[str, int] | None = None) -> pd.DataFrame | None:
+    """Filtered Astra rows reduced to one per (protein, family): the lowest i-evalue,
+    the earliest row on a tie.
+
+    Columns: sequence_id, family, i_evalue, dom_bitscore, prof, row. ``row`` is the
+    row's position in ``path``; ``prof`` is its profile's position in ``order`` (0
+    without one), so (prof, row) orders rows from several profile-part tables as one
+    single-process table. Returns None when no row passes.
+    """
+    try:
+        # identifiers stay strings whatever a file's rows look like
+        df = pd.read_csv(path, sep='\t', usecols=lambda c: c in ASTRA_COLUMNS,
+                         dtype={'sequence_id': str, 'hmm_name': str})
+    except Exception as e:
+        print(f"Warning: Failed to parse Astra TSV: {e}")
+        return None
+    if df.empty:
+        return None
+    df['row'] = np.arange(len(df))
+
+    # Filter by i-evalue
+    df = df[df['i_evalue'] < ievalue_threshold]
+    if df.empty:
+        return None
+    if lengths and {'hmm_from', 'hmm_to'} <= set(df.columns):
+        leng = df['hmm_name'].map(lengths)
+        if leng.isna().any():
+            raise ValueError(f"{path.name}: {int(leng.isna().sum())} hits name profiles absent "
+                             "from the HMM file's NAME/LENG records")
+        before = len(df)
+        df = df[(df['hmm_to'] - df['hmm_from']) / leng >= min_coverage]
+        _log(f"  [{path.name}] HMM coverage >= {min_coverage}: {len(df):,} of {before:,} domain hits")
+        if df.empty:
+            return None
+    else:
+        _log(f"  [{path.name}] no HMM coordinates or profile lengths: i-evalue filter only")
+
+    # Extract family from hmm_name
+    families = {name: parse_hmm_family(name) for name in df['hmm_name'].unique()}
+    df = df.assign(family=df['hmm_name'].map(families)).dropna(subset=['family'])
+    if df.empty:
+        return None
+    df['prof'] = df['hmm_name'].map(order) if order is not None else 0
+
+    # Per protein x family, the first row (in table order) with the lowest i-evalue
+    df = (df.sort_values(['i_evalue', 'prof', 'row'], kind='stable')
+            .drop_duplicates(['sequence_id', 'family'], keep='first'))
+    return df[['sequence_id', 'family', 'i_evalue', 'dom_bitscore', 'prof', 'row']]
+
+
+def _hits_from_rows(frames: list[pd.DataFrame | None]) -> dict[str, dict[str, tuple]]:
+    """{protein_id: {family_class: (i_evalue, dom_bitscore)}} from ``_astra_best_rows`` frames.
+
+    Several frames (profile parts of one search) reduce together, ties going to the
+    earlier (prof, row), as within one table."""
+    frames = [f for f in frames if f is not None]
+    if not frames:
+        return {}
+    df = frames[0] if len(frames) == 1 else (
+        pd.concat(frames, ignore_index=True)
+          .sort_values(['i_evalue', 'prof', 'row'], kind='stable')
+          .drop_duplicates(['sequence_id', 'family'], keep='first'))
+    result: dict[str, dict[str, tuple]] = {}
+    for pid, fam, ev, sc in zip(df['sequence_id'].tolist(), df['family'].tolist(),
+                                df['i_evalue'].tolist(), df['dom_bitscore'].tolist()):
+        result.setdefault(pid, {})[fam] = (ev, sc)
+    return result
+
+
 def _parse_astra_tsv(path: Path,
                      ievalue_threshold: float,
                      lengths: dict[str, int] | None = None,
@@ -515,54 +593,10 @@ def _parse_astra_tsv(path: Path,
     A table without HMM coordinates, or a run without profile lengths, is
     filtered on i-evalue only and says so.
 
-    Returns {protein_id: {family_class: (best_i_evalue, best_dom_bitscore)}}.
+    Returns {protein_id: {family_class: (best_i_evalue, best_dom_bitscore)}}, the
+    first row with the lowest i-evalue for each protein and family.
     """
-    try:
-        df = pd.read_csv(path, sep='\t')
-    except Exception as e:
-        print(f"Warning: Failed to parse Astra TSV: {e}")
-        return {}
-
-    if df.empty:
-        return {}
-
-    # Filter by i-evalue
-    df = df[df['i_evalue'] < ievalue_threshold].copy()
-    if df.empty:
-        return {}
-    if lengths and {'hmm_from', 'hmm_to'} <= set(df.columns):
-        leng = df['hmm_name'].map(lengths)
-        if leng.isna().any():
-            raise ValueError(f"{path.name}: {int(leng.isna().sum())} hits name profiles absent "
-                             "from the HMM file's NAME/LENG records")
-        before = len(df)
-        df = df[(df['hmm_to'] - df['hmm_from']) / leng >= min_coverage].copy()
-        _log(f"  [{path.name}] HMM coverage >= {min_coverage}: {len(df):,} of {before:,} domain hits")
-        if df.empty:
-            return {}
-    else:
-        _log(f"  [{path.name}] no HMM coordinates or profile lengths: i-evalue filter only")
-
-    # Extract family from hmm_name
-    df['family'] = df['hmm_name'].apply(parse_hmm_family)
-    df = df.dropna(subset=['family'])
-    if df.empty:
-        return {}
-
-    # Group by protein × family, keep best i-evalue
-    result: dict[str, dict[str, tuple]] = {}
-    for _, row in df.iterrows():
-        pid = row['sequence_id']
-        fam = row['family']
-        ev = row['i_evalue']
-        sc = row['dom_bitscore']
-
-        if pid not in result:
-            result[pid] = {}
-        if fam not in result[pid] or ev < result[pid][fam][0]:
-            result[pid][fam] = (ev, sc)
-
-    return result
+    return _hits_from_rows([_astra_best_rows(path, ievalue_threshold, lengths, min_coverage)])
 
 
 # ── Consensus ──────────────────────────────────────────────────────────────────
