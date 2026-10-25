@@ -5,9 +5,12 @@ canonical database and its seal are unchanged. Imports accept
 
 - a long table (TSV/CSV/Parquet) with ``sample_id``, ``protein_id`` and either
   ``sense`` (plus optional ``antisense``) or ``count_s1`` and ``count_s2``
-  (featureCounts ``-s 1`` / ``-s 2`` counts; the orientation holding more reads
-  in a sample is taken as sense unless the sample metadata gives
-  ``sense_orientation`` = ``s1`` or ``s2``);
+  (featureCounts ``-s 1`` / ``-s 2`` counts; sense is the orientation that most
+  genes with >= 10 fragments favor, or the one holding more fragments when fewer
+  than 20 genes qualify, unless the sample metadata gives
+  ``sense_orientation`` = ``s1`` or ``s2``). Strand specificity is the fraction
+  of those genes with more sense than antisense fragments (about 0.5 for an
+  unstranded library);
 - featureCounts tables (``Geneid ... Length <sample>...``), all with one
   orientation given at import (``sense`` or ``antisense``).
 
@@ -42,6 +45,10 @@ import duckdb
 
 DEFAULT_FILENAME = "expression.duckdb"
 SCHEMA_VERSION = 1
+# Orientation vote and strand specificity use genes with at least this many fragments ...
+VOTE_MIN_FRAGMENTS = 10
+# ... when at least this many such genes exist; otherwise fragment totals decide.
+VOTE_MIN_GENES = 20
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS expression_meta (key VARCHAR PRIMARY KEY, value VARCHAR);
@@ -213,15 +220,23 @@ def import_counts(store, sidecar: Path, paths: list[Path], *, fmt: str = "long",
                 "SELECT DISTINCT protein_id FROM _raw r ANTI JOIN _genes g USING (protein_id) LIMIT 3").fetchall()]
             raise ValueError(f"{unknown:,} proteins are absent from the dataset (e.g. {example}); "
                              "pass --allow-unknown-proteins to keep only matching rows")
-        # orientation per sample for s1/s2 input: metadata, else the orientation holding more fragments
-        totals = conn.execute("SELECT sample_id, SUM(s1), SUM(s2) FROM _raw GROUP BY 1 ORDER BY 1").fetchall()
+        # orientation per sample for s1/s2 input: metadata, else a per-gene majority vote (genes with
+        # >= VOTE_MIN_FRAGMENTS), else the orientation holding more fragments. The vote resists a few
+        # loci with huge one-strand counts (ORFs inside abundant non-coding RNAs) that can outweigh
+        # every mRNA in fragment totals.
+        totals = conn.execute(f"""SELECT sample_id, SUM(s1), SUM(s2),
+                                         COUNT(*) FILTER (WHERE s1 + s2 >= {VOTE_MIN_FRAGMENTS} AND s1 > s2),
+                                         COUNT(*) FILTER (WHERE s1 + s2 >= {VOTE_MIN_FRAGMENTS} AND s2 > s1)
+                                  FROM _raw GROUP BY 1 ORDER BY 1""").fetchall()
         sense_of: dict[str, str | None] = {}
-        for sample, t1, t2 in totals:
+        for sample, t1, t2, v1, v2 in totals:
             given = (metadata.get(sample) or {}).get("sense_orientation", "").strip()
             if t1 is None and t2 is None:
                 sense_of[sample] = None
             elif given in ("s1", "s2"):
                 sense_of[sample] = given
+            elif v1 + v2 >= VOTE_MIN_GENES and v1 != v2:
+                sense_of[sample] = "s1" if v1 > v2 else "s2"
             else:
                 sense_of[sample] = "s1" if (t1 or 0) >= (t2 or 0) else "s2"
         conn.register("_orient", pd.DataFrame(list(sense_of.items()), columns=["sample_id", "o"]))
@@ -239,9 +254,17 @@ def import_counts(store, sidecar: Path, paths: list[Path], *, fmt: str = "long",
                         WHERE gene_counts.sample_id = _new.sample_id AND gene_counts.protein_id = _new.protein_id""")
         conn.execute("INSERT INTO gene_counts SELECT sample_id, protein_id, bin_id, gene_length, sense, antisense FROM _new")
         for sample in samples:
-            s, a = conn.execute("SELECT SUM(sense), SUM(antisense) FROM gene_counts WHERE sample_id = ?",
-                                [sample]).fetchone()
-            spec = (s / (s + a)) if s is not None and a is not None and (s + a) else None
+            s, a, n_vote, n_sense = conn.execute(
+                f"""SELECT SUM(sense), SUM(antisense),
+                           COUNT(*) FILTER (WHERE sense + antisense >= {VOTE_MIN_FRAGMENTS}),
+                           COUNT(*) FILTER (WHERE sense + antisense >= {VOTE_MIN_FRAGMENTS} AND sense > antisense)
+                    FROM gene_counts WHERE sample_id = ?""", [sample]).fetchone()
+            if a is None or s is None:
+                spec = None
+            elif n_vote >= VOTE_MIN_GENES:
+                spec = n_sense / n_vote
+            else:
+                spec = (s / (s + a)) if (s + a) else None
             conn.execute(
                 """INSERT INTO rna_samples VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (sample_id) DO UPDATE SET
                    metadata = COALESCE(excluded.metadata, rna_samples.metadata),

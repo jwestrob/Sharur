@@ -37,7 +37,7 @@ sharur import-expression gene_counts.parquet --db data/my_dataset/sharur.duckdb 
 
 The table needs `protein_id` and `overlap_bp` (`rna_name` is kept as detail). Flagged genes leave every query's numerators, denominators and rankings; `--include-flagged` (or `include_flagged=True`) keeps them.
 
-With `count_s1`/`count_s2`, the orientation that holds more fragments in a library is taken as sense, unless the samples table gives `sense_orientation` (`s1` or `s2`). The sample record keeps the strand specificity (sense / (sense + antisense)); a value near 0.5 means an unstranded library. Proteins must exist in the dataset; `--allow-unknown-proteins` keeps the matching rows. Re-importing a sample replaces its rows.
+With `count_s1`/`count_s2`, sense is the orientation favored by most genes with at least 10 fragments (fragment totals decide when fewer than 20 genes qualify), unless the samples table gives `sense_orientation` (`s1` or `s2`). The per-gene vote matters for metatranscriptomes: a handful of ORFs inside abundant non-coding RNAs can collect more one-strand fragments than every mRNA in the library together. The sample record keeps the strand specificity, the fraction of those genes with more sense than antisense fragments; about 0.5 means an unstranded library. Proteins must exist in the dataset; `--allow-unknown-proteins` keeps the matching rows. Re-importing a sample replaces its rows.
 
 ## Questions you can ask
 

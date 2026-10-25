@@ -11,6 +11,7 @@ from sharur.expression import (
     genome_genes,
     genome_genes_markdown,
     import_counts,
+    import_gene_flags,
     samples,
 )
 from sharur.storage.duckdb_store import DuckDBStore
@@ -59,6 +60,26 @@ def test_orientation_is_the_strand_holding_more_fragments(loaded):
     assert meta["r1"]["sense_fragments"] == 420
     assert math.isclose(meta["r1"]["strand_specificity"], 420 / 424)
     assert math.isclose(meta["r2"]["strand_specificity"], 200 / 204)
+
+
+def test_gene_vote_resists_a_one_strand_hotspot(tmp_path):
+    store = DuckDBStore()
+    rows = ", ".join(f"('g{i}', 'c1', 'A', {i * 1000 + 1}, {i * 1000 + 300}, '+', {i}, 100)" for i in range(26))
+    store.conn.execute(f"""
+        INSERT INTO bins (bin_id) VALUES ('A');
+        INSERT INTO contigs (contig_id, bin_id, length) VALUES ('c1', 'A', 30000);
+        INSERT INTO proteins (protein_id, contig_id, bin_id, start, end_coord, strand, gene_index, sequence_length)
+        VALUES {rows};""")
+    # 25 mRNAs read on s2; one ORF inside an abundant non-coding RNA collects 100,000 fragments on s1
+    lines = ["sample_id\tprotein_id\tcount_s1\tcount_s2", "r\tg0\t100000\t0"]
+    lines += [f"r\tg{i}\t2\t50" for i in range(1, 26)]
+    path = tmp_path / "counts.tsv"
+    path.write_text("\n".join(lines) + "\n")
+    result = import_counts(store, tmp_path / "e.duckdb", [path])
+    assert result["sense_orientation"] == {"r": "s2"}
+    meta = samples(tmp_path / "e.duckdb")[0]
+    assert math.isclose(meta["strand_specificity"], 25 / 26)
+    assert meta["sense_fragments"] == 25 * 50
 
 
 def test_metadata_orientation_overrides_auto(tmp_path):
@@ -139,8 +160,6 @@ def test_feature_expression_share_and_within_genome_rank(loaded):
 
 
 def test_flagged_genes_leave_every_query(loaded, tmp_path):
-    from sharur.expression import import_gene_flags
-
     store, sidecar, _ = loaded
     flags = tmp_path / "overlap.tsv"
     flags.write_text("protein_id\trfam_acc\trna_name\toverlap_bp\toverlap_fraction\tsame_strand\n"
