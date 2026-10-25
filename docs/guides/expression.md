@@ -4,7 +4,7 @@ With metatranscriptome reads mapped to a dataset's contigs, Sharur answers which
 
 ## Getting counts in
 
-Map each RNA library to all dataset contigs at once (competitive mapping), keep primary alignments that pass your identity and aligned-fraction filters, and count fragments per CDS with featureCounts. Build the annotation from the dataset itself so gene IDs are protein IDs:
+Map each RNA library to all dataset contigs at once (competitive mapping), keep primary alignments that pass your identity and aligned-fraction filters, remove rRNA fragments, and count fragments per CDS with featureCounts. Build the annotation from the dataset itself so gene IDs are protein IDs:
 
 ```python
 import duckdb
@@ -18,6 +18,8 @@ con.execute("""COPY (SELECT protein_id AS GeneID, contig_id AS Chr, start AS Sta
 featureCounts -p --countReadPairs -s 1 -F SAF -a genes.saf --largestOverlap -o lib.s1.txt lib.bam
 featureCounts -p --countReadPairs -s 2 -F SAF -a genes.saf --largestOverlap -o lib.s2.txt lib.bam
 ```
+
+**Remove rRNA and count structural RNAs alongside the CDS.** Run SortMeRNA (for example 7.0 with `smr_v4.3_default_db`, `--no-best --num_alignments 1`) on the reads in the filtered BAM, and drop every fragment with an rRNA hit on either mate. Each pair aligns independently, so filtering the existing BAM by read name matches a remap of the cleaned reads. Then append the structural-RNA loci to the SAF under one meta-feature ID per family (for example `RNA__tmRNA`), so `--largestOverlap` assigns reads that straddle a CDS edge to the RNA. Genes that sit beside an abundant RNA need this. For example, `smpB` often overlaps tmRNA by a few tens of bp, below any useful overlap-flag threshold, and otherwise collects the tmRNA reads. Drop the `RNA__` rows before import. They are the per-family structural-RNA totals for QC. When reading featureCounts tables with DuckDB, declare `Chr`, `Start`, `End` and `Strand` as VARCHAR, since meta-feature rows join their coordinates with `;`.
 
 Import either a long table or featureCounts tables:
 
@@ -59,4 +61,5 @@ b.feature_expression(annotation="K00399")
 - **Transcript share** is a genome's share of the sample's sense fragments on dataset genes. It mixes abundance and per-cell activity; compare it with the genome's DNA share from `sharur abundance` for an activity ratio.
 - **Genome TPM and percentile** normalize within one genome (fragments per kb of CDS over all of its CDS, genes without reads included), so they rank a genome's own genes and are comparable across samples with different depths. A percentile near 1.0 means one of the genome's most transcribed genes.
 - **Near-identical genomes** split reads from shared sequence, so their counts are lower bounds; aggregate them at the population level before comparing.
-- rRNA reads fall outside CDS and are left out by construction; the per-library fraction of fragments assigned to CDS reflects rRNA depletion and the share of the community in the dataset.
+- After rRNA removal, the per-library fraction of fragments assigned to CDS reflects how much of the transcribing community the dataset covers, along with the share of other non-coding RNAs (tmRNA, RNase P and SRP RNA stay abundant).
+- **Activity per cell** compares a genome's share of ribosomal-protein transcripts with its share of genome copies (DNA reads / genome length) in the paired DNA sample. Ribosomal-protein genes are conserved, so at population level recount with a tighter identity filter (for example NM <= 1% of the reference span) to keep reads from uncatalogued relatives out.
