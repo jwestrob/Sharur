@@ -1572,6 +1572,81 @@ def coverage_outliers_command(
                else coverage_outliers_markdown(result))
 
 
+@app.command(name="import-expression")
+def import_expression_command(
+    paths: list[Path] = typer.Argument(..., exists=True, dir_okay=False,
+                                       help="Long table (TSV/CSV/Parquet) or featureCounts table(s)."),
+    db: Path = typer.Option(Path(DEFAULT_DB), "--db", "-d", help="Core DuckDB (validation and sidecar location)."),
+    fmt: str = typer.Option("long", "--format", help="long (sample_id, protein_id, sense|count_s1/count_s2) "
+                                                     "or featurecounts."),
+    orientation: str = typer.Option("sense", "--orientation",
+                                    help="featureCounts tables: sense or antisense counts."),
+    samples_file: Path | None = typer.Option(None, "--samples", help="TSV/CSV with sample_id and metadata columns "
+                                             "(optional sense_orientation = s1 or s2)."),
+    sidecar: Path | None = typer.Option(None, "--sidecar", help="Default: expression.duckdb beside --db."),
+    allow_unknown: bool = typer.Option(False, "--allow-unknown-proteins",
+                                       help="Keep matching rows when some proteins are absent from the dataset."),
+):
+    """Import per-sample gene (CDS) read counts from metatranscriptomes into the expression sidecar."""
+    from sharur.expression import default_path, import_counts
+    from sharur.storage.duckdb_store import DuckDBStore
+
+    target = sidecar or default_path(db)
+    try:
+        with DuckDBStore(str(db), read_only=True) as store:
+            result = import_counts(store, target, list(paths), fmt=fmt, orientation=orientation,
+                                   sample_metadata=samples_file, allow_unknown_proteins=allow_unknown)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"Imported {result['rows']:,} gene rows for {len(result['samples'])} samples into {target}"
+               + (f" ({result['unknown_proteins']:,} unknown proteins skipped)" if result["unknown_proteins"] else ""))
+
+
+@app.command(name="expression")
+def expression_command(
+    db: Path = typer.Option(Path(DEFAULT_DB), "--db", "-d", help="Core DuckDB."),
+    sample: list[str] = typer.Option([], "--sample", help="RNA sample(s); repeatable (default: all)."),
+    bin_id: str | None = typer.Option(None, "--bin", "-b", help="Most expressed genes of this genome."),
+    predicate: str | None = typer.Option(None, "--predicate", "-p", help="Expression of genes carrying a predicate."),
+    annotation: str | None = typer.Option(None, "--annotation", "-a",
+                                          help="Expression of genes carrying this accession or name."),
+    top: int = typer.Option(10, "--top", "-n", help="Rows shown per sample (markdown)."),
+    sidecar: Path | None = typer.Option(None, "--sidecar", help="Default: expression.duckdb beside --db."),
+    output_format: BriefFormat = typer.Option(BriefFormat.markdown, "--format", "-f", help="markdown or json"),
+):
+    """Genome transcript share per RNA sample, a genome's top genes, or the expression of a feature."""
+    from sharur.expression import (
+        default_path,
+        feature_expression,
+        feature_expression_markdown,
+        genome_expression,
+        genome_expression_markdown,
+        genome_genes,
+        genome_genes_markdown,
+    )
+    from sharur.storage.duckdb_store import DuckDBStore
+
+    target = sidecar or default_path(db)
+    try:
+        if predicate or annotation:
+            with DuckDBStore(str(db), read_only=True) as store:
+                result = feature_expression(store, target, predicate=predicate, annotation=annotation,
+                                            sample_ids=sample or None)
+            text = feature_expression_markdown(result, top=top)
+        elif bin_id:
+            with DuckDBStore(str(db), read_only=True) as store:
+                result = genome_genes(store, target, bin_id, sample_ids=sample or None, top=top)
+            text = genome_genes_markdown(result)
+        else:
+            result = genome_expression(target, sample_ids=sample or None)
+            text = genome_expression_markdown(result, top=top)
+    except (FileNotFoundError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(json.dumps(result, indent=2, default=str) if output_format == BriefFormat.json else text)
+
+
 @app.command(name="browse")
 def browse_command(
     db: Path = typer.Option(Path(DEFAULT_DB), "--db", "-d", help="Dataset DuckDB (opened read-only)."),

@@ -168,6 +168,7 @@ b.modules(bins=[BIN], min_completeness=0.75)   # KEGG module completeness (needs
 b.locus_modules(protein_id, window=10)          # module steps co-encoded near a protein
 b.search_architecture("TPR_* {10,}")           # ordered-domain patterns (docs/guides/architecture-search.md)
 b.abundance(); b.feature_abundance(predicate="nife_group1")   # needs coverage (docs/guides/abundance.md)
+b.expression(); b.genome_genes(BIN); b.feature_expression(annotation="K00399")  # needs RNA counts (docs/guides/expression.md)
 # CLI: sharur card PROTEIN --db ...;  sharur why PROTEIN PREDICATE --db ...
 ```
 

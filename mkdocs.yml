@@ -68,6 +68,7 @@ nav:
       - Interpreting annotations: biological_interpretation.md
       - Domain-architecture search: guides/architecture-search.md
       - Abundance across samples: guides/abundance.md
+      - Expression from metatranscriptomes: guides/expression.md
       - CRISPR-Cas subtypes: guides/crispr-cas.md
       - Dataset health: guides/health.md
       - Browsing a dataset: guides/browser.md

@@ -1307,6 +1307,32 @@ class Sharur:
 
         return coverage_outliers(self._abundance_sidecar(), bin_id, min_log2=min_log2)
 
+    def _expression_sidecar(self):
+        from sharur.expression import default_path
+
+        return default_path(self.store.db_path)
+
+    def expression(self, samples: list[str] | None = None, bins: list[str] | None = None) -> list[dict]:
+        """Genome transcript share per RNA sample from the expression sidecar (``sharur import-expression``)."""
+        from sharur.expression import genome_expression
+
+        return genome_expression(self._expression_sidecar(), sample_ids=samples, bins=bins)
+
+    def genome_genes(self, bin_id: str, samples: list[str] | None = None, top: int = 20) -> dict:
+        """Most expressed genes of one genome per RNA sample (within-genome TPM and percentile)."""
+        from sharur.expression import genome_genes
+
+        return genome_genes(self.store, self._expression_sidecar(), bin_id, sample_ids=samples, top=top)
+
+    def feature_expression(self, predicate: str | None = None, annotation: str | None = None,
+                           samples: list[str] | None = None, min_genome_fragments: int = 100) -> dict:
+        """Share of each RNA sample's fragments on proteins carrying a feature, and their within-genome rank."""
+        from sharur.expression import feature_expression
+
+        return feature_expression(self.store, self._expression_sidecar(), predicate=predicate,
+                                  annotation=annotation, sample_ids=samples,
+                                  min_genome_fragments=min_genome_fragments)
+
     def architecture(self, protein_id: str, sources: tuple[str, ...] = ("pfam",)) -> list[dict]:
         """One protein's overlap-resolved domains, N- to C-terminal."""
         from sharur.architecture import architecture
