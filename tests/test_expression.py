@@ -136,3 +136,26 @@ def test_feature_expression_share_and_within_genome_rank(loaded):
     assert "K00399" in feature_expression_markdown(result)
     with pytest.raises(ValueError, match="exactly one"):
         feature_expression(store, sidecar)
+
+
+def test_flagged_genes_leave_every_query(loaded, tmp_path):
+    from sharur.expression import import_gene_flags
+
+    store, sidecar, _ = loaded
+    flags = tmp_path / "overlap.tsv"
+    flags.write_text("protein_id\trfam_acc\trna_name\toverlap_bp\toverlap_fraction\tsame_strand\n"
+                     "a1_2\tRF00177\tSSU_rRNA_bacteria\t300\t1.0\ttrue\n"
+                     "a1_1\tRF00005\ttRNA\t20\t0.02\tfalse\n")
+    result = import_gene_flags(sidecar, flags)
+    assert result["flagged_proteins"] == 1  # a1_1 overlaps by 20 bp, below the 60 bp default
+    r1 = {r["bin_id"]: r for r in genome_expression(sidecar, sample_ids=["r1"])}
+    assert r1["A"]["fragments"] == 90
+    assert math.isclose(r1["A"]["transcript_share"], 90 / 120)
+    assert genome_expression(sidecar, sample_ids=["r1"], include_flagged=True)[0]["fragments"] == 390
+    (s,) = genome_genes(store, sidecar, "A", sample_ids=["r1"])["samples"]
+    assert s["genes"] == 2
+    assert all(g["protein_id"] != "a1_2" for g in s["top"])
+    mcr = feature_expression(store, sidecar, annotation="K00399", min_genome_fragments=10)
+    assert {x["sample_id"]: x["fragments"] for x in mcr["samples"]} == {"r1": 0, "r2": 0}
+    meta = {m["sample_id"]: m for m in samples(sidecar)}
+    assert meta["r1"]["flagged_sense_fragments"] == 300

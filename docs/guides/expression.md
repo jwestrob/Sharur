@@ -28,6 +28,15 @@ sharur import-expression gene_counts.parquet --db data/my_dataset/sharur.duckdb 
 sharur import-expression lib.s2.txt --format featurecounts --orientation sense --db data/my_dataset/sharur.duckdb
 ```
 
+**Flag CDS inside structural RNAs.** Gene callers place ORFs inside rRNA, tRNA, tmRNA, RNase P, SRP and 6S RNA genes, and reads from those abundant RNAs then count as "expression" of the ORFs, on either strand. Annotate the RNAs (for example Infernal `cmsearch --cut_ga` with those Rfam families), intersect them with the CDS, and pass the overlap table at import:
+
+```bash
+sharur import-expression gene_counts.parquet --db data/my_dataset/sharur.duckdb \
+  --gene-flags cds_rna_overlap.tsv --min-overlap-bp 60
+```
+
+The table needs `protein_id` and `overlap_bp` (`rna_name` is kept as detail). Flagged genes leave every query's numerators, denominators and rankings; `--include-flagged` (or `include_flagged=True`) keeps them.
+
 With `count_s1`/`count_s2`, the orientation that holds more fragments in a library is taken as sense, unless the samples table gives `sense_orientation` (`s1` or `s2`). The sample record keeps the strand specificity (sense / (sense + antisense)); a value near 0.5 means an unstranded library. Proteins must exist in the dataset; `--allow-unknown-proteins` keeps the matching rows. Re-importing a sample replaces its rows.
 
 ## Questions you can ask

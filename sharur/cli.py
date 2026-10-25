@@ -1586,9 +1586,13 @@ def import_expression_command(
     sidecar: Path | None = typer.Option(None, "--sidecar", help="Default: expression.duckdb beside --db."),
     allow_unknown: bool = typer.Option(False, "--allow-unknown-proteins",
                                        help="Keep matching rows when some proteins are absent from the dataset."),
+    gene_flags: Path | None = typer.Option(None, "--gene-flags", exists=True, dir_okay=False,
+                                           help="CDS overlap table (protein_id, overlap_bp, rna_name) marking genes "
+                                                "inside structural RNAs; flagged genes leave expression queries."),
+    min_overlap_bp: int = typer.Option(60, "--min-overlap-bp", help="Overlap that flags a CDS (--gene-flags)."),
 ):
     """Import per-sample gene (CDS) read counts from metatranscriptomes into the expression sidecar."""
-    from sharur.expression import default_path, import_counts
+    from sharur.expression import default_path, import_counts, import_gene_flags
     from sharur.storage.duckdb_store import DuckDBStore
 
     target = sidecar or default_path(db)
@@ -1601,6 +1605,10 @@ def import_expression_command(
         raise typer.Exit(1) from exc
     typer.echo(f"Imported {result['rows']:,} gene rows for {len(result['samples'])} samples into {target}"
                + (f" ({result['unknown_proteins']:,} unknown proteins skipped)" if result["unknown_proteins"] else ""))
+    if gene_flags:
+        flags = import_gene_flags(target, gene_flags, min_overlap_bp=min_overlap_bp)
+        typer.echo(f"Flagged {flags['flagged_proteins']:,} proteins overlapping structural RNAs "
+                   f"by >= {min_overlap_bp} bp")
 
 
 @app.command(name="expression")
@@ -1612,6 +1620,8 @@ def expression_command(
     annotation: str | None = typer.Option(None, "--annotation", "-a",
                                           help="Expression of genes carrying this accession or name."),
     top: int = typer.Option(10, "--top", "-n", help="Rows shown per sample (markdown)."),
+    include_flagged: bool = typer.Option(False, "--include-flagged",
+                                         help="Keep genes flagged as overlapping structural RNAs."),
     sidecar: Path | None = typer.Option(None, "--sidecar", help="Default: expression.duckdb beside --db."),
     output_format: BriefFormat = typer.Option(BriefFormat.markdown, "--format", "-f", help="markdown or json"),
 ):
@@ -1632,14 +1642,15 @@ def expression_command(
         if predicate or annotation:
             with DuckDBStore(str(db), read_only=True) as store:
                 result = feature_expression(store, target, predicate=predicate, annotation=annotation,
-                                            sample_ids=sample or None)
+                                            sample_ids=sample or None, include_flagged=include_flagged)
             text = feature_expression_markdown(result, top=top)
         elif bin_id:
             with DuckDBStore(str(db), read_only=True) as store:
-                result = genome_genes(store, target, bin_id, sample_ids=sample or None, top=top)
+                result = genome_genes(store, target, bin_id, sample_ids=sample or None, top=top,
+                                      include_flagged=include_flagged)
             text = genome_genes_markdown(result)
         else:
-            result = genome_expression(target, sample_ids=sample or None)
+            result = genome_expression(target, sample_ids=sample or None, include_flagged=include_flagged)
             text = genome_expression_markdown(result, top=top)
     except (FileNotFoundError, ValueError) as exc:
         typer.echo(str(exc), err=True)

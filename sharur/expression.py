@@ -19,6 +19,11 @@ Counts are fragments assigned to a protein's CDS. Derived quantities:
   sample (``tpm``) or over one genome's genes (``genome_tpm``);
 - within-genome percentile: a gene's rank by fragments per kb among all CDS of
   its genome (genes without reads included), 1.0 = the most expressed.
+
+Gene flags (``import_gene_flags``) mark CDS whose counts are not mRNA, such as
+ORFs called inside rRNA, tRNA, tmRNA, RNase P, SRP or 6S RNA genes; reads from
+those abundant RNAs land on them. Queries leave flagged genes out of every
+numerator, denominator and ranking unless ``include_flagged=True``.
 """
 
 from __future__ import annotations
@@ -58,6 +63,12 @@ CREATE TABLE IF NOT EXISTS gene_counts (
     sense BIGINT,
     antisense BIGINT,
     PRIMARY KEY (sample_id, protein_id)
+);
+CREATE TABLE IF NOT EXISTS gene_flags (
+    protein_id VARCHAR NOT NULL,
+    flag VARCHAR NOT NULL,
+    detail VARCHAR,
+    PRIMARY KEY (protein_id, flag)
 );
 CREATE TABLE IF NOT EXISTS imports (
     path VARCHAR,
@@ -253,17 +264,57 @@ def import_counts(store, sidecar: Path, paths: list[Path], *, fmt: str = "long",
             "sense_orientation": sense_of}
 
 
+def import_gene_flags(sidecar: Path, path: Path, *, flag: str = "structural_rna_overlap",
+                      min_overlap_bp: int = 60) -> dict[str, Any]:
+    """Flag CDS from an overlap table (protein_id, overlap_bp and optional rna_name/rfam_acc columns).
+
+    Rows with overlap_bp >= min_overlap_bp flag their protein; earlier flags of the same name are replaced.
+    """
+    conn = connect(sidecar)
+    try:
+        cols = {c.lower() for c in conn.execute(f"DESCRIBE SELECT * FROM {_relation(conn, path)}").df()["column_name"]}
+        if not {"protein_id", "overlap_bp"} <= cols:
+            raise ValueError(f"{path}: needs protein_id and overlap_bp columns")
+        label = "rna_name" if "rna_name" in cols else ("rfam_acc" if "rfam_acc" in cols else "NULL")
+        conn.execute("BEGIN TRANSACTION")
+        conn.execute("DELETE FROM gene_flags WHERE flag = ?", [flag])
+        conn.execute(f"""INSERT INTO gene_flags
+            SELECT protein_id, ?, string_agg(DISTINCT {label} || ':' || overlap_bp, ',')
+            FROM {_relation(conn, path)} WHERE overlap_bp >= ? GROUP BY protein_id""", [flag, min_overlap_bp])
+        n = conn.execute("SELECT COUNT(*) FROM gene_flags WHERE flag = ?", [flag]).fetchone()[0]
+        conn.execute("INSERT INTO imports VALUES (?, ?, ?, ?, ?, ?)",
+                     [str(path), _sha256(path), f"gene_flags:{flag}", [], n, datetime.now(timezone.utc)])
+        conn.execute("COMMIT")
+    except Exception:
+        with contextlib.suppress(duckdb.Error):
+            conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.close()
+    return {"sidecar": str(sidecar), "flag": flag, "flagged_proteins": n, "min_overlap_bp": min_overlap_bp}
+
+
 # --------------------------------------------------------------------------- #
 # Queries
 # --------------------------------------------------------------------------- #
 
 
+def _unflagged(include_flagged: bool, alias: str = "") -> str:
+    col = f"{alias}.protein_id" if alias else "protein_id"
+    return "" if include_flagged else f" AND {col} NOT IN (SELECT protein_id FROM gene_flags)"
+
+
+def _flagged_ids(conn) -> set[str]:
+    return {r[0] for r in conn.execute("SELECT DISTINCT protein_id FROM gene_flags").fetchall()}
+
+
 def samples(sidecar: Path) -> list[dict[str, Any]]:
     with connect(sidecar, read_only=True) as conn:
         return [{"sample_id": s, "metadata": json.loads(m) if m else {}, "sense_orientation": o,
-                 "strand_specificity": p, "sense_fragments": n, "genes": g}
-                for s, m, o, p, n, g in conn.execute(
+                 "strand_specificity": p, "sense_fragments": n, "flagged_sense_fragments": f, "genes": g}
+                for s, m, o, p, n, f, g in conn.execute(
                     """SELECT s.sample_id, s.metadata, s.sense_orientation, s.strand_specificity, s.sense_fragments,
+                              COALESCE(SUM(c.sense) FILTER (WHERE c.protein_id IN (SELECT protein_id FROM gene_flags)), 0),
                               COUNT(c.protein_id) FILTER (WHERE c.sense > 0)
                        FROM rna_samples s LEFT JOIN gene_counts c USING (sample_id) GROUP BY ALL ORDER BY 1""").fetchall()]
 
@@ -275,14 +326,14 @@ def _sample_clause(sample_ids: list[str] | None, column: str = "sample_id") -> t
 
 
 def genome_expression(sidecar: Path, *, sample_ids: list[str] | None = None,
-                      bins: list[str] | None = None) -> list[dict[str, Any]]:
+                      bins: list[str] | None = None, include_flagged: bool = False) -> list[dict[str, Any]]:
     """Per genome and sample: sense fragments, genes with reads, share of the sample's sense fragments."""
     clause, params = _sample_clause(sample_ids)
     with connect(sidecar, read_only=True) as conn:
         rows = conn.execute(f"""
             WITH g AS (SELECT sample_id, bin_id, SUM(sense) AS fragments,
                               COUNT(*) FILTER (WHERE sense > 0) AS genes_with_reads
-                       FROM gene_counts WHERE TRUE {clause} GROUP BY 1, 2)
+                       FROM gene_counts WHERE TRUE {clause}{_unflagged(include_flagged)} GROUP BY 1, 2)
             SELECT sample_id, bin_id, fragments, genes_with_reads,
                    fragments / NULLIF(SUM(fragments) OVER (PARTITION BY sample_id), 0) AS transcript_share
             FROM g ORDER BY sample_id, fragments DESC, bin_id""", params).fetchall()
@@ -306,7 +357,7 @@ def _labels(store, protein_ids: list[str]) -> dict[str, str]:
 
 
 def genome_genes(store, sidecar: Path, bin_id: str, *, sample_ids: list[str] | None = None,
-                 top: int = 20, min_fragments: int = 0) -> dict[str, Any]:
+                 top: int = 20, min_fragments: int = 0, include_flagged: bool = False) -> dict[str, Any]:
     """Most expressed genes of one genome per sample, with within-genome TPM and percentile."""
     import pandas as pd  # noqa: PLC0415
 
@@ -317,8 +368,10 @@ def genome_genes(store, sidecar: Path, bin_id: str, *, sample_ids: list[str] | N
         raise ValueError(f"No proteins for genome {bin_id}")
     clause, params = _sample_clause(sample_ids)
     with connect(sidecar, read_only=True) as conn:
-        counts = conn.execute(f"SELECT sample_id, protein_id, sense FROM gene_counts WHERE bin_id = ? {clause}",
-                              [bin_id, *params]).df()
+        counts = conn.execute(f"SELECT sample_id, protein_id, sense FROM gene_counts WHERE bin_id = ? {clause}"
+                              f"{_unflagged(include_flagged)}", [bin_id, *params]).df()
+        flagged = set() if include_flagged else _flagged_ids(conn)
+    genes = genes[~genes["protein_id"].isin(flagged)]
     result = []
     for sample, part in counts.groupby("sample_id"):
         if part["sense"].sum() < max(min_fragments, 1):
@@ -339,7 +392,8 @@ def genome_genes(store, sidecar: Path, bin_id: str, *, sample_ids: list[str] | N
 
 
 def feature_expression(store, sidecar: Path, *, annotation: str | None = None, predicate: str | None = None,
-                       sample_ids: list[str] | None = None, min_genome_fragments: int = 100) -> dict[str, Any]:
+                       sample_ids: list[str] | None = None, min_genome_fragments: int = 100,
+                       include_flagged: bool = False) -> dict[str, Any]:
     """Share of each sample's sense fragments on proteins carrying a feature, and where the feature's genes
     rank inside their own genomes (samples where the genome has >= min_genome_fragments)."""
     import pandas as pd  # noqa: PLC0415
@@ -365,11 +419,14 @@ def feature_expression(store, sidecar: Path, *, annotation: str | None = None, p
         columns=["protein_id", "bin_id", "gene_length"])
     clause, params = _sample_clause(sample_ids)
     with connect(sidecar, read_only=True) as conn:
-        totals = dict(conn.execute(f"SELECT sample_id, SUM(sense) FROM gene_counts WHERE TRUE {clause} GROUP BY 1",
-                                   params).fetchall())
+        totals = dict(conn.execute(f"SELECT sample_id, SUM(sense) FROM gene_counts WHERE TRUE {clause}"
+                                   f"{_unflagged(include_flagged)} GROUP BY 1", params).fetchall())
+        flagged = set() if include_flagged else _flagged_ids(conn)
         conn.register("_bins", pd.DataFrame({"bin_id": bins}))
         counts = conn.execute(f"SELECT sample_id, protein_id, sense FROM gene_counts JOIN _bins USING (bin_id) "
-                              f"WHERE TRUE {clause}", params).df()
+                              f"WHERE TRUE {clause}{_unflagged(include_flagged)}", params).df()
+    genes = genes[~genes["protein_id"].isin(flagged)]
+    carrier_set -= flagged
     per_sample, per_genome = [], {}
     for sample in sorted(totals):
         part = counts[counts["sample_id"] == sample]
@@ -383,6 +440,8 @@ def feature_expression(store, sidecar: Path, *, annotation: str | None = None, p
                 continue
             pct = g["rate"].rank(pct=True, method="max")
             mine = pct[g["protein_id"].isin(carrier_set)]
+            if mine.empty:
+                continue
             per_genome.setdefault(bin_id, []).append({"sample_id": sample, "genome_fragments": int(g["sense"].sum()),
                                                       "best_percentile": float(mine.max())})
     genomes = [{"bin_id": b, "samples": len(v),
