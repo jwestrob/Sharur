@@ -1,6 +1,6 @@
 # Structure Prediction & Foldseek Skill
 
-Structure-based functional annotation for proteins where sequence annotation fails. Combines ESM3 structure prediction with Foldseek structural homology search.
+Structure-based functional annotation for proteins where sequence annotation fails. Folds proteins with Protenix v2 (the default, with an MSA) or ESMFold2, then searches the structure with Foldseek.
 
 **When to use:**
 - Unknown/ambiguous proteins with zero or few PFAM/KEGG hits
@@ -31,68 +31,106 @@ work must also obey the project-wide one-MPS-process rule.
 ```python
 from sharur.operators import Sharur
 b = Sharur("data/DATASET/sharur.duckdb", read_only=True)
-
-# Requires ESM_API_KEY for structure prediction
-# export ESM_API_KEY=your_key
 ```
+
+Folding runs on a GPU node with Protenix v2 or ESMFold2 installed. The quick-look
+`b.predict_structure` operator calls the ESM3 API and needs `ESM_API_KEY`.
 
 ---
 
-## Structure Prediction (ESM3)
+## Structure Prediction
 
-### For database proteins
+Fold with **Protenix v2 and an MSA** by default. Use **ESMFold2** for a fast fold when you
+skip the MSA search; ESMFold2 also improves when given an MSA. On matched inputs, Protenix v2
+with an MSA gives the most confident models. Both run on a GPU, write mmCIF, and fold
+proteins well past 1,024 aa.
+
+| Folder | Use it for | Confidence values |
+|--------|------------|-------------------|
+| **Protenix v2 + MSA** (default) | Structures you will report; multimers, ligands, template-guided folds | `plddt`, `ptm`, `iptm`, `ranking_score` in each `*_summary_confidence_sample_*.json` |
+| **ESMFold2** | Fast screening of many proteins; folds without an MSA search (an MSA helps) | `plddt`, `ptm`, `iptm` on the fold result |
+| ESM3 API (`b.predict_structure`) | Quick look at a database protein of ≤ 1,024 aa | `plddt_mean` in `result.raw` |
+
+### Export the sequence
+
+```python
+seq, length = b.store.execute(
+    "SELECT sequence, sequence_length FROM proteins WHERE protein_id = ?", [protein_id])[0]
+with open(f"structures/{protein_id}.faa", "w") as f:
+    f.write(f">{protein_id}\n{seq}\n")
+```
+
+### Build the MSA
+
+Search the sequence with `colabfold_search` (or an iterative `mmseqs search` against a
+lineage-relevant database) and keep the result as an a3m. For windows of a giant protein,
+build one MSA for the full protein and slice it to each window's coordinates, keeping the
+insertion columns that fall inside the window.
+
+### Protenix v2
+
+Input JSON (one entry per job; `count` > 1 folds a homo-oligomer):
+
+```json
+[{"name": "PROTEIN_ID",
+  "sequences": [{"proteinChain": {"sequence": "<sequence>", "count": 1,
+                                  "unpairedMsaPath": "/abs/path/PROTEIN_ID.a3m"}}]}]
+```
+
+```bash
+export PROTENIX_ROOT_DIR=/path/to/protenix-v2      # the install's data directory
+protenix pred -i PROTEIN_ID.json -o out/PROTEIN_ID -n protenix-v2 -s 101 -e 5 \
+    --kalign_binary_path "$(command -v kalign)"
+```
+
+- `-e 5` draws five diffusion samples. Protenix writes them unranked: rank the samples by
+  `plddt` from their `*_summary_confidence_sample_*.json` files and carry the best one forward.
+- For a homo-oligomer, give the unpaired MSA alone; identical chains make pairing degenerate.
+- Templates: add `templatesPath` (an hmmsearch-format a3m) to the chain and pass
+  `--use_template True`. The switch defaults to off, and a `templatesPath` takes effect only
+  with it. Template hits resolve to mmCIFs under `$PROTENIX_ROOT_DIR/mmcif`.
+- Protenix is a command-line tool, so each job loads the model; batch jobs through a queue
+  that holds the GPU.
+
+### ESMFold2
+
+```python
+from esm.models.esmfold2 import ESMFold2InputBuilder
+from esm.utils.msa import MSA
+from esm.utils.structure.input_builder import ProteinInput, StructurePredictionInput
+from transformers.models.esmfold2.modeling_esmfold2 import ESMFold2Model
+
+model = ESMFold2Model.from_pretrained("biohub/ESMFold2").cuda().eval()
+model.set_chunk_size(8)
+builder = ESMFold2InputBuilder()
+
+msa = MSA.from_a3m(path=f"{protein_id}.a3m", remove_insertions=True, max_sequences=4096)  # or None
+spi = StructurePredictionInput(sequences=[ProteinInput(id=["A"], sequence=seq, msa=msa)])
+res = builder.fold(model, spi, num_loops=3, num_sampling_steps=200,
+                   num_diffusion_samples=1, seed=101)
+best = max(res if isinstance(res, list) else [res], key=lambda r: float(r.plddt.float().mean()))
+with open(f"structures/{protein_id}.cif", "w") as f:
+    f.write(best.complex.to_mmcif())
+```
+
+- Load the model once and fold many proteins against it.
+- pLDDT can come back on a 0–1 scale; multiply by 100 before comparing it with Protenix.
+- Around 2,500 aa on one H200, chunk size 8, the fused kernel backend and one diffusion
+  sample keep the fold in memory.
+- `DistogramConditioning(chain_id=..., distogram=...)` conditions the fold on a template's
+  Cα distance matrix.
+
+### ESM3 API: quick look (≤ 1,024 aa)
 
 ```python
 result = b.predict_structure("protein_id", output_path="structures/protein_id.pdb")
-# Auto-cleans sequence (removes stop codons, non-standard AAs)
-# Auto-updates manifest
+result = b.batch_predict_structures(protein_ids=["id1", "id2"], output_dir="structures/",
+                                    max_length=1024)   # reports longer proteins as skipped
 ```
 
-### For arbitrary sequences (no DB lookup)
-
-```python
-from sharur.operators.structure import predict_structure_from_sequence
-result = predict_structure_from_sequence(
-    sequence="MKVL...",
-    output_path="structures/custom.pdb",
-    name="my_protein"
-)
-```
-
-### Batch prediction
-
-```python
-result = b.batch_predict_structures(
-    protein_ids=["id1", "id2", "id3"],
-    output_dir="structures/",
-    max_length=1024
-)
-# Filenames: {protein_id}.pdb
-# Skips proteins > max_length (reports them as skipped)
-```
-
-### ESM3 limits and workarounds
-
-- **Max 1024 aa** (ESM3 open model hard limit)
-- Proteins >1024 aa return an error, not a truncated structure
-- **Do NOT skip giant proteins.** Export FASTA for external folding:
-
-```python
-# For >1024 aa proteins, export for external tools
-rows = b.store.execute("""
-    SELECT protein_id, sequence, sequence_length
-    FROM proteins WHERE protein_id = ?
-""", [protein_id])
-
-if rows[0][2] > 1024:
-    # Option 1: ESMFold server (up to 2048 aa, sometimes longer)
-    # https://esmatlas.com/resources?action=fold
-    # Option 2: Local ESMFold on H200/A100 (no length limit with enough VRAM)
-    # Option 3: AlphaFold2 via ColabFold
-    with open(f"structures/{protein_id}.fasta", "w") as f:
-        f.write(f">{protein_id}\n{rows[0][1]}\n")
-    print(f"Exported {rows[0][2]} aa FASTA for external folding")
-```
+The operator cleans the sequence (stop codons, non-standard residues) and updates the
+manifest. Fold proteins longer than 1,024 aa, and every structure you will report, with
+Protenix v2.
 
 ### pLDDT interpretation
 
@@ -141,6 +179,9 @@ print(format_foldseek_hits(hits.raw, query_name="my_protein"))
 
 ### Local vs web search
 
+- Local Foldseek reads the mmCIF from Protenix or ESMFold2 directly. The web fallback uploads
+  PDB text, so convert the CIF to PDB first (for example with `gemmi convert`) when a database
+  is available only on the web.
 - Local binary auto-detected and execution-tested; `FOLDSEEK_BINARY` overrides discovery
 - Local databases may use nested prefixes or resolved symlink prefixes under `~/.foldseek/`
 - Local is faster and has no rate limits
@@ -287,25 +328,12 @@ length = info[0][0]
 # 3. Get genomic neighborhood (context-first)
 print(b.get_neighborhood(protein_id, window=8, all_annotations=True))
 
-# 4. Predict structure (if <=1024 aa)
-if length <= 1024:
-    result = b.predict_structure(protein_id,
-        output_path=f"structures/{protein_id}.pdb")
-    # Check pLDDT before proceeding to Foldseek
-    plddt = result.raw.get("plddt_mean")
-    if plddt and plddt < 50:
-        print(f"WARNING: Low pLDDT ({plddt:.1f}) — structure may be unreliable")
-else:
-    # Export for external folding
-    seq = b.store.execute("SELECT sequence FROM proteins WHERE protein_id = ?",
-        [protein_id])[0][0]
-    with open(f"structures/{protein_id}.fasta", "w") as f:
-        f.write(f">{protein_id}\n{seq}\n")
-    print(f"Exported {length} aa for external folding (exceeds 1024 aa ESM3 limit)")
+# 4. Fold it: export the sequence, build the MSA, run Protenix v2 (any length)
+#    -> structures/{protein_id}.cif (best-ranked sample). See "Structure Prediction".
+#    Check pLDDT before Foldseek; below 50 the model is unreliable.
 
-# 5. Run Foldseek (if PDB exists)
-pdb_path = f"structures/{protein_id}.pdb"
-hits = b.search_foldseek(pdb_path,
+# 5. Run Foldseek on the folded structure
+hits = b.search_foldseek(f"structures/{protein_id}.cif",
     databases=["afdb50", "pdb100", "afdb-swissprot"], top_k=10)
 
 # 6. MANDATORY: Look up every hit you plan to report
@@ -326,8 +354,8 @@ hits = b.search_foldseek(pdb_path,
 
 | File | Content |
 |------|---------|
-| `structures/{protein_id}.pdb` | Predicted structure |
-| `structures/{protein_id}.fasta` | Exported FASTA for >1024 aa proteins |
+| `structures/{protein_id}.cif` | Predicted structure (best-ranked Protenix v2 or ESMFold2 sample) |
+| `structures/{protein_id}.faa`, `.a3m` | Folding input: sequence and MSA |
 | `structures/foldseek_results.tsv` | Tabular Foldseek results (optional, for batch) |
 | `exploration/findings.jsonl` | Append findings with structural evidence |
 
@@ -338,11 +366,11 @@ hits = b.search_foldseek(pdb_path,
   "id": "E015",
   "title": "DUF1015 is a SerK-family phosphotransferase (Foldseek TM=0.82)",
   "category": "structural_characterization",
-  "description": "Foldseek search of the predicted ESM3 structure for protein X (DUF1015, 312 aa) returned PDB 5X0K (SerK phosphotransferase, E=1e-8, TM-score 0.82). The kinase fold and active-site conservation are consistent with phosphotransferase function. Genomic context shows co-localization with sugar transport genes.",
-  "evidence": "ESM3 pLDDT=78.3; Foldseek top hit PDB 5X0K (TM=0.82, E=1e-8); 3/5 catalytic residues conserved",
+  "description": "Foldseek search of the Protenix v2 structure for protein X (DUF1015, 312 aa) returned PDB 5X0K (SerK phosphotransferase, E=1e-8, TM-score 0.82). The kinase fold and active-site conservation are consistent with phosphotransferase function. Genomic context shows co-localization with sugar transport genes.",
+  "evidence": "Protenix v2 + MSA pLDDT=78.3 (best of 5 samples); Foldseek top hit PDB 5X0K (TM=0.82, E=1e-8); 3/5 catalytic residues conserved",
   "n_genomes": 15,
   "provenance": {
-    "query": "b.predict_structure('protein_X') -> b.search_foldseek('structures/protein_X.pdb')",
+    "query": "protenix pred -n protenix-v2 -e 5 (MSA structures/protein_X.a3m) -> b.search_foldseek('structures/protein_X.cif')",
     "raw_result": "PDB 5X0K: SerK kinase, Thermotoga maritima, 1.8A resolution",
     "accession_verified": "WebFetch('https://www.rcsb.org/structure/5X0K', ...) confirmed phosphotransferase",
     "interpretation": "Structural homology (TM>0.7) to characterized kinase supports phosphotransferase function"

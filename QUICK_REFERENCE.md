@@ -24,7 +24,7 @@ b.get_neighborhood(protein_id, window=5, all_annotations=True)
 
 # Embedding similarity / structure / export
 b.find_similar(protein_id, k=20)
-b.predict_structure(protein_id)
+b.predict_structure(protein_id)          # ESM3 API quick look (≤ 1,024 aa); fold with Protenix v2 per .claude/skills/foldseek.md
 b.search_foldseek_for_protein(protein_id)
 b.export_fasta(protein_ids, "out.faa")
 ```

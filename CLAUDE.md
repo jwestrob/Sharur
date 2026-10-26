@@ -18,7 +18,7 @@ Detailed guides live in `docs/` and `.claude/skills/`. **Read the relevant doc b
 |-----------------|-----------|
 | Running a full 5-phase analysis pipeline | `docs/analysis_workflow.md` |
 | Writing manuscripts or compiling reports | `docs/manuscript_guide.md` |
-| Using tools (Aksha, ELSA, ESM3, Foldseek, V2 atoms) | `docs/tools_reference.md` |
+| Using tools (Aksha, ELSA, Protenix/ESMFold2, Foldseek, V2 atoms) | `docs/tools_reference.md` |
 | Making biological claims or interpreting annotations | `docs/biological_interpretation.md` |
 | Dispatching or working as a subagent | `docs/subagent_guide.md` |
 | Working with V2 predicate system | `docs/predicates_v2.md` |
@@ -63,7 +63,7 @@ rerunning a specific stage, or intentionally customizing the stage sequence. If
 | `literature.md` | Literature/database research for functional ambiguity |
 | `reviewer_2.md` | Adversarial manuscript claim verification |
 | `atlas.md` | Exhaustive genome-by-genome reading |
-| `foldseek.md` | ESM3 structure prediction + Foldseek search |
+| `foldseek.md` | Structure prediction (Protenix v2, ESMFold2) + Foldseek search |
 | `hydrogenase.md` | NiFe/FeFe hydrogenase validation |
 | `synteny.md` | ELSA-powered synteny discovery |
 | `coordinator.md` | Multi-agent analysis orchestration |
@@ -223,7 +223,7 @@ report/draft files remain independently writable.
 | `sharur/predicates/mappings/` | PFAM/KEGG/CAZy/VOGdb → predicate mappings |
 | `sharur/predicates_v2/` | V2 semantic atom system |
 | `config/predicates_v2/` | V2 YAML config: facets, relations, composites |
-| `sharur/operators/structure.py` | ESM3 structure prediction |
+| `sharur/operators/structure.py` | Quick-look structure prediction via the ESM3 API (≤ 1,024 aa) |
 | `sharur/operators/foldseek.py` | Foldseek structural homology search |
 | `sharur/operators/manifest.py` | Analysis manifest for session continuity |
 | `sharur/core/hypothesis_registry.py` | Persistent hypothesis store |
@@ -280,7 +280,7 @@ data/{dataset_name}/
 ├── stage05c_crispr/            # CRISPR array outputs
 ├── annotations/                # Annotation results
 ├── embeddings/                 # ESM2 embeddings (H5 + FAISS)
-├── structures/                 # ESM3 PDBs + Foldseek results
+├── structures/                 # Predicted structures (mmCIF/PDB) + Foldseek results
 ├── synteny.duckdb             # Normalized, run-scoped ELSA result sidecar
 ├── synteny/                    # ELSA checkpoints + persistent index
 ├── exploration/                # Exploration outputs

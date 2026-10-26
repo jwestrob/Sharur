@@ -262,7 +262,7 @@ Wave 2: Targeted Exploration
 
 Wave 3: Follow-up
   → Tasks from agent suggestions + reviewer feedback
-  → Structural analysis (ESM3/Foldseek) for top unknowns
+  → Structural analysis (Protenix v2/Foldseek) for top unknowns
   → Literature search for context on novel findings
 
 Wave N: Convergence

@@ -1,6 +1,6 @@
 # Tools Reference
 
-**Load this doc when:** Using Aksha, ESM2/ESM3, Foldseek, ELSA, CAZyme/HydDB pipelines, V2 predicates, or hypothesis tracking.
+**Load this doc when:** Using Aksha, ESM2, structure prediction (Protenix v2, ESMFold2), Foldseek, ELSA, CAZyme/HydDB pipelines, V2 predicates, or hypothesis tracking.
 
 ## Aksha Annotation Pipeline
 
@@ -261,21 +261,20 @@ coordinate contracts, while string membership scans admit partial matches.
 
 ## Structure Prediction & Foldseek
 
+Fold with **Protenix v2 and an MSA** by default, or with **ESMFold2** for a fast fold
+(an MSA helps it too). Both run on a GPU node and write mmCIF; commands, input JSON and
+sample ranking are in `.claude/skills/foldseek.md`. The `predict_structure` operators call
+the ESM3 API for a quick look at proteins of ≤ 1,024 aa.
+
 ```python
 b = Sharur("data/DATASET/sharur.duckdb", read_only=True)
 
-# Database proteins
-result = b.predict_structure("protein_id", output_path="structures/protein.pdb")  # requires ESM_API_KEY
-
-# Arbitrary sequences
-from sharur.operators.structure import predict_structure_from_sequence
-result = predict_structure_from_sequence(sequence="MKVL...", output_path="output.pdb", name="my_protein")
-
-# Batch
+# Quick look via the ESM3 API (requires ESM_API_KEY; ≤ 1,024 aa)
+result = b.predict_structure("protein_id", output_path="structures/protein.pdb")
 result = b.batch_predict_structures(protein_ids=["id1", "id2"], output_dir="structures/", max_length=1024)
 
-# Foldseek search
-hits = b.search_foldseek("structures/protein.pdb", databases=["afdb50", "pdb100"], top_k=10)
+# Foldseek search (local Foldseek reads Protenix/ESMFold2 mmCIF directly)
+hits = b.search_foldseek("structures/protein.cif", databases=["afdb50", "pdb100"], top_k=10)
 hits = b.search_foldseek_for_protein("protein_id")  # convenience
 ```
 

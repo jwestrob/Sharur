@@ -392,7 +392,7 @@ Your survey should address all major functional domains. Not every analysis appl
 - **Unusual domain architectures**: Fusions that shouldn't exist, exotic combinations
 - **Orphan genes**: No homologs anywhere - genuinely novel or poor annotation?
 
-**Scratchpad candidates**: Note proteins that would benefit from structure prediction (AlphaFold3) or structural homology search (Foldseek) for later follow-up.
+**Scratchpad candidates**: Note proteins that would benefit from structure prediction (Protenix v2) or structural homology search (Foldseek) for later follow-up.
 
 ### Specialized Analyses (When Relevant)
 

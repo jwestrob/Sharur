@@ -146,9 +146,10 @@ export PATH="/Library/TeX/texbin:$PATH"
 xelatex --version
 ```
 
-### ESM API key (for structure prediction)
+### ESM API key (for quick-look structure prediction)
 
-ESM3 structure prediction requires an API key from EvolutionaryScale:
+The `predict_structure` operators call the ESM3 API, which needs an API key from
+EvolutionaryScale. Protenix v2 and ESMFold2 run locally on a GPU node and need no key:
 
 ```bash
 # Set in your shell profile

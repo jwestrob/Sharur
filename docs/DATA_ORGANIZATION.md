@@ -39,8 +39,8 @@ data/
 │   │
 │   ├── slurm/                         # Generated ingest bundle/logs (SLURM profile)
 │   │
-│   ├── structures/                    # ESM3 structure predictions
-│   │   ├── *.pdb                      # Predicted PDB files
+│   ├── structures/                    # Structure predictions
+│   │   ├── *.cif / *.pdb              # Predicted structures (Protenix v2, ESMFold2, ESM3 API)
 │   │   └── foldseek_results.tsv       # Structural homology searches
 │   │
 │   ├── synteny/                       # ELSA synteny results + FAISS store
@@ -165,7 +165,7 @@ The default seal is faster and samples large canonical files; `--full` is the ar
 choice. Verification is read-only and exits non-zero if the canonical identity changed.
 
 **Archive if valuable:**
-- `structures/` - ESM3 PDBs (can regenerate but slow)
+- `structures/` - predicted structures and their MSAs (can regenerate but slow)
 - `annotations/` - Processed annotation TSVs
 
 **Don't archive (regenerable):**
@@ -205,7 +205,7 @@ git status --porcelain | grep "^?" | head -20
 
 ### Phase 3: Structure Prediction (if warranted)
 - Select candidates (unannotated, giant, interesting)
-- Run ESM3 prediction
+- Fold with Protenix v2 + MSA (ESMFold2 for fast screening)
 - Search Foldseek for remote homologs
 - Research PDB hits for functions
 

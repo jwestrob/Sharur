@@ -476,7 +476,8 @@ print(protein.data)
 similar = b.find_similar("protein_id", k=10)
 print(similar.data)
 
-# Structure prediction (requires ESM_API_KEY, max 1024 aa)
+# Structure: fold with Protenix v2 + MSA (or ESMFold2) on a GPU node; see .claude/skills/foldseek.md
+# Quick look via the ESM3 API (requires ESM_API_KEY, max 1024 aa):
 structure = b.predict_structure("protein_id")
 print(structure.data)
 # Returns: structure.raw["pdb_path"]
@@ -1557,8 +1558,8 @@ MAGs (metagenome-assembled genomes) have unique issues:
 - **Chimeric contigs** - Contigs can join sequences from different organisms. Look for sudden GC/coverage shifts
 
 #### Structure Prediction Caveats
-When using ESM3/Foldseek:
-- **pLDDT < 0.7** - Low confidence, interpret structure cautiously
+When using Protenix/ESMFold2 and Foldseek:
+- **pLDDT < 70** - Low confidence, interpret structure cautiously
 - **pTM < 0.5** - Global fold may be unreliable
 - **Foldseek E-value** - E < 1e-10 is strong; E > 1e-3 is weak
 - **Sequence identity** - Low seq ID + good structural match = possible convergent evolution or distant homology
