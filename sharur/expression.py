@@ -21,7 +21,8 @@ Counts are fragments assigned to a protein's CDS. Derived quantities:
 - TPM: fragments per kb of CDS, scaled to 10^6 over all dataset genes in the
   sample (``tpm``) or over one genome's genes (``genome_tpm``);
 - within-genome percentile: a gene's rank by fragments per kb among all CDS of
-  its genome (genes without reads included), 1.0 = the most expressed.
+  its genome (genes without reads included), 1.0 = the most expressed; genes
+  without reads get 0.
 
 Gene flags (``import_gene_flags``) mark CDS whose counts are not mRNA, such as
 ORFs called inside rRNA, tRNA, tmRNA, RNase P, SRP or 6S RNA genes; reads from
@@ -379,6 +380,15 @@ def _labels(store, protein_ids: list[str]) -> dict[str, str]:
     return {pid: "; ".join(f"{k}: {v}" for k, v in sorted(d.items())) for pid, d in out.items()}
 
 
+def _within_genome_percentile(rate):
+    """Share of the genome's genes at or below each gene's rate; genes without reads get 0.
+
+    Ranking ties with ``method="max"`` alone would give every read-less gene the read-less fraction of the genome
+    (often 0.8-0.9 in a sparsely covered genome), which reads as a highly expressed gene.
+    """
+    return rate.rank(pct=True, method="max").where(rate > 0, 0.0)
+
+
 def genome_genes(store, sidecar: Path, bin_id: str, *, sample_ids: list[str] | None = None,
                  top: int = 20, min_fragments: int = 0, include_flagged: bool = False) -> dict[str, Any]:
     """Most expressed genes of one genome per sample, with within-genome TPM and percentile."""
@@ -402,7 +412,7 @@ def genome_genes(store, sidecar: Path, bin_id: str, *, sample_ids: list[str] | N
         frame = genes.merge(part[["protein_id", "sense"]], on="protein_id", how="left").fillna({"sense": 0})
         frame["rate"] = frame["sense"] / (frame["gene_length"] / 1000)
         frame["genome_tpm"] = frame["rate"] / frame["rate"].sum() * 1e6
-        frame["percentile"] = frame["rate"].rank(pct=True, method="max")
+        frame["percentile"] = _within_genome_percentile(frame["rate"])
         best = frame.sort_values("rate", ascending=False).head(top)
         result.append({"sample_id": sample, "fragments": int(part["sense"].sum()),
                        "genes_with_reads": int((frame["sense"] > 0).sum()), "genes": len(frame),
@@ -461,7 +471,7 @@ def feature_expression(store, sidecar: Path, *, annotation: str | None = None, p
         for bin_id, g in frame.groupby("bin_id"):
             if g["sense"].sum() < min_genome_fragments:
                 continue
-            pct = g["rate"].rank(pct=True, method="max")
+            pct = _within_genome_percentile(g["rate"])
             mine = pct[g["protein_id"].isin(carrier_set)]
             if mine.empty:
                 continue

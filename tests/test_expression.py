@@ -159,6 +159,17 @@ def test_feature_expression_share_and_within_genome_rank(loaded):
         feature_expression(store, sidecar)
 
 
+def test_genes_without_reads_rank_at_zero(loaded):
+    store, sidecar, _ = loaded
+    (s,) = genome_genes(store, sidecar, "A", sample_ids=["r2"], top=3)["samples"]
+    pct = {g["protein_id"]: g["percentile"] for g in s["top"]}
+    assert pct["a1_1"] == 1.0
+    assert pct["a1_2"] == 0.0 and pct["a1_3"] == 0.0  # two of three genes have no reads
+    mcr = feature_expression(store, sidecar, annotation="K00399", min_genome_fragments=10)
+    by_sample = {g["bin_id"]: g for g in mcr["genomes"]}
+    assert by_sample["A"]["median_best_percentile"] == 0.5  # 1.0 in r1, 0.0 in r2
+
+
 def test_flagged_genes_leave_every_query(loaded, tmp_path):
     store, sidecar, _ = loaded
     flags = tmp_path / "overlap.tsv"
