@@ -1114,7 +1114,12 @@ def migrate(
         help="Path to a writable Sharur DuckDB.",
     ),
 ):
-    """Apply pending additive schema/index migrations in a maintenance window."""
+    """Apply pending schema/index migrations in a maintenance window.
+
+    Migrations add columns and indexes, except v5: it removes defense/secretion system calls made before
+    replicon-local validation (raw HMM rows stay) until Stage 07 reruns the caller. A writable
+    DuckDBStore open applies the same migrations. Copy a pre-v5 file first if its old calls matter.
+    """
     import duckdb  # noqa: PLC0415
 
     from sharur.storage.migrations import (  # noqa: PLC0415
