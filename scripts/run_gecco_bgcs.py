@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import gzip
+import json
 import logging
 import os
 import shutil
@@ -163,13 +164,15 @@ def main() -> int:
     con = duckdb.connect(str(args.db), read_only=True, config={"threads": 4})
     bins = [r[0] for r in con.execute("SELECT DISTINCT bin_id FROM proteins ORDER BY bin_id").fetchall()]
     con.close()
-    tag = "all"
+    tag, i, n = "all", 0, 1
     if args.shard:
         i, n = (int(x) for x in args.shard.split("/"))
         bins = [b for k, b in enumerate(bins) if k % n == i]
         tag = f"{i:03d}"
     shard_dir = args.out_dir / f"shard_{tag}"
     shard_dir.mkdir(parents=True, exist_ok=True)
+    # sharur load-bgcs requires every index 0..n-1 of one sharding before it replaces any locus
+    (shard_dir / "shard.json").write_text(json.dumps({"index": i, "of": n, "bins": len(bins)}) + "\n")
     if (shard_dir / "input.clusters.tsv").is_file():
         logger.info("shard %s already has a clusters table; nothing to do", tag)
         return 0

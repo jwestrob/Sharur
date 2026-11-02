@@ -121,3 +121,47 @@ def test_load_bgcs_cli(tmp_path):
     assert result.exit_code == 0, result.output
     assert "BGC loci: 1 in 1 genomes" in result.output
     assert "Saccharide: 1" in result.output
+
+
+def test_missing_or_partial_output_never_wipes_existing_loci(store, tmp_path):
+    good = tmp_path / "good"
+    _shard(good, "s0", {"r0": ("b1", "c1")}, ["r0\tx\t50\t2100\t0.8\t0.95\tNRP\t0\t0.8\t0\t0\t0\t0\tc1_1\t\n"])
+    load_gecco_bgcs(store.conn, good)
+
+    def bgc_count():
+        return store.conn.execute("SELECT COUNT(*) FROM loci WHERE locus_type = 'bgc'").fetchone()[0]
+
+    with pytest.raises(ValueError, match="does not exist"):
+        load_gecco_bgcs(store.conn, tmp_path / "typo")
+    (tmp_path / "empty").mkdir()
+    with pytest.raises(ValueError, match="No GECCO shards"):
+        load_gecco_bgcs(store.conn, tmp_path / "empty")
+    # a shard that died while exporting leaves only the temporary record map
+    dead = tmp_path / "dead"
+    _shard(dead, "shard_000", {"r0": ("b1", "c1")}, [])
+    (dead / "shard_001").mkdir()
+    (dead / "shard_001" / "record_map.tsv.tmp").write_text("record\tbin_id\tcontig_id\n")
+    with pytest.raises(ValueError, match="shard_001"):
+        load_gecco_bgcs(store.conn, dead)
+    assert bgc_count() == 1
+
+
+def test_shard_manifests_must_cover_one_sharding(store, tmp_path):
+    def run(root, index, of):
+        shard = _shard(root, f"shard_{index:03d}", {"r0": ("b1", "c1")}, [])
+        (shard / "shard.json").write_text(json.dumps({"index": index, "of": of, "bins": 1}))
+
+    incomplete = tmp_path / "incomplete"
+    run(incomplete, 0, 3)
+    run(incomplete, 2, 3)
+    with pytest.raises(ValueError, match="index 1 of 3"):
+        load_gecco_bgcs(store.conn, incomplete)
+    mixed = tmp_path / "mixed"
+    run(mixed, 0, 2)
+    run(mixed, 1, 3)
+    with pytest.raises(ValueError, match="mixes shardings"):
+        load_gecco_bgcs(store.conn, mixed)
+    complete = tmp_path / "complete"
+    run(complete, 0, 2)
+    run(complete, 1, 2)
+    assert load_gecco_bgcs(store.conn, complete)["shards"] == 2

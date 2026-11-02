@@ -51,16 +51,37 @@ def collect_gecco_clusters(gecco_dir: Path) -> tuple[list[dict[str, Any]], dict[
     """Parse every shard under ``gecco_dir`` into cluster dicts.
 
     A shard is a directory holding ``record_map.tsv`` and one GECCO
-    ``*.clusters.tsv``. Shards without a finished clusters table are reported
-    in ``meta["missing_shards"]``.
+    ``*.clusters.tsv``. Shards without a finished export or clusters table, and
+    shard indices that the runner's ``shard.json`` files promise but no directory
+    holds, are reported in ``meta["missing_shards"]``.
     """
     clusters: list[dict[str, Any]] = []
     meta: dict[str, Any] = {"shards": 0, "missing_shards": [], "gecco_version": None}
-    for record_map in sorted(gecco_dir.glob("*/record_map.tsv")):
-        shard = record_map.parent
+    if not gecco_dir.is_dir():
+        raise ValueError(f"GECCO output directory does not exist: {gecco_dir}")
+    shard_dirs = sorted({p.parent for pattern in ("*/record_map.tsv", "*/record_map.tsv.tmp", "*/shard.json")
+                         for p in gecco_dir.glob(pattern)})
+    if not shard_dirs:
+        raise ValueError(f"No GECCO shards (directories with record_map.tsv) under {gecco_dir}")
+    manifests = {}
+    for shard in shard_dirs:
+        if (shard / "shard.json").is_file():
+            manifests[shard.name] = json.loads((shard / "shard.json").read_text())
+    if manifests:
+        if len(manifests) != len(shard_dirs):
+            raise ValueError(f"{gecco_dir}: shards {sorted({s.name for s in shard_dirs} - set(manifests))} "
+                             "lack shard.json beside shards that have one; rerun them with the current runner")
+        sizes = {m["of"] for m in manifests.values()}
+        if len(sizes) != 1:
+            raise ValueError(f"{gecco_dir} mixes shardings (N = {sorted(sizes)}); use a fresh --out-dir per sharding")
+        (size,) = sizes
+        present = {m["index"] for m in manifests.values()}
+        meta["missing_shards"].extend(f"index {i} of {size}" for i in range(size) if i not in present)
+    for shard in shard_dirs:
+        record_map = shard / "record_map.tsv"
         meta["shards"] += 1
         tables = sorted(shard.glob("*.clusters.tsv"))
-        if not tables:
+        if not record_map.is_file() or not tables:
             meta["missing_shards"].append(shard.name)
             continue
         version_file = shard / "gecco_version.txt"
@@ -103,7 +124,7 @@ def load_gecco_bgcs(conn, gecco_dir: Path) -> dict[str, Any]:
 
     clusters, meta = collect_gecco_clusters(Path(gecco_dir))
     if meta["missing_shards"]:
-        raise ValueError(f"GECCO shards without a clusters table: {meta['missing_shards']}")
+        raise ValueError(f"GECCO shards missing or without a clusters table: {meta['missing_shards']}")
     member_ids = sorted({p for c in clusters for p in c["proteins"]})
     owner: dict[str, tuple[str, str]] = {}
     if member_ids:

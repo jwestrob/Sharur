@@ -146,6 +146,9 @@ shard's genomes as GenBank records whose CDS features are the database's own gen
 **Load:** `sharur load-bgcs --db DB --gecco-dir DIR` replaces the `loci` rows with
 `locus_type='bgc'` (the `bgc_loci` view) and their `locus_proteins`. Locus IDs are
 `{bin_id}::bgc{n}`; `metadata` carries the GECCO type, probabilities, domains and version.
+The load requires a complete run: every shard index 0..N-1 of one sharding (each shard's
+`shard.json`), each with a finished `record_map.tsv` and clusters table. A missing, empty or
+partial `--gecco-dir` stops before any locus is replaced. Use a fresh `--out-dir` per sharding.
 
 ## ESM2 Embeddings
 **Script:** `src/ingest/06_esm2_embeddings.py`
