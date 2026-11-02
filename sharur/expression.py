@@ -412,13 +412,15 @@ def _labels(store, protein_ids: list[str]) -> dict[str, str]:
     return {pid: "; ".join(f"{k}: {v}" for k, v in sorted(d.items())) for pid, d in out.items()}
 
 
-def _within_genome_percentile(rate):
+def _within_genome_percentile(rate, genome=None):
     """Share of the genome's genes at or below each gene's rate; genes without reads get 0.
 
-    Ranking ties with ``method="max"`` alone would give every read-less gene the read-less fraction of the genome
-    (often 0.8-0.9 in a sparsely covered genome), which reads as a highly expressed gene.
+    ``genome`` (bin IDs aligned with ``rate``) ranks several genomes at once. Ranking ties with ``method="max"``
+    alone would give every read-less gene the read-less fraction of the genome (often 0.8-0.9 in a sparsely
+    covered genome), which reads as a highly expressed gene.
     """
-    return rate.rank(pct=True, method="max").where(rate > 0, 0.0)
+    ranked = rate.groupby(genome, sort=False) if genome is not None else rate
+    return ranked.rank(pct=True, method="max").where(rate > 0, 0.0)
 
 
 def genome_genes(store, sidecar: Path, bin_id: str, *, sample_ids: list[str] | None = None,
@@ -461,6 +463,7 @@ def feature_expression(store, sidecar: Path, *, annotation: str | None = None, p
                        include_flagged: bool = False) -> dict[str, Any]:
     """Share of each sample's sense fragments on proteins carrying a feature, and where the feature's genes
     rank inside their own genomes (samples where the genome has >= min_genome_fragments)."""
+    import numpy as np  # noqa: PLC0415
     import pandas as pd  # noqa: PLC0415
 
     if (predicate is None) == (annotation is None):
@@ -490,25 +493,31 @@ def feature_expression(store, sidecar: Path, *, annotation: str | None = None, p
         conn.register("_bins", pd.DataFrame({"bin_id": bins}))
         counts = conn.execute(f"SELECT sample_id, protein_id, sense FROM gene_counts JOIN _bins USING (bin_id) "
                               f"WHERE TRUE {clause}{_unflagged(include_flagged)}", params).df()
-    genes = genes[~genes["protein_id"].isin(flagged)]
+    genes = genes[~genes["protein_id"].isin(flagged)].reset_index(drop=True)
     carrier_set -= flagged
+    # Genes sit at fixed positions; each sample's counts scatter into one vector (string keys hash once).
+    carrier = genes["protein_id"].isin(carrier_set).to_numpy()
+    bin_codes, bin_names = pd.factorize(genes["bin_id"])
+    kb = genes["gene_length"].to_numpy(dtype=float) / 1000
+    position = pd.Index(genes["protein_id"])
+    by_sample = dict(tuple(counts.groupby("sample_id")))
     per_sample, per_genome = [], {}
     for sample in sorted(totals):
-        part = counts[counts["sample_id"] == sample]
-        on_feature = int(part.loc[part["protein_id"].isin(carrier_set), "sense"].sum())
+        sense = np.zeros(len(genes))
+        part = by_sample.get(sample)
+        if part is not None:
+            loc = position.get_indexer(part["protein_id"])
+            known = loc >= 0
+            sense[loc[known]] = part["sense"].fillna(0).to_numpy(dtype=float)[known]
+        on_feature = int(sense[carrier].sum())
         per_sample.append({"sample_id": sample, "fragments": on_feature,
                            "share_of_sample": on_feature / totals[sample] if totals[sample] else None})
-        frame = genes.merge(part[["protein_id", "sense"]], on="protein_id", how="left").fillna({"sense": 0})
-        frame["rate"] = frame["sense"] / (frame["gene_length"] / 1000)
-        for bin_id, g in frame.groupby("bin_id"):
-            if g["sense"].sum() < min_genome_fragments:
-                continue
-            pct = _within_genome_percentile(g["rate"])
-            mine = pct[g["protein_id"].isin(carrier_set)]
-            if mine.empty:
-                continue
-            per_genome.setdefault(bin_id, []).append({"sample_id": sample, "genome_fragments": int(g["sense"].sum()),
-                                                      "best_percentile": float(mine.max())})
+        genome_fragments = np.bincount(bin_codes, weights=sense, minlength=len(bin_names))
+        pct = _within_genome_percentile(pd.Series(sense / kb), bin_codes)
+        keep = carrier & (genome_fragments[bin_codes] >= min_genome_fragments)
+        for code, best in pct[keep].groupby(bin_codes[keep]).max().items():
+            per_genome.setdefault(bin_names[code], []).append({
+                "sample_id": sample, "genome_fragments": int(genome_fragments[code]), "best_percentile": float(best)})
     genomes = [{"bin_id": b, "samples": len(v),
                 "median_best_percentile": float(pd.Series([x["best_percentile"] for x in v]).median()),
                 "max_genome_fragments": max(x["genome_fragments"] for x in v)} for b, v in per_genome.items()]
