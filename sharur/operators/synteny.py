@@ -85,6 +85,7 @@ def synteny_for_proteins(
         with SyntenyStore(
             sidecar_path,
             core_db_path=core_store.db_path,
+            core_connection=getattr(core_store, "conn", None),
             allow_stale=allow_stale,
         ) as synteny:
             rows, total, resolved_run = synteny.protein_memberships(
@@ -131,6 +132,7 @@ def synteny_anchor_blocks(
         with SyntenyStore(
             sidecar_path,
             core_db_path=core_store.db_path,
+            core_connection=getattr(core_store, "conn", None),
             allow_stale=allow_stale,
         ) as synteny:
             rows, total, resolved_run = synteny.anchor_blocks(
@@ -194,6 +196,7 @@ def get_synteny_cluster(
         with SyntenyStore(
             sidecar_path,
             core_db_path=core_store.db_path,
+            core_connection=getattr(core_store, "conn", None),
             allow_stale=allow_stale,
         ) as synteny:
             payload = synteny.cluster(

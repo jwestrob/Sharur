@@ -190,8 +190,14 @@ def inspect_synteny_sidecar(path: str | Path) -> SyntenySidecarInspection:
 def inspect_synteny_dataset_identity(
     db_path: str | Path,
     sidecar: str | Path | SyntenySidecarInspection,
+    *,
+    core_connection: duckdb.DuckDBPyConnection | None = None,
 ) -> SyntenyDatasetIdentityInspection:
-    """Compare sidecar identity to the live dataset seal, when available."""
+    """Compare sidecar identity to the live dataset seal, when available.
+
+    ``core_connection`` is an open connection to ``db_path``; pass it from a session that already holds the
+    database, since DuckDB refuses a second connection to one file with a different configuration.
+    """
 
     database = Path(db_path).expanduser().resolve()
     inspection = (
@@ -242,7 +248,7 @@ def inspect_synteny_dataset_identity(
     # sidecars), so a reseal alone does not make a run stale. ELSA's inputs are the gene layout (which
     # proteins, on which contigs, at which coordinates) and their embeddings; the sidecar records the layout
     # it used in elsa_genes. A run whose layout equals the live proteins table is still valid.
-    layout_ok, layout_error = _gene_layout_matches(database, inspection)
+    layout_ok, layout_error = _gene_layout_matches(database, inspection, core_connection)
     return SyntenyDatasetIdentityInspection(
         state="inputs_match" if layout_ok else "mismatch",
         compatible=layout_ok,
@@ -253,35 +259,46 @@ def inspect_synteny_dataset_identity(
     )
 
 
-def _gene_layout_matches(database: Path, inspection: SyntenySidecarInspection) -> tuple[bool, str | None]:
+# ELSA's strand is +1/-1; the proteins table may hold '+'/'-' or '1'/'-1'.
+_LIVE_STRAND = ("CASE WHEN TRIM(CAST(strand AS VARCHAR)) IN ('-', '-1') THEN -1 "
+                "WHEN TRIM(CAST(strand AS VARCHAR)) IN ('+', '1', '+1') THEN 1 END")
+
+
+def _gene_layout_matches(
+    database: Path,
+    inspection: SyntenySidecarInspection,
+    core_connection: duckdb.DuckDBPyConnection | None = None,
+) -> tuple[bool, str | None]:
     """Whether the sidecar run's gene layout equals the live proteins table (count and order-free hash of
-    protein_id, contig_id, start, end)."""
+    protein_id, genome, contig_id, start, end and strand)."""
     if inspection.active_run_id is None:
         return False, "sidecar has no active run"
     try:
         side = duckdb.connect(str(inspection.path), read_only=True)
         try:
             sidecar_print = side.execute(
-                "SELECT COUNT(*), COALESCE(SUM(hash(protein_id, contig_id, CAST(start_bp AS BIGINT), "
-                "CAST(end_bp AS BIGINT))::HUGEINT), 0) FROM elsa_genes WHERE run_id = ?",
+                "SELECT COUNT(*), COALESCE(SUM(hash(protein_id, genome_id, contig_id, CAST(start_bp AS BIGINT), "
+                "CAST(end_bp AS BIGINT), CAST(sign(strand) AS INTEGER))::HUGEINT), 0) FROM elsa_genes WHERE run_id = ?",
                 [inspection.active_run_id],
             ).fetchone()
         finally:
             side.close()
-        core = duckdb.connect(str(database), read_only=True)
-        try:
-            live_print = core.execute(
-                "SELECT COUNT(*), COALESCE(SUM(hash(protein_id, contig_id, CAST(start AS BIGINT), "
-                "CAST(end_coord AS BIGINT))::HUGEINT), 0) FROM proteins"
-            ).fetchone()
-        finally:
-            core.close()
+        live_query = ("SELECT COUNT(*), COALESCE(SUM(hash(protein_id, bin_id, contig_id, CAST(start AS BIGINT), "
+                      f"CAST(end_coord AS BIGINT), CAST({_LIVE_STRAND} AS INTEGER))::HUGEINT), 0) FROM proteins")
+        if core_connection is not None:
+            live_print = core_connection.execute(live_query).fetchone()
+        else:
+            core = duckdb.connect(str(database), read_only=True)
+            try:
+                live_print = core.execute(live_query).fetchone()
+            finally:
+                core.close()
     except Exception as exc:  # noqa: BLE001 - any failure means the run cannot be shown compatible
         return False, f"{type(exc).__name__}: {exc}"
     if tuple(sidecar_print) == tuple(live_print):
         return True, None
     return False, (f"gene layout differs: sidecar {sidecar_print[0]:,} genes, live {live_print[0]:,} proteins "
-                   "(or coordinates changed)")
+                   "(or genome, contig, coordinates or strand changed)")
 
 
 def _fetch_dicts(
@@ -303,6 +320,7 @@ class SyntenyStore:
         *,
         core_db_path: str | Path | None = None,
         allow_stale: bool = False,
+        core_connection: duckdb.DuckDBPyConnection | None = None,
     ):
         self.path = Path(path).expanduser().resolve()
         self.core_db_path = (
@@ -311,6 +329,7 @@ class SyntenyStore:
             else None
         )
         self.allow_stale = allow_stale
+        self.core_connection = core_connection
         self._connection: duckdb.DuckDBPyConnection | None = None
 
     @property
@@ -326,6 +345,7 @@ class SyntenyStore:
                 identity = inspect_synteny_dataset_identity(
                     self.core_db_path,
                     inspection,
+                    core_connection=self.core_connection,
                 )
                 if not identity.compatible and not self.allow_stale:
                     raise SyntenyDatasetMismatchError(

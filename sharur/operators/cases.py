@@ -1156,6 +1156,7 @@ def inspect_case(
                         discovered_synteny,
                         core_db_path=db_path,
                         allow_stale=allow_stale_synteny,
+                        core_connection=getattr(store, "conn", None),
                     ) as synteny_store:
                         membership_rows, membership_total, _run_id = (
                             synteny_store.protein_memberships(

@@ -98,9 +98,11 @@ class SyntenyView:
         self.inspection = inspect_synteny_sidecar(path)
         if self.inspection.state != "available":
             raise RuntimeError(self.inspection.error or self.inspection.state)
-        self.identity = inspect_synteny_dataset_identity(ctx.db_path, self.inspection)
-        self.store = SyntenyStore(path, core_db_path=ctx.db_path, allow_stale=True)
-        self.conn = self.store.connection
+        core = getattr(ctx.store, "conn", None)
+        with ctx.lock:
+            self.identity = inspect_synteny_dataset_identity(ctx.db_path, self.inspection, core_connection=core)
+            self.store = SyntenyStore(path, core_db_path=ctx.db_path, allow_stale=True, core_connection=core)
+            self.conn = self.store.connection
         self.lock = threading.Lock()
         self.run_id = self.inspection.active_run_id
         self.run = next(r for r in self.store.runs() if r["run_id"] == self.run_id)

@@ -337,3 +337,38 @@ def test_dataset_mismatch_fails_closed_with_explicit_historical_opt_in(tmp_path)
     assert memberships.meta.total_rows == 2
     assert historical_case.record.synteny_state == "available"
     assert len(historical_case.record.synteny_memberships) == 2
+
+
+def _layout_matched_dataset(tmp_path):
+    db_path = tmp_path / "sharur.duckdb"
+    sidecar_path = tmp_path / "synteny.duckdb"
+    _build_core_database(db_path)
+    _build_synteny_sidecar(sidecar_path, dataset_id="sealed-before-findings")
+    connection = duckdb.connect(str(sidecar_path))
+    connection.execute("DELETE FROM elsa_genes WHERE protein_id = 'q2'")  # the run's genes equal the core's
+    connection.close()
+    (tmp_path / "dataset.seal.json").write_text(json.dumps({"dataset_id": "resealed"}))
+    return db_path, sidecar_path
+
+
+@pytest.mark.parametrize("change", [
+    "UPDATE elsa_genes SET genome_id = 'genome_z' WHERE protein_id = 'p10'",
+    "UPDATE elsa_genes SET strand = -1 WHERE protein_id = 'p10'",
+    "UPDATE elsa_genes SET end_bp = 571 WHERE protein_id = 'p10'",
+])
+def test_reseal_fallback_catches_genome_strand_and_coordinate_changes(tmp_path, change):
+    from sharur.synteny import inspect_synteny_dataset_identity
+
+    db_path, sidecar_path = _layout_matched_dataset(tmp_path)
+    assert inspect_synteny_dataset_identity(db_path, sidecar_path).state == "inputs_match"
+    connection = duckdb.connect(str(sidecar_path))
+    connection.execute(change)  # the run saw a different genome, strand or coordinate than the live table
+    connection.close()
+    identity = inspect_synteny_dataset_identity(db_path, sidecar_path)
+    assert identity.state == "mismatch" and not identity.compatible
+
+
+def test_reseal_fallback_works_inside_a_writable_session(tmp_path):
+    db_path, _sidecar = _layout_matched_dataset(tmp_path)
+    session = Sharur(db_path)  # writable: a second read-only connection to the file would be refused
+    assert session.synteny_for_protein("p1").meta.total_rows == 2
