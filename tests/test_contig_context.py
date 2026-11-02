@@ -209,6 +209,21 @@ def test_backfill_resizes_bins_whose_contigs_all_have_assembly_lengths(tmp_path)
         ("bin1", 1120), ("bin2", 50)]
 
 
+def test_backfill_keeps_the_total_of_a_bin_with_one_unmatched_contig(tmp_path):
+    conn = _legacy_db(tmp_path / "legacy.duckdb")  # every length_source is NULL, as in a legacy build
+    conn.execute("""
+        CREATE TABLE bins (bin_id VARCHAR PRIMARY KEY, total_length INTEGER, n_contigs INTEGER);
+        INSERT INTO bins VALUES ('bin1', 390, 2);
+    """)
+    fasta = tmp_path / "bin1.fna"
+    fasta.write_text(">ctg1\n" + "A" * 1000 + "\n")  # ctg9 has no assembly record
+
+    stats = backfill_contig_context(conn, assemblies={"bin1": fasta})
+
+    assert stats["bins_resized"] == 0  # 1,000 + 90 would mix an assembly length with a gene span
+    assert conn.execute("SELECT total_length FROM bins").fetchone()[0] == 390
+
+
 def test_backfill_rejects_a_mismatched_assembly(tmp_path):
     conn = _legacy_db(tmp_path / "legacy.duckdb")
     fasta = tmp_path / "bin1.fna"
