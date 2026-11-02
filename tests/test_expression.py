@@ -120,6 +120,37 @@ def test_featurecounts_tables_import_with_given_orientation(tmp_path):
     assert [(r["bin_id"], r["fragments"]) for r in rows] == [("A", 7), ("B", 3)]
 
 
+def test_reimport_replaces_the_whole_sample(tmp_path):
+    store = _core()
+    sidecar = tmp_path / "e.duckdb"
+    first, recount = tmp_path / "v1.tsv", tmp_path / "v2.tsv"
+    first.write_text("sample_id\tprotein_id\tsense\tantisense\nr\ta1_1\t50\t1\nr\ta1_2\t300\t2\nq\ta1_2\t9\t0\n")
+    recount.write_text("sample_id\tprotein_id\tsense\tantisense\nr\ta1_1\t48\t1\n")  # a1_2 lost its reads
+    import_counts(store, sidecar, [first])
+    result = import_counts(store, sidecar, [recount])
+    assert result["cleared_rows"] == 1
+    meta = {s["sample_id"]: s for s in samples(sidecar)}
+    assert meta["r"]["sense_fragments"] == 48
+    assert meta["q"]["sense_fragments"] == 9  # samples outside the import keep their counts
+    assert [(r["sample_id"], r["fragments"]) for r in genome_expression(sidecar)] == [("q", 9), ("r", 48)]
+
+
+def test_featurecounts_orientations_merge_across_imports(tmp_path):
+    store = _core()
+    sidecar = tmp_path / "e.duckdb"
+    header = "# Program:featureCounts v2.0.6\nGeneid\tChr\tStart\tEnd\tStrand\tLength\tlibA.bam\n"
+    sense, anti = tmp_path / "s.txt", tmp_path / "a.txt"
+    sense.write_text(header + "a1_1\ta1\t1\t900\t+\t900\t50\na1_2\ta1\t1001\t1300\t-\t300\t20\n")
+    anti.write_text(header + "a1_1\ta1\t1\t900\t+\t900\t3\nb1_1\tb1\t1\t900\t+\t900\t4\n")
+    import_counts(store, sidecar, [sense], fmt="featurecounts", orientation="sense")
+    import_counts(store, sidecar, [anti], fmt="featurecounts", orientation="antisense")
+    (meta,) = samples(sidecar)
+    assert meta["sense_orientation"] == "sense"
+    assert meta["sense_fragments"] == 70
+    assert math.isclose(meta["strand_specificity"], 70 / 77)  # fewer than 20 voting genes: fragment totals
+    assert {(r["bin_id"], r["fragments"]) for r in genome_expression(sidecar)} == {("A", 70), ("B", 0)}
+
+
 def test_genome_transcript_share_sums_to_one(loaded):
     _, sidecar, _ = loaded
     rows = genome_expression(sidecar)

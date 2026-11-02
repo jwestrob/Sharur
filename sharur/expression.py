@@ -135,11 +135,12 @@ def _read_metadata(path: Path) -> dict[str, dict[str, str]]:
 def _relation(conn: duckdb.DuckDBPyConnection, path: Path) -> str:
     """SQL source for a long table file."""
     name = path.name.lower()
+    literal = str(path).replace("'", "''")
     if name.endswith(".parquet"):
-        return f"read_parquet('{path}')"
+        return f"read_parquet('{literal}')"
     with _open(path) as handle:
         head = handle.read(4096)
-    return f"read_csv('{path}', delim='{chr(9) if chr(9) in head else ','}', header=true)"
+    return f"read_csv('{literal}', delim='{chr(9) if chr(9) in head else ','}', header=true)"
 
 
 def _long_frame(conn: duckdb.DuckDBPyConnection, paths: list[Path]):
@@ -195,7 +196,9 @@ def import_counts(store, sidecar: Path, paths: list[Path], *, fmt: str = "long",
                   allow_unknown_proteins: bool = False) -> dict[str, Any]:
     """Validate gene counts against the core proteins and write them to the sidecar.
 
-    Rows replace earlier ones for the same (sample, protein). Rows with no reads are dropped.
+    Each sample's import replaces that sample's counts for the orientations it supplies: genes it omits
+    count zero, and orientations it leaves out (one-orientation featureCounts tables) keep their earlier
+    counts. Rows with no reads are dropped.
     """
     import pandas as pd  # noqa: PLC0415
 
@@ -241,19 +244,44 @@ def import_counts(store, sidecar: Path, paths: list[Path], *, fmt: str = "long",
             else:
                 sense_of[sample] = "s1" if (t1 or 0) >= (t2 or 0) else "s2"
         conn.register("_orient", pd.DataFrame(list(sense_of.items()), columns=["sample_id", "o"]))
-        conn.execute("""CREATE TEMP TABLE _new AS
+        conn.execute("""CREATE TEMP TABLE _oriented AS
             SELECT r.sample_id, r.protein_id, g.bin_id, g.gene_length,
                    CASE o.o WHEN 's1' THEN r.s1 WHEN 's2' THEN r.s2 ELSE r.sense END AS sense,
                    CASE o.o WHEN 's1' THEN r.s2 WHEN 's2' THEN r.s1 ELSE r.antisense END AS antisense
-            FROM _raw r JOIN _genes g USING (protein_id) JOIN _orient o USING (sample_id)
-            WHERE COALESCE(CASE o.o WHEN 's1' THEN r.s1 WHEN 's2' THEN r.s2 ELSE r.sense END, 0) > 0
-               OR COALESCE(CASE o.o WHEN 's1' THEN r.s2 WHEN 's2' THEN r.s1 ELSE r.antisense END, 0) > 0""")
-        samples = [r[0] for r in conn.execute("SELECT DISTINCT sample_id FROM _new ORDER BY 1").fetchall()]
+            FROM _raw r JOIN _genes g USING (protein_id) JOIN _orient o USING (sample_id)""")
+        # The orientations each sample's import supplies. A re-import replaces those orientations for the
+        # whole sample (genes it omits have no reads); orientations it leaves out keep their earlier counts,
+        # so featureCounts sense and antisense tables can arrive in separate imports.
+        conn.execute("""CREATE TEMP TABLE _supplied AS
+            SELECT sample_id, bool_or(sense IS NOT NULL) AS has_sense, bool_or(antisense IS NOT NULL) AS has_anti
+            FROM _oriented GROUP BY 1""")
+        conn.execute("""CREATE TEMP TABLE _new AS SELECT * FROM _oriented
+                        WHERE COALESCE(sense, 0) > 0 OR COALESCE(antisense, 0) > 0""")
+        samples = [r[0] for r in conn.execute("SELECT sample_id FROM _supplied ORDER BY 1").fetchall()]
+        supplies_sense = dict(conn.execute("SELECT sample_id, has_sense FROM _supplied").fetchall())
         rows = conn.execute("SELECT COUNT(*) FROM _new").fetchone()[0]
         conn.execute("BEGIN TRANSACTION")
-        conn.execute("""DELETE FROM gene_counts USING _new
-                        WHERE gene_counts.sample_id = _new.sample_id AND gene_counts.protein_id = _new.protein_id""")
-        conn.execute("INSERT INTO gene_counts SELECT sample_id, protein_id, bin_id, gene_length, sense, antisense FROM _new")
+        conn.execute("""CREATE TEMP TABLE _merged AS
+            WITH old AS (SELECT * FROM gene_counts WHERE sample_id IN (SELECT sample_id FROM _supplied)),
+            prior AS (SELECT sample_id, bool_or(sense IS NOT NULL) AS had_sense,
+                             bool_or(antisense IS NOT NULL) AS had_anti FROM old GROUP BY 1),
+            m AS (SELECT COALESCE(n.sample_id, o.sample_id) AS sample_id, COALESCE(n.protein_id, o.protein_id) AS protein_id,
+                         COALESCE(n.bin_id, o.bin_id) AS bin_id, COALESCE(n.gene_length, o.gene_length) AS gene_length,
+                         n.sense AS n_sense, n.antisense AS n_anti, o.sense AS o_sense, o.antisense AS o_anti
+                  FROM _new n FULL OUTER JOIN old o ON n.sample_id = o.sample_id AND n.protein_id = o.protein_id),
+            v AS (SELECT m.sample_id, m.protein_id, m.bin_id, m.gene_length,
+                         CASE WHEN s.has_sense THEN COALESCE(m.n_sense, 0)
+                              WHEN p.had_sense THEN COALESCE(m.o_sense, 0) END AS sense,
+                         CASE WHEN s.has_anti THEN COALESCE(m.n_anti, 0)
+                              WHEN p.had_anti THEN COALESCE(m.o_anti, 0) END AS antisense
+                  FROM m JOIN _supplied s USING (sample_id) LEFT JOIN prior p USING (sample_id))
+            SELECT * FROM v WHERE COALESCE(sense, 0) > 0 OR COALESCE(antisense, 0) > 0""")
+        cleared = conn.execute("""SELECT COUNT(*) FROM gene_counts g WHERE g.sample_id IN (SELECT sample_id FROM _supplied)
+                                  AND NOT EXISTS (SELECT 1 FROM _merged m WHERE m.sample_id = g.sample_id
+                                                  AND m.protein_id = g.protein_id)""").fetchone()[0]
+        conn.execute("DELETE FROM gene_counts WHERE sample_id IN (SELECT sample_id FROM _supplied)")
+        conn.execute("INSERT INTO gene_counts SELECT sample_id, protein_id, bin_id, gene_length, sense, antisense "
+                     "FROM _merged")
         for sample in samples:
             s, a, n_vote, n_sense = conn.execute(
                 f"""SELECT SUM(sense), SUM(antisense),
@@ -266,14 +294,18 @@ def import_counts(store, sidecar: Path, paths: list[Path], *, fmt: str = "long",
                 spec = n_sense / n_vote
             else:
                 spec = (s / (s + a)) if (s + a) else None
+            # s1/s2 when chosen from strand counts; "sense" when the file gave sense counts; an antisense-only
+            # import keeps the sample's earlier value.
+            oriented = sense_of.get(sample) or ("sense" if supplies_sense.get(sample) else None)
             conn.execute(
                 """INSERT INTO rna_samples VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (sample_id) DO UPDATE SET
                    metadata = COALESCE(excluded.metadata, rna_samples.metadata),
-                   sense_orientation = excluded.sense_orientation, strand_specificity = excluded.strand_specificity,
+                   sense_orientation = COALESCE(excluded.sense_orientation, rna_samples.sense_orientation),
+                   strand_specificity = excluded.strand_specificity,
                    sense_fragments = excluded.sense_fragments, antisense_fragments = excluded.antisense_fragments,
                    source = excluded.source, imported_at = excluded.imported_at""",
                 [sample, json.dumps(metadata[sample]) if sample in metadata else None,
-                 sense_of.get(sample) or orientation, spec, s, a, source or fmt, now])
+                 oriented, spec, s, a, source or fmt, now])
         for path in paths:
             conn.execute("INSERT INTO imports VALUES (?, ?, ?, ?, ?, ?)",
                          [str(path), _sha256(path), fmt, samples, rows, now])
@@ -285,7 +317,7 @@ def import_counts(store, sidecar: Path, paths: list[Path], *, fmt: str = "long",
     finally:
         conn.close()
     return {"sidecar": str(sidecar), "samples": samples, "rows": rows, "unknown_proteins": unknown,
-            "sense_orientation": sense_of}
+            "cleared_rows": cleared, "sense_orientation": sense_of}
 
 
 def import_gene_flags(sidecar: Path, path: Path, *, flag: str = "structural_rna_overlap",

@@ -1605,6 +1605,9 @@ def import_expression_command(
         raise typer.Exit(1) from exc
     typer.echo(f"Imported {result['rows']:,} gene rows for {len(result['samples'])} samples into {target}"
                + (f" ({result['unknown_proteins']:,} unknown proteins skipped)" if result["unknown_proteins"] else ""))
+    if result["cleared_rows"]:
+        typer.echo(f"Replaced these samples' earlier counts: {result['cleared_rows']:,} gene rows without reads "
+                   "in this import were removed")
     if gene_flags:
         flags = import_gene_flags(target, gene_flags, min_overlap_bp=min_overlap_bp)
         typer.echo(f"Flagged {flags['flagged_proteins']:,} proteins overlapping structural RNAs "
