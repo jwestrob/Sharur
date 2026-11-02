@@ -357,7 +357,8 @@ def test_slurm_submission_failure_is_terminally_recorded(tmp_path, monkeypatch):
 
 
 def _slurm_bundle(tmp_path, monkeypatch, *, slurm_cpus=None, **env):
-    for key in ("SHARUR_SLURM_PARTITION", "SHARUR_SLURM_GPU_PARTITION", "SHARUR_SLURM_EXCLUDE"):
+    for key in ("SHARUR_SLURM_PARTITION", "SHARUR_SLURM_GPU_PARTITION", "SHARUR_SLURM_EXCLUDE",
+                "SHARUR_SLURM_QOS", "SHARUR_SLURM_GPU_QOS"):
         monkeypatch.delenv(key, raising=False)
     for key, value in env.items():
         monkeypatch.setenv(key, value)
@@ -379,7 +380,8 @@ def test_sbatch_scripts_follow_full_node_cluster_rules(tmp_path, monkeypatch):
     dag, bundle, _ = _slurm_bundle(tmp_path, monkeypatch)
     scripts = {path.stem: path.read_text() for path in bundle.glob("*.sbatch")}
     assert {"01", "02", "03", "04", "05a", "05b", "06", "06i", "07", "08"} <= set(scripts)
-    allowed = ("#SBATCH -p ", "#SBATCH -J ", "#SBATCH -o ", "#SBATCH -e ", "#SBATCH --gres=", "#SBATCH --exclude=")
+    allowed = ("#SBATCH -p ", "#SBATCH --qos=", "#SBATCH -J ", "#SBATCH -o ", "#SBATCH -e ", "#SBATCH --gres=",
+               "#SBATCH --exclude=")
     for stage, text in scripts.items():
         directives = [line for line in text.splitlines() if line.startswith("#SBATCH")]
         assert directives and all(line.startswith(allowed) for line in directives), (stage, directives)
@@ -413,6 +415,16 @@ def test_slurm_partition_and_exclude_come_from_the_environment(tmp_path, monkeyp
     assert "#SBATCH -p standard" in (bundle / "04.sbatch").read_text()
     assert "#SBATCH -p gpu" in (bundle / "06.sbatch").read_text()
     assert "#SBATCH --exclude=node-1,node-2" in (bundle / "07.sbatch").read_text()
+
+
+def test_slurm_qos_comes_from_the_environment(tmp_path, monkeypatch):
+    _, bundle, _ = _slurm_bundle(tmp_path / "none", monkeypatch, slurm_cpus=24)
+    assert "--qos" not in (bundle / "04.sbatch").read_text()
+    _, bundle, _ = _slurm_bundle(tmp_path / "set", monkeypatch, slurm_cpus=24,
+                                 SHARUR_SLURM_QOS="standard_expand", SHARUR_SLURM_GPU_QOS="gpu_qos")
+    assert "#SBATCH --qos=standard_expand" in (bundle / "04.sbatch").read_text()
+    assert "#SBATCH --qos=gpu_qos" in (bundle / "06.sbatch").read_text()
+    assert "#SBATCH --cpus-per-task=24" in (bundle / "04.sbatch").read_text()
 
 
 def test_slurm_cpus_requests_cpus_per_task_and_stages_use_the_allocation(tmp_path, monkeypatch):

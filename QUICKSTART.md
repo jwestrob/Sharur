@@ -83,13 +83,16 @@ Execution profiles are explicit:
   that passes `$SLURM_CPUS_ON_NODE` to its tool; sbatch scripts carry only the job name, log path,
   GPU request and the partition and node exclusions you set, leaving memory and time to partition
   defaults. On clusters that allocate by CPU, `--slurm-cpus N` requests N CPUs per stage job
-  (`--cpus-per-task`) in place of a full node; each stage then uses those N CPUs. Serial stages
-  (input audit, MinCED) run inline from `submit.sh`. Set the partitions and exclusions once per
-  cluster:
+  (`--cpus-per-task`) in place of a full node; each stage then uses those N CPUs. On such a
+  cluster a job without `--slurm-cpus` receives the scheduler's default allocation (often 1 CPU).
+  Serial stages (input audit, MinCED) run inline from `submit.sh`. Set the partitions, QOS and
+  exclusions once per cluster:
 
   ```bash
   export SHARUR_SLURM_PARTITION=standard
   export SHARUR_SLURM_GPU_PARTITION=gpu
+  export SHARUR_SLURM_QOS=standard_expand      # optional: QOS whose CPU and walltime caps fit --slurm-cpus
+  export SHARUR_SLURM_GPU_QOS=gpu              # optional: QOS for GPU stages
   export SHARUR_SLURM_EXCLUDE=node-a,node-b   # optional: nodes to avoid
   ```
 

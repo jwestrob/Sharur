@@ -278,10 +278,14 @@ def render_slurm_script(
     # carry no CPU directive either; an explicit CPU count becomes --cpus-per-task. Stage
     # commands use $SLURM_CPUS_ON_NODE, so they follow whatever Slurm allocates.
     partition = os.environ.get("SHARUR_SLURM_GPU_PARTITION" if request.gpus else "SHARUR_SLURM_PARTITION")
+    # A cluster whose default QOS caps CPUs or walltime rejects or limits larger jobs; name the QOS here.
+    qos = os.environ.get("SHARUR_SLURM_GPU_QOS" if request.gpus else "SHARUR_SLURM_QOS")
     exclude = os.environ.get("SHARUR_SLURM_EXCLUDE")
     lines = ["#!/usr/bin/env bash"]
     if partition:
         lines.append(f"#SBATCH -p {partition}")
+    if qos:
+        lines.append(f"#SBATCH --qos={qos}")
     lines += [
         f"#SBATCH -J sharur-{node.stage_id}",
         f"#SBATCH -o {log_dir / (node.stage_id + '-%j.log')}",
