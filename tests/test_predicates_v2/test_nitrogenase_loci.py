@@ -1,9 +1,13 @@
 """Nitrogenase structural-locus calls and the composite that reads them."""
 
 import json
+from importlib.machinery import SourceFileLoader
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from sharur.kofam import SCORE_BASIS_FULL, SCORE_BASIS_KOFAM, ko_score_bases, record_ko_score_basis
 from sharur.predicates_v2.composites import (
     CompositeDefinition,
     clear_composites_cache,
@@ -593,3 +597,123 @@ def test_write_loci_reports_proteins_whose_locus_atoms_change(tmp_path, monkeypa
     assert {"bact_nif_1", "bact_nif_2", "bact_nif_3"} <= set(second["changed_proteins"])
     assert not any(pid.startswith("arch_nif") for pid in second["changed_proteins"])
     assert refresh_nitrogenase_loci(store)["changed_proteins"] == []
+
+
+# --------------------------------------------------------------------------- #
+# KOfam score_type: a full KO is judged on the full-sequence bitscore, a domain
+# KO on its best domain's bitscore
+# --------------------------------------------------------------------------- #
+
+KB_PATH = Path(__file__).resolve().parents[2] / "src" / "ingest" / "07_build_knowledge_base.py"
+
+# contig -> {gene index: (KO, full-sequence bitscore, [domain bitscores])}; genes 1-3 on '+'.
+# Thresholds (KO_LIST): nifH K02588 362.67 full, nifD K02586 541.60 full, nifK K02591 403.20 domain.
+SCORED = {
+    # nifH passes on its full-sequence score; no single domain reaches the threshold.
+    "h_full_passes": {1: ("K02588", 400.0, [300.0, 150.0]), 2: ("K02586", 600.0, [599.0]),
+                      3: ("K02591", 700.0, [450.0, 200.0])},
+    # nifD's domain clears the threshold; its full-sequence score falls short.
+    "d_full_fails": {1: ("K02588", 500.0, [499.0]), 2: ("K02586", 530.0, [560.0]),
+                     3: ("K02591", 700.0, [450.0, 200.0])},
+    # nifK (domain type) reaches the threshold only on its full-sequence score.
+    "k_domain_fails": {1: ("K02588", 500.0, [499.0]), 2: ("K02586", 600.0, [599.0]),
+                       3: ("K02591", 500.0, [390.0, 300.0])},
+}
+
+
+def _stage07_store(tmp_path, monkeypatch):
+    """Stage 07 loads an Astra KOFAM hits table (one row per domain) for the SCORED layouts."""
+    reference = tmp_path / "reference"
+    reference.mkdir()
+    (reference / "ko_list").write_text(KO_LIST)
+    monkeypatch.setenv("SHARUR_REFERENCE_DIR", str(reference))
+    monkeypatch.setenv("SHARUR_KOFAM_KO_LIST", str(reference / "ko_list"))
+    module = SourceFileLoader("kb_build_kofam", str(KB_PATH)).load_module()
+    data = tmp_path / "data"
+    outputs = module.PipelineOutputs(**{name: data / name for name in (
+        "stage00_dir", "stage01_dir", "stage02_dir", "stage03_dir", "stage04_dir",
+        "stage05a_dir", "stage05b_dir", "stage05c_dir", "stage06_dir")})
+    hits_dir = outputs.stage04_dir / "kofam_results"
+    hits_dir.mkdir(parents=True)
+    rows = ["sequence_id\thmm_name\tbitscore\tevalue\tc_evalue\ti_evalue\tenv_from\tenv_to\tdom_bitscore\t"
+            "ali_from\tali_to\thmm_from\thmm_to"]
+    for contig_id, genes in SCORED.items():
+        for index, (ko, full, domains) in genes.items():
+            for k, dom in enumerate(domains):
+                start = 1 + 200 * k
+                rows.append(f"{contig_id}_{index}\t{ko}\t{full}\t1e-100\t1e-100\t1e-100\t{start}\t{start + 150}\t"
+                            f"{dom}\t{start}\t{start + 150}\t1\t150")
+    (hits_dir / "KOFAM_hits_df.tsv").write_text("\n".join(rows) + "\n")
+
+    builder = module.KnowledgeBaseBuilder(outputs, tmp_path / "sharur.duckdb", force=True, threads=1)
+    builder._init_db()
+    conn = builder.conn
+    conn.execute("INSERT INTO bins (bin_id) VALUES ('b1')")
+    for contig_id in SCORED:
+        conn.execute("INSERT INTO contigs (contig_id, bin_id, length) VALUES (?, 'b1', 12500)", [contig_id])
+        for index in range(12):
+            conn.execute("""INSERT INTO proteins (protein_id, contig_id, bin_id, start, end_coord, strand,
+                                                  gene_index, sequence_length, partial)
+                            VALUES (?, ?, 'b1', ?, ?, '+', ?, 500, '00')""",
+                         [f"{contig_id}_{index}", contig_id, index * 1000 + 1, index * 1000 + 900, index])
+    builder._load_annotations()
+    return builder, SimpleNamespace(conn=conn)
+
+
+def test_stage07_ko_scores_follow_kofam_score_type(tmp_path, monkeypatch):
+    builder, store = _stage07_store(tmp_path, monkeypatch)
+    try:
+        stored = dict(store.conn.execute(
+            "SELECT protein_id, score FROM annotations WHERE source = 'kegg'").fetchall())
+        refresh_nitrogenase_loci(store)
+        loci = {row[0]: json.loads(row[1]) for row in store.conn.execute(
+            "SELECT contig_id, metadata FROM loci WHERE locus_type LIKE 'nitrogenase%'").fetchall()}
+        bases = ko_score_bases(store.conn)
+    finally:
+        builder._release_db()
+    # Full KOs store the full-sequence score, domain KOs the best domain's.
+    assert stored["h_full_passes_1"] == pytest.approx(400.0)
+    assert stored["d_full_fails_2"] == pytest.approx(530.0)
+    assert stored["k_domain_fails_3"] == pytest.approx(390.0)
+    assert bases == {"kegg": SCORE_BASIS_KOFAM}
+    assert {contig: meta["call"] for contig, meta in loci.items()} == {
+        "h_full_passes": "confirmed",
+        "d_full_fails": "ko_below_threshold",
+        "k_domain_fails": "ko_below_threshold",
+    }
+    assert all(meta["slot_ko_scores_exact"] for meta in loci.values())
+
+
+def _score_flags(store):
+    """contig -> (call, slot_ko_scores_exact, roles of members flagged ko_score_exact: false)."""
+    out = {}
+    for contig_id, metadata in store.conn.execute(
+            "SELECT contig_id, metadata FROM loci WHERE locus_type LIKE 'nitrogenase%'").fetchall():
+        meta = json.loads(metadata)
+        out[contig_id] = (meta["call"], meta.get("slot_ko_scores_exact"),
+                          {m["role"] for m in meta["members"] if m.get("ko_score_exact") is False})
+    return out
+
+
+def test_unrecorded_ko_scores_flag_the_gene_set(tmp_path, monkeypatch):
+    # KO rows loaded before the score basis was recorded: the calls stand, flagged.
+    store = _seed_store(tmp_path, monkeypatch)
+    summary = refresh_nitrogenase_loci(store)
+    assert summary["by_call"] == {"confirmed": 2, "contig_edge": 1, "ko_below_threshold": 1, "short_partners": 1}
+    assert summary["ko_score_inexact_loci"] == 3
+    flags = _score_flags(store)
+    assert flags["bact_nif"] == ("confirmed", False, {"fe_protein", "alpha", "beta"})
+    assert flags["weak"] == ("ko_below_threshold", False, {"anchor", "partner"})
+
+    # A full-sequence basis is KOfam's score for nifH/nifD/nifI1; nifK, the NifN-group beta
+    # and nifI2 are domain KOs.
+    record_ko_score_basis(store.conn, "kegg", SCORE_BASIS_FULL)
+    refresh_nitrogenase_loci(store)
+    flags = _score_flags(store)
+    assert flags["bact_nif"] == ("confirmed", False, {"beta"})
+    assert flags["arch_nif"] == ("confirmed", False, {"beta", "nifI"})
+
+    record_ko_score_basis(store.conn, "kegg", SCORE_BASIS_KOFAM)
+    summary = refresh_nitrogenase_loci(store)
+    assert summary["ko_score_inexact_loci"] == 0
+    assert _score_flags(store)["bact_nif"] == ("confirmed", True, set())
