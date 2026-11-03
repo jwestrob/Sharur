@@ -154,6 +154,8 @@ python scripts/fold_biohub.py OUT_DIR p.faa --smiles "CC(=O)O:1"
 - **Gotchas.**
   - Strip the trailing `*` that gene callers write. The script does this; the API otherwise fails each task with `422: Invalid character(s)`.
   - Limits: 4,096 tokens per item (ligand atoms count), 2,000 items per submission (the script splits larger inputs) and 5,000 fold items per user per day. Results expire after 31 days.
+  - Each complex can have at most 36 chains (1 protein + 35 ligands); the script stops early on larger requests.
+  - Batch items are sometimes rejected with `422 … exceeds maximum allowed sequence length (768)` even though batch limits are 4,096 tokens. Resubmitting succeeds, and the script retries these automatically (2026-11-03: 147 of 423 rejected, 145 recovered on retry).
   - The API supports explicit covalent bonds and pocket conditioning, but the script does not expose them yet.
 - **Permission.** Jacob approved sending unpublished SR-VP sequences to this API (2026-11-03). Other external sequence services still need his go-ahead.
 

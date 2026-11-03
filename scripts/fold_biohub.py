@@ -250,6 +250,9 @@ def main():
             for _ in range(int(n)):
                 cid = CHAIN_IDS[k]; k += 1
                 ents.append({"type": "ligand", "id": cid, "smiles": smi}); lmap[cid] = "LIG"
+        if len(ents) > 36:
+            sys.exit(f"{nm}: {len(ents)} chains; the API allows at most 36 per complex (1 protein + 35 ligands). "
+                     f"Lower the ligand count for this sequence.")
         payload.append({"model": model, "all_atom_input": {"sequences": ents}, "include_pae": a.pae,
                         "include_pair_chains_iptm": True})
         lig_maps.append(lmap)
@@ -264,15 +267,23 @@ def main():
         print(f"batch {batch}: {len(chunk)} items, endpoint {endpoint}, model {model}", flush=True)
         tasks += [(start + i, f"{batch}-{i:05d}") for i in range(len(chunk))]
 
-    pending, rows, failed = dict(tasks), [], []
+    pending, rows, failed, retries = dict(tasks), [], [], {}
     while pending:
         time.sleep(a.poll)
         for i, tid in list(pending.items()):
             d = post("/status", {"task_id": tid}, H)["data"]
             st = d.get("status")
             if st in ("failed", "cancelled"):
-                failed.append((names[i], d.get("error", st)))
-                print(f"FAILED {names[i]}: {d.get('error', st)}", flush=True)
+                err = str(d.get("error", st))
+                # Batch items are sometimes rejected against the 768-token on-demand limit; a resubmission succeeds.
+                if "maximum allowed sequence length (768)" in err and retries.get(i, 0) < 3:
+                    retries[i] = retries.get(i, 0) + 1
+                    b2 = post("/submit", {"endpoint": endpoint, "payload": [payload[i]]}, H)["data"]["batch_id"]
+                    print(f"retry {retries[i]} {names[i]} (transient 768-token rejection) -> {b2}", flush=True)
+                    pending[i] = f"{b2}-00000"
+                    continue
+                failed.append((names[i], err))
+                print(f"FAILED {names[i]}: {err}", flush=True)
                 del pending[i]
                 continue
             if st != "done":
