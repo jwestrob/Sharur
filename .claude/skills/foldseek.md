@@ -49,6 +49,7 @@ proteins well past 1,024 aa.
 |--------|------------|-------------------|
 | **Protenix v2 + MSA** (default) | Structures you will report; multimers, ligands, template-guided folds | `plddt`, `ptm`, `iptm`, `ranking_score` in each `*_summary_confidence_sample_*.json` |
 | **ESMFold2** | Fast screening of many proteins; folds without an MSA search (an MSA helps) | `plddt`, `ptm`, `iptm` on the fold result |
+| **ESMFold2 via Biohub batch API** (`scripts/fold_biohub.py`) | Batches of up to 2,000 sequences (≤ 4,096 aa) with no GPU, from the Mac or the login node | `plddt` (0–1) and `ptm` in each `<name>.json`; pLDDT × 100 in the PDB B-factor column |
 | ESM3 API (`b.predict_structure`) | Quick look at a database protein of ≤ 1,024 aa | `plddt_mean` in `result.raw` |
 
 ### Export the sequence
@@ -119,6 +120,29 @@ with open(f"structures/{protein_id}.cif", "w") as f:
   sample keep the fold in memory.
 - `DistogramConditioning(chain_id=..., distogram=...)` conditions the fold on a template's
   Cα distance matrix.
+
+### ESMFold2 via the Biohub batch API (no GPU)
+
+`scripts/fold_biohub.py` submits a FASTA to the hosted ESMFold2 model, polls until every task
+finishes, and writes one PDB per sequence. It uses only the Python standard library and does
+no local compute, so it runs on the Mac or the biotite login node.
+
+```bash
+export ESM_API_KEY=...          # or BIOHUB_API_KEY; set on Jacob's Mac, not on biotite
+python scripts/fold_biohub.py structures/esmfold2_api proteins.faa [more.faa] [--pae]
+```
+
+- Output per sequence: `<name>.pdb` (pLDDT × 100 in the B-factor column), `<name>.json`
+  (pTM, per-residue pLDDT, sequence, and PAE with `--pae`), plus `summary.tsv`. Names come from
+  the first header token with unsafe characters replaced.
+- Strip the trailing `*` that gene callers write; the script does this and refuses sequences
+  with internal stops. The API otherwise fails each task with `422: Invalid character(s)`.
+- Limits: 4,096 tokens per sequence, 2,000 items per submission (the script splits larger
+  inputs), 5,000 fold items per user per day; results expire after 31 days.
+- The API returns atom37 coordinates, per-residue pLDDT and pTM as JSON (no PDB string); the
+  script converts them. Model: `esmfold2-fast-2026-05` (single sequence, no MSA).
+- Jacob approved sending unpublished SR-VP sequences to this API (2026-11-03). Other external
+  sequence services still need his go-ahead.
 
 ### ESM3 API: quick look (≤ 1,024 aa)
 
