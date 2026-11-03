@@ -936,11 +936,16 @@ def _synteny_check(
             f"Normalized ELSA run {inspection.active_run_id} is queryable "
             f"across {inspection.cluster_count} complete clusters."
         )
+        if identity.sequence_identity == "unverified":
+            summary += (
+                " Its protein-sequence identity is unverified: the run recorded no "
+                "sequence digest to compare with the live proteins table."
+            )
         remediation = None
     elif state == CapabilityState.stale:
         summary = (
-            "The ELSA sidecar is readable, but its schema, active run, or "
-            "dataset identity requires refresh."
+            "The ELSA sidecar is readable, but its schema, active run, "
+            "dataset identity, or protein sequences require refresh."
         )
         remediation = (
             "Rematerialize the sidecar from the current dataset and ELSA artifacts."
@@ -964,6 +969,10 @@ def _synteny_check(
             "dataset_seal_id": identity.seal_dataset_id,
             "dataset_identity_check": identity.state,
             "dataset_identity_error": identity.error,
+            "sequence_identity_check": identity.sequence_identity,
+            "sequence_identity_error": identity.sequence_error,
+            "sidecar_sequence_digest": identity.sidecar_sequence_digest,
+            "live_sequence_digest": identity.live_sequence_digest,
             "gene_count": inspection.gene_count,
             "block_count": inspection.block_count,
             "cluster_count": inspection.cluster_count,

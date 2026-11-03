@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -28,6 +28,29 @@ _REQUIRED_RELATIONS = (
     "elsa_cluster_members",
     "current_elsa_run",
 )
+
+# Order-free digest of the (protein_id, sequence) pairs an ELSA run was built from. Each protein contributes
+# md5(md5(sequence) || protein_id); 32 dashes stand in for a NULL sequence, so the fixed-width prefix keeps
+# the encoding unambiguous. The upper and lower 64-bit halves of those per-protein hashes are summed exactly
+# as HUGEINT, and the digest is md5 of "count:upper_sum:lower_sum". md5 text, hex parsing and integer sums
+# give the same value on every DuckDB version and platform (hash() and md5_number() carry no such promise).
+# The ELSA writer records this value under elsa_runs.inputs_json["protein_sequences"] at build time; keep its
+# copy of the SQL identical to this one and the algorithm name in step with any change.
+PROTEIN_SEQUENCE_DIGEST_ALGORITHM = "protein-sequence-md5-sum-v1"
+PROTEIN_SEQUENCE_DIGEST_SQL = """
+WITH element AS (
+    SELECT md5(COALESCE(md5(sequence), repeat('-', 32)) || protein_id) AS h
+    FROM proteins
+)
+SELECT
+    COUNT(*) AS protein_count,
+    md5(
+        CAST(COUNT(*) AS VARCHAR) || ':'
+        || CAST(COALESCE(SUM(('0x' || substr(h, 1, 16))::UBIGINT), 0)::HUGEINT AS VARCHAR) || ':'
+        || CAST(COALESCE(SUM(('0x' || substr(h, 17, 16))::UBIGINT), 0)::HUGEINT AS VARCHAR)
+    ) AS digest
+FROM element
+"""
 
 
 class SyntenySidecarError(RuntimeError):
@@ -56,11 +79,20 @@ class SyntenySidecarInspection:
     locus_count: int
     member_count: int
     error: str | None = None
+    # The active run's recorded protein-sequence digest (inputs_json["protein_sequences"]); None for runs
+    # materialized before ELSA recorded one.
+    sequence_digest: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
 class SyntenyDatasetIdentityInspection:
-    """Comparison between one sidecar run and the live Sharur dataset seal."""
+    """Comparison between one sidecar run and the live Sharur dataset seal.
+
+    ``sequence_identity`` compares the run's recorded protein-sequence digest with the live proteins table:
+    ``match``, ``mismatch`` (the run is stale), ``unverified`` (the run recorded no digest this Sharur can
+    compute, so sequence identity is open; compatibility follows the seal and gene layout), ``check_failed``
+    (the live digest could not be computed) or ``not_checked`` (the check stopped earlier).
+    """
 
     state: str
     compatible: bool
@@ -68,6 +100,10 @@ class SyntenyDatasetIdentityInspection:
     seal_path: Path
     seal_dataset_id: str | None
     error: str | None = None
+    sequence_identity: str = "not_checked"
+    sidecar_sequence_digest: str | None = None
+    live_sequence_digest: str | None = None
+    sequence_error: str | None = None
 
 
 def discover_synteny_sidecar(
@@ -151,6 +187,7 @@ def inspect_synteny_sidecar(path: str | Path) -> SyntenySidecarInspection:
                 if version == EXPECTED_SCHEMA_VERSION and run[2] == "ready"
                 else "stale"
             )
+            sequence_digest = _recorded_sequence_digest(connection)
             return SyntenySidecarInspection(
                 path=resolved,
                 state=state,
@@ -165,6 +202,7 @@ def inspect_synteny_sidecar(path: str | Path) -> SyntenySidecarInspection:
                 anchor_pair_count=int(run[7] or 0),
                 locus_count=int(run[8] or 0),
                 member_count=int(run[9] or 0),
+                sequence_digest=sequence_digest,
             )
         finally:
             connection.close()
@@ -193,7 +231,7 @@ def inspect_synteny_dataset_identity(
     *,
     core_connection: duckdb.DuckDBPyConnection | None = None,
 ) -> SyntenyDatasetIdentityInspection:
-    """Compare sidecar identity to the live dataset seal, when available.
+    """Compare sidecar identity to the live dataset seal and protein sequences, when available.
 
     ``core_connection`` is an open connection to ``db_path``; pass it from a session that already holds the
     database, since DuckDB refuses a second connection to one file with a different configuration.
@@ -207,12 +245,17 @@ def inspect_synteny_dataset_identity(
     )
     seal_path = database.parent / "dataset.seal.json"
     if not seal_path.is_file():
-        return SyntenyDatasetIdentityInspection(
-            state="seal_unavailable",
-            compatible=True,
-            sidecar_dataset_id=inspection.dataset_id,
-            seal_path=seal_path,
-            seal_dataset_id=None,
+        return _with_sequence_identity(
+            SyntenyDatasetIdentityInspection(
+                state="seal_unavailable",
+                compatible=True,
+                sidecar_dataset_id=inspection.dataset_id,
+                seal_path=seal_path,
+                seal_dataset_id=None,
+            ),
+            database,
+            inspection,
+            core_connection,
         )
     try:
         payload = json.loads(seal_path.read_text())
@@ -237,25 +280,159 @@ def inspect_synteny_dataset_identity(
             seal_dataset_id=seal_dataset_id,
         )
     if inspection.dataset_id == seal_dataset_id:
-        return SyntenyDatasetIdentityInspection(
-            state="match",
-            compatible=True,
-            sidecar_dataset_id=inspection.dataset_id,
-            seal_path=seal_path,
-            seal_dataset_id=seal_dataset_id,
+        # The seal file is a snapshot (a structural seal samples large files, and the core can change after it
+        # was written), so an equal dataset_id still leaves the live sequences to compare.
+        return _with_sequence_identity(
+            SyntenyDatasetIdentityInspection(
+                state="match",
+                compatible=True,
+                sidecar_dataset_id=inspection.dataset_id,
+                seal_path=seal_path,
+                seal_dataset_id=seal_dataset_id,
+            ),
+            database,
+            inspection,
+            core_connection,
         )
     # The seal also covers artifacts ELSA never reads (findings ledgers, annotation tables, embedding
     # sidecars), so a reseal alone does not make a run stale. ELSA's inputs are the gene layout (which
-    # proteins, on which contigs, at which coordinates) and their embeddings; the sidecar records the layout
-    # it used in elsa_genes. A run whose layout equals the live proteins table is still valid.
+    # proteins, on which contigs, at which coordinates) and their embeddings, which follow from the protein
+    # sequences; the sidecar records the layout it used in elsa_genes and, for runs built since ELSA recorded
+    # one, a digest of the sequences. A run whose layout and sequences equal the live proteins table is still
+    # valid.
     layout_ok, layout_error = _gene_layout_matches(database, inspection, core_connection)
-    return SyntenyDatasetIdentityInspection(
+    result = SyntenyDatasetIdentityInspection(
         state="inputs_match" if layout_ok else "mismatch",
         compatible=layout_ok,
         sidecar_dataset_id=inspection.dataset_id,
         seal_path=seal_path,
         seal_dataset_id=seal_dataset_id,
         error=layout_error,
+    )
+    return _with_sequence_identity(result, database, inspection, core_connection) if layout_ok else result
+
+
+def protein_sequence_digest(connection: duckdb.DuckDBPyConnection) -> dict[str, Any]:
+    """Order-free digest of the ``proteins`` table's (protein_id, sequence) pairs on ``connection``."""
+    count, digest = connection.execute(PROTEIN_SEQUENCE_DIGEST_SQL).fetchone()
+    return {
+        "algorithm": PROTEIN_SEQUENCE_DIGEST_ALGORITHM,
+        "digest": str(digest),
+        "protein_count": int(count),
+    }
+
+
+def _recorded_sequence_digest(connection: duckdb.DuckDBPyConnection) -> dict[str, Any] | None:
+    """The active run's inputs_json["protein_sequences"] entry, or None when the run recorded none."""
+    columns = {str(row[0]) for row in connection.execute("DESCRIBE current_elsa_run").fetchall()}
+    if "inputs_json" not in columns:
+        return None
+    row = connection.execute("SELECT inputs_json FROM current_elsa_run").fetchone()
+    if row is None or not row[0]:
+        return None
+    entry = json.loads(row[0]).get("protein_sequences")
+    return dict(entry) if isinstance(entry, dict) else None
+
+
+# One cached live digest per database, valid while the file and its WAL keep their size and mtime. Only
+# digests read through a read-only connection are cached: DuckDB admits no writer while one is open.
+_LIVE_SEQUENCE_DIGESTS: dict[str, tuple[tuple[Any, ...], dict[str, Any]]] = {}
+
+
+def _file_state(path: Path) -> tuple[int, int] | None:
+    try:
+        stat = path.stat()
+    except FileNotFoundError:
+        return None
+    return stat.st_size, stat.st_mtime_ns
+
+
+def _live_sequence_digest(
+    database: Path,
+    core_connection: duckdb.DuckDBPyConnection | None,
+) -> dict[str, Any]:
+    state = (_file_state(database), _file_state(database.with_name(database.name + ".wal")))
+    cached = _LIVE_SEQUENCE_DIGESTS.get(str(database))
+    if core_connection is None:
+        if cached is not None and cached[0] == state:
+            return cached[1]
+        core = duckdb.connect(str(database), read_only=True)
+        try:
+            value = protein_sequence_digest(core)
+        finally:
+            core.close()
+    else:
+        read_only = core_connection.execute("SELECT current_setting('access_mode')").fetchone()[0] == "read_only"
+        if not read_only:
+            return protein_sequence_digest(core_connection)
+        if cached is not None and cached[0] == state:
+            return cached[1]
+        value = protein_sequence_digest(core_connection)
+    _LIVE_SEQUENCE_DIGESTS[str(database)] = (state, value)
+    return value
+
+
+def _with_sequence_identity(
+    result: SyntenyDatasetIdentityInspection,
+    database: Path,
+    inspection: SyntenySidecarInspection,
+    core_connection: duckdb.DuckDBPyConnection | None,
+) -> SyntenyDatasetIdentityInspection:
+    """Add the protein-sequence comparison to an otherwise compatible identity result."""
+    recorded = inspection.sequence_digest
+    if recorded is None:
+        return replace(
+            result,
+            sequence_identity="unverified",
+            sequence_error="the ELSA run recorded no protein-sequence digest",
+        )
+    recorded_digest = recorded.get("digest")
+    algorithm = recorded.get("algorithm")
+    if algorithm != PROTEIN_SEQUENCE_DIGEST_ALGORITHM or not isinstance(recorded_digest, str):
+        return replace(
+            result,
+            sequence_identity="unverified",
+            sidecar_sequence_digest=recorded_digest if isinstance(recorded_digest, str) else None,
+            sequence_error=(
+                f"the ELSA run recorded a sequence digest with algorithm {algorithm!r}; "
+                f"this Sharur computes {PROTEIN_SEQUENCE_DIGEST_ALGORITHM!r}"
+            ),
+        )
+    try:
+        live = _live_sequence_digest(database, core_connection)
+    except Exception as exc:  # a run whose sequences cannot be checked is not shown compatible
+        message = f"live protein-sequence digest failed: {type(exc).__name__}: {exc}"
+        return replace(
+            result,
+            state="sequence_check_failed",
+            compatible=False,
+            error=message,
+            sequence_identity="check_failed",
+            sidecar_sequence_digest=recorded_digest,
+            sequence_error=message,
+        )
+    if live["digest"] == recorded_digest:
+        return replace(
+            result,
+            sequence_identity="match",
+            sidecar_sequence_digest=recorded_digest,
+            live_sequence_digest=live["digest"],
+        )
+    recorded_count = recorded.get("protein_count")
+    message = (
+        f"protein sequences differ: sidecar digest {recorded_digest[:12]} over "
+        f"{recorded_count if recorded_count is not None else 'an unrecorded number of'} proteins, live digest "
+        f"{live['digest'][:12]} over {live['protein_count']} proteins"
+    )
+    return replace(
+        result,
+        state="sequence_mismatch",
+        compatible=False,
+        error=message,
+        sequence_identity="mismatch",
+        sidecar_sequence_digest=recorded_digest,
+        live_sequence_digest=live["digest"],
+        sequence_error=message,
     )
 
 
@@ -351,7 +528,8 @@ class SyntenyStore:
                     raise SyntenyDatasetMismatchError(
                         "ELSA sidecar dataset identity is "
                         f"{identity.state}: sidecar={identity.sidecar_dataset_id!r}, "
-                        f"live={identity.seal_dataset_id!r}. "
+                        f"live={identity.seal_dataset_id!r}"
+                        f"{f' ({identity.error})' if identity.error else ''}. "
                         "Refresh the ELSA run or opt into historical results "
                         "with allow_stale_synteny=True."
                     )
@@ -639,6 +817,8 @@ class SyntenyStore:
 __all__ = [
     "DEFAULT_SIDECAR_NAME",
     "EXPECTED_SCHEMA_VERSION",
+    "PROTEIN_SEQUENCE_DIGEST_ALGORITHM",
+    "PROTEIN_SEQUENCE_DIGEST_SQL",
     "SyntenyDatasetIdentityInspection",
     "SyntenyDatasetMismatchError",
     "SyntenySidecarError",
@@ -647,4 +827,5 @@ __all__ = [
     "discover_synteny_sidecar",
     "inspect_synteny_dataset_identity",
     "inspect_synteny_sidecar",
+    "protein_sequence_digest",
 ]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 
 import duckdb
@@ -11,9 +12,12 @@ from sharur.capabilities import CapabilityState, build_capability_brief
 from sharur.operators import Sharur
 from sharur.storage.duckdb_store import DuckDBStore
 from sharur.synteny import (
+    PROTEIN_SEQUENCE_DIGEST_ALGORITHM,
     SyntenyDatasetMismatchError,
     SyntenyStore,
+    inspect_synteny_dataset_identity,
     inspect_synteny_sidecar,
+    protein_sequence_digest,
 )
 
 
@@ -47,7 +51,7 @@ def _build_core_database(path) -> None:
     store.close()
 
 
-def _build_synteny_sidecar(path, *, dataset_id: str = "dataset-1") -> str:
+def _build_synteny_sidecar(path, *, dataset_id: str = "dataset-1", inputs: dict | None = None) -> str:
     run_id = "elsa-run-a"
     connection = duckdb.connect(str(path))
     connection.execute(
@@ -72,7 +76,9 @@ def _build_synteny_sidecar(path, *, dataset_id: str = "dataset-1") -> str:
             anchor_pair_count BIGINT,
             locus_count BIGINT,
             member_count BIGINT,
-            validation_json VARCHAR
+            validation_json VARCHAR,
+            parameters_json VARCHAR,
+            inputs_json VARCHAR
         );
         CREATE TABLE elsa_dataset_state(singleton BOOLEAN, active_run_id VARCHAR);
         CREATE TABLE elsa_genes(
@@ -170,10 +176,10 @@ def _build_synteny_sidecar(path, *, dataset_id: str = "dataset-1") -> str:
         INSERT INTO elsa_runs VALUES (
             ?, 'test run', current_timestamp, 'ready', TRUE, ?, '0.2.0',
             'commit-a', 'coordinate-sorted-position-index-v1',
-            6, 2, 2, 1, 3, 3, 6, '{"exact_anchor_resolution":true}'
+            6, 2, 2, 1, 3, 3, 6, '{"exact_anchor_resolution":true}', '{}', ?
         )
         """,
-        [run_id, dataset_id],
+        [run_id, dataset_id, json.dumps(inputs or {})],
     )
     connection.execute(
         "INSERT INTO elsa_dataset_state VALUES (TRUE, ?)",
@@ -372,3 +378,106 @@ def test_reseal_fallback_works_inside_a_writable_session(tmp_path):
     db_path, _sidecar = _layout_matched_dataset(tmp_path)
     session = Sharur(db_path)  # writable: a second read-only connection to the file would be refused
     assert session.synteny_for_protein("p1").meta.total_rows == 2
+
+
+def _reference_sequence_digest(rows):
+    """Pure-Python definition of protein-sequence-md5-sum-v1, independent of DuckDB."""
+    upper = lower = 0
+    for protein_id, sequence in rows:
+        token = hashlib.md5(sequence.encode()).hexdigest() if sequence is not None else "-" * 32
+        element = hashlib.md5((token + protein_id).encode()).hexdigest()
+        upper += int(element[:16], 16)
+        lower += int(element[16:], 16)
+    return hashlib.md5(f"{len(rows)}:{upper}:{lower}".encode()).hexdigest()
+
+
+def test_protein_sequence_digest_is_order_free_and_matches_its_reference_definition():
+    rows = [("p1", "MKV"), ("p10", "MA"), ("q2", None), ("q3", "")]
+    digests = []
+    for ordering in (rows, list(reversed(rows))):
+        connection = duckdb.connect()
+        connection.execute("CREATE TABLE proteins(protein_id VARCHAR, sequence VARCHAR)")
+        connection.executemany("INSERT INTO proteins VALUES (?, ?)", ordering)
+        digests.append(protein_sequence_digest(connection))
+        connection.close()
+
+    assert digests[0] == digests[1]
+    assert digests[0] == {
+        "algorithm": PROTEIN_SEQUENCE_DIGEST_ALGORITHM,
+        "digest": _reference_sequence_digest(rows),
+        "protein_count": 4,
+    }
+    # Pinned so a change to the SQL, or a DuckDB release that changes md5 text, hex casts or HUGEINT sums,
+    # cannot silently disagree with digests ELSA already recorded.
+    assert digests[0]["digest"] == "f3a85170cd50c5ae9114999152561214"
+
+
+def _sequence_recorded_dataset(tmp_path, *, dataset_id="resealed", algorithm=None):
+    """A layout-matched sidecar whose run recorded the core's protein-sequence digest at build time."""
+    db_path = tmp_path / "sharur.duckdb"
+    sidecar_path = tmp_path / "synteny.duckdb"
+    _build_core_database(db_path)
+    core = duckdb.connect(str(db_path), read_only=True)
+    recorded = protein_sequence_digest(core)
+    core.close()
+    if algorithm is not None:
+        recorded["algorithm"] = algorithm
+    _build_synteny_sidecar(sidecar_path, dataset_id="sealed-at-build", inputs={"protein_sequences": recorded})
+    connection = duckdb.connect(str(sidecar_path))
+    connection.execute("DELETE FROM elsa_genes WHERE protein_id = 'q2'")  # the run's genes equal the core's
+    connection.close()
+    (tmp_path / "dataset.seal.json").write_text(json.dumps({"dataset_id": dataset_id}))
+    return db_path, sidecar_path
+
+
+def _change_core_sequence(db_path):
+    core = duckdb.connect(str(db_path))
+    core.execute("UPDATE proteins SET sequence = 'MV' WHERE protein_id = 'p10'")  # same layout, new translation
+    core.close()
+
+
+@pytest.mark.parametrize("dataset_id", ["resealed", "sealed-at-build"])
+def test_changed_sequences_with_unchanged_layout_make_the_run_stale(tmp_path, dataset_id):
+    db_path, sidecar_path = _sequence_recorded_dataset(tmp_path, dataset_id=dataset_id)
+    before = inspect_synteny_dataset_identity(db_path, sidecar_path)
+    assert before.state == ("inputs_match" if dataset_id == "resealed" else "match")
+    assert before.compatible
+    assert before.sequence_identity == "match"
+
+    _change_core_sequence(db_path)  # also proves the cached live digest follows the file
+    identity = inspect_synteny_dataset_identity(db_path, sidecar_path)
+    assert identity.state == "sequence_mismatch"
+    assert not identity.compatible
+    assert identity.sequence_identity == "mismatch"
+    assert identity.live_sequence_digest != identity.sidecar_sequence_digest
+    with pytest.raises(SyntenyDatasetMismatchError, match="identity is sequence_mismatch"):
+        Sharur(db_path, read_only=True).synteny_for_protein("p1")
+    assert build_capability_brief(db_path).get("elsa_synteny").state == CapabilityState.stale
+
+
+def test_sequence_check_runs_inside_a_writable_session(tmp_path):
+    db_path, _sidecar = _sequence_recorded_dataset(tmp_path)
+    session = Sharur(db_path)  # writable: the check runs on the session's own connection, uncached
+    assert session.synteny_for_protein("p1").meta.total_rows == 2
+    session.store.execute("UPDATE proteins SET sequence = 'MV' WHERE protein_id = 'p10'")
+    with pytest.raises(SyntenyDatasetMismatchError, match="identity is sequence_mismatch"):
+        session.synteny_for_protein("p1")
+
+
+@pytest.mark.parametrize("algorithm", [None, "a-future-digest-v2"])
+def test_run_without_a_usable_sequence_digest_is_unverified_not_stale(tmp_path, algorithm):
+    if algorithm is None:
+        db_path, sidecar_path = _layout_matched_dataset(tmp_path)  # inputs_json records no digest
+    else:
+        db_path, sidecar_path = _sequence_recorded_dataset(tmp_path, algorithm=algorithm)
+    _change_core_sequence(db_path)
+
+    identity = inspect_synteny_dataset_identity(db_path, sidecar_path)
+    assert identity.state == "inputs_match"
+    assert identity.compatible
+    assert identity.sequence_identity == "unverified"
+    assert identity.live_sequence_digest is None
+    capability = build_capability_brief(db_path).get("elsa_synteny")
+    assert capability.state == CapabilityState.available
+    assert capability.evidence["sequence_identity_check"] == "unverified"
+    assert "unverified" in capability.summary
