@@ -15,9 +15,13 @@ Usage:
 
 import argparse
 import re
+from pathlib import Path
 
 import duckdb
 import pandas as pd
+
+from sharur.health import kofam_ko_list
+from sharur.kofam import KO_SOURCES, kofam_scores, ko_score_bases, read_ko_list, record_ko_score_basis
 
 # Default e-value thresholds per source (same as 07_build_knowledge_base.py)
 DEFAULT_EVALUE_THRESHOLDS = {
@@ -73,7 +77,7 @@ def _dedup_defensefinder_fam_variants(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def load_annotations(db_path: str, tsv_path: str, source: str,
-                     evalue_threshold: float | None = None) -> None:
+                     evalue_threshold: float | None = None, ko_list: str | None = None) -> None:
     conn = duckdb.connect(db_path)
 
     source = source.lower()  # Enforce lowercase source names
@@ -107,6 +111,17 @@ def load_annotations(db_path: str, tsv_path: str, source: str,
 
     df["source"] = source
 
+    # KO rows: one per (protein, KO), scored as KOfam compares them with the threshold
+    # (full-sequence bitscore, or the best domain's for score_type 'domain').
+    ko_basis = None
+    ko_list_path = None
+    if source in KO_SOURCES and {"score", "dom_score"} <= set(df.columns):
+        ko_list_path = Path(ko_list) if ko_list is not None else kofam_ko_list()
+        score_types = ({ko: entry.score_type for ko, entry in read_ko_list(ko_list_path).items()}
+                       if ko_list_path is not None else None)
+        df, ko_basis = kofam_scores(df, score_types, full="score", domain="dom_score")
+        print(f"  KO scores: {ko_basis} ({len(df):,} protein-KO rows)")
+
     # Apply e-value filtering
     if evalue_threshold is None:
         evalue_threshold = DEFAULT_EVALUE_THRESHOLDS.get(source)
@@ -128,6 +143,9 @@ def load_annotations(db_path: str, tsv_path: str, source: str,
     before = len(df)
     df = df[df["protein_id"].isin(existing)]
     print(f"  Matched to existing proteins: {len(df):,} ({before - len(df):,} dropped)")
+
+    prior_rows = conn.execute("SELECT COUNT(*) FROM annotations WHERE LOWER(source) = ?", [source]).fetchone()[0]
+    prior_basis = ko_score_bases(conn).get(source) if source in KO_SOURCES else None
 
     # Get next annotation_id
     next_id = conn.execute(
@@ -158,6 +176,14 @@ def load_annotations(db_path: str, tsv_path: str, source: str,
     ).fetchone()[0]
     print(f"  Inserted {len(df):,} annotations (total {source} in DB: {final_count:,})")
 
+    if source in KO_SOURCES:
+        # The record covers every row of the source: rows already stored under another
+        # (or no recorded) basis leave the source's basis unknown.
+        basis = ko_basis if prior_rows == 0 or prior_basis == ko_basis else None
+        record_ko_score_basis(conn, source, basis, ko_list=ko_list_path, hits_paths=[tsv_path],
+                              loaded_rows=len(df))
+        print(f"  KO score basis recorded: {basis or 'unknown (mixed with earlier rows)'}")
+
     conn.close()
     print("Done.")
 
@@ -169,5 +195,7 @@ if __name__ == "__main__":
     parser.add_argument("--source", required=True)
     parser.add_argument("--evalue", type=float, default=None,
                         help="E-value threshold (default: source-specific, see DEFAULT_EVALUE_THRESHOLDS)")
+    parser.add_argument("--ko-list", default=None,
+                        help="KOfam ko_list for KO score types (default: sharur.health.kofam_ko_list())")
     args = parser.parse_args()
-    load_annotations(args.db, args.tsv, args.source, evalue_threshold=args.evalue)
+    load_annotations(args.db, args.tsv, args.source, evalue_threshold=args.evalue, ko_list=args.ko_list)

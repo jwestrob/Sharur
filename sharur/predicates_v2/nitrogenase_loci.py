@@ -21,7 +21,9 @@ and writes one ``loci`` row per gene set:
    KOfam's best hit for the beta subunit is the NifN group (K02592), so K02592
    fills the beta slot when a nifI1/nifI2 gene (K02589/K02590) lies between the
    Fe protein and the alpha slot.
-4. Each of the three KOs scores at or above its KOfam threshold.
+4. Each of the three KOs scores at or above its KOfam threshold, on the score
+   that KOfam's ``score_type`` names for the KO: the full-sequence bitscore
+   (nifH, nifD, the vnf genes) or the best-domain bitscore (nifK, the NifN group).
 5. None of the three genes is partial (cut by a contig end). A gene without a
    Prodigal partial flag counts as partial when it is the first or last gene of
    a linear contig, since only those genes can run off a contig end.
@@ -40,6 +42,18 @@ index is the larger one), and its ``start``/``end_coord`` cover the members on
 the Fe protein's side of the origin (for an unanchored set, its 5'-most gene),
 because every ``loci`` reader expects ``start <= end_coord``. Such rows carry
 ``wraps_origin: true`` and both arcs as ``segments`` in their metadata.
+
+The KO score: a KO loader records which bitscore its rows store
+(:mod:`sharur.kofam`). Rows loaded before that record existed store one domain's
+bitscore (Stage 07) or the full-sequence bitscore (other loaders), and the score
+KOfam names for a ``full`` KO, or for a ``domain`` KO, may be absent from the
+database. The threshold check then compares the stored score and flags the gene
+set: its slot members carry ``ko_score_exact: false`` and the locus
+``slot_ko_scores_exact: false``; the call itself stands. Astra and Aksha write a
+KOFAM hit only when its full-sequence score and the domain's score both reach the
+profile's embedded threshold (``ko_list``'s value set as GA1 and GA2), so on rows
+from those searches the two scores agree about a threshold from the same
+``ko_list``. Reloading the KO rows replaces the flag with KOfam's own comparison.
 
 The window: in the SR-VP archaeal and bacterial snapshots every KO-assigned
 alpha and beta partner of a nifH lies 1-5 genes downstream on its strand (alpha
@@ -61,6 +75,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
+from sharur.kofam import KoThreshold, compares_as_kofam, ko_score_bases, read_ko_list
 from sharur.predicates.pfam_identity import normalize_pfam_accession
 from sharur.predicates_v2.model import ClaimRelation, SemanticAtom, SemanticFacet
 
@@ -73,7 +88,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 CALLER = "sharur.nitrogenase_loci"
-CALLER_VERSION = "1"
+CALLER_VERSION = "2"  # 2: KOfam score_type picks the full-sequence or best-domain score
 WINDOW = 6
 SHORT_PARTNER_AA = 430  # labels uncalled pairs; KO-assigned alpha/beta partners here are >= 439 aa
 SOURCE_DB = "nitrogenase_locus"
@@ -159,6 +174,7 @@ class Gene:
     ko_passes: bool = False
     pfams: frozenset[str] = frozenset()
     partial_inferred: bool = False  # no Prodigal flag: ``partial`` comes from the gene's contig position
+    ko_score_exact: bool = True  # ``ko_passes`` compared the score KOfam's score_type names for ``ko``
 
     @property
     def catalytic_family(self) -> bool:
@@ -228,6 +244,8 @@ class Locus:
                       "ko_passes": gene.ko_passes, "length": gene.length, "partial": gene.partial}
             if gene.partial_inferred and gene.partial:
                 member["partial_inferred"] = True  # no Prodigal flag; first or last gene of a linear contig
+            if gene.ko is not None and not gene.ko_score_exact:
+                member["ko_score_exact"] = False  # the stored score may differ from the one KOfam compares
             members.append(member)
         metadata = {
             "caller": CALLER,
@@ -380,6 +398,7 @@ def _call_anchor(contig: _ContigGenes, anchor: Gene) -> Locus:
         "nifB_or_nifX": nifb_nifx,
         "window_cut_by_contig_end": cut,
         "group_ii_beta": bool(beta is not None and beta.ko == GROUP_II_BETA_KO and beta_ko_fits),
+        "slot_ko_scores_exact": all(gene.ko_score_exact for gene in slots if gene.ko is not None),
     }
     return Locus(anchor.contig_id, call, anchor.strand, members, evidence)
 
@@ -477,34 +496,29 @@ def call_loci(contigs: Mapping[str, Contig], genes: Iterable[Gene]) -> list[Locu
 # --------------------------------------------------------------------------- #
 
 
-def _kofam_thresholds(kos: Iterable[str]) -> dict[str, float | None] | None:
-    """KOfam score thresholds for ``kos`` (None value: KOfam has none); None when ko_list is absent."""
+def _kofam_thresholds(kos: Iterable[str]) -> dict[str, KoThreshold] | None:
+    """KOfam thresholds and score types for ``kos``; None when ko_list is absent."""
     from sharur.health import kofam_ko_list  # noqa: PLC0415
 
     path: Path | None = kofam_ko_list()
-    if path is None:
-        return None
-    wanted = set(kos)
-    thresholds: dict[str, float | None] = {}
-    with open(path) as handle:
-        header = handle.readline().rstrip("\n").split("\t")
-        ko_idx, thr_idx = header.index("knum"), header.index("threshold")
-        for line in handle:
-            parts = line.rstrip("\n").split("\t")
-            if parts[ko_idx] in wanted:
-                value = parts[thr_idx].strip()
-                thresholds[parts[ko_idx]] = None if value in ("", "-") else float(value)
-    return thresholds
+    return None if path is None else read_ko_list(path, kos)
 
 
-def _ko_passes(ko: str, score: float | None, evalue: float | None,
-               thresholds: dict[str, float | None] | None) -> bool:
+def _ko_check(ko: str, score: float | None, evalue: float | None,
+              thresholds: dict[str, KoThreshold] | None, basis: str | None) -> tuple[bool, bool]:
+    """Whether a stored KO call passes KOfam's threshold, and whether that compared KOfam's own score.
+
+    ``basis`` is the score the KO row's loader recorded storing (:mod:`sharur.kofam`);
+    the comparison is KOfam's when that is the score the KO's ``score_type`` names.
+    KOs without a threshold are judged on the full-sequence E-value, which every
+    loader stores.
+    """
     if thresholds is None:
-        return True  # no ko_list: the stored KO call stands (recorded in metadata)
-    threshold = thresholds.get(ko)
-    if threshold is None:
-        return evalue is not None and evalue <= KOFAM_NO_THRESHOLD_EVALUE
-    return score is not None and score >= threshold
+        return True, False  # no ko_list: the stored KO call stands (recorded in metadata)
+    entry = thresholds.get(ko)
+    if entry is None or entry.threshold is None:
+        return evalue is not None and evalue <= KOFAM_NO_THRESHOLD_EVALUE, True
+    return score is not None and score >= entry.threshold, compares_as_kofam(basis, entry.score_type)
 
 
 def fetch_genes(conn) -> tuple[dict[str, Contig], list[Gene], bool]:
@@ -570,7 +584,8 @@ def fetch_genes(conn) -> tuple[dict[str, Contig], list[Gene], bool]:
     conn.execute("DROP TABLE IF EXISTS _nif_seed_contigs")
 
     thresholds = _kofam_thresholds(CONTEXT_KOS)
-    best_ko: dict[str, tuple[bool, float, str]] = {}
+    bases = ko_score_bases(conn)
+    best_ko: dict[str, tuple[bool, float, str, bool]] = {}
     pfams: dict[str, set[str]] = defaultdict(set)
     for protein_id, source, accession, name, score, evalue in hits:
         if source == "pfam":
@@ -578,13 +593,13 @@ def fetch_genes(conn) -> tuple[dict[str, Contig], list[Gene], bool]:
                 if key in CONTEXT_PFAMS:
                     pfams[protein_id].add(key)
             continue
-        passes = _ko_passes(accession, score, evalue, thresholds)
-        candidate = (passes, score if score is not None else float("-inf"), accession)
+        passes, exact = _ko_check(accession, score, evalue, thresholds, bases.get(source))
+        candidate = (passes, score if score is not None else float("-inf"), accession, exact)
         if protein_id not in best_ko or candidate > best_ko[protein_id]:
             best_ko[protein_id] = candidate
     genes = []
     for protein_id, contig_id, gene_index, strand, start, end, length, partial in proteins:
-        passes, _, ko = best_ko.get(protein_id, (False, 0.0, None))
+        passes, _, ko, exact = best_ko.get(protein_id, (False, 0.0, None, True))
         index = int(gene_index)
         if partial is None or str(partial).strip() == "":
             # No Prodigal flag: only the first or last gene of a linear contig can run off its end.
@@ -599,7 +614,7 @@ def fetch_genes(conn) -> tuple[dict[str, Contig], list[Gene], bool]:
             strand=normalize_strand(strand), start=int(start), end=int(end),
             length=int(length) if length is not None else None,
             partial=is_partial, partial_inferred=inferred,
-            ko=ko, ko_passes=passes, pfams=frozenset(pfams.get(protein_id, ())),
+            ko=ko, ko_passes=passes, pfams=frozenset(pfams.get(protein_id, ())), ko_score_exact=exact,
         ))
     return contigs, genes, thresholds is not None
 
@@ -639,8 +654,12 @@ def write_loci(conn, loci: list[Locus], *, thresholds_checked: bool = True) -> d
     by_call: dict[str, int] = defaultdict(int)
     for locus in loci:
         by_call[locus.call] += 1
+    # Threshold-gated calls whose slot scores may differ from the ones KOfam compares.
+    inexact = sum(1 for locus in loci if locus.call in ("confirmed", "ko_below_threshold")
+                  and locus.evidence.get("slot_ko_scores_exact") is False)
     summary = {"loci": len(loci_rows), "members": len(member_rows), "by_call": dict(sorted(by_call.items())),
-               "kofam_thresholds_checked": thresholds_checked, "written": False, "changed_proteins": []}
+               "kofam_thresholds_checked": thresholds_checked, "ko_score_inexact_loci": inexact,
+               "written": False, "changed_proteins": []}
     stored_loci = conn.execute(
         f"""SELECT locus_id, locus_type, contig_id, start, end_coord, confidence, CAST(metadata AS VARCHAR)
             FROM loci WHERE locus_type IN ({types}) ORDER BY locus_id"""
@@ -689,13 +708,19 @@ def refresh_nitrogenase_loci(store) -> dict[str, Any]:
     conn = store.conn
     tables = {row[0] for row in conn.execute("SHOW TABLES").fetchall()}
     if not {"proteins", "annotations", "loci", "locus_proteins"} <= tables:
-        return {"loci": 0, "members": 0, "by_call": {}, "kofam_thresholds_checked": False, "written": False,
-                "changed_proteins": []}
+        return {"loci": 0, "members": 0, "by_call": {}, "kofam_thresholds_checked": False,
+                "ko_score_inexact_loci": 0, "written": False, "changed_proteins": []}
     contigs, genes, checked = fetch_genes(conn)
     if not checked:
         logger.warning("KOfam ko_list not found: nitrogenase slot KOs are taken as called, unthresholded")
     loci = call_loci(contigs, genes)
     summary = write_loci(conn, loci, thresholds_checked=checked)
+    if checked and summary["ko_score_inexact_loci"]:
+        logger.warning(
+            "%d nitrogenase gene sets were thresholded on a stored KO score whose basis the KO loader did not "
+            "record (KOfam compares the full-sequence or best-domain bitscore per score_type); reload the KO "
+            "rows to compare KOfam's own score. Flagged as slot_ko_scores_exact: false.",
+            summary["ko_score_inexact_loci"])
     logger.info("Nitrogenase loci (%s): %s", "rewritten" if summary["written"] else "unchanged", summary["by_call"])
     return summary
 
