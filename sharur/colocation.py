@@ -42,7 +42,7 @@ from pathlib import Path
 import duckdb
 import pandas as pd
 
-from sharur.storage.migrations import get_current_version, run_migrations
+from sharur.storage.migrations import run_migrations
 
 
 logger = logging.getLogger(__name__)
@@ -1980,18 +1980,17 @@ def _integrate_results(
     conn = duckdb.connect(str(db_path), config=connect_config or {})
 
     _assert_system_dataframe_invariants(conn, systems_df, genes_df)
+    try:
+        if "schema_version" in {str(row[0]) for row in conn.execute("SHOW TABLES").fetchall()}:
+            # Additive migrations only: a database holding pre-v5 system calls
+            # stops here and names `sharur migrate`, before anything changes.
+            run_migrations(conn)
+    except BaseException:
+        conn.close()
+        raise
     existing_tables = {str(row[0]) for row in conn.execute("SHOW TABLES").fetchall()}
     capture_sources = {source_label}
     capture_tables = {table_name}
-    if (
-        "schema_version" in existing_tables
-        and get_current_version(conn) < 5
-    ):
-        # Migration 5 quarantines both legacy callers. Include every protein it
-        # invalidates in the returned refresh set, even when this integration
-        # invocation is rebuilding only one source.
-        capture_sources.update({"defensefinder_system", "txsscan_system"})
-        capture_tables.update({"defense_systems", "secretion_systems"})
 
     capture_source_values = sorted(capture_sources)
     capture_placeholders = ", ".join("?" for _ in capture_source_values)
@@ -2047,9 +2046,6 @@ def _integrate_results(
         )
     if not genes_df.empty and "protein_id" in genes_df:
         affected_protein_ids.update(str(value) for value in genes_df["protein_id"])
-
-    if "schema_version" in existing_tables:
-        run_migrations(conn)
 
     conn.execute("BEGIN TRANSACTION")
 

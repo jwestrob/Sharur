@@ -749,8 +749,10 @@ Schema version 5 adds contig provenance to validated system calls. Because the
 pre-v5 caller did not enforce replicon-local MacSyFinder semantics, migration
 quarantines those legacy named calls and removes semantic state/search-cache
 rows for their former members. Raw DefenseFinder/TXSScan observations remain.
-Rerun the current caller and refresh V2 for the affected proteins before using
-named system evidence from a migrated legacy dataset.
+Only `sharur migrate` applies this step; a writable open of a database holding
+such calls stops and names that command. Rerun the current caller and refresh
+V2 for the affected proteins before using named system evidence from a migrated
+legacy dataset.
 
 ### `semantic_atoms`
 

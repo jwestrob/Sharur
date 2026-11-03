@@ -3,17 +3,46 @@
 from __future__ import annotations
 
 from contextlib import suppress
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, NamedTuple
 
 from sharur.predicates.provenance import CREATE_SQL as PROVENANCE_SQL
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     import duckdb
 
-# Each migration: (version, description, sql)
-MIGRATIONS: list[tuple[int, str, str]] = [
-    (
+
+@dataclass(frozen=True)
+class Destructive:
+    """Marks a migration that removes or rewrites rows already in a database.
+
+    ``run_migrations`` applies such a migration only with
+    ``allow_destructive=True``, which ``sharur migrate`` passes; every other
+    caller (a writable ``DuckDBStore`` open, Stage 07, the system callers, the
+    contig backfill) stops with :class:`DestructiveMigrationError` instead.
+    ``removes_rows`` reports whether applying the migration to this database
+    would remove anything, so a fresh or empty database still migrates on
+    open; without one, the migration counts as destructive for every database.
+    """
+
+    effect: str
+    removes_rows: Callable[[duckdb.DuckDBPyConnection], bool] | None = None
+
+
+class Migration(NamedTuple):
+    version: int
+    description: str
+    sql: str
+    # None for an additive migration (new tables, columns, indexes). Mark every
+    # migration that deletes or rewrites existing rows.
+    destructive: Destructive | None = None
+
+
+MIGRATIONS: list[Migration] = [
+    Migration(
         1,
         "Initial schema version tracking",
         """
@@ -26,7 +55,7 @@ MIGRATIONS: list[tuple[int, str, str]] = [
             VALUES (1, 'Initial schema version tracking');
         """,
     ),
-    (
+    Migration(
         2,
         "Predicate V2 semantic tables and indexes",
         """
@@ -75,7 +104,7 @@ MIGRATIONS: list[tuple[int, str, str]] = [
             VALUES (2, 'Predicate V2 semantic tables and indexes');
         """,
     ),
-    (
+    Migration(
         3,
         "Predicate V2 materialized search terms",
         """
@@ -103,7 +132,7 @@ MIGRATIONS: list[tuple[int, str, str]] = [
             VALUES (3, 'Predicate V2 materialized search terms');
         """,
     ),
-    (
+    Migration(
         4,
         "Validated system membership join table",
         """
@@ -129,15 +158,24 @@ MIGRATIONS: list[tuple[int, str, str]] = [
             VALUES (4, 'Validated system membership join table');
         """,
     ),
-    (
+    Migration(
         5,
         "Replicon provenance for validated systems",
         """
         INSERT INTO schema_version (version, description)
             VALUES (5, 'Replicon provenance for validated systems');
         """,
+        Destructive(
+            effect=(
+                "removes every DefenseFinder/TXSScan system call made before replicon-local "
+                "validation (defense_systems, secretion_systems, *_system annotations and "
+                "system_proteins rows) and the V2 rows of their member proteins; raw HMM hits "
+                "stay, and Stage 07 (or the callers plus a V2 refresh) rebuilds the calls"
+            ),
+            removes_rows=lambda conn: _pre_v5_system_calls_present(conn),
+        ),
     ),
-    (
+    Migration(
         6,
         "Contig navigation index",
         """
@@ -145,7 +183,7 @@ MIGRATIONS: list[tuple[int, str, str]] = [
             VALUES (6, 'Contig navigation index');
         """,
     ),
-    (
+    Migration(
         7,
         "Predicate map provenance stamps",
         f"""
@@ -154,14 +192,15 @@ MIGRATIONS: list[tuple[int, str, str]] = [
             VALUES (7, 'Predicate map provenance stamps');
         """,
     ),
-    (
+    Migration(
         8,
         "Contig length source and gene truncation flags",
         """
         INSERT INTO schema_version (version, description)
             VALUES (8, 'Contig length source and gene truncation flags');
         """,
-    ),    (
+    ),
+    Migration(
         9,
         "CRISPR-Cas subtype calls",
         """
@@ -243,6 +282,44 @@ def _add_v8_contig_context_columns(conn: duckdb.DuckDBPyConnection) -> None:
         conn.execute("ALTER TABLE proteins ADD COLUMN partial VARCHAR(2)")
 
 
+_PRE_V5_SYSTEM_SOURCES = ("defensefinder_system", "txsscan_system")
+# Tables v5 empties entirely, and (table, column) pairs it filters on the sources above.
+_PRE_V5_SYSTEM_TABLES = ("defense_systems", "secretion_systems")
+_PRE_V5_SOURCE_COLUMNS = (
+    ("annotations", "source"),
+    ("system_proteins", "system_source"),
+    ("semantic_atoms", "source_db"),
+    ("semantic_terms", "source_db"),
+)
+
+
+def _pre_v5_system_calls_present(conn: duckdb.DuckDBPyConnection) -> bool:
+    """True when :func:`_quarantine_pre_v5_system_calls` would delete any row.
+
+    It deletes all rows of the two system tables and rows carrying a
+    ``*_system`` source; the semantic_state, semantic_terms and
+    protein_predicates rows it drops belong to proteins those rows name, so
+    they exist only when one of these probes finds a row.
+    """
+    tables = {str(row[0]) for row in conn.execute("SHOW TABLES").fetchall()}
+    for table_name in _PRE_V5_SYSTEM_TABLES:
+        if table_name in tables and conn.execute(
+            f"SELECT 1 FROM {table_name} LIMIT 1"
+        ).fetchone():
+            return True
+    for table_name, column in _PRE_V5_SOURCE_COLUMNS:
+        if (
+            table_name in tables
+            and column in _column_names(conn, table_name)
+            and conn.execute(
+                f"SELECT 1 FROM {table_name} WHERE {column} IN (?, ?) LIMIT 1",
+                list(_PRE_V5_SYSTEM_SOURCES),
+            ).fetchone()
+        ):
+            return True
+    return False
+
+
 def _quarantine_pre_v5_system_calls(conn: duckdb.DuckDBPyConnection) -> None:
     """Remove caller output that predates replicon-local validation.
 
@@ -254,7 +331,7 @@ def _quarantine_pre_v5_system_calls(conn: duckdb.DuckDBPyConnection) -> None:
     the affected semantic subset.
     """
     tables = {str(row[0]) for row in conn.execute("SHOW TABLES").fetchall()}
-    sources = ("defensefinder_system", "txsscan_system")
+    sources = _PRE_V5_SYSTEM_SOURCES
 
     conn.execute("""
         CREATE TEMP TABLE sharur_stale_system_members (
@@ -393,24 +470,78 @@ def get_current_version(conn: duckdb.DuckDBPyConnection) -> int:
         return 0
 
 
-def run_migrations(
+class DestructiveMigrationError(RuntimeError):
+    """A pending migration would remove rows; only ``sharur migrate`` applies it."""
+
+    def __init__(self, path: str | None, current: int, migrations: list[Migration]):
+        self.path = path
+        self.current = current
+        self.migrations = migrations
+        target = path or "PATH"
+        steps = "; ".join(
+            f"v{m.version} ({m.description}) {m.destructive.effect}" for m in migrations
+        )
+        super().__init__(
+            f"{target} is at schema {current} and needs a destructive migration: {steps}. "
+            "Opening or writing a database applies only additive migrations; nothing was "
+            "changed. Copy the file if its current contents matter, then run "
+            f"`sharur migrate --db {target}` in a maintenance window."
+        )
+
+
+def _pending(current: int, target_version: int | None) -> list[Migration]:
+    if target_version is None:
+        target_version = max(m.version for m in MIGRATIONS) if MIGRATIONS else 0
+    return [
+        m for m in sorted(MIGRATIONS, key=lambda m: m.version)
+        if current < m.version <= target_version
+    ]
+
+
+def blocking_migrations(
     conn: duckdb.DuckDBPyConnection, target_version: int | None = None
+) -> list[Migration]:
+    """Pending destructive migrations that would remove rows from this database.
+
+    Read-only: safe on a read-only connection.
+    """
+    return [
+        m for m in _pending(get_current_version(conn), target_version)
+        if m.destructive is not None
+        and (m.destructive.removes_rows is None or m.destructive.removes_rows(conn))
+    ]
+
+
+def _database_path(conn: duckdb.DuckDBPyConnection) -> str | None:
+    with suppress(Exception):
+        row = conn.execute(
+            "SELECT path FROM duckdb_databases() WHERE database_name = current_database()"
+        ).fetchone()
+        return row[0] if row else None
+    return None
+
+
+def run_migrations(
+    conn: duckdb.DuckDBPyConnection,
+    target_version: int | None = None,
+    *,
+    allow_destructive: bool = False,
 ) -> int:
     """Apply pending migrations up to target_version (default: latest).
 
-    Returns count of migrations applied.
+    Additive migrations always apply. When a pending destructive migration
+    would remove rows, nothing is applied and :class:`DestructiveMigrationError`
+    names ``sharur migrate``, unless ``allow_destructive`` is set (that command
+    sets it). Returns count of migrations applied.
     """
     current = get_current_version(conn)
-    if target_version is None:
-        target_version = max(v for v, _, _ in MIGRATIONS) if MIGRATIONS else 0
+    if not allow_destructive:
+        blocking = blocking_migrations(conn, target_version)
+        if blocking:
+            raise DestructiveMigrationError(_database_path(conn), current, blocking)
 
     applied = 0
-    for version, _description, sql in sorted(MIGRATIONS, key=lambda m: m[0]):
-        if version <= current:
-            continue
-        if version > target_version:
-            break
-
+    for version, _description, sql, _destructive in _pending(current, target_version):
         if version == 5:
             _add_v5_replicon_columns(conn)
             conn.execute("BEGIN TRANSACTION")
@@ -437,4 +568,12 @@ def run_migrations(
     return applied
 
 
-__all__ = ["MIGRATIONS", "get_current_version", "run_migrations"]
+__all__ = [
+    "MIGRATIONS",
+    "Destructive",
+    "DestructiveMigrationError",
+    "Migration",
+    "blocking_migrations",
+    "get_current_version",
+    "run_migrations",
+]

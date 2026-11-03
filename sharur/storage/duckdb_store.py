@@ -107,7 +107,14 @@ class DuckDBStore:
 
             self._configure_resources()
             if not self.read_only:
-                self._initialize_schema()
+                try:
+                    self._initialize_schema()
+                except BaseException:
+                    # Release the file (and its write lock) when the open is refused,
+                    # e.g. by a destructive migration that only `sharur migrate` applies.
+                    self._conn.close()
+                    self._conn = None
+                    raise
         return self._conn
 
     def _configure_resources(self) -> None:
@@ -140,8 +147,13 @@ class DuckDBStore:
         An existing database is migrated first: SCHEMA's index DDL names
         columns that later migrations add (``defense_systems.contig_id`` at v5),
         so applying SCHEMA to an older file fails before any migration runs.
-        This matches ``sharur migrate``. A fresh database takes SCHEMA first,
-        because early migrations reference its base tables.
+        A fresh database takes SCHEMA first, because early migrations reference
+        its base tables.
+
+        Only additive migrations apply here. When a pending migration would
+        remove rows (v5 on a database holding pre-v5 system calls), the open
+        raises :class:`~sharur.storage.migrations.DestructiveMigrationError`
+        before changing anything and names ``sharur migrate --db PATH``.
         """
         has_tables = self._conn.execute(
             "SELECT COUNT(*) FROM information_schema.tables "

@@ -1,10 +1,20 @@
 """Tests for schema versioning and migrations."""
 
+import re
+
 import duckdb
 import pytest
+from typer.testing import CliRunner
 
+from sharur.cli import app
 from sharur.storage.duckdb_store import DuckDBStore
-from sharur.storage.migrations import MIGRATIONS, get_current_version, run_migrations
+from sharur.storage.migrations import (
+    MIGRATIONS,
+    DestructiveMigrationError,
+    blocking_migrations,
+    get_current_version,
+    run_migrations,
+)
 from sharur.storage.schema import SCHEMA, SCHEMA_VERSION
 
 
@@ -68,7 +78,16 @@ def test_schema_version_table_has_correct_data(fresh_conn):
 
 def test_schema_version_constant():
     """SCHEMA_VERSION constant matches latest migration."""
-    assert SCHEMA_VERSION == max(version for version, _, _ in MIGRATIONS) == 9
+    assert SCHEMA_VERSION == max(migration.version for migration in MIGRATIONS) == 9
+
+
+def test_only_marked_migrations_remove_rows():
+    """An unmarked migration's SQL only adds; v5 is the one marked destructive."""
+    assert [m.version for m in MIGRATIONS if m.destructive is not None] == [5]
+    removal = re.compile(r"\b(DELETE|DROP|UPDATE|TRUNCATE)\b", re.IGNORECASE)
+    for migration in MIGRATIONS:
+        if migration.destructive is None:
+            assert not removal.search(migration.sql), migration.version
 
 
 def test_duckdb_store_runs_migrations():
@@ -129,10 +148,27 @@ def _write_pre_v5_db(db_path) -> None:
     conn.close()
 
 
-def test_duckdb_store_opens_pre_v5_file(tmp_path):
-    """A writable store migrates a v4 file before applying SCHEMA's indexes."""
+def test_writable_open_refuses_pre_v5_calls_until_sharur_migrate(tmp_path):
+    """Opening writable never applies v5's quarantine; `sharur migrate` does."""
     db_path = tmp_path / "pre_v5.duckdb"
     _write_pre_v5_db(db_path)
+
+    with pytest.raises(DestructiveMigrationError,
+                       match=re.escape(f"`sharur migrate --db {db_path}`")):
+        _ = DuckDBStore(db_path).conn
+
+    # Nothing changed, and the refused open released the file.
+    conn = duckdb.connect(str(db_path), read_only=True)
+    assert get_current_version(conn) == 4
+    assert conn.execute("SELECT COUNT(*) FROM defense_systems").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM annotations").fetchone()[0] == 2
+    assert [m.version for m in blocking_migrations(conn)] == [5]
+    conn.close()
+
+    result = CliRunner().invoke(app, ["migrate", "--db", str(db_path)])
+    assert result.exit_code == 0, result.output
+    assert "Destructive migration v5" in result.output
+    assert f"Schema: 4 -> {SCHEMA_VERSION}" in result.output
 
     store = DuckDBStore(db_path)
     conn = store.conn
@@ -245,7 +281,12 @@ def test_v5_migration_quarantines_legacy_named_system_calls():
             VALUES ('p1', ['secretion_system_validated']);
     """)
 
-    applied = run_migrations(conn)
+    with pytest.raises(DestructiveMigrationError, match="sharur migrate --db PATH"):
+        run_migrations(conn)
+    assert get_current_version(conn) == 4
+    assert conn.execute("SELECT COUNT(*) FROM secretion_systems").fetchone()[0] == 1
+
+    applied = run_migrations(conn, allow_destructive=True)
 
     assert applied == SCHEMA_VERSION - 4
     assert get_current_version(conn) == SCHEMA_VERSION
@@ -270,3 +311,77 @@ def test_v5_migration_quarantines_legacy_named_system_calls():
         WHERE index_name = 'idx_contigs_bin'
         """
     ).fetchone()[0] == 1
+
+
+def _v4_db_with(conn, rows_sql: str = "") -> None:
+    """A v4 database (pre-v5) holding one protein plus ``rows_sql``."""
+    conn.execute(SCHEMA)
+    run_migrations(conn, target_version=4)
+    conn.execute("""
+        INSERT INTO bins (bin_id) VALUES ('bin1');
+        INSERT INTO contigs (contig_id, bin_id, length) VALUES ('contig1', 'bin1', 300);
+        INSERT INTO proteins (protein_id, contig_id, bin_id, start, end_coord, strand)
+            VALUES ('p1', 'contig1', 'bin1', 1, 300, '+');
+        INSERT INTO annotations (annotation_id, protein_id, source, accession, name)
+            VALUES (1, 'p1', 'defensefinder', 'raw-profile', 'raw-profile');
+    """ + rows_sql)
+
+
+def test_writable_open_applies_additive_migrations(tmp_path):
+    """A pre-v5 file without system calls, and a v8 file with current calls, migrate on open."""
+    empty = tmp_path / "pre_v5_empty.duckdb"
+    conn = duckdb.connect(str(empty))
+    _v4_db_with(conn)
+    conn.close()
+    store = DuckDBStore(empty)
+    assert get_current_version(store.conn) == SCHEMA_VERSION
+    assert store.execute("SELECT source FROM annotations") == [("defensefinder",)]
+    store.close()
+
+    v8 = tmp_path / "v8.duckdb"
+    conn = duckdb.connect(str(v8))
+    conn.execute(SCHEMA)
+    run_migrations(conn, target_version=8)
+    conn.execute("""
+        DROP TABLE crispr_cas_systems; DROP TABLE crispr_array_types;
+        INSERT INTO bins (bin_id) VALUES ('bin1');
+        INSERT INTO defense_systems (system_id, genome_id, contig_id, system_type)
+            VALUES ('current', 'bin1', 'contig1', 'RM');
+    """)
+    conn.close()
+    store = DuckDBStore(v8)
+    assert get_current_version(store.conn) == SCHEMA_VERSION
+    assert store.execute("SELECT system_id FROM defense_systems") == [("current",)]
+    assert store.execute(
+        "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'crispr_cas_systems'"
+    ) == [(1,)]
+    store.close()
+
+
+@pytest.mark.parametrize(("table_name", "rows_sql"), [
+    ("defense_systems", "INSERT INTO defense_systems (system_id, genome_id) VALUES ('s', 'bin1');"),
+    ("secretion_systems", "INSERT INTO secretion_systems (system_id, genome_id) VALUES ('s', 'bin1');"),
+    ("annotations", "INSERT INTO annotations (annotation_id, protein_id, source, accession, name) "
+                    "VALUES (2, 'p1', 'txsscan_system', 'x', 'x');"),
+    ("system_proteins", "INSERT INTO system_proteins (system_id, protein_id, system_source) "
+                        "VALUES ('s', 'p1', 'defensefinder_system');"),
+    ("semantic_atoms", "INSERT INTO semantic_atoms (protein_id, atom_id, facet, relation, "
+                       "source_accession, source_db) VALUES ('p1', 'a', 'role', 'implies', 'x', "
+                       "'defensefinder_system');"),
+    ("semantic_terms", "INSERT INTO semantic_terms (protein_id, term_id, term_kind, source_db) "
+                       "VALUES ('p1', 't', 'atom', 'txsscan_system');"),
+])
+def test_v5_gate_fires_for_every_row_the_quarantine_removes(table_name, rows_sql):
+    """The probe and the quarantine agree: each blocked row is one v5 deletes."""
+    conn = duckdb.connect(":memory:")
+    _v4_db_with(conn, rows_sql)
+    total = conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+
+    assert [m.version for m in blocking_migrations(conn)] == [5]
+    with pytest.raises(DestructiveMigrationError):
+        run_migrations(conn)
+    assert get_current_version(conn) == 4
+
+    run_migrations(conn, allow_destructive=True)
+    assert conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0] < total
+    assert blocking_migrations(conn) == []

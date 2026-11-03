@@ -1114,15 +1114,18 @@ def migrate(
         help="Path to a writable Sharur DuckDB.",
     ),
 ):
-    """Apply pending schema/index migrations in a maintenance window.
+    """Apply pending schema/index migrations, destructive ones included, in a maintenance window.
 
-    Migrations add columns and indexes, except v5: it removes defense/secretion system calls made before
-    replicon-local validation (raw HMM rows stay) until Stage 07 reruns the caller. A writable
-    DuckDBStore open applies the same migrations. Copy a pre-v5 file first if its old calls matter.
+    Migrations add tables, columns and indexes, and a writable open applies those itself. v5 is
+    destructive: it removes defense/secretion system calls made before replicon-local validation
+    (raw HMM rows stay) until Stage 07 reruns the caller. Only this command applies it; a writable
+    open of a database holding such calls stops and names this command. Copy a pre-v5 file first
+    if its old calls matter.
     """
     import duckdb  # noqa: PLC0415
 
     from sharur.storage.migrations import (  # noqa: PLC0415
+        blocking_migrations,
         get_current_version,
         run_migrations,
     )
@@ -1135,7 +1138,10 @@ def migrate(
     connection = duckdb.connect(str(database))
     try:
         before = get_current_version(connection)
-        applied = run_migrations(connection)
+        for migration in blocking_migrations(connection):
+            typer.echo(f"Destructive migration v{migration.version} ({migration.description}): "
+                       f"{migration.destructive.effect}.")
+        applied = run_migrations(connection, allow_destructive=True)
         after = get_current_version(connection)
     finally:
         connection.close()
@@ -1180,6 +1186,7 @@ def backfill_contig_context_command(
         assemblies_from_stage00,
         backfill_contig_context,
     )
+    from sharur.storage.migrations import DestructiveMigrationError  # noqa: PLC0415
 
     database = db.expanduser().resolve()
     if not database.is_file():
@@ -1200,7 +1207,7 @@ def backfill_contig_context_command(
     connection = duckdb.connect(str(database))
     try:
         stats = backfill_contig_context(connection, assemblies=assembly_paths, protein_faas=faas)
-    except ValueError as exc:
+    except (ValueError, DestructiveMigrationError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
     finally:

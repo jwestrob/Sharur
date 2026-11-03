@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 import duckdb
@@ -25,6 +26,7 @@ from sharur.colocation import (
     validate_systems,
 )
 import sharur.colocation as colocation
+from sharur.storage.migrations import DestructiveMigrationError
 
 
 if TYPE_CHECKING:
@@ -75,6 +77,18 @@ def _hit(
         evalue=evalue,
         annotation_id=annotation_id,
     )
+
+
+def _table_snapshot(path: Path) -> dict[str, list[tuple]]:
+    """Every table's rows; opening read-only also proves no writer holds the file."""
+    conn = duckdb.connect(str(path), read_only=True)
+    try:
+        return {
+            table: sorted(conn.execute(f"SELECT * FROM {table}").fetchall(), key=repr)
+            for (table,) in conn.execute("SHOW TABLES").fetchall()
+        }
+    finally:
+        conn.close()
 
 
 def _seed_integration_db(path: Path) -> None:
@@ -503,7 +517,7 @@ def test_integration_invalidates_derived_semantics_for_old_and_new_members(
     assert predicates == [("p3",)]
 
 
-def test_integration_returns_every_member_quarantined_by_v5_migration(
+def test_integration_refuses_a_database_holding_pre_v5_system_calls(
     tmp_path: Path,
 ) -> None:
     db_path = tmp_path / "systems.duckdb"
@@ -532,25 +546,16 @@ def test_integration_returns_every_member_quarantined_by_v5_migration(
              NULL, 1, NULL, NULL);
     """)
     conn.close()
+    before = _table_snapshot(db_path)
     systems, genes = _system_frames()
 
-    affected = integrate_secretion_results(db_path, systems, genes)
+    with pytest.raises(DestructiveMigrationError,
+                       match=re.escape(f"`sharur migrate --db {db_path}`")):
+        integrate_secretion_results(db_path, systems, genes)
 
-    conn = duckdb.connect(str(db_path), read_only=True)
-    defense_count = conn.execute(
-        "SELECT COUNT(*) FROM defense_systems"
-    ).fetchone()[0]
-    current_sources = conn.execute(
-        "SELECT source, COUNT(*) FROM annotations GROUP BY source ORDER BY source"
-    ).fetchall()
-    conn.close()
-
-    assert affected == {"p1", "p2", "p3"}
-    assert defense_count == 0
-    assert current_sources == [
-        ("txsscan", 1),
-        ("txsscan_system", 2),
-    ]
+    # Nothing changed (the other caller's legacy defense call included), and
+    # the refused integration released the file.
+    assert _table_snapshot(db_path) == before
 
 
 def test_empty_integration_clears_stale_structured_calls(tmp_path: Path) -> None:

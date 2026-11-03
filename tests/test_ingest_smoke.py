@@ -1,12 +1,16 @@
 import json
+import re
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
 import duckdb
 import pytest
 from pandas.errors import EmptyDataError
+from typer.testing import CliRunner
 
 import sharur.colocation
+from sharur.cli import app as sharur_app
+from sharur.storage.migrations import DestructiveMigrationError
 from sharur.storage.schema import SCHEMA_VERSION
 
 
@@ -243,8 +247,9 @@ def test_stage07_restart_v2_preserves_upstream_tables(tmp_path):
         ) VALUES ('stale', [], [], [], [], '{}', 'small', [], [], 0);
     """)
     # Model a completed database created before the validated-system replicon
-    # migration. Restart mode must bring its schema current before generating
-    # semantic rows, while retaining raw upstream observations.
+    # migration. Restart mode stops before changing it (v5 is destructive);
+    # after `sharur migrate`, it regenerates semantic rows while retaining raw
+    # upstream observations.
     builder.conn.execute("""
         DELETE FROM schema_version WHERE version > 1;
         ALTER TABLE defense_systems DROP COLUMN contig_id;
@@ -259,6 +264,16 @@ def test_stage07_restart_v2_preserves_upstream_tables(tmp_path):
         ) VALUES ('legacy-system', 'bin1', 'legacy-type', 1, 'p1');
     """)
     builder._release_db()
+
+    with pytest.raises(DestructiveMigrationError, match=re.escape(f"sharur migrate --db {db_path}")):
+        builder.restart_v2()
+    builder._release_db()
+    conn = duckdb.connect(str(db_path), read_only=True)
+    assert conn.execute("SELECT COUNT(*) FROM defense_systems").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM semantic_state").fetchone()[0] == 1
+    conn.close()
+    result = CliRunner().invoke(sharur_app, ["migrate", "--db", str(db_path)])
+    assert result.exit_code == 0, result.output
 
     stats = builder.restart_v2()
 

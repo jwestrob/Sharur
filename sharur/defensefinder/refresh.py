@@ -540,7 +540,7 @@ def reload_defensefinder(
     from sharur.storage.migrations import MIGRATIONS, get_current_version
 
     wal = _wal_path(db)
-    latest = max(v for v, _, _ in MIGRATIONS)
+    latest = max(m.version for m in MIGRATIONS)
     if dry_run:
         # A dry run only reads the source: an outstanding WAL would make a file copy stale.
         if wal.exists():
