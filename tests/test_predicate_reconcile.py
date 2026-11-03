@@ -125,3 +125,50 @@ def test_old_provenance_tables_gain_the_reconcile_columns():
     cols = {r[0] for r in store.execute(
         "SELECT column_name FROM information_schema.columns WHERE table_name = 'predicate_provenance'")}
     assert {"reconciled_from", "reconciled_accessions"} <= cols
+
+
+def test_reconcile_finds_carriers_under_every_kegg_source_spelling(maps):
+    # The generator reads KO calls from 'kegg', 'kofam' and any capitalization of them;
+    # DPANN stores most of its KO calls as 'kofam'.
+    old, new, monkeypatch = maps
+    store = _store()
+    store.conn.execute("""
+        INSERT INTO proteins (protein_id, contig_id, bin_id, start, end_coord, strand, gene_index,
+                              sequence_length, gc_content)
+        VALUES ('p4', 'contig1', 'bin1', 1201, 1500, '+', 4, 100, 0.5),
+               ('p5', 'contig1', 'bin1', 1501, 1800, '+', 5, 100, 0.5);
+        INSERT INTO annotations (annotation_id, protein_id, source, accession, name, description, evalue, score)
+        VALUES (4, 'p4', 'kofam', 'K05986', 'nuclease S1', 'nuclease S1', 1e-30, 100.0),
+               (5, 'p5', 'KEGG', 'K05986', 'nuclease S1', 'nuclease S1', 1e-30, 100.0);
+    """)
+    generate_and_persist_v2(store, chunk_size=10, return_states=False)
+    monkeypatch.setattr(kegg_map, "KEGG_MAPPING_FILE", new)
+    seen = []
+    result = reconcile(store, old, lambda ids: seen.append(list(ids)))
+    assert seen == [["p1", "p4", "p5"]]
+    assert result["proteins"] == 3
+
+
+def test_reconcile_refuses_when_a_later_subset_ran_on_other_maps(maps):
+    old, new, monkeypatch = maps
+    store = _store()
+    generate_and_persist_v2(store, chunk_size=1, return_states=False)
+    generate_and_persist_v2(store, protein_ids=["p3"], chunk_size=1, return_states=False)
+    # That subset ran under a Pfam map that is neither the base's nor the installed one.
+    store.execute("UPDATE predicate_provenance SET pfam_map_sha256 = 'interim-map' WHERE scope = 'subset'")
+    monkeypatch.setattr(kegg_map, "KEGG_MAPPING_FILE", new)
+    with pytest.raises(ReconcileError, match=r"subset generation 2 .*pfam_map_sha256"):
+        reconcile(store, old, lambda ids: pytest.fail("must not regenerate"))
+    status = map_status(store)
+    assert (status.state, status.mixed_subsets) == ("stale", 1)  # the record of the mixed subset stays
+
+
+def test_reconcile_accepts_a_later_subset_on_the_installed_maps(maps):
+    old, new, monkeypatch = maps
+    store = _store()
+    generate_and_persist_v2(store, chunk_size=1, return_states=False)
+    monkeypatch.setattr(kegg_map, "KEGG_MAPPING_FILE", new)
+    generate_and_persist_v2(store, protein_ids=["p3"], chunk_size=1, return_states=False)  # on the new map
+    seen = []
+    assert reconcile(store, old, lambda ids: seen.append(list(ids)))["state"] == "reconciled"
+    assert seen == [["p1"]]

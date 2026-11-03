@@ -243,6 +243,15 @@ def reconcile(store, old_kegg_map: Path, regenerate) -> dict[str, Any]:
     blocking = [f for f in changed if f not in RECONCILABLE]
     if blocking:
         raise ReconcileError(f"{', '.join(blocking)} changed; only a full regeneration covers that")
+    # A later subset generation on maps that are neither the base's nor the installed ones left its
+    # proteins with predicates no KO diff of the base map describes; the reconciled stamp would hide them.
+    for sub in stamps["subsets"]:
+        foreign = [f for f in COMPARED if sub.get(f) != base.get(f) and sub.get(f) != installed.get(f)]
+        if foreign:
+            raise ReconcileError(
+                f"subset generation {sub['generation_id']} ({sub.get('protein_count')} proteins, "
+                f"{sub.get('generated_at')}) ran on other maps ({', '.join(foreign)} match neither base generation "
+                f"{base['generation_id']} nor the installed maps); only a full regeneration covers its proteins")
     if KEGG_MAPPING_FILE is None:
         raise ReconcileError("no local KEGG build installed")
     old_sha = _sha256_file(Path(old_kegg_map))
@@ -252,8 +261,9 @@ def reconcile(store, old_kegg_map: Path, regenerate) -> dict[str, Any]:
     kos = kegg_map_changes(Path(old_kegg_map), KEGG_MAPPING_FILE)
     proteins: list[str] = []
     if kos:
+        # The generator reads KO calls from every source spelling of KEGG/KOfam (sharur.predicates.generator).
         proteins = [r[0] for r in store.execute(
-            "SELECT DISTINCT protein_id FROM annotations WHERE source = 'kegg' AND accession IN "
+            "SELECT DISTINCT protein_id FROM annotations WHERE LOWER(source) IN ('kegg', 'kofam') AND accession IN "
             "(SELECT UNNEST(?::VARCHAR[])) ORDER BY 1", [kos])]
     if proteins:
         regenerate(proteins)
