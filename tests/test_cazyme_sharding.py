@@ -6,6 +6,7 @@ the proteins of an HMM search would change calls near the 1e-15 cut.
 """
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -143,8 +144,166 @@ def test_sharded_run_equals_single_process(toy):
         # the merge parses shard tables in worker processes when given threads
         cc.run_stage("merge", None, str(faa), work, n, threads=1 if n == 1 else 2, dbcan_dir=dbcan,
                      results_out=out / "cazy.tsv", verbose=False)
-        for name in ("cazy.tsv", cc.DIAMOND_CACHE, "cazyme_dbcan_hmm_hits.tsv", "cazyme_dbcan_sub_hits.tsv"):
+        # side files carry the --out stem; the reusable ones carry provenance stamps
+        names = ["cazy.tsv"] + [f"cazy.{t}" for t in (cc.DIAMOND_CACHE, cc.HMM_TABLE, cc.SUB_TABLE)]
+        names += [f"cazy.{t}.stamp.json" for t in (cc.DIAMOND_CACHE, cc.HMM_TABLE)]
+        for name in names:
             assert (out / name).read_text() == (single / name).read_text(), (n, name)
+    assert "family_tools" in ref.columns
+
+
+def _run_shards(faa, dbcan, work, n, stages=("search", "sub")):
+    for stage in stages:
+        for i in range(n):
+            cc.run_stage(stage, None, str(faa), work, n, shard_index=i, threads=1, dbcan_dir=dbcan,
+                         verbose=False)
+
+
+def _install(bin_dir: Path, name: str, body: str) -> None:
+    exe = bin_dir / name
+    exe.write_text(f"#!{sys.executable}\n" + body.format(MOTIFS=repr(MOTIFS)))
+    exe.chmod(0o755)
+
+
+def test_merge_raises_when_a_reported_sub_table_is_missing(toy):
+    """Finding 1: a sub shard that reports a search but lost its table stops the merge."""
+    faa, dbcan, tmp = toy
+    work = tmp / "work"
+    _run_shards(faa, dbcan, work, 3)
+    (work / "sub_0001" / "dbcan_sub.tsv").unlink()
+    with pytest.raises(RuntimeError, match="dbCAN-sub shard table"):
+        cc.run_stage("merge", None, str(faa), work, 3, threads=1, dbcan_dir=dbcan,
+                     results_out=tmp / "cazy.tsv", verbose=False)
+
+
+def test_merge_raises_on_sub_shards_from_other_search_results(toy):
+    """Finding 1: sub shards built on an earlier search (here a sparser DIAMOND) stop the
+    merge once the search stage is rerun, instead of losing DIAMOND + dbCAN-sub proteins."""
+    faa, dbcan, tmp = toy
+    bin_dir, work = tmp / "bin", tmp / "work"
+    _install(bin_dir, "diamond", FAKE_DIAMOND.replace("if k and ev <= cut:", "if k >= 3 and ev <= cut:"))
+    _run_shards(faa, dbcan, work, 3)
+    _install(bin_dir, "diamond", FAKE_DIAMOND)
+    _run_shards(faa, dbcan, work, 3, stages=("search",))
+    with pytest.raises(RuntimeError, match="rerun the sub stage"):
+        cc.run_stage("merge", None, str(faa), work, 3, threads=1, dbcan_dir=dbcan,
+                     results_out=tmp / "cazy.tsv", verbose=False)
+    _run_shards(faa, dbcan, work, 3, stages=("sub",))  # the rerun makes the merge whole again
+    merged = cc.run_stage("merge", None, str(faa), work, 3, threads=1, dbcan_dir=dbcan,
+                          results_out=tmp / "cazy.tsv", verbose=False)
+    (tmp / "one").mkdir()
+    single = cc.classify_cazymes(None, threads=1, verbose=False, dbcan_dir=dbcan, write_db=False,
+                                 results_out=tmp / "one" / "cazy.tsv", proteins=str(faa))
+    assert merged.equals(single)
+
+
+def test_merge_raises_when_sub_shards_disagree_on_candidates(toy):
+    faa, dbcan, tmp = toy
+    work = tmp / "work"
+    _run_shards(faa, dbcan, work, 2)
+    done = work / "sub_0001" / "DONE.json"
+    info = json.loads(done.read_text())
+    info["candidates_hash"] = "0" * 32
+    done.write_text(json.dumps(info))
+    with pytest.raises(RuntimeError, match="disagree on candidates_hash"):
+        cc.run_stage("merge", None, str(faa), work, 2, threads=1, dbcan_dir=dbcan,
+                     results_out=tmp / "cazy.tsv", verbose=False)
+
+
+def test_missing_diamond_raises_single_and_sharded(toy, monkeypatch):
+    """Finding 3: no diamond binary stops the run instead of yielding an HMM-only consensus."""
+    faa, dbcan, tmp = toy
+    (tmp / "bin" / "diamond").unlink()
+    monkeypatch.setenv("PATH", f"{tmp / 'bin'}:/usr/bin:/bin")
+    (tmp / "single").mkdir()
+    with pytest.raises(RuntimeError, match="diamond"):
+        cc.classify_cazymes(None, threads=1, verbose=False, dbcan_dir=dbcan, write_db=False,
+                            results_out=tmp / "single" / "cazy.tsv", proteins=str(faa))
+    work = tmp / "work"
+    with pytest.raises(RuntimeError, match="diamond"):
+        cc.run_stage("search", None, str(faa), work, 2, shard_index=0, threads=1, dbcan_dir=dbcan,
+                     verbose=False)
+    assert not (work / "search_0000" / "DONE.json").exists()
+
+
+def _second_proteome(tmp: Path) -> Path:
+    """The toy proteome with renamed proteins and one motif copy fewer in every fifth protein."""
+    lines = (tmp / "proteins.faa").read_text().splitlines(keepends=True)
+    out = []
+    for k in range(0, len(lines), 2):
+        seq = lines[k + 1]
+        if k % 10 == 0:
+            for motif in MOTIFS.values():
+                if motif in seq:
+                    seq = seq.replace(motif, "", 1)
+                    break
+        out += [lines[k].replace(">p", ">q"), seq]
+    faa = tmp / "other.faa"
+    faa.write_text("".join(out))
+    return faa
+
+
+def test_runs_sharing_an_output_directory_keep_their_own_evidence(toy):
+    """Finding 2: two inputs written into one directory get stem-prefixed side files, and
+    each consensus equals the one it gets alone."""
+    faa, dbcan, tmp = toy
+    other = _second_proteome(tmp)
+    shared, alone = tmp / "shared", tmp / "alone"
+    shared.mkdir()
+    alone.mkdir()
+    kw = dict(threads=1, verbose=False, dbcan_dir=dbcan, write_db=False)
+    cc.classify_cazymes(None, results_out=shared / "a.tsv", proteins=str(faa), **kw)
+    b = cc.classify_cazymes(None, results_out=shared / "b.tsv", proteins=str(other), **kw)
+    b_alone = cc.classify_cazymes(None, results_out=alone / "b.tsv", proteins=str(other), **kw)
+    assert b.equals(b_alone) and "diamond" in ",".join(b["tools"])
+    assert (shared / f"a.{cc.DIAMOND_CACHE}").exists() and (shared / f"b.{cc.DIAMOND_CACHE}").exists()
+
+
+def test_caches_are_reused_only_with_a_matching_stamp(toy, capsys):
+    """Finding 2: a DIAMOND cache or dbCAN.hmm table stamped for other proteins, another
+    CAZy.dmnd, or carrying no stamp is ignored with a log line; a matching one is reused."""
+    faa, dbcan, tmp = toy
+    out = tmp / "out"
+    out.mkdir()
+    kw = dict(threads=1, verbose=False, dbcan_dir=dbcan, write_db=False, results_out=out / "cazy.tsv")
+    ref = cc.classify_cazymes(None, proteins=str(faa), **kw)
+    cache, table = out / f"cazy.{cc.DIAMOND_CACHE}", out / f"cazy.{cc.HMM_TABLE}"
+    capsys.readouterr()
+
+    # a matching stamp: both are reused, and the result is unchanged
+    assert cc.classify_cazymes(None, proteins=str(faa), **kw).equals(ref)
+    log = capsys.readouterr().out
+    assert "Ignoring" not in log and "Reusing dbCAN.hmm table" in log
+
+    # another proteome: both caches are ignored and the result equals a clean run
+    other = _second_proteome(tmp)
+    got = cc.classify_cazymes(None, proteins=str(other), **kw)
+    log = capsys.readouterr().out
+    assert "Ignoring DIAMOND cache" in log and "stamp differs in proteins" in log
+    (tmp / "clean").mkdir()
+    clean = cc.classify_cazymes(None, proteins=str(other), **{**kw, "results_out": tmp / "clean" / "cazy.tsv"})
+    assert got.equals(clean)
+
+    # another CAZy.dmnd: the DIAMOND cache is ignored
+    (dbcan / "CAZy.dmnd").write_text("another release")
+    cc.classify_cazymes(None, proteins=str(other), **kw)
+    assert "stamp differs in reference" in capsys.readouterr().out
+
+    # an unstamped cache (one written before stamps existed) is ignored
+    (out / f"cazy.{cc.DIAMOND_CACHE}.stamp.json").unlink()
+    cc.classify_cazymes(None, proteins=str(other), **kw)
+    assert "carries no provenance stamp" in capsys.readouterr().out
+    assert cache.exists() and table.exists()
+
+
+def test_both_dbcan_sub_file_names_stop_the_run(tmp_path):
+    """Finding 7: dbCAN-sub.hmm beside dbCAN_sub.hmm is ambiguous between releases."""
+    for name in ("dbCAN.hmm", "dbCAN-sub.hmm", "dbCAN_sub.hmm"):
+        (tmp_path / name).write_text("x")
+    with pytest.raises(ValueError, match="both dbCAN-sub.hmm and dbCAN_sub.hmm"):
+        cc.dbcan_hmm_files(tmp_path)
+    (tmp_path / "dbCAN-sub.hmm").unlink()
+    assert cc.dbcan_hmm_files(tmp_path)[1] == tmp_path / "dbCAN_sub.hmm"
 
 
 def test_protein_split_hmm_search_changes_calls(toy):

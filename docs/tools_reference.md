@@ -123,20 +123,25 @@ before treating a migrated legacy database's system surface as available.
 ## CAZyme Classification (dbCAN 3-tool consensus)
 **Script:** `scripts/classify_cazymes.py`
 **Requires:** `data/dbcan_db/` with CAZy.dmnd, dbCAN.hmm, dbCAN-sub.hmm
-**Method:** DIAMOND (default mode, `-k 1`, 1e-102) + dbCAN.hmm (i-evalue < 1e-15, HMM coverage > 0.35) + dbCAN-sub.hmm (same), consensus ≥2 tools: the run_dbcan defaults. HMM i-evalues are rescaled to run_dbcan's Z (the HMM file's profile count; Aksha's raw Z is the number of proteins searched).
+**Method:** DIAMOND (default mode, `-k 1`, 1e-102) + dbCAN.hmm (i-evalue < 1e-15, HMM coverage > 0.35) + dbCAN-sub.hmm (same), consensus ≥2 tools: the run_dbcan defaults. HMM i-evalues are rescaled to run_dbcan's Z (the HMM file's profile count; Aksha's raw Z is the number of proteins searched); this matches run_dbcan 5.2.9 and later, while 5.2.8 and earlier use the number of proteins searched as Z. Each consensus protein gets the families run_dbcan 5.2.9 recommends (HMM domains after its overlap filter and dbCAN.hmm/dbCAN-sub grouping; DIAMOND families only when neither HMM tool hit), with `family_tools` naming the tools behind each family; DIAMOND subject IDs are parsed with run_dbcan's `extract_cazy_id` rule. A missing `diamond` binary stops the run.
 **Pipeline:** Optional in Stage 07 before final V2 predicate generation. Enable it with
 `sharur-ingest --enable-cazymes` or standalone Stage 07 `--enable-cazymes`.
 **Existing database:** `--dbcan-dir DIR` (or `$SHARUR_DBCAN_DIR`) names the release directory;
 step 2 uses that release's `dbCAN.hmm`. `--results-only --out cazy.tsv` computes the consensus
 against a read-only database (for a cluster job), and `--load-results cazy.tsv` loads it later
-as `source='cazy'` annotations. The DIAMOND cache lives in `cazyme_diamond_hits.tsv`, apart from
-the consensus table. `--proteins FASTA` runs on a protein file with no database.
+as `source='cazy'` annotations, rewriting CAZy predicates (stale ones included) in the same
+transaction. Side files sit beside `--out` under its stem (`cazy.cazyme_diamond_hits.tsv`), or
+beside the database without `--out`; the DIAMOND cache and raw dbCAN.hmm table are reused only when
+their `.stamp.json` (protein content hash, reference-file content hash, search settings) matches.
+`--proteins FASTA` runs on a protein file with no database. A release directory holding both
+`dbCAN-sub.hmm` and `dbCAN_sub.hmm` stops the run.
 **Sharded (Slurm):** `scripts/submit_cazy_shards.sh -n N -w WORK -s "SBATCH OPTS" -- CLASSIFIER_ARGS`
 submits a search array (dbCAN.hmm profile part i on every protein; task 0 also runs DIAMOND on every
 protein), a dbCAN-sub array (profile part i on the candidate subset) and a merge job, chained with
 `afterok`. HMM steps split profiles because HMMER i-evalues scale with the number of target sequences
 (Z), and DIAMOND's default-mode top target depends on the other queries in its run, so no step splits
-the proteins; the merged table equals the single-process table.
+the proteins; the merged table equals the single-process table. The merge stops when a sub shard's
+table is missing or the sub shards searched a candidate set other than the search shards give.
 Details: `src/ingest/DBCAN_PIPELINE.md`.
 
 ## Biosynthetic Gene Clusters (GECCO on stored gene calls)

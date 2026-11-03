@@ -1,6 +1,7 @@
 """CAZyme consensus table: compute/load split and cache separation (scripts/classify_cazymes.py)."""
 
 import importlib.util
+from collections import defaultdict
 from pathlib import Path
 
 import pandas as pd
@@ -51,16 +52,22 @@ def test_load_replaces_cazy_rows_and_drops_unknown_proteins(tmp_path):
     assert con.execute("SELECT COUNT(*) FROM annotations WHERE source = 'pfam'").fetchone()[0] == 1
 
 
+STAMP = {"kind": "diamond", "proteins": {"records": 2, "bytes": 40, "blake2b": "00"},
+         "reference": {"name": "CAZy.dmnd", "bytes": 1, "blake2b": "11"}, "settings": cc.DIAMOND_SETTINGS}
+
+
 def test_diamond_cache_is_separate_from_the_consensus_table(tmp_path):
     db = tmp_path / "sharur.duckdb"
     # a consensus table beside the database is never read back as DIAMOND evidence
     pd.DataFrame([{"protein_id": "p1", "family_class": "GH13", "evalue": 1e-50, "score": 200.0}]).to_csv(
         tmp_path / "cazyme_classification.tsv", sep="\t", index=False)
-    assert cc.load_diamond_cache(str(db), verbose=False) is None
-    cc._save_diamond_cache({"p1": {"GH13": (1e-150, 210.0)}}, tmp_path, verbose=False)
-    cached = cc.load_diamond_cache(str(db), verbose=False)
+    assert cc.load_diamond_cache(str(db), STAMP, verbose=False) is None
+    cc._save_diamond_cache({"p1": {"GH13": (1e-150, 210.0)}}, tmp_path / cc.DIAMOND_CACHE, STAMP, verbose=False)
+    cached = cc.load_diamond_cache(str(db), STAMP, verbose=False)
     assert list(cached) == ["p1"] and list(cached["p1"]) == ["GH13"]
     assert cached["p1"]["GH13"][0] == pytest.approx(1e-150) and cached["p1"]["GH13"][1] == 210.0
+    # the same table under another stamp is not evidence for that run
+    assert cc.load_diamond_cache(str(db), {**STAMP, "proteins": {"records": 3}}, verbose=False) is None
 
 
 def test_explicit_dbcan_directory(tmp_path, monkeypatch):
@@ -74,8 +81,9 @@ def test_explicit_dbcan_directory(tmp_path, monkeypatch):
 def test_dbcan_standard_thresholds(tmp_path):
     # DIAMOND cache rows looser than 1e-102 are refiltered on read
     db = tmp_path / "sharur.duckdb"
-    cc._save_diamond_cache({"p1": {"GH13": (1e-150, 400.0)}, "p2": {"GT2": (1e-30, 120.0)}}, tmp_path, verbose=False)
-    assert set(cc.load_diamond_cache(str(db), verbose=False)) == {"p1"}
+    cc._save_diamond_cache({"p1": {"GH13": (1e-150, 400.0)}, "p2": {"GT2": (1e-30, 120.0)}},
+                           tmp_path / cc.DIAMOND_CACHE, STAMP, verbose=False)
+    assert set(cc.load_diamond_cache(str(db), STAMP, verbose=False)) == {"p1"}
 
     # HMM coverage = (hmm_to - hmm_from + 1) / profile length > 0.35, as run_dbcan computes it
     hmm = tmp_path / "toy.hmm"
@@ -118,3 +126,113 @@ def test_coverage_boundary_matches_run_dbcan(tmp_path):
         {"sequence_id": "y", "hmm_name": "GH5.hmm", "i_evalue": 1e-30, "dom_bitscore": 90, "hmm_from": 11, "hmm_to": 46},
     ]).to_csv(tsv, sep="\t", index=False)
     assert set(cc._parse_astra_tsv(tsv, cc.HMMER_IEVALUE, cc.hmm_lengths(hmm))) == {"y"}
+
+
+# ── Finding 5: DIAMOND subject IDs parsed as run_dbcan's extract_cazy_id parses them ──
+
+def test_diamond_subject_families_follow_run_dbcan_extract_cazy_id():
+    # JGI subjects carry the family in the first field, before the protein number and file name
+    assert cc.parse_cazy_families("GH3|355645|NeFL0916_1_GeneCatalog_proteins_20190612.aa.fasta") == ["GH3"]
+    assert cc.parse_cazy_families(
+        "GH13_32|CBM20|GH13_32|113791|Lacaka1_GeneCatalog_proteins_20180802.aa.fasta") == ["GH13", "CBM20"]
+    assert cc.parse_cazy_families("ASI91817.1|CBM48|GH13_9") == ["CBM48", "GH13"]
+    assert cc.parse_cazy_families("AAO30670.1|GH33|2.4.1.-") == ["GH33"]  # an AA-prefixed accession
+    assert cc.parse_cazy_families("pir||S68598|") == []
+    hits = defaultdict(dict)
+    cc._add_diamond_line(hits, "q1\tAA9|998744|Pisti2_GeneCatalog_proteins_20200523.aa.fasta\t80.0\t1e-140\t480\n")
+    assert dict(hits) == {"q1": {"AA9": (1e-140, 480.0)}}
+
+
+# ── Finding 4: consensus families follow run_dbcan 5.2.9's recommendation ──
+
+def _domains(rows):
+    return pd.DataFrame([{"sequence_id": pid, "hmm_name": name, "family": cc.parse_hmm_family(name),
+                          "i_evalue": ev, "dom_bitscore": sc, "ali_from": a, "ali_to": b, "prof": k, "row": k}
+                         for k, (pid, name, a, b, ev, sc) in enumerate(rows)])
+
+
+def _hits(domains):
+    return cc._hits_from_rows([cc._best_per_family(domains)])
+
+
+def test_consensus_families_follow_run_dbcan_recommendation():
+    hmm_rows = [("p2", "GH5_4.hmm", 10, 200, 1e-50, 150.0), ("p2", "CBM6.hmm", 250, 330, 1e-20, 60.0),
+                ("p3", "GT4.hmm", 1, 300, 1e-40, 120.0),
+                ("p4", "GT2_Glycos_transf_2.hmm", 5, 220, 1e-35, 110.0)]
+    sub_rows = [("p1", "GT2_e7.hmm|GT2:4", 5, 200, 1e-30, 90.0),
+                ("p2", "GH5_e1.hmm|GH5:3", 12, 198, 1e-45, 140.0),
+                ("p2", "GH30_e2.hmm|GH30:1", 15, 190, 1e-30, 80.0),  # overlaps the stronger GH5_e1 domain
+                ("p3", "GT2_e9.hmm|GT2:2", 5, 295, 1e-38, 115.0),
+                ("p4", "GT2_e7.hmm|GT2:4", 8, 215, 1e-33, 105.0)]
+    hmm_domains, sub_domains = _domains(hmm_rows), _domains(sub_rows)
+    diamond = {"p1": {"GT4": (1e-120, 300.0)}, "p2": {"GH5": (1e-150, 400.0)}}
+    df = cc.apply_consensus(diamond, _hits(hmm_domains), _hits(sub_domains), hmm_domains, sub_domains,
+                            verbose=False)
+    got = {(r.protein_id, r.family_class): r.family_tools for r in df.itertuples()}
+    assert got == {
+        ("p1", "GT2"): "dbcan_sub",                       # DIAMOND's GT4 is not recommended
+        ("p2", "CBM6"): "dbcan_hmm",
+        ("p2", "GH5"): "dbcan_hmm,dbcan_sub,diamond",      # GH30 lost to the overlap filter
+        ("p3", "GT2"): "dbcan_sub",                       # one domain per hmm/sub group
+        ("p4", "GT2"): "dbcan_hmm,dbcan_sub",             # GT2 profiles renamed as run_dbcan does
+    }
+    gh5 = df[(df.protein_id == "p2") & (df.family_class == "GH5")].iloc[0]
+    assert (gh5.evalue, gh5.score, gh5.tools) == (1e-50, 150.0, "dbcan_hmm,dbcan_sub,diamond")
+
+
+# ── Finding 6: one transaction; stale CAZy predicates stripped ──
+
+def _with_predicates(tmp_path):
+    db = _db(tmp_path)
+    import duckdb
+    con = duckdb.connect(str(db))
+    con.execute("INSERT INTO annotations (annotation_id, protein_id, source, accession, name) "
+                "VALUES (9, 'c1_2', 'pfam', 'PF00535', 'Glycos_transf_2')")
+    con.execute("INSERT INTO protein_predicates (protein_id, predicates) VALUES "
+                "('c1_1', ['pfam:PF00150']), ('c1_2', ['pfam:PF00535', 'glycosyltransferase', 'transferase'])")
+    con.close()
+    return db
+
+
+RESULTS = pd.DataFrame([
+    {"protein_id": "c1_1", "family_class": "GH5", "cazy_class": "GH", "evalue": 1e-40, "score": 150.0,
+     "n_tools": 3, "tools": "dbcan_hmm,dbcan_sub,diamond"},
+    {"protein_id": "c1_2", "family_class": "GT2", "cazy_class": "GT", "evalue": 1e-20, "score": 60.0,
+     "n_tools": 2, "tools": "dbcan_sub,diamond"},
+])
+
+
+def _predicates(db):
+    import duckdb
+    con = duckdb.connect(str(db), read_only=True)
+    out = {pid: sorted(p) for pid, p in con.execute("SELECT protein_id, predicates FROM protein_predicates").fetchall()}
+    con.close()
+    return out
+
+
+def test_reload_strips_cazy_predicates_of_proteins_that_left_the_consensus(tmp_path):
+    db = _with_predicates(tmp_path)
+    cc.load_cazyme_results(str(db), RESULTS, verbose=False)
+    assert "cazy:GT2" in _predicates(db)["c1_2"]
+    cc.load_cazyme_results(str(db), RESULTS.iloc[[0]], verbose=False)  # c1_2 no longer passes
+    preds = _predicates(db)
+    # c1_2 keeps what its PFAM Glycos_transf_2 domain gives and loses every CAZy-only predicate
+    assert preds["c1_2"] == ["carbohydrate_active", "glycosyltransferase", "pfam:PF00535", "transferase"]
+    assert {"cazy:GH5", "cazy_annotated", "glycoside_hydrolase"} <= set(preds["c1_1"])
+
+
+def test_load_is_one_transaction(tmp_path, monkeypatch):
+    db = _with_predicates(tmp_path)
+    before = _predicates(db)
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("predicate step failed")
+
+    monkeypatch.setattr(cc, "get_predicates_for_cazy", fail)  # fails after the annotations are replaced
+    with pytest.raises(RuntimeError, match="predicate step failed"):
+        cc.load_cazyme_results(str(db), RESULTS, verbose=False)
+    import duckdb
+    con = duckdb.connect(str(db), read_only=True)
+    assert con.execute("SELECT accession FROM annotations WHERE source = 'cazy'").fetchall() == [("GH999",)]
+    con.close()
+    assert _predicates(db) == before

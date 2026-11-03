@@ -14,13 +14,44 @@ The standard dbCAN annotation pipeline uses a **3-tool consensus** approach to m
 | 2 | HMMER (via Aksha) | `dbCAN.hmm` | i-evalue < 1e-15 at run_dbcan's Z, HMM coverage > 0.35 | HMM profile matching to CAZy family models |
 | 3 | HMMER (via Aksha) | `dbCAN-sub.hmm` | i-evalue < 1e-15 at run_dbcan's Z, HMM coverage > 0.35 | Substrate-specific HMM sub-family models |
 
-These are the run_dbcan settings, including DIAMOND's default sensitivity mode.
+These are the run_dbcan settings, including DIAMOND's default sensitivity mode. The HMM i-evalue
+rescaling (see **E-value scale** below) matches run_dbcan 5.2.9 and later, which fix HMMER's Z at the
+HMM file's profile count; run_dbcan 5.2.8 and earlier use pyhmmer's default Z, the number of
+proteins searched, so their HMM calls depend on the input size.
 
 ### Consensus Rule
 
 - A protein must be called by **>= 2 of 3 tools** to pass consensus.
 - If `dbCAN-sub.hmm` is unavailable, falls back to 2-tool mode (DIAMOND + dbCAN HMM), requiring **both** to agree.
 - Step 3 runs only on the **union** of hit sets from steps 1 and 2 (optimization: proteins unseen by either tool can never reach 2/3 consensus even with a sub hit).
+- A tool calls a protein when it reports a CAZy family for it. DIAMOND subject IDs are parsed as
+  run_dbcan's `extract_cazy_id` parses them, including JGI subjects that carry the family in their
+  first field (`GH3|355645|<genome>.aa.fasta`; 359,744 of the 4,098,879 subjects in the
+  db_v5-2_9-13-2025 `CAZy.dmnd`).
+
+### Family Recommendation
+
+The families reported for a consensus protein are the ones run_dbcan 5.2.9 recommends
+(`dbcan/IO/OverviewGenerator.py`, `determine_best_result`), reproduced line for line in
+`run_dbcan_recommendation`:
+
+1. Each HMM tool's domains are thinned per protein: of two domains overlapping by more than half
+   of either length, the lower i-evalue stays (`dbcan/process/process_utils.py`, `filter_overlaps`).
+2. When both HMM tools hit, dbCAN.hmm and dbCAN-sub domains are grouped by overlap and one domain per
+   group is kept: a dbCAN.hmm subfamily profile first, then a dbCAN-sub profile, then a dbCAN.hmm
+   family profile (`graph_based_grouping`, `select_best_result`).
+3. With one HMM tool, every remaining domain of that tool is kept. DIAMOND families are used only when
+   neither HMM tool hit, which a ≥2-tool protein reaches only in a DIAMOND-only configuration.
+
+A DIAMOND family that no HMM domain supports is therefore never reported. Each recommended CAZy
+family is one row, with the i-evalue and score of its best recommended domain. On 4,000 random
+domain layouts with distinct coordinates, this code and run_dbcan 5.2.9's own functions recommend
+the same families for all 3,471 two-tool proteins. run_dbcan orders domains with identical
+coordinates by an unstable sort; here those ties follow profile-file order.
+
+Profiles outside the CAZy classes (`cohesin`, `dockerin`, `SLH`, `fungi_doc`, `fungi_coh` in
+`dbCAN.hmm`) take part in steps 1-2 as in run_dbcan, but a protein hit only by them does not count as
+a dbCAN.hmm call, and they are never reported as families.
 
 ### CAZy Family Classes
 
@@ -43,7 +74,7 @@ All database files should reside in `data/dbcan_db/`.
 |------|------|-----------|-------|
 | `CAZy.dmnd` | ~2 GB | Yes | DIAMOND database for step 1 |
 | `dbCAN.hmm` (+ `hmmpress` index) | ~130 MB | Yes | HMM profiles for step 2 |
-| `dbCAN-sub.hmm` (+ `hmmpress` index) | ~2.3 GB | Recommended | Substrate HMM profiles for step 3; the release names it `dbCAN_sub.hmm`, and both names are accepted |
+| `dbCAN-sub.hmm` (+ `hmmpress` index) | ~2.3 GB | Recommended | Substrate HMM profiles for step 3; the release names it `dbCAN_sub.hmm`, and either name is accepted. A directory holding both names stops the run: keep the file of the release that `CAZy.dmnd` and `dbCAN.hmm` come from |
 | `fam-substrate-mapping.tsv` | ~100 KB | Optional | Maps CAZy families to substrates |
 
 ### How to Download / Update
@@ -107,24 +138,35 @@ python scripts/classify_cazymes.py --proteins all.faa --threads 24 --results-onl
 
 1. **Locates databases** in `--dbcan-dir`, `$SHARUR_DBCAN_DIR`, `data/dbcan_db/`, `data/reference/dbcan/`, or `~/.sharur/dbcan/`
 2. **Finds proteins:** `--proteins`, else `stage03_prodigal/genomes/all_protein_symlinks/*.faa` or `source/proteins_db_ids.faa` beside the database, else extraction from the database
-3. **Tool 1 (DIAMOND):** Runs `diamond blastp` in default mode with `-k 1` against `CAZy.dmnd` at e-value <= 1e-102 (the run_dbcan settings), or loads cached results from `cazyme_diamond_hits.tsv` if present (refiltered to the current cut)
-4. **Tool 2 (Aksha/HMMER):** Runs `aksha search --hmm_in dbCAN.hmm` on every protein, or loads cached results from `annotations/dbCAN_hits_df.tsv`
+3. **Tool 1 (DIAMOND):** Runs `diamond blastp` in default mode with `-k 1` against `CAZy.dmnd` at e-value <= 1e-102 (the run_dbcan settings), or reuses a DIAMOND cache whose stamp matches (below). A missing `diamond` binary, an empty protein input or a DIAMOND error stops the run
+4. **Tool 2 (Aksha/HMMER):** Runs `aksha search --hmm_in dbCAN.hmm` on every protein, or reuses a raw dbCAN.hmm table whose stamp matches
 5. **Tool 3 (Aksha/HMMER):** Subsets proteins to union of step 1+2 hits, runs `aksha search --hmm_in dbCAN_sub.hmm` against the subset
-6. **Consensus:** Keeps proteins called by >= 2 tools; records which tools agreed
+6. **Consensus:** Keeps proteins called by >= 2 tools, with the families run_dbcan recommends (above); records which tools called each protein and which support each family
 7. **Saves results** to `cazyme_classification.tsv` (or `--out`), one row per protein and family, sorted by protein and family
 8. **Loads annotations** into DuckDB as `source='cazy'` (clears any existing CAZy annotations first), unless `--results-only`
-9. **Updates predicates** (adds `cazy:GH13`, `carbohydrate_active`, etc.)
+9. **Rewrites predicates** (`cazy:GH13`, `cazy_annotated`, `carbohydrate_active`, etc., expanded through the predicate hierarchy as the predicate generator does), in the same transaction as step 8
 
 ### Caching Behavior
 
-The script keeps each tool's evidence beside the database (beside `--out` for a `--proteins` run):
+The script keeps each tool's evidence beside `--out`, named with its stem (`--out cazy_arc.tsv`
+writes `cazy_arc.cazyme_diamond_hits.tsv` and so on), or beside the database under the plain names
+when `--out` is not given. Runs with different outputs therefore never share a side file.
 
 | File | Contents | Reused by |
 |------|----------|-----------|
-| `cazyme_diamond_hits.tsv` | DIAMOND hits (protein_id, family_class, cazy_class, evalue, bitscore) | Step 1 of the next run |
-| `annotations/dbCAN_hits_df.tsv` | Stage 04 dbCAN HMM hits, copied there by Stage 07 | Step 2 |
-| `cazyme_dbcan_hmm_hits.tsv` | Raw Aksha table for step 2 | Audit |
-| `cazyme_dbcan_sub_hits.tsv` | Raw Aksha table for step 3 | Audit |
+| `[STEM.]cazyme_diamond_hits.tsv` (+ `.stamp.json`) | DIAMOND hits (protein_id, family_class, cazy_class, evalue, bitscore) | Step 1 of a run with the same stamp |
+| `[STEM.]cazyme_dbcan_hmm_hits.tsv` (+ `.stamp.json`) | Raw Aksha table for step 2 | Step 2 of a run with the same stamp |
+| `[STEM.]cazyme_dbcan_sub_hits.tsv` | Raw Aksha table for step 3 | Audit |
+
+**Provenance stamps.** A cache is reused only when its `.stamp.json` equals the stamp of the run
+about to use it: the protein input (record count, byte count and BLAKE2b-128 hash of the `.faa`
+content), the reference file (`CAZy.dmnd` or `dbCAN.hmm`: size and full-content BLAKE2b-128 hash,
+about 3.5 s for the 2.2 GB `CAZy.dmnd` on local SSD), and the search settings (for DIAMOND: default
+mode, `-k 1`, e-value 1e-102 and the subject-ID parser). Any other cache, including one written
+before stamps existed, is ignored with a log line naming the field that differs, and the tool reruns.
+The stamp is removed before a table is rewritten and written after it, so an interrupted write
+leaves nothing that a later run reuses. Stage 04's registry table (`annotations/dbCAN_hits_df.tsv`)
+carries no stamp and is never reused, so step 2 always searches the release's own `dbCAN.hmm`.
 
 The consensus table merges HMM families and is never read back as DIAMOND evidence.
 
@@ -134,7 +176,7 @@ The `07_build_knowledge_base.py` ingest pipeline calls `classify_cazymes.py` aut
 
 1. During `_load_annotations()`, raw dbCAN HMM TSV files are **skipped** (the line `if "dbcan" in tsv.as_posix().lower(): continue`)
 2. During `_classify_cazymes()`, the full 3-tool consensus script is invoked
-3. If stage04 Astra results include a `dbCAN_hits_df.tsv`, it is copied to `annotations/` for caching
+3. If stage04 Astra results include a `dbCAN_hits_df.tsv`, it is copied to `annotations/`; it carries no provenance stamp, so the classifier does not reuse it
 
 This ensures that only consensus-filtered results enter the database as `source='cazy'`.
 
@@ -160,7 +202,16 @@ scripts/submit_cazy_shards.sh -n 16 -w WORK_DIR -m 16 -e setup/env.sh \
 
 Each step is also a plain command (`--stage search|sub --shard-index i --n-shards N --work-dir W`,
 then `--stage merge --n-shards N --work-dir W --out cazy.tsv`), so a shard can be rerun alone.
-Every shard searches afresh; the caches above serve single-process runs.
+Every shard searches afresh; the caches above serve single-process runs. The merge writes the same
+stamped side files as a single-process run.
+
+**Merge checks.** Each sub shard records a BLAKE2b-128 hash of its candidate set (`candidates_hash`
+in `DONE.json`). The merge stops, asking for a rerun of the sub stage, when the sub shards disagree on
+that hash, their dbCAN-sub Z or whether the release has a dbCAN-sub file; when the candidate set the
+current search shards give differs from the one the sub shards searched (a search stage rerun after a
+DIAMOND or release change); or when a sub shard that reports a search has no table. A shard removes
+its earlier `DONE.json` (and a sub shard its earlier table) when it starts, so a failed rerun leaves
+no completion record.
 
 **E-value scale.** HMMER reports i-evalue = P-value x Z. Aksha uses pyhmmer's default, Z = the
 number of target sequences searched. run_dbcan fixes Z at the number of profiles in the HMM file
@@ -190,8 +241,9 @@ therefore runs once on every protein, in search task 0; in default mode that tak
 for 2 million proteins. The candidate subset depends on every search shard, which is why dbCAN-sub
 runs as a second array.
 
-`tests/test_cazyme_sharding.py` checks that the merged table equals the single-process table
-byte for byte, and that a protein-split HMM search changes calls.
+`tests/test_cazyme_sharding.py` checks that the merged table and stamped side files equal the
+single-process ones byte for byte, that a protein-split HMM search changes calls, and that each merge
+check above stops a merge.
 
 Measured on biotite (24 CPUs per job) for the SR-VP archaeal set, 1,976,915 proteins and 38,883
 dbCAN-sub candidates, with all 16 shards running at once:
@@ -219,15 +271,15 @@ WHERE source = 'cazy'
 LIMIT 5;
 ```
 
-Each row represents one protein-family pair. A protein with multiple CAZy domains (e.g., GH5 + CBM3) will have multiple rows.
+Each row represents one protein-family pair. A protein with multiple recommended CAZy domains (e.g., GH5 + CBM3) will have multiple rows.
 
 | Column | Content |
 |--------|---------|
 | `source` | `'cazy'` |
 | `accession` | CAZy family (e.g., `GH13`, `GT2`, `CBM48`) |
 | `name` | Same as accession |
-| `evalue` | Best e-value from whichever tool provided it |
-| `score` | Best score from whichever tool provided it |
+| `evalue` | i-evalue (run_dbcan scale) of the family's best recommended HMM domain |
+| `score` | Domain score of that domain |
 
 ### cazyme_classification.tsv
 
@@ -238,16 +290,23 @@ Detailed results file saved alongside the database:
 | `protein_id` | Protein identifier |
 | `family_class` | CAZy family (e.g., `GH13`) |
 | `cazy_class` | Class abbreviation (e.g., `GH`, `GT`) |
-| `evalue` | Best e-value across tools |
-| `score` | Best score across tools |
-| `n_tools` | Number of tools that detected this protein (2 or 3) |
-| `tools` | Comma-separated list of agreeing tools |
+| `evalue` | i-evalue (run_dbcan scale) of the family's best recommended HMM domain |
+| `score` | Domain score of that domain |
+| `n_tools` | Number of tools that call this protein (2 or 3) |
+| `tools` | Comma-separated tools that call this protein |
+| `family_tools` | Comma-separated tools whose hits include this family (`diamond`, `dbcan_hmm`, `dbcan_sub`) |
 
 ### Predicates
 
 Each CAZyme protein receives:
-- `cazy:{family}` (e.g., `cazy:GH13`, `cazy:GT2`) -- specific family tag
-- Class-level predicates from `sharur/predicates/mappings/cazy_map.py` (e.g., `carbohydrate_active`, `glycosyl_transferase`, `glycoside_hydrolase`)
+- `cazy:{family}` (e.g., `cazy:GH13`, `cazy:GT2`) -- specific family tag, and `cazy_annotated`
+- Class-level predicates from `sharur/predicates/mappings/cazy_map.py` (e.g., `carbohydrate_active`, `glycosyl_transferase`, `glycoside_hydrolase`), expanded through the predicate hierarchy
+
+On a reload, every protein that carried a `cazy:` predicate first loses the predicates its earlier
+families gave, except those its other annotation sources also give (a PFAM Glycos_transf_2 domain
+keeps `glycosyltransferase` and `transferase`). A protein that left the consensus keeps no CAZy-only
+predicate. Annotations and predicates change in one transaction, so a failed load leaves both as
+they were.
 
 ---
 
@@ -276,7 +335,7 @@ run. For proteomes of a million proteins or more, use a sharded run (above).
 
 ### Existing annotations
 
-Running the script clears all existing `source='cazy'` annotations before loading new ones. This is safe to re-run.
+Running the script replaces all existing `source='cazy'` annotations and rewrites CAZy predicates in one transaction. This is safe to re-run.
 
 ---
 
