@@ -591,7 +591,9 @@ def reload_defensefinder(
         stale.unlink(missing_ok=True)
     shutil.rmtree(spill, ignore_errors=True)
     logger.info("Copying %s to %s", db, staging)
-    shutil.copy2(db, staging)
+    from sharur.staging import clone_file  # copy-on-write clone where the filesystem has one
+
+    clone_file(db, staging)
     if _db_state(db) != source_state:
         staging.unlink(missing_ok=True)
         raise ReloadValidationError(f"{db} changed while it was being copied")

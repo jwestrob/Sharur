@@ -1252,6 +1252,151 @@ def load_bgcs_command(
     typer.echo("Canonical database state changed. Rebuild dataset.seal.json with `sharur seal --force`.")
 
 
+@app.command(name="diff-db")
+def diff_db_command(
+    before: Path = typer.Argument(..., help="Earlier database (e.g. a pre-publish backup)."),
+    after: Path = typer.Argument(..., help="Later database (e.g. a staged copy)."),
+    table: list[str] = typer.Option([], "--table", "-t", help="Limit to these tables (repeatable)."),
+    key: list[str] = typer.Option(
+        [], "--key", "-k", help="TABLE=COL[,COL] key for added/removed/changed counts (default: the "
+                                "table's primary or unique key)."),
+    examples: int = typer.Option(0, "--examples", help="Show up to N added/removed key values per table."),
+    threads: int = typer.Option(4, "--threads"),
+    memory_limit: str = typer.Option("8GB", "--memory-limit"),
+    output_format: BriefFormat = typer.Option(BriefFormat.markdown, "--format", "-f"),
+):
+    """Compare every table of two DuckDB files: schema, rows, content, keys."""
+    import json  # noqa: PLC0415
+
+    from sharur.staging import diff_databases  # noqa: PLC0415
+
+    keys = {}
+    for item in key:
+        name, _, cols = item.partition("=")
+        if not cols:
+            typer.echo(f"--key needs TABLE=COL[,COL], got {item!r}", err=True)
+            raise typer.Exit(2)
+        keys[name] = cols.split(",")
+    diff = diff_databases(before, after, tables=table or None, keys=keys, examples=examples,
+                          threads=threads, memory_limit=memory_limit)
+    typer.echo(json.dumps(diff.to_dict(), indent=2, default=str) if output_format == BriefFormat.json
+               else diff.to_markdown())
+
+
+stage_app = typer.Typer(help="Run a writer against a staged clone of a dataset database, review, publish.")
+app.add_typer(stage_app, name="stage")
+
+
+@stage_app.command(
+    "run", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def stage_run_command(
+    ctx: typer.Context,
+    db: Path = typer.Option(..., "--db", "-d", help="Canonical sharur.duckdb."),
+    label: str = typer.Option(..., "--label", "-l", help="Short name for this change (backup and staged file names)."),
+    work_dir: Optional[Path] = typer.Option(
+        None, "--work-dir", help="Directory for the staged clone (default: beside the database; must share "
+                                 "its filesystem to publish)."),
+    findings: list[Path] = typer.Option(
+        [], "--findings", help="findings.jsonl files or dataset dirs to replay against the staged copy "
+                               "(only findings that read what changed)."),
+    reports: list[str] = typer.Option([], "--reports", help="Globs of documents to scan for citations."),
+    report_dir: Optional[Path] = typer.Option(None, "--report-dir", help="Where to write diff/reverify reports."),
+    workers: Optional[int] = typer.Option(None, "--workers", "-j"),
+    do_publish: bool = typer.Option(False, "--publish", help="Publish when the writer succeeds."),
+):
+    """Stage DB, run the command after `--` against it, diff, reverify findings, optionally publish.
+
+    In the command, `{staged}` is replaced by the staged path, also exported as SHARUR_STAGED_DB:
+
+        sharur stage run --db data/ds/sharur.duckdb --label cazy-rerun --findings data/ds -- \\
+            python scripts/classify_cazymes.py --db {staged} ...
+    """
+    import json  # noqa: PLC0415
+    import subprocess  # noqa: PLC0415
+
+    from sharur.reverify import reverify, write_tsv  # noqa: PLC0415
+    from sharur.staging import (  # noqa: PLC0415
+        StagingError, diff_databases, publish, stage, touching_regex)
+
+    command = list(ctx.args)
+    if not command:
+        typer.echo("Give the writer command after `--`.", err=True)
+        raise typer.Exit(2)
+    try:
+        st = stage(db, work_dir=work_dir, label=label)
+    except StagingError as exc:
+        typer.echo(f"stage: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"Staged {st.source} -> {st.staged} ({st.method})", err=True)
+    argv = [a.replace("{staged}", st.staged) for a in command]
+    env = dict(os.environ, SHARUR_STAGED_DB=st.staged)
+    rc = subprocess.run(argv, env=env).returncode
+    if rc != 0:
+        typer.echo(f"Writer exited {rc}; staged copy kept at {st.staged} (discard with "
+                   f"`sharur stage discard {st.staged}`).", err=True)
+        raise typer.Exit(rc)
+    out_dir = report_dir or Path(st.staged).parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+    diff = diff_databases(st.source, st.staged, examples=5)
+    (out_dir / f"{label}.diff.md").write_text(diff.to_markdown() + "\n")
+    (out_dir / f"{label}.diff.json").write_text(json.dumps(diff.to_dict(), indent=2, default=str))
+    typer.echo(diff.to_markdown())
+    attention = []
+    regex = touching_regex(diff)
+    if findings and regex:
+        typer.echo(f"\nReplaying findings that match {regex} ...", err=True)
+        rep = reverify(findings, touching=regex, substitutions=[(st.source, st.staged)], compare=True,
+                       workers=workers, report_globs=reports)
+        (out_dir / f"{label}.reverify.md").write_text(rep.to_markdown() + "\n")
+        write_tsv(rep, out_dir / f"{label}.reverify.tsv")
+        attention = rep.changed()
+        typer.echo("\n" + rep.to_markdown(limit=40))
+    typer.echo(f"\nReports in {out_dir}.", err=True)
+    if not do_publish:
+        typer.echo(f"Publish with `sharur stage publish {st.staged}`, or discard with "
+                   f"`sharur stage discard {st.staged}`.")
+        return
+    if attention:
+        typer.echo(f"{len(attention)} recorded verification results change; review the reverify report, "
+                   f"then publish with `sharur stage publish {st.staged}`.")
+        raise typer.Exit(3)
+    try:
+        result = publish(st)
+    except StagingError as exc:
+        typer.echo(f"publish: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"Published {result.source}; backup {result.backup}; resealed {result.resealed}"
+               + (f"; seal error {result.seal_error}" if result.seal_error else ""))
+
+
+@stage_app.command("publish")
+def stage_publish_command(
+    staged: Path = typer.Argument(..., help="The staged file `sharur stage run` printed."),
+    no_reseal: bool = typer.Option(False, "--no-reseal"),
+):
+    """Replace the canonical database with a reviewed staged copy (backup kept, reseal)."""
+    from sharur.staging import Stage, StagingError, publish  # noqa: PLC0415
+
+    try:
+        result = publish(Stage.load(staged.resolve()), reseal=not no_reseal)
+    except StagingError as exc:
+        typer.echo(f"publish: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"Published {result.source}; backup {result.backup}; resealed {result.resealed}"
+               + (f"; seal error {result.seal_error}" if result.seal_error else ""))
+    if result.seal_error:
+        raise typer.Exit(1)
+
+
+@stage_app.command("discard")
+def stage_discard_command(staged: Path = typer.Argument(...)):
+    """Delete a staged copy and its manifest."""
+    from sharur.staging import Stage, discard  # noqa: PLC0415
+
+    discard(Stage.load(staged.resolve()))
+    typer.echo(f"Discarded {staged}")
+
+
 @app.command(name="reverify")
 def reverify_command(
     findings: list[Path] = typer.Argument(
