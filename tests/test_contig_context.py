@@ -8,13 +8,17 @@ import duckdb
 import pytest
 
 from sharur.contig_context import (
+    NAME_TOPOLOGY_CONVENTIONS,
     backfill_contig_context,
     contig_circularity,
     describe_edge,
     edge_context,
     fasta_lengths,
+    parse_name_conventions,
     parse_partial,
     prodigal_partials,
+    record_name_conventions,
+    recorded_name_conventions,
 )
 from sharur.modules import genome_modules, modules_markdown
 from sharur.operators.cards import card, card_markdown
@@ -120,16 +124,35 @@ def test_fasta_and_header_parsing(tmp_path):
     assert list(prodigal_partials(faa)) == [("ctg1_1", "10")]
 
 
+ALL_CONVENTIONS = tuple(NAME_TOPOLOGY_CONVENTIONS)
+SUFFIXED = [  # (record, its convention, circular)
+    ("SR-VP_A1_90cm_PACBIO-HIFI_METAMDBG_641824_C", "srvp", True),
+    ("SR-VP_A1_115cm_PACBIO-HIFI_METAMDBG_409162_RC", "srvp", True),
+    ("SR-VP_A1_115cm_PACBIO-HIFI_METAMDBG_409130_L", "srvp", False),
+    ("ctg409162_11x_rc", "metamdbg", True),
+    ("ctg402616_2x_l", "metamdbg", False),
+    ("s1.ctg000001c", "hifiasm", True),
+    ("ptg000002l", "hifiasm", False),
+]
+
+
+@pytest.mark.parametrize(("record", "convention", "circular"), SUFFIXED)
+def test_contig_name_suffix_marks_topology_only_under_its_recorded_convention(record, convention, circular):
+    assert contig_circularity(record, "", (convention,)) is circular
+    assert contig_circularity(record, "", ALL_CONVENTIONS) is circular
+    # Unrecorded, or recorded for another assembler, the suffix says nothing.
+    assert contig_circularity(record) is None
+    assert contig_circularity(record, "", tuple(c for c in ALL_CONVENTIONS if c != convention)) is None
+
+
+@pytest.mark.parametrize("record", ["MAG12_scaffold_3_C", "sample7_k141_88_L", "bin4_contig_12_RC"])
+def test_other_datasets_names_ending_like_srvp_stay_unmarked(record):
+    assert contig_circularity(record) is None
+
+
 @pytest.mark.parametrize(("record", "description", "expected"), [
-    ("SR-VP_A1_90cm_PACBIO-HIFI_METAMDBG_641824_C", "read_count_1", True),
-    ("SR-VP_A1_115cm_PACBIO-HIFI_METAMDBG_409162_RC", "", True),
-    ("SR-VP_A1_115cm_PACBIO-HIFI_METAMDBG_409130_L", "", False),
-    ("ctg409162_11x_rc", "", True),
-    ("ctg402616_2x_l", "", False),
-    ("s1.ctg000001c", "", True),
-    ("ptg000002l", "", False),
     ("contig_7", "length=5000 circular=yes", True),
-    ("contig_7_C", "circular=no", False),
+    ("contig_7_C", "circular=no", False),  # header marks outrank a recorded suffix convention
     ("tig00000001", "len=4000000 suggestCircular=yes", True),
     ("NZ_CP000001.1", "Escherichia coli [topology=circular]", True),
     ("Genome_2_circular_FINAL", "", True),
@@ -138,19 +161,36 @@ def test_fasta_and_header_parsing(tmp_path):
     ("bin1_contig1", "", None),
 ])
 def test_contig_circularity_marks(record, description, expected):
-    assert contig_circularity(record, description) is expected
+    assert contig_circularity(record, description, ALL_CONVENTIONS) is expected
 
 
-def test_backfill_sets_circularity_from_assembly_headers(tmp_path):
+def test_parse_name_conventions():
+    assert parse_name_conventions(None) == ()
+    assert parse_name_conventions("none") == ()
+    assert parse_name_conventions(" HIFIASM , srvp ") == ("srvp", "hifiasm")
+    with pytest.raises(ValueError, match="Unknown contig-name topology convention"):
+        parse_name_conventions("srvp,spades")
+
+
+def test_backfill_applies_only_recorded_name_conventions(tmp_path):
     conn = _legacy_db(tmp_path / "legacy.duckdb")
     conn.execute("UPDATE contigs SET contig_id = 'ctg1_C' WHERE contig_id = 'ctg1'")
     conn.execute("UPDATE proteins SET contig_id = 'ctg1_C' WHERE contig_id = 'ctg1'")
     fasta = tmp_path / "bin1.fna"
     fasta.write_text(">ctg1_C read_count_1\n" + "A" * 1000 + "\n>ctg9 circular=no\n" + "C" * 90 + "\n")
+
+    stats = backfill_contig_context(conn, assemblies={"bin1": fasta})
+    assert recorded_name_conventions(conn) == ()
+    assert stats["contigs_circular"] == 0
+    assert conn.execute("SELECT contig_id, is_circular FROM contigs ORDER BY 1").fetchall() == [
+        ("ctg1_C", False), ("ctg9", False)]
+
+    assert record_name_conventions(conn, "srvp") == ("srvp",)
     stats = backfill_contig_context(conn, assemblies={"bin1": fasta})
     assert stats["contigs_circular"] == 1
     assert conn.execute("SELECT contig_id, is_circular FROM contigs ORDER BY 1").fetchall() == [
         ("ctg1_C", True), ("ctg9", False)]
+    assert conn.execute("SELECT key, value FROM dataset_meta").fetchall() == [("contig_name_topology", "srvp")]
 
 
 def _legacy_db(path: Path):
@@ -256,3 +296,77 @@ def test_stage07_reads_assembly_lengths_and_partial_flags(tmp_path):
         (5000, "assembly", True)]
     assert conn.execute("SELECT protein_id, partial FROM proteins ORDER BY 1").fetchall() == [
         ("bin1_contig1_1", "10"), ("bin1_contig1_2", "00")]
+
+
+def _stage07_dataset(tmp_path: Path, contig: str):
+    """Minimal Stage 00/03 outputs: one assembly contig with two genes."""
+    module = SourceFileLoader("kb_build_topology", str(REPO_ROOT / "src/ingest/07_build_knowledge_base.py")).load_module()
+    data = tmp_path / "data"
+    assembly = data / "stage00_prepared" / "genomes" / "bin1.fna"
+    assembly.parent.mkdir(parents=True)
+    assembly.write_text(f">{contig} read_count_9\n" + "A" * 5000 + "\n")
+    (data / "stage00_prepared" / "processing_manifest.json").write_text(json.dumps(
+        {"genomes": [{"genome_id": "bin1", "filename": "bin1.fna", "output_path": str(assembly)}]}))
+    faa = data / "stage03_prodigal" / "genomes" / "bin1" / "bin1.faa"
+    faa.parent.mkdir(parents=True)
+    faa.write_text(f">{contig}_1 # 1 # 300 # 1 # ID=1_1;partial=00\nMAAA\n"
+                   f">{contig}_2 # 400 # 900 # 1 # ID=1_2;partial=00\nMAAA\n")
+    outputs = module.PipelineOutputs(
+        **{f"stage{s}_dir": data / name for s, name in [
+            ("00", "stage00_prepared"), ("01", "stage01_quast"), ("02", "stage02_dfast_qc"),
+            ("03", "stage03_prodigal"), ("04", "stage04_astra"), ("05a", "stage05a_gecco"),
+            ("05b", "stage05b_dbcan"), ("05c", "stage05c_crispr"), ("06", "stage06_embeddings")]})
+    return module, outputs, data / "sharur.duckdb"
+
+
+def test_stage07_applies_and_keeps_the_recorded_name_convention(tmp_path):
+    module, outputs, db = _stage07_dataset(tmp_path, "SR-VP_07_25_2022_A1_100cm_PACBIO-HIFI_METAMDBG_7_C")
+
+    def build(**options):
+        module.KnowledgeBaseBuilder(outputs, db, force=True, threads=1, **options).build()
+        conn = duckdb.connect(str(db), read_only=True)
+        try:
+            return conn.execute("SELECT is_circular FROM contigs").fetchone()[0], recorded_name_conventions(conn)
+        finally:
+            conn.close()
+
+    assert build() == (False, ())                                  # no convention recorded
+    assert build(contig_name_topology="srvp") == (True, ("srvp",))
+    assert build() == (True, ("srvp",))                            # a --force rebuild keeps it
+    assert build(contig_name_topology="none") == (False, ())
+
+
+def test_contig_name_topology_command_reports_and_records(tmp_path):
+    from typer.testing import CliRunner  # noqa: PLC0415
+
+    from sharur.cli import app  # noqa: PLC0415
+
+    db = tmp_path / "sharur.duckdb"
+    store = DuckDBStore(db)
+    store.execute("""
+        INSERT INTO bins (bin_id) VALUES ('b1');
+        INSERT INTO contigs (contig_id, bin_id, length, is_circular) VALUES
+            ('asm_1_C', 'b1', 100, TRUE), ('asm_2_L', 'b1', 100, FALSE), ('asm_3_C', 'b1', 100, FALSE),
+            ('plain', 'b1', 100, FALSE)""")
+    store.close()
+    runner = CliRunner()
+
+    report = runner.invoke(app, ["contig-name-topology", "--db", str(db)])
+    assert report.exit_code == 0, report.output
+    assert "Recorded contig-name topology conventions: none" in report.output
+    assert ("srvp (not recorded): 3 contig IDs match (2 circular, 1 linear); "
+            "stored is_circular differs for 1") in report.output
+    assert "sharur seal --force" not in report.output
+
+    recorded = runner.invoke(app, ["contig-name-topology", "--db", str(db), "--set", "srvp"])
+    assert recorded.exit_code == 0, recorded.output
+    assert "Recorded contig-name topology conventions: srvp" in recorded.output
+    assert "sharur seal --force" in recorded.output
+    conn = duckdb.connect(str(db), read_only=True)
+    assert recorded_name_conventions(conn) == ("srvp",)
+    assert conn.execute("SELECT COUNT(*) FROM contigs WHERE is_circular").fetchone()[0] == 1  # stored values kept
+    conn.close()
+
+    assert runner.invoke(app, ["contig-name-topology", "--db", str(db), "--set", "spades"]).exit_code == 2
+    cleared = runner.invoke(app, ["contig-name-topology", "--db", str(db), "--set", "none"])
+    assert "Recorded contig-name topology conventions: none" in cleared.output

@@ -1,12 +1,16 @@
 import json
+import re
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
 import duckdb
 import pytest
 from pandas.errors import EmptyDataError
+from typer.testing import CliRunner
 
 import sharur.colocation
+from sharur.cli import app as sharur_app
+from sharur.storage.migrations import DestructiveMigrationError
 from sharur.storage.schema import SCHEMA_VERSION
 
 
@@ -243,8 +247,9 @@ def test_stage07_restart_v2_preserves_upstream_tables(tmp_path):
         ) VALUES ('stale', [], [], [], [], '{}', 'small', [], [], 0);
     """)
     # Model a completed database created before the validated-system replicon
-    # migration. Restart mode must bring its schema current before generating
-    # semantic rows, while retaining raw upstream observations.
+    # migration. Restart mode stops before changing it (v5 is destructive);
+    # after `sharur migrate`, it regenerates semantic rows while retaining raw
+    # upstream observations.
     builder.conn.execute("""
         DELETE FROM schema_version WHERE version > 1;
         ALTER TABLE defense_systems DROP COLUMN contig_id;
@@ -259,6 +264,16 @@ def test_stage07_restart_v2_preserves_upstream_tables(tmp_path):
         ) VALUES ('legacy-system', 'bin1', 'legacy-type', 1, 'p1');
     """)
     builder._release_db()
+
+    with pytest.raises(DestructiveMigrationError, match=re.escape(f"sharur migrate --db {db_path}")):
+        builder.restart_v2()
+    builder._release_db()
+    conn = duckdb.connect(str(db_path), read_only=True)
+    assert conn.execute("SELECT COUNT(*) FROM defense_systems").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM semantic_state").fetchone()[0] == 1
+    conn.close()
+    result = CliRunner().invoke(sharur_app, ["migrate", "--db", str(db_path)])
+    assert result.exit_code == 0, result.output
 
     stats = builder.restart_v2()
 
@@ -352,3 +367,36 @@ def test_stage07_annotation_chunk_failure_aborts_build(tmp_path):
             builder._load_annotations()
     finally:
         builder._release_db()
+
+
+def test_stage07_cazyme_step_leaves_stage04_dbcan_table_in_place(tmp_path, monkeypatch):
+    """The classifier runs its own stamped dbCAN.hmm search, so Stage 07 copies nothing for it."""
+    import sys
+    import types
+
+    import pandas as pd
+
+    builder_cls, outputs_cls = _load_kb_module()
+    data_dir = tmp_path / "data"
+    _write(data_dir / "stage04_astra" / "dbcan_results" / "dbCAN_hits_df.tsv",
+           "sequence_id\thmm_name\np1\tGH5.hmm\n")
+    calls = []
+    fake = types.ModuleType("classify_cazymes")
+    fake.classify_cazymes = lambda **kwargs: calls.append(kwargs) or pd.DataFrame()
+    monkeypatch.setitem(sys.modules, "classify_cazymes", fake)
+    builder = builder_cls(_pipeline_outputs(outputs_cls, data_dir), data_dir / "sharur.duckdb",
+                          force=True, threads=1, enable_cazymes=True)
+    builder._init_db()
+    try:
+        builder.conn.execute("""
+            INSERT INTO bins (bin_id) VALUES ('bin1');
+            INSERT INTO contigs (contig_id, bin_id, length) VALUES ('c1', 'bin1', 900);
+            INSERT INTO proteins (protein_id, contig_id, bin_id, start, end_coord, strand)
+                VALUES ('p1', 'c1', 'bin1', 1, 900, '+');
+        """)
+        builder._classify_cazymes()
+    finally:
+        builder._release_db()
+
+    assert [call["db_path"] for call in calls] == [str(data_dir / "sharur.duckdb")]
+    assert not (data_dir / "annotations").exists()

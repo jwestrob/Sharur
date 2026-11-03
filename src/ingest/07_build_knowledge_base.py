@@ -15,7 +15,6 @@ import json
 import logging
 import os
 import re
-import shutil
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -27,7 +26,14 @@ import pandas as pd
 import typer
 from rich.console import Console
 
-from sharur.contig_context import assemblies_from_stage00, fasta_records, parse_partial
+from sharur.contig_context import (
+    assemblies_from_stage00,
+    fasta_records,
+    parse_name_conventions,
+    parse_partial,
+    record_name_conventions,
+    recorded_name_conventions,
+)
 from sharur.defensefinder import selection as df_selection
 from sharur.kofam import SCORE_BASIS_FULL, kofam_scores, record_ko_score_basis
 from sharur.storage.migrations import run_migrations
@@ -207,11 +213,18 @@ class PipelineOutputs:
 class KnowledgeBaseBuilder:
     def __init__(self, outputs: PipelineOutputs, db_path: Path, force: bool = False,
                  enable_cazymes: bool = False, threads: Optional[int] = None,
-                 pipeline_depth: int = 2, defensefinder_models: Optional[Path] = None):
+                 pipeline_depth: int = 2, defensefinder_models: Optional[Path] = None,
+                 contig_name_topology: Optional[str] = None):
         self.outputs = outputs
         self.db_path = db_path
         self.force = force
         self.enable_cazymes = enable_cazymes
+        # Contig-name suffix conventions that mark topology in this dataset
+        # (sharur.contig_context); None keeps what the database being replaced records.
+        self.contig_name_topology = (
+            None if contig_name_topology is None else parse_name_conventions(contig_name_topology)
+        )
+        self._name_conventions: tuple = ()
         # defense-finder-models directory for hit selection (GA, LENG) and system
         # calling; resolved on first use (explicit, $SHARUR_DEFENSEFINDER_MODELS,
         # then ~/.macsyfinder/models/defense-finder-models).
@@ -396,8 +409,11 @@ class KnowledgeBaseBuilder:
 
     # --- init ----------------------------------------------------------- #
     def _init_db(self) -> None:
+        conventions = self.contig_name_topology
         if self.db_path.exists():
             if self.force:
+                if conventions is None:
+                    conventions = self._previous_name_conventions()
                 self.db_path.unlink()
             else:
                 raise FileExistsError(f"{self.db_path} exists (use --force to overwrite)")
@@ -406,8 +422,24 @@ class KnowledgeBaseBuilder:
         self.conn.execute(f"SET threads = {self.threads}")
         self.conn.execute(SCHEMA)
         run_migrations(self.conn)
+        self._name_conventions = record_name_conventions(self.conn, conventions)
+        if self._name_conventions:
+            console.print(f"  Contig-name topology conventions: {', '.join(self._name_conventions)}")
         self._drop_secondary_indexes()
         console.print(f"[blue]Created DuckDB at {self.db_path}[/blue]")
+
+    def _previous_name_conventions(self) -> tuple:
+        """Conventions recorded by the database a --force rebuild replaces, so a rebuild keeps them."""
+        try:
+            previous = duckdb.connect(str(self.db_path), read_only=True)
+        except duckdb.Error as exc:
+            console.print(f"  [yellow]Could not read {self.db_path} before replacing it ({exc}); "
+                          "pass --contig-name-topology if its contig names mark topology[/yellow]")
+            return ()
+        try:
+            return recorded_name_conventions(previous)
+        finally:
+            previous.close()
 
     # --- bins ----------------------------------------------------------- #
     def _load_bins(self) -> None:
@@ -596,7 +628,8 @@ class KnowledgeBaseBuilder:
 
         Returns the keys whose length came from the assembly. A contig whose
         assembly record is shorter than its gene span keeps the gene span.
-        Circularity recorded in the assembly headers lands in ``self._contig_circular``.
+        Circularity recorded in the assembly headers, or by a contig-name convention
+        the dataset records, lands in ``self._contig_circular``.
         """
         self._contig_circular: Dict[tuple, bool] = {}
         assemblies = assemblies_from_stage00(self.outputs.stage00_dir)
@@ -605,7 +638,8 @@ class KnowledgeBaseBuilder:
             return {}
         bins = sorted(wanted)
         with ThreadPoolExecutor(max_workers=self.threads) as executor:
-            records = dict(zip(bins, executor.map(lambda b: fasta_records(assemblies[b]), bins)))
+            records = dict(zip(bins, executor.map(
+                lambda b: fasta_records(assemblies[b], self._name_conventions), bins)))
         sources: Dict[tuple, str] = {}
         for (cid, bid), span in list(contig_lengths.items()):
             length, circular = records.get(bid, {}).get(cid, (None, None))
@@ -1192,18 +1226,6 @@ class KnowledgeBaseBuilder:
             console.print("  No proteins found, skipping CAZyme classification")
             return
 
-        # Copy stage04 dbCAN HMM results to annotations dir for classify_cazymes cache
-        data_dir = self.db_path.parent
-        ann_dir = data_dir / "annotations"
-        ann_dir.mkdir(parents=True, exist_ok=True)
-        cached_tsv = ann_dir / "dbCAN_hits_df.tsv"
-        if not cached_tsv.exists():
-            for tsv in (self.outputs.stage04_dir.rglob("*dbCAN*_hits_df.tsv")
-                        if self.outputs.stage04_dir.exists() else []):
-                shutil.copy2(tsv, cached_tsv)
-                console.print(f"  Cached dbCAN HMM results → {cached_tsv.name}")
-                break
-
         console.print(f"  Running dbCAN 3-tool consensus CAZyme classification for {protein_count:,} proteins...")
 
         # Release DB so the external script can open its own connection
@@ -1483,6 +1505,15 @@ def main(
             "~/.macsyfinder/models/defense-finder-models"
         ),
     ),
+    contig_name_topology: Optional[str] = typer.Option(
+        None,
+        "--contig-name-topology",
+        help=(
+            "Contig-name suffix conventions that mark circular/linear contigs in this dataset "
+            "(comma-separated: srvp, metamdbg, hifiasm; or none), recorded in the database. "
+            "Default: what the database being replaced records, else none"
+        ),
+    ),
 ) -> None:
     logging.basicConfig(level=logging.INFO)
     if resume_v2 and restart_v2:
@@ -1518,6 +1549,7 @@ def main(
         threads=threads,
         pipeline_depth=pipeline_depth,
         defensefinder_models=defensefinder_models,
+        contig_name_topology=contig_name_topology,
     )
     if resume_v2:
         stats = builder.resume_v2()

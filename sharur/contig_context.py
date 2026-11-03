@@ -15,6 +15,14 @@ This module reports, per protein:
 
 It also reads true contig lengths from assemblies and Prodigal flags from
 protein FASTA headers, for ingest and for backfilling existing databases.
+
+Contig topology (``contigs.is_circular``) comes from what the assembly header
+records (``circular=yes``, ``suggestCircular=``, ``[topology=]``), then from a
+contig-name suffix convention the dataset opted into, then from a curated
+``circular`` token in the name. A suffix convention belongs to one assembler's
+(or one project's renamed) output, so each dataset records the conventions its
+contig IDs follow in ``dataset_meta`` (key ``contig_name_topology``); with none
+recorded, a name ending ``_C`` or ``_L`` says nothing about topology.
 """
 
 from __future__ import annotations
@@ -38,14 +46,19 @@ _CIRC_FIELDS = (
     re.compile(r"(?:^|\s)(?:circular|suggestCircular)=(yes|no|true|false)\b", re.I),
     re.compile(r"\[topology=(circular|linear)\]", re.I),
 )
-# Contig-name suffixes: metaMDBG ctg<N>_<cov>x_c|rc|l, the renamed _C|_RC|_L form
-# (SR-VP PacBio sets; _RC contigs match _C contigs in length and completeness),
-# and hifiasm(-meta) [sp]tg<digits>c|l.
-_CIRC_SUFFIXES = (
-    re.compile(r"_\d+x_(rc|c|l)$"),
-    re.compile(r"_(RC|C|L)$"),
-    re.compile(r"(?:^|\.)[a-z]?tg\d+([cl])$"),
-)
+# Contig-name suffix conventions, applied only when a dataset records them
+# (dataset_meta key NAME_TOPOLOGY_KEY). The captured letter is c/rc (circular)
+# or l (linear). Checked in this order.
+NAME_TOPOLOGY_KEY = "contig_name_topology"
+NAME_TOPOLOGY_CONVENTIONS: dict[str, re.Pattern[str]] = {
+    # metaMDBG: ctg<N>_<cov>x_c|rc|l
+    "metamdbg": re.compile(r"_\d+x_(rc|c|l)$"),
+    # SR-VP PacBio sets, renamed to ..._<N>_C|RC|L (_RC contigs match _C contigs
+    # in length and completeness)
+    "srvp": re.compile(r"_(RC|C|L)$"),
+    # hifiasm(-meta): [sp]tg<digits>c|l
+    "hifiasm": re.compile(r"(?:^|\.)[a-z]?tg\d+([cl])$"),
+}
 # Curated names carrying a "circular" token (e.g. Genome_2_circular_FINAL).
 _CIRC_TOKEN = re.compile(r"(?:^|[_.\-])circular(?:[_.\-]|$)", re.I)
 _NOT_CIRC_TOKEN = re.compile(r"(?:non|not)[_.\-]?circular", re.I)
@@ -83,34 +96,98 @@ def _open_text(path: Path):
     return gzip.open(path, "rt") if path.suffix == ".gz" else open(path)
 
 
-def contig_circularity(record_id: str, description: str = "") -> bool | None:
-    """Circularity recorded in a FASTA header: True, False, or None when unmarked.
+def parse_name_conventions(value: str | Iterable[str] | None) -> tuple[str, ...]:
+    """Validated convention names in canonical order; ``none``, empty or None give ().
 
-    Explicit header fields take precedence over name suffixes, and suffixes over
-    a curated "circular" token in the name.
+    Accepts a comma-separated string (``"srvp"``, ``"srvp,hifiasm"``) or names.
+    """
+    if value is None:
+        return ()
+    names = value.split(",") if isinstance(value, str) else list(value)
+    wanted = {name.strip().lower() for name in names} - {"", "none"}
+    unknown = wanted - set(NAME_TOPOLOGY_CONVENTIONS)
+    if unknown:
+        raise ValueError(f"Unknown contig-name topology convention(s): {', '.join(sorted(unknown))}; "
+                         f"known: {', '.join(NAME_TOPOLOGY_CONVENTIONS)}, or none")
+    return tuple(name for name in NAME_TOPOLOGY_CONVENTIONS if name in wanted)
+
+
+def recorded_name_conventions(conn) -> tuple[str, ...]:
+    """The contig-name topology conventions a database records (read-only safe)."""
+    from sharur.storage.dataset_meta import get_dataset_meta  # noqa: PLC0415
+
+    return parse_name_conventions(get_dataset_meta(conn, NAME_TOPOLOGY_KEY))
+
+
+def record_name_conventions(conn, conventions: str | Iterable[str] | None) -> tuple[str, ...]:
+    """Record the conventions this dataset's contig IDs follow; empty clears the setting.
+
+    Stored values of ``contigs.is_circular`` stay as they are; Stage 07 and
+    :func:`backfill_contig_context` apply the setting when they read assemblies.
+    """
+    from sharur.storage.dataset_meta import set_dataset_meta  # noqa: PLC0415
+
+    names = parse_name_conventions(conventions)
+    set_dataset_meta(conn, NAME_TOPOLOGY_KEY, ",".join(names) or None)
+    return names
+
+
+def contig_circularity(record_id: str, description: str = "",
+                       conventions: Iterable[str] = ()) -> bool | None:
+    """Circularity recorded for a contig: True, False, or None when unmarked.
+
+    Explicit header fields take precedence, then the name suffix of each
+    convention in ``conventions`` (names from :data:`NAME_TOPOLOGY_CONVENTIONS`;
+    none apply unless the dataset records them), then a curated "circular"
+    token in the name.
     """
     for pattern in _CIRC_FIELDS:
         match = pattern.search(description)
         if match:
             return match.group(1).lower() in {"yes", "true", "circular"}
-    for pattern in _CIRC_SUFFIXES:
-        match = pattern.search(record_id)
-        if match:
-            return match.group(1).lower() != "l"
+    for name, pattern in NAME_TOPOLOGY_CONVENTIONS.items():
+        if name in conventions:
+            match = pattern.search(record_id)
+            if match:
+                return match.group(1).lower() != "l"
     if _NOT_CIRC_TOKEN.search(record_id):
         return False
     return True if _CIRC_TOKEN.search(record_id) else None
 
 
-def fasta_records(path: Path) -> dict[str, tuple[int, bool | None]]:
-    """Record ID (first header word) -> (sequence length, recorded circularity), streamed."""
+def name_convention_matches(conn) -> dict[str, dict[str, int]]:
+    """Per convention: contigs whose ID it marks circular / linear, and how many stored values differ.
+
+    Counts every known convention, recorded or not, so a dataset's IDs can be
+    checked before one is recorded. ``stored_differs`` counts contigs whose
+    ``is_circular`` disagrees with the suffix (an assembly header mark takes
+    precedence, so a difference is a prompt to check, not an error).
+    """
+    counts = {name: {"circular": 0, "linear": 0, "stored_differs": 0} for name in NAME_TOPOLOGY_CONVENTIONS}
+    for contig_id, stored in conn.execute(
+            "SELECT contig_id, COALESCE(is_circular, FALSE) FROM contigs").fetchall():
+        for name, pattern in NAME_TOPOLOGY_CONVENTIONS.items():
+            match = pattern.search(contig_id)
+            if match:
+                circular = match.group(1).lower() != "l"
+                counts[name]["circular" if circular else "linear"] += 1
+                counts[name]["stored_differs"] += bool(stored) != circular
+    return counts
+
+
+def fasta_records(path: Path, conventions: Iterable[str] = ()) -> dict[str, tuple[int, bool | None]]:
+    """Record ID (first header word) -> (sequence length, recorded circularity), streamed.
+
+    ``conventions``: the contig-name topology conventions the dataset records.
+    """
+    conventions = parse_name_conventions(conventions)
     records: dict[str, tuple[int, bool | None]] = {}
     current, description, length = None, "", 0
     with _open_text(path) as handle:
         for line in handle:
             if line.startswith(">"):
                 if current is not None:
-                    records[current] = (length, contig_circularity(current, description))
+                    records[current] = (length, contig_circularity(current, description, conventions))
                 fields = line[1:].rstrip("\n").split(None, 1)
                 current = fields[0] if fields else ""
                 description = fields[1] if len(fields) > 1 else ""
@@ -118,7 +195,7 @@ def fasta_records(path: Path) -> dict[str, tuple[int, bool | None]]:
             else:
                 length += len(line.strip())
     if current is not None:
-        records[current] = (length, contig_circularity(current, description))
+        records[current] = (length, contig_circularity(current, description, conventions))
     return records
 
 
@@ -272,8 +349,9 @@ def backfill_contig_context(conn, *, assemblies: dict[str, Path] | None = None,
     ``assemblies`` maps bin_id -> assembly FASTA; only contigs already in that
     bin are updated. A contig whose assembly record is shorter than its gene
     span means the wrong assembly was supplied, and nothing is written.
-    ``is_circular`` takes the circularity the assembly header records
-    (:func:`contig_circularity`); unmarked contigs keep their stored value.
+    ``is_circular`` takes the circularity the assembly header records, or the
+    name suffix of a convention the database records (:func:`contig_circularity`,
+    :func:`recorded_name_conventions`); unmarked contigs keep their stored value.
     """
     import os  # noqa: PLC0415
     from concurrent.futures import ThreadPoolExecutor  # noqa: PLC0415
@@ -283,12 +361,13 @@ def backfill_contig_context(conn, *, assemblies: dict[str, Path] | None = None,
     from sharur.storage.migrations import run_migrations  # noqa: PLC0415
 
     run_migrations(conn)
+    conventions = recorded_name_conventions(conn)
     workers = threads or os.cpu_count() or 1
     stats = {"contigs_updated": 0, "contigs_unmatched": 0, "contigs_circular": 0, "bins_resized": 0,
              "proteins_flagged": 0}
     with ThreadPoolExecutor(max_workers=workers) as executor:
         bins = sorted(assemblies or {})
-        records = list(executor.map(lambda b: fasta_records(assemblies[b]), bins))
+        records = list(executor.map(lambda b: fasta_records(assemblies[b], conventions), bins))
         flags = list(executor.map(lambda f: list(prodigal_partials(f)), list(protein_faas)))
     conn.execute("BEGIN TRANSACTION")
     try:

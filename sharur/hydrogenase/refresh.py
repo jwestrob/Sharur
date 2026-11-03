@@ -227,7 +227,7 @@ def refresh_hydrogenases(
         current = get_current_version(probe)
     finally:
         probe.close()
-    latest = max(v for v, _, _ in MIGRATIONS)
+    latest = max(m.version for m in MIGRATIONS)
     if current < latest:
         raise RefreshValidationError(
             f"{db} is at schema version {current}; run `sharur migrate --db {db}` "

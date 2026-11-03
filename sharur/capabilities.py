@@ -278,7 +278,8 @@ def _database_checks(
                 remediation=(
                     None
                     if schema_state == CapabilityState.available
-                    else "Open the database writable once to run migrations, or rebuild it."
+                    else "Run `sharur migrate --db DATASET/sharur.duckdb` in a maintenance "
+                    "window, or rebuild it."
                 ),
             )
         )

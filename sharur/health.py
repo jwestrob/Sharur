@@ -153,7 +153,8 @@ def check_schema(ctx: Context) -> Finding:
                        "The database records no schema version.", "Rebuild it with `sharur-ingest`.")
     if version < SCHEMA_VERSION:
         return Finding("schema", "Database", "Schema version", "warn",
-                       f"Schema {version}; this Sharur expects {SCHEMA_VERSION}. Reading works; writes migrate first.",
+                       f"Schema {version}; this Sharur expects {SCHEMA_VERSION}. Reading works; writable opens "
+                       "apply additive migrations and stop at a destructive one.",
                        "Review the pending migrations, then run `sharur migrate --db DATASET/sharur.duckdb`.")
     if version > SCHEMA_VERSION:
         return Finding("schema", "Database", "Schema version", "warn",

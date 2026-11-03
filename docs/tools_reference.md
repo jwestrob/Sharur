@@ -117,8 +117,11 @@ Python hash seeds.
 - Aksha `--write_macsyfinder` is NOT needed (engine reads from DuckDB, not hmmsearch files)
 
 Schema-v5 migration quarantines pre-v5 named DefenseFinder/TXSScan calls and invalidates
-their affected semantic cache rows. Rerun Stage 07 (or the caller plus a V2 subset refresh)
-before treating a migrated legacy database's system surface as available.
+their affected semantic cache rows. It is the one destructive migration: only
+`sharur migrate --db PATH` applies it, and a writable open, Stage 07 restart or caller rerun
+on a database holding such calls stops with an error naming that command. Rerun Stage 07
+(or the caller plus a V2 subset refresh) before treating a migrated legacy database's system
+surface as available.
 
 ## Hydrogenase Classification
 **Script:** `scripts/classify_hydrogenases.py`
