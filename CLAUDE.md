@@ -29,6 +29,7 @@ Detailed guides live in `docs/` and `.claude/skills/`. **Read the relevant doc b
 | Running hierarchical candidate review | `docs/review_workflow.md`, `sharur/review/` |
 | Serving one large DuckDB to many agents | `docs/query_service.md`, `sharur/query/` |
 | Writing structured findings | `docs/findings_spec.md` |
+| Re-checking findings after a database refresh (`sharur reverify`) | `docs/findings_spec.md` § Replaying verification |
 | Inspecting cases, comparing ORF context, or adding assembly evidence | `docs/cases_and_evidence.md` |
 
 **Other key docs:**

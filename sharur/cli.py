@@ -1252,6 +1252,85 @@ def load_bgcs_command(
     typer.echo("Canonical database state changed. Rebuild dataset.seal.json with `sharur seal --force`.")
 
 
+@app.command(name="reverify")
+def reverify_command(
+    findings: list[Path] = typer.Argument(
+        ..., help="findings.jsonl files or dataset directories (data/DATASET → exploration/findings.jsonl)."),
+    db: Optional[Path] = typer.Option(
+        None, "--db", "-d", help="Database for SQL triples without `attach` (default: data/DATASET/sharur.duckdb)."),
+    touching: Optional[str] = typer.Option(
+        None, "--touching", "-t",
+        help="Regex: replay only findings whose queries, or the local scripts they run, match it "
+             "(e.g. 'defense_systems|defensefinder')."),
+    ids: Optional[str] = typer.Option(None, "--ids", help="Comma-separated finding IDs to replay."),
+    substitute: list[str] = typer.Option(
+        [], "--substitute", "-s",
+        help="OLD=NEW path substitution, repeatable; redirects queries, attach maps, duckdb.connect "
+             "and ATTACH in helper scripts."),
+    baseline: list[str] = typer.Option(
+        [], "--baseline", "-b",
+        help="OLD=NEW substitution for the compare-mode baseline run, repeatable (e.g. LIVE=BACKUP "
+             "after a publish)."),
+    compare: bool = typer.Option(
+        False, "--compare",
+        help="Run each triple under the baseline (as recorded unless --baseline) and under "
+             "--substitute; report every result that changes."),
+    workers: Optional[int] = typer.Option(None, "--workers", "-j", help="Parallel replay processes."),
+    threads: int = typer.Option(2, "--threads", help="DuckDB threads per replay connection."),
+    memory_limit: str = typer.Option("4GB", "--memory-limit", help="DuckDB memory limit per connection."),
+    timeout: float = typer.Option(1800.0, "--timeout", help="Seconds per shell triple."),
+    reports: list[str] = typer.Option(
+        [], "--reports", help="Glob (relative to the repo root) of documents to scan for citations of "
+                              "failing or changed findings, repeatable; e.g. 'data/srvp_joint/reports/*.md'."),
+    out: Optional[Path] = typer.Option(None, "--out", "-o", help="Write every triple's result as TSV."),
+    output_format: BriefFormat = typer.Option(BriefFormat.markdown, "--format", "-f"),
+    strict: bool = typer.Option(False, "--strict", help="Exit 1 on any FAIL/ERROR (or change, with --compare)."),
+):
+    """Replay findings' verification triples and report numbers that no longer hold.
+
+    Before publishing a refresh, `--compare -s LIVE=STAGED` shows every recorded number the
+    staged copy would change; after one, `--compare -b LIVE=BACKUP` does the same against a
+    pre-publish backup. `--reports GLOB` lists the documents that cite each affected finding.
+    """
+    import json  # noqa: PLC0415
+
+    from sharur.reverify import reverify, write_tsv  # noqa: PLC0415
+
+    def parse_pairs(items, flag):
+        pairs = []
+        for item in items:
+            if "=" not in item:
+                typer.echo(f"{flag} needs OLD=NEW, got {item!r}", err=True)
+                raise typer.Exit(2)
+            pairs.append(tuple(item.split("=", 1)))
+        return pairs
+
+    pairs = parse_pairs(substitute, "--substitute")
+    baseline_pairs = parse_pairs(baseline, "--baseline")
+
+    def progress(done, total, result, slot):
+        if done == total or done % 50 == 0:
+            typer.echo(f"  {done}/{total} replays", err=True)
+
+    try:
+        report = reverify(
+            findings, db=db, touching=touching,
+            ids=[i for i in (ids or "").split(",") if i] or None,
+            substitutions=pairs, baseline_substitutions=baseline_pairs, compare=compare, workers=workers, threads=threads,
+            memory_limit=memory_limit, timeout=timeout, report_globs=reports, progress=progress)
+    except (FileNotFoundError, ValueError) as exc:
+        typer.echo(f"reverify: {exc}", err=True)
+        raise typer.Exit(2) from exc
+    if out is not None:
+        write_tsv(report, out)
+    if output_format == BriefFormat.json:
+        typer.echo(json.dumps(report.to_dict(), indent=2, default=str))
+    else:
+        typer.echo(report.to_markdown())
+    if strict and report.attention():
+        raise typer.Exit(1)
+
+
 @app.command(name="verify-seal")
 def verify_seal(
     seal_path: Path = typer.Argument(..., help="Path to dataset.seal.json."),

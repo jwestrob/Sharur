@@ -365,6 +365,38 @@ Queries can be:
 
 **Decompositions require separate verification.** "68 DUF1016_N near defense, across 20 system types" is two claims needing two queries, not one.
 
+### Replaying verification: `sharur reverify`
+
+`sharur reverify` re-executes every triple and compares the result with `expected`.
+Write queries in a form it can replay:
+
+- SQL runs against `data/<dataset>/sharur.duckdb` for a findings file under `data/<dataset>/`,
+  or against the aliases in `attach` (`{"alias": "data/<dataset>/sharur.duckdb"}`), which is the
+  form to use for any query spanning datasets.
+- `python: EXPR` evaluates from the repository root with `json`, `pd`, `np`, `duckdb`,
+  `Sharur`, `os`, `re`, `math` and `Path` in scope.
+- `shell: CMD` runs under `/bin/sh` from the repository root; stdout is parsed as JSON when it
+  parses, so print a JSON number or list.
+- A float matches when the observed value, rounded to the precision written in `expected`,
+  equals it; write `expected` with the precision the claim states.
+
+```bash
+# every triple of one dataset
+sharur reverify data/srvp_archaea --out reverify.tsv
+# before publishing a refresh: which recorded numbers would a staged copy change?
+sharur reverify data/srvp_archaea data/srvp_joint --touching 'defense_systems|defensefinder' \
+    --compare -s data/srvp_archaea/sharur.duckdb=/scratch/staged.duckdb \
+    --reports 'data/srvp_joint/reports/*.md'
+# after publishing: compare against the pre-publish backup
+sharur reverify data/srvp_archaea --compare -b data/srvp_archaea/sharur.duckdb=BACKUP.duckdb
+```
+
+`--touching REGEX` selects findings whose queries, or the local scripts those queries run or
+import, match; the whole finding is replayed. Substitutions redirect every path a replay touches,
+including `duckdb.connect` and `ATTACH` calls inside helper scripts and Python processes that a
+shell triple starts. Every replayed connection is read-only, with per-connection thread and
+memory limits (`--threads`, `--memory-limit`) and `--workers` parallel processes.
+
 ---
 
 ## Falsification
