@@ -1177,6 +1177,8 @@ def backfill_contig_context_command(
 
     Older databases store each contig's length as the end of its last gene and
     omit Prodigal's partial-gene flags; contig-edge context needs both.
+    Circularity comes from assembly header marks, and from contig-name suffixes
+    only under the conventions the database records (`sharur contig-name-topology`).
     Writes the canonical database: run in a maintenance window, then reseal.
     """
     import duckdb  # noqa: PLC0415
@@ -1185,6 +1187,7 @@ def backfill_contig_context_command(
         assemblies_from_dir,
         assemblies_from_stage00,
         backfill_contig_context,
+        recorded_name_conventions,
     )
     from sharur.storage.migrations import DestructiveMigrationError  # noqa: PLC0415
 
@@ -1207,6 +1210,7 @@ def backfill_contig_context_command(
     connection = duckdb.connect(str(database))
     try:
         stats = backfill_contig_context(connection, assemblies=assembly_paths, protein_faas=faas)
+        conventions = recorded_name_conventions(connection)
     except (ValueError, DestructiveMigrationError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
@@ -1216,9 +1220,67 @@ def backfill_contig_context_command(
     typer.echo(f"Contig lengths from assemblies: {stats['contigs_updated']:,} "
                f"({stats['contigs_unmatched']:,} contigs in those bins without an assembly record)")
     typer.echo(f"Genome lengths re-summed from assembly contigs: {stats['bins_resized']:,} bins")
-    typer.echo(f"Circular contigs (assembly header marks): {stats['contigs_circular']:,}")
+    typer.echo(f"Circular contigs (assembly header marks; name conventions: "
+               f"{', '.join(conventions) or 'none recorded'}): {stats['contigs_circular']:,}")
     typer.echo(f"Proteins with Prodigal partial flags: {stats['proteins_flagged']:,}")
     typer.echo("Canonical database state changed. Rebuild dataset.seal.json with `sharur seal --force`.")
+
+
+@app.command(name="contig-name-topology")
+def contig_name_topology_command(
+    db: Path = typer.Option(Path(DEFAULT_DB), "--db", "-d", help="Path to a Sharur DuckDB."),
+    set_conventions: str | None = typer.Option(
+        None, "--set",
+        help="Record the conventions this dataset's contig IDs follow (comma-separated: "
+             "srvp, metamdbg, hifiasm), or 'none' to clear. Without --set, only report."),
+):
+    """Show or record which contig-name suffixes mark circular and linear contigs in a dataset.
+
+    Suffix conventions belong to one assembler's or project's naming: srvp (`..._C`/`_RC`
+    circular, `..._L` linear), metamdbg (`ctg<N>_<cov>x_c|rc|l`), hifiasm (`[sp]tg<N>c|l`).
+    Stage 07 and `sharur backfill-contig-context` apply only the conventions a database records,
+    after assembly header marks. Recording leaves stored `is_circular` values as they are; the
+    report shows, per convention, how many contig IDs it marks and how many stored values differ.
+    """
+    import duckdb  # noqa: PLC0415
+
+    from sharur.contig_context import (  # noqa: PLC0415
+        name_convention_matches,
+        parse_name_conventions,
+        record_name_conventions,
+        recorded_name_conventions,
+    )
+
+    database = db.expanduser().resolve()
+    if not database.is_file():
+        typer.echo(f"DuckDB file does not exist: {database}", err=True)
+        raise typer.Exit(1)
+    try:
+        wanted = None if set_conventions is None else parse_name_conventions(set_conventions)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--set") from exc
+    connection = duckdb.connect(str(database), read_only=wanted is None)
+    try:
+        before = recorded_name_conventions(connection)
+        changed = wanted is not None and wanted != before
+        if changed:
+            connection.execute("BEGIN TRANSACTION")
+            record_name_conventions(connection, wanted)
+            connection.execute("COMMIT")
+        recorded = recorded_name_conventions(connection)
+        matches = name_convention_matches(connection)
+    finally:
+        connection.close()
+    typer.echo(f"Recorded contig-name topology conventions: {', '.join(recorded) or 'none'}")
+    for name, counts in matches.items():
+        total = counts["circular"] + counts["linear"]
+        if total or name in recorded:
+            state = "recorded" if name in recorded else "not recorded"
+            typer.echo(f"  {name} ({state}): {total:,} contig IDs match "
+                       f"({counts['circular']:,} circular, {counts['linear']:,} linear); "
+                       f"stored is_circular differs for {counts['stored_differs']:,}")
+    if changed:
+        typer.echo("Canonical database state changed. Rebuild dataset.seal.json with `sharur seal --force`.")
 
 
 @app.command(name="load-bgcs")

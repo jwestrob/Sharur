@@ -36,6 +36,7 @@ $ sharur [OPTIONS] COMMAND [ARGS]...
 * `seal`: Write a portable integrity seal for a...
 * `migrate`: Apply pending schema/index migrations,...
 * `backfill-contig-context`: Record assembly contig lengths and...
+* `contig-name-topology`: Show or record which contig-name suffixes...
 * `verify-seal`: Recompute a dataset seal and report...
 * `build-vector-index`: Build mmap-ready FAISS sidecars and a...
 * `doctor`: Verify external tools, reference...
@@ -434,6 +435,8 @@ Record assembly contig lengths and Prodigal truncation flags in an existing data
 
 Older databases store each contig's length as the end of its last gene and
 omit Prodigal's partial-gene flags; contig-edge context needs both.
+Circularity comes from assembly header marks, and from contig-name suffixes
+only under the conventions the database records (`sharur contig-name-topology`).
 Writes the canonical database: run in a maintenance window, then reseal.
 
 **Usage**:
@@ -447,6 +450,28 @@ $ sharur backfill-contig-context [OPTIONS]
 * `-d, --db PATH`: Path to a writable Sharur DuckDB.  [default: data/sharur.duckdb]
 * `--assemblies PATH`: Directory of assembly FASTAs named BIN_ID.fna|fa|fasta[.gz] (default: the dataset's stage00_prepared manifest).
 * `--proteins PATH`: Prodigal output directory with *.faa files (default: the dataset's stage03_prodigal).
+* `--help`: Show this message and exit.
+
+### `sharur contig-name-topology`
+
+Show or record which contig-name suffixes mark circular and linear contigs in a dataset.
+
+Suffix conventions belong to one assembler's or project's naming: srvp (`..._C`/`_RC`
+circular, `..._L` linear), metamdbg (`ctg<N>_<cov>x_c|rc|l`), hifiasm (`[sp]tg<N>c|l`).
+Stage 07 and `sharur backfill-contig-context` apply only the conventions a database records,
+after assembly header marks. Recording leaves stored `is_circular` values as they are; the
+report shows, per convention, how many contig IDs it marks and how many stored values differ.
+
+**Usage**:
+
+```console
+$ sharur contig-name-topology [OPTIONS]
+```
+
+**Options**:
+
+* `-d, --db PATH`: Path to a Sharur DuckDB.  [default: data/sharur.duckdb]
+* `--set TEXT`: Record the conventions this dataset's contig IDs follow (comma-separated: srvp, metamdbg, hifiasm), or 'none' to clear. Without --set, only report.
 * `--help`: Show this message and exit.
 
 ### `sharur verify-seal`
@@ -844,6 +869,7 @@ $ sharur-ingest [OPTIONS]
 * `--skip-dbcan / --with-legacy-dbcan`: Skip deprecated Stage 05b by default; use --with-legacy-dbcan to enable it  [default: skip-dbcan]
 * `--enable-cazymes`: Run the optional Stage 07 dbCAN three-tool consensus classifier
 * `--pipeline-depth INTEGER RANGE`: Maximum ordered V2 transform chunks in flight during Stage 07  [default: 2; x>=1]
+* `--contig-name-topology TEXT`: Contig-name suffix conventions that mark circular/linear contigs in this dataset (comma-separated: srvp, metamdbg, hifiasm; or none); Stage 07 records them in the database. Default: what the database being replaced records, else none
 * `--skip-crispr / --no-skip-crispr`: Skip standard Stage 05c (CRISPR arrays via minced_crispr.py)  [default: no-skip-crispr]
 * `--skip-embeddings / --no-skip-embeddings`: Skip Stage 06 post-build embeddings (06_esm2_embeddings.py)  [default: no-skip-embeddings]
 * `--reads PATH`: TSV of sample_id, read1[, read2 | interleaved]: adds optional Stage 08 per-sample coverage with CoverM (abundance.duckdb sidecar)

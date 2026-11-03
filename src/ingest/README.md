@@ -19,7 +19,11 @@ If `sharur-ingest` is missing, refresh the editable install with
 The default plan runs the core stages and skips optional QUAST, DFAST, GECCO, and the
 deprecated legacy dbCAN helper. Opt in with `--with-quast`, `--with-dfast`,
 `--with-gecco`, or `--with-legacy-dbcan`. The separate Stage 07 dbCAN three-tool
-consensus classifier is opt-in with `--enable-cazymes`. `--dry-run` prints the exact
+consensus classifier is opt-in with `--enable-cazymes`. For assemblies whose contig names
+mark topology (for example the SR-VP PacBio sets' `_C`/`_RC`/`_L` suffixes), pass
+`--contig-name-topology srvp` (or `metamdbg`, `hifiasm`); Stage 07 records it in the
+database, and a `--force` rebuild keeps what the replaced database recorded
+(`docs/concepts/contig-edges.md`). `--dry-run` prints the exact
 stage order and paths without creating the dataset directory. The bounded Stage 07
 pipeline defaults to `--pipeline-depth 2`.
 

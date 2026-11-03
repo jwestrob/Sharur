@@ -114,6 +114,7 @@ def _build_tools_dag(
     reads: Path | None = None,
     enable_cazymes: bool,
     pipeline_depth: int = 2,
+    contig_name_topology: str | None = None,
 ) -> IngestDAG:
     """Build the selected stage graph and its concrete resource-tuned commands."""
     stage_dir = _stage_script_dir()
@@ -308,6 +309,8 @@ def _build_tools_dag(
     ]
     if enable_cazymes:
         builder_command.append("--enable-cazymes")
+    if contig_name_topology is not None:
+        builder_command += ["--contig-name-topology", contig_name_topology]
     skipped_inputs = tuple(
         path
         for enabled, path in (
@@ -728,6 +731,15 @@ def run(
             help="Maximum ordered V2 transform chunks in flight during Stage 07",
         ),
     ] = 2,
+    contig_name_topology: Annotated[
+        str | None,
+        typer.Option(
+            "--contig-name-topology",
+            help="Contig-name suffix conventions that mark circular/linear contigs in this "
+                 "dataset (comma-separated: srvp, metamdbg, hifiasm; or none); Stage 07 records "
+                 "them in the database. Default: what the database being replaced records, else none",
+        ),
+    ] = None,
     skip_crispr: Annotated[
         bool,
         typer.Option(help="Skip standard Stage 05c (CRISPR arrays via minced_crispr.py)"),
@@ -807,6 +819,13 @@ def run(
         raise typer.BadParameter(str(exc)) from exc
     if submit_slurm and resource_profile.name != "slurm":
         raise typer.BadParameter("--submit-slurm requires --profile slurm")
+    if contig_name_topology is not None:
+        from sharur.contig_context import parse_name_conventions  # noqa: PLC0415
+
+        try:
+            contig_name_topology = ",".join(parse_name_conventions(contig_name_topology)) or "none"
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc)) from exc
 
     input_dir = input_dir.expanduser().resolve()
     data_dir = data_dir.expanduser().resolve()
@@ -850,6 +869,8 @@ def run(
         ]
         if enable_cazymes:
             builder_command.append("--enable-cazymes")
+        if contig_name_topology is not None:
+            builder_command += ["--contig-name-topology", contig_name_topology]
         builder_node = StageNode(
             stage_id="07",
             label="Build synthetic knowledge base",
@@ -879,6 +900,7 @@ def run(
             reads=reads,
             enable_cazymes=enable_cazymes,
             pipeline_depth=pipeline_depth,
+            contig_name_topology=contig_name_topology,
         )
     else:
         raise typer.BadParameter("mode must be 'tools' or 'fast'")

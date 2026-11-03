@@ -174,3 +174,20 @@ def test_slurm_cpus_flag_reaches_the_plan_and_needs_the_slurm_profile(tmp_path):
     assert result.exit_code != 0
     result = CliRunner().invoke(app, [*base, "--profile", "slurm", "--slurm-cpus", "0"])
     assert result.exit_code != 0
+
+
+def test_contig_name_topology_reaches_stage07(tmp_path):
+    def stage07(**options):
+        plan = ingest.run(input_dir=Path("dummy_dataset"), data_dir=tmp_path / "dataset",
+                          output=tmp_path / "dataset" / "sharur.duckdb", mode="tools", dry_run=True,
+                          **options)
+        return next(command for command in plan or [] if command[0].endswith("07_build_knowledge_base.py"))
+
+    assert "--contig-name-topology" not in stage07()
+    builder = stage07(contig_name_topology="SRVP")
+    assert builder[builder.index("--contig-name-topology") + 1] == "srvp"
+    result = CliRunner().invoke(app, ["--input-dir", "dummy_dataset", "--data-dir", str(tmp_path / "d"),
+                                      "--contig-name-topology", "spades", "--dry-run"],
+                                terminal_width=400)
+    assert result.exit_code == 2
+    assert "Unknown contig-name topology convention" in result.output
