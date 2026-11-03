@@ -264,3 +264,26 @@ def test_rejudge_applies_a_rule_change_like_a_rebuild(tmp_path, monkeypatch):
     fresh = tmp_path / "fresh"
     build(inputs, fresh, kofam_ko_list=kofam, log=lambda *_: None)
     assert (stale / "kegg_predicates.tsv").read_bytes() == (fresh / "kegg_predicates.tsv").read_bytes()
+
+
+def test_rejudge_can_map_again_a_ko_an_earlier_rejudge_unmapped(tmp_path, monkeypatch):
+    inputs, kofam = _synthetic_inputs(tmp_path)
+    out = tmp_path / "kegg"
+    build(inputs, out, kofam_ko_list=kofam, log=lambda *_: None)
+    built = (out / "kegg_predicates.tsv").read_bytes()
+    assert "K90007" in kegg_map._load_kegg_mapping_file(out / "kegg_predicates.tsv")[0]
+    assert "K90006" in (out / "kegg_unmapped_snapshot.tsv").read_text()  # unmapped KOs are kept too
+
+    current = read_patterns()
+    monkeypatch.setattr(kegg_build, "read_patterns",
+                        lambda: [(p, preds) for p, preds in current if p.pattern != r"\bnitrogenase\b"])
+    rejudge(out, log=lambda *_: None)  # a rule edit unmaps K90007
+    assert "K90007" not in kegg_map._load_kegg_mapping_file(out / "kegg_predicates.tsv")[0]
+
+    monkeypatch.setattr(kegg_build, "read_patterns", lambda: current)
+    rejudge(out, log=lambda *_: None)  # the edit is reverted
+    assert (out / "kegg_predicates.tsv").read_bytes() == built
+    fresh = tmp_path / "fresh"
+    build(inputs, fresh, kofam_ko_list=kofam, log=lambda *_: None)
+    for name in ("kegg_predicates.tsv", "kegg_evidence_snapshot.tsv", "kegg_unmapped_snapshot.tsv"):
+        assert (out / name).read_bytes() == (fresh / name).read_bytes(), name

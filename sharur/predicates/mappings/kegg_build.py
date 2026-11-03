@@ -14,6 +14,8 @@ need a KEGG license and can build from their licensed copy with ``--inputs``.
 - ``kegg_predicates.tsv``: KO, predicates, per-predicate evidence;
 - ``kegg_evidence_snapshot.tsv``: KEGG symbols, name, BRITE placements and
   module memberships per mapped KO (for the integrity tests);
+- ``kegg_unmapped_snapshot.tsv``: the same columns for every KO the rules left
+  unmapped, so ``sharur setup-kegg --rejudge`` judges each KO of the release;
 - ``kegg_modules.tsv``: module names, classes and definitions (for
   :mod:`sharur.modules` completeness);
 - ``provenance.json``: KEGG release, retrieval time, input and rule checksums.
@@ -335,18 +337,36 @@ def _header(release: str) -> str:
             "subject to KEGG's terms of use. Do not redistribute.\n")
 
 
+SNAPSHOT_FILE = "kegg_evidence_snapshot.tsv"
+UNMAPPED_SNAPSHOT_FILE = "kegg_unmapped_snapshot.tsv"
+
+
+def _snapshot_row(ko: str, kos, placements, memberships) -> str:
+    symbols, name = kos[ko]
+    brite = "|".join(f"{h}:{PATH_SEP.join(labels)}" for h, labels in placements.get(ko, ()))
+    modules_col = ",".join(m + ("+" if c else "") for m, c in memberships.get(ko, ()))
+    return f"{ko}\t{symbols}\t{name}\t{brite}\t{modules_col}\n"
+
+
 def _write_map(out_dir: Path, header: str, mapped, kos, placements, memberships) -> None:
+    """The map, the snapshot of its KOs, and the snapshot of every KO the rules left unmapped.
+
+    The unmapped snapshot lets a later rejudge map a KO again (a reverted rule, or a
+    rule that adds pairs to a KO) exactly as a full build of the same release would.
+    """
+    columns = "# ko\tsymbols\tname\tbrite\tmodules\n"
     with open(out_dir / "kegg_predicates.tsv", "w") as out, \
-            open(out_dir / "kegg_evidence_snapshot.tsv", "w") as snap:
+            open(out_dir / SNAPSHOT_FILE, "w") as snap:
         out.write(header + "# ko\tpredicates\tevidence\n")
-        snap.write(header + "# ko\tsymbols\tname\tbrite\tmodules\n")
+        snap.write(header + columns)
         for ko, evidence in mapped.items():
-            symbols, name = kos[ko]
             out.write(f"{ko}\t{','.join(sorted(evidence))}\t"
                       f"{';'.join(f'{p}={e}' for p, e in sorted(evidence.items()))}\n")
-            brite = "|".join(f"{h}:{PATH_SEP.join(labels)}" for h, labels in placements.get(ko, ()))
-            modules_col = ",".join(m + ("+" if c else "") for m, c in memberships.get(ko, ()))
-            snap.write(f"{ko}\t{symbols}\t{name}\t{brite}\t{modules_col}\n")
+            snap.write(_snapshot_row(ko, kos, placements, memberships))
+    with open(out_dir / UNMAPPED_SNAPSHOT_FILE, "w") as unmapped:
+        unmapped.write(header + columns)
+        for ko in sorted(set(kos) - set(mapped)):
+            unmapped.write(_snapshot_row(ko, kos, placements, memberships))
 
 
 def _write_report(report: Path | None, dropped) -> None:
@@ -374,18 +394,28 @@ def read_snapshot(path: Path):
 
 
 def rejudge(kegg_dir: Path, report: Path | None = None, log=print) -> dict:
-    """Re-apply the current rules to an existing build, from its evidence snapshot.
+    """Re-apply the current rules to an existing build, from its evidence snapshots.
 
-    The snapshot keeps every mapped KO's KEGG symbols, name, BRITE placements and
-    module memberships, so a rule edit that removes pairs, or adds pairs to KOs the
-    build already maps, is judged exactly as a full build of the same KEGG release
-    would judge it, with no download. KOs the build left unmapped are absent from
-    the snapshot; a rule meant to map a new KO needs ``sharur setup-kegg``.
+    The snapshots keep every KO's KEGG symbols, name, BRITE placements and module
+    memberships (``kegg_evidence_snapshot.tsv`` for mapped KOs,
+    ``kegg_unmapped_snapshot.tsv`` for the rest), so any rule edit is judged exactly
+    as a full build of the same KEGG release would judge it, with no download, and a
+    KO one rejudge unmaps can be mapped again by the next. Builds made before the
+    unmapped snapshot existed hold mapped KOs only: for them, a rule meant to map a
+    KO the build never mapped needs ``sharur setup-kegg``. KOs a rejudge unmaps move
+    to the unmapped snapshot.
     """
-    snapshot = kegg_dir / "kegg_evidence_snapshot.tsv"
+    snapshot = kegg_dir / SNAPSHOT_FILE
     provenance_path = kegg_dir / "provenance.json"
     provenance = json.loads(provenance_path.read_text()) if provenance_path.exists() else {}
     kos, placements, memberships = read_snapshot(snapshot)
+    unmapped_snapshot = kegg_dir / UNMAPPED_SNAPSHOT_FILE
+    if unmapped_snapshot.exists():
+        extra_kos, extra_placements, extra_memberships = read_snapshot(unmapped_snapshot)
+        for ko in extra_kos.keys() - kos.keys():
+            kos[ko] = extra_kos[ko]
+            placements[ko] = extra_placements[ko]
+            memberships[ko] = extra_memberships[ko]
     before = sha256(kegg_dir / "kegg_predicates.tsv")
     mapped, dropped = judge_kos(kos, placements, memberships, brite_rules=load_brite_rules(),
                                 module_rules=load_module_rules(), hyddb=load_hyddb_snapshot(),
