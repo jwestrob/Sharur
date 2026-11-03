@@ -300,8 +300,19 @@ def generate_and_persist_v2(
     # rewritten rows are checkpointed first: concurrent readers then see persistent
     # blocks only (an uncheckpointed block pinned by the reader makes DuckDB's
     # auto-checkpoint fail with "ConvertToPersistent ... multiple readers active").
-    if refresh_nitrogenase_loci(store)["written"]:
+    # A rewrite can change the locus atoms of proteins outside a requested subset
+    # (operon partners of a gene whose KO changed, or every member when the KOfam
+    # thresholds differ); the subset grows to cover them.
+    nitrogenase_refresh = refresh_nitrogenase_loci(store)
+    if nitrogenase_refresh["written"]:
         store.execute("CHECKPOINT")
+        if protein_ids is not None:
+            requested = set(protein_ids)
+            extra = [pid for pid in nitrogenase_refresh.get("changed_proteins", ()) if pid not in requested]
+            if extra:
+                logger.info("Nitrogenase loci changed for %d proteins outside the requested subset; "
+                            "regenerating them too", len(extra))
+                protein_ids = [*protein_ids, *extra]
 
     start_after: str | None = None
     total_processed = 0
@@ -1028,6 +1039,14 @@ def _semantic_generation_fingerprint(
     digest.update(b"kegg_map\0")
     if KEGG_MAPPING_FILE is not None:
         digest.update(KEGG_MAPPING_FILE.read_bytes())
+    # The nitrogenase locus caller checks slot KOs against KOfam's ko_list, found per
+    # machine (sharur.health.kofam_ko_list); its thresholds decide confirmed calls.
+    from sharur.health import kofam_ko_list  # noqa: PLC0415
+
+    digest.update(b"\0kofam_ko_list\0")
+    ko_list = kofam_ko_list()
+    if ko_list is not None:
+        digest.update(hashlib.sha256(ko_list.read_bytes()).digest())
     return digest.hexdigest()
 
 
@@ -1050,6 +1069,12 @@ def _generation_input_signature(store: DuckDBStore) -> str:
         "annotation_count": int(annotations[0]),
         "max_annotation_id": int(annotations[1]),
         "locus_count": int(store.execute("SELECT COUNT(*) FROM loci")[0][0]),
+        # Content, not only the count: a locus whose call or roles change (e.g. under
+        # other KOfam thresholds) keeps the row count but changes its atoms.
+        "locus_digest": int(store.execute(
+            "SELECT COALESCE(bit_xor(hash(locus_id, locus_type, contig_id, start, end_coord, "
+            "CAST(metadata AS VARCHAR))), 0) FROM loci"
+        )[0][0]),
         "system_protein_count": int(
             store.execute("SELECT COUNT(*) FROM system_proteins")[0][0]
         ),

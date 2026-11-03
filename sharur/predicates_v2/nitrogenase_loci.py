@@ -13,19 +13,33 @@ and writes one ``loci`` row per gene set:
 1. Fe protein: a gene whose KO is K02588 (nifH) or K22899 (vnfH).
 2. Catalytic slots: the first two Oxidored_nitro-family genes (Pfam
    Oxidored_nitro, or a KO of that family) on the Fe protein's strand within
-   ``WINDOW`` genes downstream of it.
+   ``WINDOW`` genes downstream of it, before the next Fe-protein KO gene on
+   that strand (a tandem nifH pair calls one gene set, from the nifH nearer the
+   catalytic genes).
 3. Alpha slot KO K02586 (nifD) or K22896 (vnfD); beta slot KO K02591 (nifK) or
    K22897 (vnfK). In the methanogen-type operon (nifH-nifI1-nifI2-nifD-nifK)
    KOfam's best hit for the beta subunit is the NifN group (K02592), so K02592
    fills the beta slot when a nifI1/nifI2 gene (K02589/K02590) lies between the
    Fe protein and the alpha slot.
 4. Each of the three KOs scores at or above its KOfam threshold.
-5. None of the three genes is partial (cut by a contig end).
+5. None of the three genes is partial (cut by a contig end). A gene without a
+   Prodigal partial flag counts as partial when it is the first or last gene of
+   a linear contig, since only those genes can run off a contig end.
 
 Every other Fe-protein KO gene, and every alpha/beta KO gene outside a called
 gene set, becomes a ``locus_type = 'nitrogenase_candidate'`` row whose ``call``
 states what was observed (see ``CALLS``). A gene set cut by a contig end gets
-``contig_edge`` and never ``confirmed``.
+``contig_edge`` and never ``confirmed``. Each gene takes one structural role
+(fe_protein, alpha, beta, anchor or partner) in at most one gene set.
+
+Strands are read in any encoding Sharur datasets carry (``+``/``-``,
+``1``/``-1``). On a circular contig a gene set may cross the origin: its
+members are listed in contig order across the origin (..., n-1, 0, 1, ...), its
+``locus_id`` names the first and last member index in that order (so the first
+index is the larger one), and its ``start``/``end_coord`` cover the members on
+the Fe protein's side of the origin (for an unanchored set, its 5'-most gene),
+because every ``loci`` reader expects ``start <= end_coord``. Such rows carry
+``wraps_origin: true`` and both arcs as ``segments`` in their metadata.
 
 The window: in the SR-VP archaeal and bacterial snapshots every KO-assigned
 alpha and beta partner of a nifH lies 1-5 genes downstream on its strand (alpha
@@ -44,7 +58,7 @@ from __future__ import annotations
 import json
 import logging
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 from sharur.predicates.pfam_identity import normalize_pfam_accession
@@ -93,6 +107,22 @@ CATALYTIC_PFAM = frozenset({"PF00148", "Oxidored_nitro"})
 NIFX_PFAM = frozenset({"PF02579", "Nitro_FeMo-Co"})
 CONTEXT_PFAMS = CATALYTIC_PFAM | NIFX_PFAM
 
+_STRAND_ALIASES = {"+": "+", "+1": "+", "1": "+", "forward": "+", "f": "+",
+                   "-": "-", "-1": "-", "reverse": "-", "r": "-"}
+
+
+def normalize_strand(value: Any) -> str:
+    """``+`` or ``-`` for every strand encoding Sharur datasets carry; ``?`` for anything else.
+
+    Accepts the values :func:`sharur.operators.cases._normalize_strand` accepts. That
+    helper cannot be imported here: ``sharur.operators`` imports the V2 persistence
+    layer, which imports this module. A ``?`` gene matches only other ``?`` genes.
+    """
+    if value is None:
+        return "?"
+    return _STRAND_ALIASES.get(str(value).strip().lower(), "?")
+
+
 STRUCTURAL_ROLES = frozenset({"fe_protein", "alpha", "beta", "delta"})
 EDGE_FLAG_ROLES = frozenset({"anchor", "partner"})
 KOFAM_NO_THRESHOLD_EVALUE = 1e-15  # KOfam's cascade for KOs without a score threshold
@@ -128,6 +158,7 @@ class Gene:
     ko: str | None = None
     ko_passes: bool = False
     pfams: frozenset[str] = frozenset()
+    partial_inferred: bool = False  # no Prodigal flag: ``partial`` comes from the gene's contig position
 
     @property
     def catalytic_family(self) -> bool:
@@ -143,7 +174,11 @@ class Contig:
 
 @dataclass
 class Locus:
-    """One called gene set, ready for ``loci`` / ``locus_proteins``."""
+    """One called gene set, ready for ``loci`` / ``locus_proteins``.
+
+    ``members`` run in contig order; on a circular contig that order crosses the
+    origin when the gene set does (``wraps_origin``).
+    """
 
     contig_id: str
     call: str
@@ -156,25 +191,58 @@ class Locus:
         return CONFIRMED_TYPE if self.call == "confirmed" else CANDIDATE_TYPE
 
     @property
-    def locus_id(self) -> str:
+    def wraps_origin(self) -> bool:
         indexes = [gene.gene_index for gene, _ in self.members]
-        return f"{self.locus_type}:{self.contig_id}:{min(indexes)}-{max(indexes)}"
+        return any(b < a for a, b in zip(indexes, indexes[1:]))
+
+    @property
+    def locus_id(self) -> str:
+        first, last = self.members[0][0].gene_index, self.members[-1][0].gene_index
+        return f"{self.locus_type}:{self.contig_id}:{first}-{last}"
+
+    def segments(self) -> list[tuple[int, int]]:
+        """(start, end) of each stretch of members between contig ends, in member order."""
+        runs: list[list[Gene]] = [[]]
+        for gene, _ in self.members:
+            if runs[-1] and gene.gene_index < runs[-1][-1].gene_index:
+                runs.append([])
+            runs[-1].append(gene)
+        return [(min(g.start for g in run), max(g.end for g in run)) for run in runs]
+
+    def span(self) -> tuple[int, int]:
+        """``start``/``end_coord`` for the loci row (always start <= end).
+
+        A gene set that crosses a circular contig's origin is stored as the stretch
+        holding its 5'-most member (the Fe protein of an anchored set).
+        """
+        segments = self.segments()
+        if len(segments) == 1:
+            return segments[0]
+        head = self.members[-1][0] if self.strand == "-" else self.members[0][0]
+        return next(seg for seg in segments if seg[0] <= head.start and head.end <= seg[1])
 
     def metadata(self) -> dict[str, Any]:
-        return {
+        members = []
+        for gene, role in self.members:
+            member = {"protein_id": gene.protein_id, "role": role, "ko": gene.ko,
+                      "ko_passes": gene.ko_passes, "length": gene.length, "partial": gene.partial}
+            if gene.partial_inferred and gene.partial:
+                member["partial_inferred"] = True  # no Prodigal flag; first or last gene of a linear contig
+            members.append(member)
+        metadata = {
             "caller": CALLER,
             "caller_version": CALLER_VERSION,
             "call": self.call,
             "call_reason": CALLS[self.call],
             "window": WINDOW,
             "strand": self.strand,
-            "members": [
-                {"protein_id": gene.protein_id, "role": role, "ko": gene.ko,
-                 "ko_passes": gene.ko_passes, "length": gene.length, "partial": gene.partial}
-                for gene, role in self.members
-            ],
+            "members": members,
             **self.evidence,
         }
+        if self.wraps_origin:
+            metadata["wraps_origin"] = True
+            metadata["segments"] = [list(seg) for seg in self.segments()]
+        return metadata
 
 
 # --------------------------------------------------------------------------- #
@@ -198,17 +266,40 @@ class _ContigGenes:
             return None, True
         return self.by_index.get(index), False
 
-    def walk(self, origin: Gene, step: int, count: int) -> tuple[list[Gene], bool]:
-        """Up to ``count`` genes from ``origin`` in direction ``step``; True if a contig end cuts the walk."""
+    def walk(self, origin: Gene, step: int, count: int, stop=None) -> tuple[list[Gene], bool]:
+        """Up to ``count`` genes from ``origin`` in direction ``step``; True if a contig end cuts the walk.
+
+        The walk ends before the first gene for which ``stop(gene)`` holds. On a
+        circular contig it visits each other gene at most once.
+        """
+        if self.contig.circular:
+            count = min(count, max(self.contig.n_genes - 1, 0))
         genes, cut = [], False
         for offset in range(1, count + 1):
             gene, past_end = self.at(origin.gene_index + step * offset)
             if past_end:
                 cut = True
                 break
-            if gene is not None and gene.protein_id != origin.protein_id:
-                genes.append(gene)
+            if gene is None or gene.protein_id == origin.protein_id:
+                continue
+            if stop is not None and stop(gene):
+                break
+            genes.append(gene)
         return genes, cut
+
+    def stretch(self, first: int, last: int) -> list[Gene]:
+        """Genes from index ``first`` to ``last`` in contig order, across the origin of a circular contig."""
+        n = self.contig.n_genes
+        if self.contig.circular and n > 0:
+            indexes = [(first + k) % n for k in range((last - first) % n + 1)]
+        else:
+            indexes = list(range(first, last + 1))
+        return [self.by_index[i] for i in indexes if i in self.by_index]
+
+    def distance(self, lower: Gene, upper: Gene) -> int:
+        """Genes from ``lower`` forward to ``upper`` (across the origin of a circular contig)."""
+        gap = upper.gene_index - lower.gene_index
+        return gap % self.contig.n_genes if self.contig.circular and self.contig.n_genes > 0 else gap
 
 
 def _direction(gene: Gene) -> int:
@@ -217,7 +308,9 @@ def _direction(gene: Gene) -> int:
 
 def _call_anchor(contig: _ContigGenes, anchor: Gene) -> Locus:
     step = _direction(anchor)
-    downstream, cut = contig.walk(anchor, step, WINDOW)
+    # The next Fe-protein gene on this strand starts its own gene set.
+    downstream, cut = contig.walk(anchor, step, WINDOW,
+                                  stop=lambda gene: gene.strand == anchor.strand and gene.ko in FE_PROTEIN_KOS)
     same_strand = [gene for gene in downstream if gene.strand == anchor.strand]
     partners = [gene for gene in same_strand if gene.catalytic_family]
     alpha = partners[0] if partners else None
@@ -263,10 +356,8 @@ def _call_anchor(contig: _ContigGenes, anchor: Gene) -> Locus:
     else:
         call = "no_partner"
 
-    last = beta or alpha
-    span = [anchor]
-    if last is not None:
-        span += downstream[: downstream.index(last) + 1]
+    tail = beta or alpha or anchor
+    first, last = (anchor, tail) if step == 1 else (tail, anchor)
     confirmed = call == "confirmed"
     roles = {anchor.protein_id: "fe_protein" if confirmed else "anchor"}
     if alpha is not None:
@@ -274,12 +365,11 @@ def _call_anchor(contig: _ContigGenes, anchor: Gene) -> Locus:
     if beta is not None:
         roles[beta.protein_id] = "beta" if confirmed else "partner"
     members = []
-    for gene in span:
+    for gene in contig.stretch(first.gene_index, last.gene_index):
         role = roles.get(gene.protein_id)
         if role is None:
             role = "nifI" if gene.ko in NIFI_KOS else "delta" if confirmed and gene.ko in DELTA_KOS else "other"
         members.append((gene, role))
-    members.sort(key=lambda item: item[0].gene_index)
     evidence = {
         "partner_lengths": [gene.length for gene in partners[:2]],
         "partner_kos": [gene.ko for gene in partners[:2]],
@@ -294,45 +384,70 @@ def _call_anchor(contig: _ContigGenes, anchor: Gene) -> Locus:
     return Locus(anchor.contig_id, call, anchor.strand, members, evidence)
 
 
-def _call_unanchored(contig: _ContigGenes, genes: list[Gene]) -> Locus:
+def _call_unanchored(contig: _ContigGenes, genes: list[Gene], claimed: set[str] = frozenset()) -> Locus:
     """Alpha/beta KO genes that no Fe-protein gene claimed: one gene set per strand run.
 
-    A run holding a single alpha/beta gene takes the next Oxidored_nitro-family gene
+    ``genes`` are in contig order (across the origin of a circular contig). A run
+    holding a single alpha/beta gene takes the next Oxidored_nitro-family gene
     downstream on its strand as its partner (in methanogen-type operons the beta
-    subunit carries the NifN-group KO, which seeds nothing on its own).
+    subunit carries the NifN-group KO, which seeds nothing on its own), unless a
+    called gene set already holds that gene (``claimed``).
     """
     step = _direction(genes[0])
-    first, last = (genes[0], genes[-1]) if step == 1 else (genes[-1], genes[0])
+    head, tail = (genes[0], genes[-1]) if step == 1 else (genes[-1], genes[0])  # 5'-most, 3'-most
     run = list(genes)
     if len(run) == 1:
-        downstream, _ = contig.walk(last, step, WINDOW)
-        partner = next((gene for gene in downstream if gene.strand == last.strand and gene.catalytic_family), None)
-        if partner is not None:
+        downstream, _ = contig.walk(tail, step, WINDOW)
+        partner = next((gene for gene in downstream if gene.strand == tail.strand and gene.catalytic_family), None)
+        if partner is not None and partner.protein_id not in claimed:
             run.append(partner)
-    upstream, cut = contig.walk(first, -step, WINDOW)
+            tail = partner
+    upstream, cut = contig.walk(head, -step, WINDOW)
     call = "contig_edge" if cut or any(gene.partial for gene in run) else "no_fe_protein"
-    lo = min(gene.gene_index for gene in run)
-    hi = max(gene.gene_index for gene in run)
+    first, last = (head, tail) if step == 1 else (tail, head)
     partners = {gene.protein_id for gene in run}
     members = []
-    for index in range(lo, hi + 1):
-        gene, _ = contig.at(index)
-        if gene is None:
-            continue
+    for gene in contig.stretch(first.gene_index, last.gene_index):
         role = "partner" if gene.protein_id in partners else "nifI" if gene.ko in NIFI_KOS else "other"
         members.append((gene, role))
     evidence = {
         "fe_protein_upstream": any(gene.ko in FE_PROTEIN_KOS for gene in upstream),
         "window_cut_by_contig_end": cut,
     }
-    return Locus(first.contig_id, call, first.strand, members, evidence)
+    return Locus(head.contig_id, call, head.strand, members, evidence)
+
+
+def _strand_runs(contig: _ContigGenes, genes: list[Gene]) -> list[list[Gene]]:
+    """Group genes (in contig order) into runs: same strand, each within ``WINDOW`` genes of the previous.
+
+    Genes on the other strand do not break a run. On a circular contig a run that
+    ends near the last gene joins a same-strand run that starts near gene 0.
+    """
+    runs: list[list[Gene]] = []
+    open_runs: dict[str, list[Gene]] = {}
+    for gene in genes:
+        run = open_runs.get(gene.strand)
+        if run is not None and contig.distance(run[-1], gene) <= WINDOW:
+            run.append(gene)
+        else:
+            run = [gene]
+            runs.append(run)
+            open_runs[gene.strand] = run
+    if contig.contig.circular:
+        for strand in {run[0].strand for run in runs}:
+            same = [run for run in runs if run[0].strand == strand]
+            if len(same) > 1 and contig.distance(same[-1][-1], same[0][0]) <= WINDOW:
+                same[-1].extend(same[0])
+                runs = [run for run in runs if run is not same[0]]
+    return runs
 
 
 def call_loci(contigs: Mapping[str, Contig], genes: Iterable[Gene]) -> list[Locus]:
     """Call every Fe-protein KO gene and every unclaimed alpha/beta KO gene."""
     by_contig: dict[str, list[Gene]] = defaultdict(list)
     for gene in genes:
-        by_contig[gene.contig_id].append(gene)
+        strand = normalize_strand(gene.strand)
+        by_contig[gene.contig_id].append(gene if strand == gene.strand else replace(gene, strand=strand))
 
     loci: list[Locus] = []
     for contig_id in sorted(by_contig):
@@ -346,18 +461,11 @@ def call_loci(contigs: Mapping[str, Contig], genes: Iterable[Gene]) -> list[Locu
             loci.append(locus)
             claimed.update(gene.protein_id for gene, role in locus.members if role in ("alpha", "beta", "partner"))
 
-        runs: list[list[Gene]] = []
-        for gene in contig_genes:
-            if (gene.ko not in ALPHA_KOS and gene.ko not in BETA_KOS) or gene.protein_id in claimed:
-                continue
-            last = runs[-1][-1] if runs else None
-            if last is not None and last.strand == gene.strand and gene.gene_index - last.gene_index <= WINDOW:
-                runs[-1].append(gene)
-            else:
-                runs.append([gene])
-        loci.extend(_call_unanchored(contig, run) for run in runs)
+        seeds = [gene for gene in contig_genes
+                 if (gene.ko in ALPHA_KOS or gene.ko in BETA_KOS) and gene.protein_id not in claimed]
+        loci.extend(_call_unanchored(contig, run, claimed) for run in _strand_runs(contig, seeds))
 
-    # One gene set per id: two Fe-protein genes can share a span only when one holds no partner.
+    # One gene set per id (a safeguard: anchored gene sets end before the next same-strand Fe protein).
     unique: dict[str, Locus] = {}
     for locus in loci:
         unique.setdefault(locus.locus_id, locus)
@@ -477,26 +585,51 @@ def fetch_genes(conn) -> tuple[dict[str, Contig], list[Gene], bool]:
     genes = []
     for protein_id, contig_id, gene_index, strand, start, end, length, partial in proteins:
         passes, _, ko = best_ko.get(protein_id, (False, 0.0, None))
+        index = int(gene_index)
+        if partial is None or str(partial).strip() == "":
+            # No Prodigal flag: only the first or last gene of a linear contig can run off its end.
+            contig = contigs[contig_id]
+            is_partial = not contig.circular and index in (0, contig.n_genes - 1)
+            inferred = True
+        else:
+            is_partial = bool(partial) and str(partial).strip("0") != ""
+            inferred = False
         genes.append(Gene(
-            protein_id=protein_id, contig_id=contig_id, gene_index=int(gene_index),
-            strand=strand or "+", start=int(start), end=int(end),
+            protein_id=protein_id, contig_id=contig_id, gene_index=index,
+            strand=normalize_strand(strand), start=int(start), end=int(end),
             length=int(length) if length is not None else None,
-            partial=bool(partial) and str(partial).strip("0") != "",
+            partial=is_partial, partial_inferred=inferred,
             ko=ko, ko_passes=passes, pfams=frozenset(pfams.get(protein_id, ())),
         ))
     return contigs, genes, thresholds is not None
 
 
+def _member_states(rows: Iterable[tuple[str, str, Any]]) -> dict[str, set[tuple[str, str, str, str]]]:
+    """protein_id -> {(locus_id, locus_type, call, role)}: everything :func:`locus_atoms` reads."""
+    states: dict[str, set[tuple[str, str, str, str]]] = defaultdict(set)
+    for locus_id, locus_type, metadata in rows:
+        if isinstance(metadata, str):
+            metadata = json.loads(metadata)
+        metadata = metadata or {}
+        for member in metadata.get("members", ()):
+            states[member.get("protein_id")].add((locus_id, locus_type, metadata.get("call"), member.get("role")))
+    return states
+
+
 def write_loci(conn, loci: list[Locus], *, thresholds_checked: bool = True) -> dict[str, Any]:
-    """Replace every nitrogenase locus row; return counts by locus type and call."""
+    """Replace every nitrogenase locus row; return counts by locus type and call.
+
+    ``summary["changed_proteins"]`` lists the proteins whose locus atoms change with
+    the rewrite (a locus, call or role gained or lost); a subset generation must
+    regenerate them along with the proteins it was asked for.
+    """
     loci_rows, member_rows = [], []
     for locus in sorted(loci, key=lambda item: item.locus_id):
-        genes = [gene for gene, _ in locus.members]
         metadata = locus.metadata()
         metadata["kofam_thresholds_checked"] = thresholds_checked
+        start, end = locus.span()
         loci_rows.append((
-            locus.locus_id, locus.locus_type, locus.contig_id,
-            min(gene.start for gene in genes), max(gene.end for gene in genes),
+            locus.locus_id, locus.locus_type, locus.contig_id, start, end,
             1.0 if locus.call == "confirmed" else None, json.dumps(metadata, sort_keys=True),
         ))
         member_rows.extend((locus.locus_id, gene.protein_id, position)
@@ -507,7 +640,7 @@ def write_loci(conn, loci: list[Locus], *, thresholds_checked: bool = True) -> d
     for locus in loci:
         by_call[locus.call] += 1
     summary = {"loci": len(loci_rows), "members": len(member_rows), "by_call": dict(sorted(by_call.items())),
-               "kofam_thresholds_checked": thresholds_checked, "written": False}
+               "kofam_thresholds_checked": thresholds_checked, "written": False, "changed_proteins": []}
     stored_loci = conn.execute(
         f"""SELECT locus_id, locus_type, contig_id, start, end_coord, confidence, CAST(metadata AS VARCHAR)
             FROM loci WHERE locus_type IN ({types}) ORDER BY locus_id"""
@@ -518,6 +651,11 @@ def write_loci(conn, loci: list[Locus], *, thresholds_checked: bool = True) -> d
     ).fetchall()
     if stored_loci == loci_rows and sorted(stored_members) == sorted(member_rows):
         return summary  # unchanged calls leave the tables (and their storage blocks) untouched
+
+    before = _member_states((row[0], row[1], row[6]) for row in stored_loci)
+    after = _member_states((row[0], row[1], row[6]) for row in loci_rows)
+    summary["changed_proteins"] = sorted(
+        pid for pid in before.keys() | after.keys() if pid is not None and before.get(pid) != after.get(pid))
 
     # DuckDB checks a foreign key against the committed child table, so member rows
     # are deleted and committed before their parent loci (as in sharur.bgc).
@@ -545,12 +683,14 @@ def refresh_nitrogenase_loci(store) -> dict[str, Any]:
     """Call nitrogenase gene sets from the database's annotations and replace their loci rows.
 
     The rows are rewritten only when the calls change; ``summary["written"]`` says
-    whether they were.
+    whether they were, and ``summary["changed_proteins"]`` which proteins' locus
+    atoms the rewrite changed.
     """
     conn = store.conn
     tables = {row[0] for row in conn.execute("SHOW TABLES").fetchall()}
     if not {"proteins", "annotations", "loci", "locus_proteins"} <= tables:
-        return {"loci": 0, "members": 0, "by_call": {}, "kofam_thresholds_checked": False, "written": False}
+        return {"loci": 0, "members": 0, "by_call": {}, "kofam_thresholds_checked": False, "written": False,
+                "changed_proteins": []}
     contigs, genes, checked = fetch_genes(conn)
     if not checked:
         logger.warning("KOfam ko_list not found: nitrogenase slot KOs are taken as called, unthresholded")
@@ -599,6 +739,7 @@ __all__ = [
     "call_loci",
     "fetch_genes",
     "locus_atoms",
+    "normalize_strand",
     "refresh_nitrogenase_loci",
     "write_loci",
 ]

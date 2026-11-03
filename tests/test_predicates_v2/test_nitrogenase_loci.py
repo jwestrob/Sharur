@@ -386,3 +386,210 @@ def test_unchanged_calls_leave_the_loci_tables_untouched(tmp_path, monkeypatch):
     again = refresh_nitrogenase_loci(store)
     assert again["written"] is False
     assert again["by_call"] == first["by_call"]
+
+
+# --------------------------------------------------------------------------- #
+# Regressions: strand encodings, missing partial flags, overlapping and
+# origin-crossing gene sets, scoped regeneration
+# --------------------------------------------------------------------------- #
+
+
+def _recode(genes, encoding, only=None):
+    """Re-encode gene strands ('+'/'-' -> e.g. '1'/'-1'); ``only`` limits it to those protein IDs."""
+    from dataclasses import replace
+
+    return [replace(gene, strand=encoding[gene.strand]) if only is None or gene.protein_id in only else gene
+            for gene in genes]
+
+
+def _summary(loci):
+    return sorted((locus.locus_id, locus.call, tuple(_roles(locus).items())) for locus in loci)
+
+
+@pytest.mark.parametrize("strand", ["+", "-"])
+def test_numeric_and_mixed_strand_encodings_call_like_symbols(strand):
+    contigs, genes = _contig([".", "H", "D", "K", *PAD], strand=strand)
+    expected = _summary(call_loci(contigs, genes))
+    assert [call for _, call, _ in expected] == ["confirmed"]
+    numeric = {"+": "1", "-": "-1"}
+    assert _summary(call_loci(contigs, _recode(genes, numeric))) == expected
+    # Mixed: the Fe protein keeps the symbol, its partners carry the number.
+    mixed = _recode(genes, numeric, only={"c1_2", "c1_3"} if strand == "+" else {"c1_9", "c1_8"})
+    assert _summary(call_loci(contigs, mixed)) == expected
+
+
+def _store_with(rows, *, contig_length=20000, circular=False):
+    """A database holding one contig; rows: (index, strand, partial, ko, pfam)."""
+    store = DuckDBStore()
+    conn = store.conn
+    conn.execute("INSERT INTO bins (bin_id, completeness, contamination, taxonomy) VALUES ('b', 90, 1, 'x')")
+    conn.execute("INSERT INTO contigs (contig_id, bin_id, length, gc_content, is_circular) VALUES ('c', 'b', ?, 0.5, ?)",
+                 [contig_length, circular])
+    annotation_id = 0
+    for index, strand, partial, ko, pfam in rows:
+        pid = f"p{index}"
+        conn.execute("""INSERT INTO proteins (protein_id, contig_id, bin_id, start, end_coord, strand, gene_index,
+                                              sequence_length, gc_content, partial)
+                        VALUES (?, 'c', 'b', ?, ?, ?, ?, 500, 0.5, ?)""",
+                     [pid, index * 1000 + 1, index * 1000 + 900, strand, index, partial])
+        for source, accession, score in (("kegg", ko, 900.0), ("pfam", pfam, 200.0)):
+            if accession:
+                annotation_id += 1
+                conn.execute("""INSERT INTO annotations (annotation_id, protein_id, source, accession, name,
+                                                         description, evalue, score)
+                                VALUES (?, ?, ?, ?, ?, '', 1e-100, ?)""",
+                             [annotation_id, pid, source, accession, accession, score])
+    return store
+
+
+def _stored_calls(store):
+    return sorted((row[0], json.loads(row[1])["call"]) for row in store.conn.execute(
+        "SELECT locus_id, metadata FROM loci WHERE locus_type LIKE 'nitrogenase%'").fetchall())
+
+
+def test_numeric_strands_from_the_database(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHARUR_KOFAM_KO_LIST", str(tmp_path / "absent"))
+    # Minus-strand nifK-nifD-nifH at genes 3-5 of a 10-gene contig, stored as '-1'; the rest '1'.
+    rows = [(i, "1", "00", None, None) for i in range(10)]
+    rows[5] = (5, "-1", "00", "K02588", None)
+    rows[4] = (4, "-1", "00", "K02586", "PF00148")
+    rows[3] = (3, "-1", "00", "K02591", "PF00148")
+    store = _store_with(rows)
+    refresh_nitrogenase_loci(store)
+    assert _stored_calls(store) == [("nitrogenase:c:3-5", "confirmed")]
+    metadata = json.loads(store.conn.execute("SELECT metadata FROM loci").fetchone()[0])
+    assert metadata["strand"] == "-"
+
+
+def _edge_rows(partial):
+    # Minus-strand nifK-nifD-nifH at genes 0-2: nifK is the first gene of the contig.
+    rows = [(i, "+", partial, None, None) for i in range(10)]
+    rows[2] = (2, "-", partial, "K02588", None)
+    rows[1] = (1, "-", partial, "K02586", "PF00148")
+    rows[0] = (0, "-", partial, "K02591", "PF00148")
+    return rows
+
+
+def test_genes_without_partial_flags_at_a_linear_contig_end_count_as_partial(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHARUR_KOFAM_KO_LIST", str(tmp_path / "absent"))
+    flagged = _store_with(_edge_rows("10"))
+    refresh_nitrogenase_loci(flagged)
+    assert _stored_calls(flagged) == [("nitrogenase_candidate:c:0-2", "contig_edge")]
+
+    unflagged = _store_with(_edge_rows(None))  # no Prodigal flags: nifK sits at the contig start
+    refresh_nitrogenase_loci(unflagged)
+    assert _stored_calls(unflagged) == [("nitrogenase_candidate:c:0-2", "contig_edge")]
+    members = json.loads(unflagged.conn.execute("SELECT metadata FROM loci").fetchone()[0])["members"]
+    assert [m.get("partial_inferred", False) for m in members] == [True, False, False]
+
+    # Unflagged genes away from the contig ends, or on a circular contig, stay complete.
+    interior = _edge_rows(None)
+    interior = [(index + 3, strand, partial, ko, pfam) for index, strand, partial, ko, pfam in interior]
+    interior = [(i, "+", None, None, None) for i in range(3)] + interior
+    store = _store_with(interior)
+    refresh_nitrogenase_loci(store)
+    assert _stored_calls(store) == [("nitrogenase:c:3-5", "confirmed")]
+    circular = _store_with(_edge_rows(None), circular=True)
+    refresh_nitrogenase_loci(circular)
+    assert _stored_calls(circular) == [("nitrogenase:c:0-2", "confirmed")]
+
+
+def _structural_roles(loci):
+    seen: dict[str, list[str]] = {}
+    for locus in loci:
+        for gene, role in locus.members:
+            if role in ("fe_protein", "alpha", "beta", "anchor", "partner"):
+                seen.setdefault(gene.protein_id, []).append(locus.locus_id)
+    return seen
+
+
+def test_tandem_fe_proteins_call_one_gene_set():
+    loci = _call([".", "H", "H", "D", "K", *PAD])
+    assert _summary(loci) == [
+        ("nitrogenase:c1:2-4", "confirmed", (("c1_2", "fe_protein"), ("c1_3", "alpha"), ("c1_4", "beta"))),
+        ("nitrogenase_candidate:c1:1-1", "no_partner", (("c1_1", "anchor"),)),
+    ]
+    assert all(len(ids) == 1 for ids in _structural_roles(loci).values())
+
+
+def test_an_orphan_alpha_takes_no_partner_from_a_called_gene_set():
+    # nifD at the contig start, then a complete nifH-nifD-nifK: the confirmed nifD stays out of
+    # the orphan's contig-edge set and carries no edge flag.
+    loci = _call(["D", "H", "D", "K", *PAD])
+    assert _summary(loci) == [
+        ("nitrogenase:c1:1-3", "confirmed", (("c1_1", "fe_protein"), ("c1_2", "alpha"), ("c1_3", "beta"))),
+        ("nitrogenase_candidate:c1:0-0", "contig_edge", (("c1_0", "partner"),)),
+    ]
+    atoms = {}
+    for locus in loci:
+        metadata = json.dumps(locus.metadata())
+        for gene, _ in locus.members:
+            atoms.setdefault(gene.protein_id, set()).update(
+                atom.atom_id for atom in locus_atoms(gene.protein_id, locus.locus_id, locus.locus_type, metadata))
+    assert atoms["c1_2"] == {SYSTEM_ATOM}
+    assert atoms["c1_0"] == {EDGE_ATOM}
+
+
+def test_alpha_beta_genes_across_the_other_strand_form_one_run():
+    # nifD and nifK on the plus strand with an opposite-strand nifD between them: one gene set each strand.
+    loci = _call([*PAD, "D", "-D", "K", *PAD])
+    assert all(len(ids) == 1 for ids in _structural_roles(loci).values())
+    assert sorted(len(locus.members) for locus in loci) == [1, 3]
+
+
+def test_gene_sets_across_a_circular_origin_stay_local():
+    contigs, genes = _contig(["K", *PAD, "H", "D"], circular=True)  # nifH 9, nifD 10, nifK 0 on 11 genes
+    locus = _only(call_loci(contigs, genes))
+    assert locus.call == "confirmed"
+    assert locus.locus_id == "nitrogenase:c1:9-0"
+    assert [gene.gene_index for gene, _ in locus.members] == [9, 10, 0]
+    by_index = {gene.gene_index: gene for gene in genes}
+    # Stored span: the Fe protein's side of the origin, never the whole contig.
+    assert locus.span() == (by_index[9].start, by_index[10].end)
+    metadata = locus.metadata()
+    assert metadata["wraps_origin"] is True
+    assert metadata["segments"] == [[by_index[9].start, by_index[10].end], [by_index[0].start, by_index[0].end]]
+
+    # Unanchored nifD/nifK across the origin of a 1,000-gene contig, with an unrelated nifD mid-contig.
+    n = 1000
+    genes = [_gene("c2", i, ".", "+") for i in [*range(990, 999), *range(1, 12), *range(495, 506)]]
+    genes += [_gene("c2", 999, "D", "+"), _gene("c2", 0, "K", "+"), _gene("c2", 500, "D", "+")]
+    genes = [gene for gene in genes if not (gene.gene_index == 500 and gene.ko is None)]
+    loci = call_loci({"c2": Contig("c2", n, True)}, genes)
+    assert sorted((locus.locus_id, len(locus.members)) for locus in loci) == [
+        ("nitrogenase_candidate:c2:500-500", 1), ("nitrogenase_candidate:c2:999-0", 2)]
+    assert all(len(ids) == 1 for ids in _structural_roles(loci).values())
+    for locus in loci:
+        start, end = locus.span()
+        assert start <= end and end - start < 10_000
+
+
+def test_a_short_circular_contig_is_walked_once():
+    # One KO-less Oxidored_nitro partner on a 3-gene circular contig is one partner, not two.
+    assert _only(_call(["H", "o300", "."], circular=True)).call == "single_partner"
+
+
+def test_subset_generation_regenerates_partners_whose_locus_changed(tmp_path, monkeypatch):
+    clear_composites_cache()
+    store = _seed_store(tmp_path, monkeypatch)
+    generate_and_persist_v2(store, chunk_size=7, return_states=False)
+    assert {"bact_nif_1", "bact_nif_2", "bact_nif_3"} <= _composite_hits(store)
+
+    # A KOfam reload drops the nifK call; the scoped refresh names only that protein.
+    store.conn.execute("DELETE FROM annotations WHERE protein_id = 'bact_nif_3' AND source = 'kegg'")
+    states = generate_and_persist_v2(store, protein_ids=["bact_nif_3"], return_states=True)
+    assert {"bact_nif_1", "bact_nif_2"} <= set(states)  # its operon partners were regenerated too
+    assert not {"bact_nif_1", "bact_nif_2", "bact_nif_3"} & _composite_hits(store)
+    assert {"arch_nif_1", "arch_nif_4", "arch_nif_5"} <= _composite_hits(store)  # untouched gene set
+
+
+def test_write_loci_reports_proteins_whose_locus_atoms_change(tmp_path, monkeypatch):
+    store = _seed_store(tmp_path, monkeypatch)
+    first = refresh_nitrogenase_loci(store)
+    assert "bact_nif_2" in first["changed_proteins"]
+    store.conn.execute("DELETE FROM annotations WHERE protein_id = 'bact_nif_3' AND source = 'kegg'")
+    second = refresh_nitrogenase_loci(store)
+    assert second["written"] is True
+    assert {"bact_nif_1", "bact_nif_2", "bact_nif_3"} <= set(second["changed_proteins"])
+    assert not any(pid.startswith("arch_nif") for pid in second["changed_proteins"])
+    assert refresh_nitrogenase_loci(store)["changed_proteins"] == []

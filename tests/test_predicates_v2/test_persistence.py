@@ -994,3 +994,27 @@ def test_batch_insert_types_sparse_list_columns_from_every_row():
     assert store.conn.execute(
         "SELECT COUNT(*), COUNT(*) FILTER (WHERE len(flags) > 0) FROM sparse_lists"
     ).fetchone() == (25_000, 3)
+
+
+def test_input_signature_tracks_locus_content_not_only_the_count():
+    """Resume must refuse when a locus changed its call or roles (same row count)."""
+    store = _seed_store()
+    store.conn.execute(
+        "INSERT INTO loci (locus_id, locus_type, contig_id, start, end_coord, confidence, metadata) "
+        "VALUES ('nitrogenase:contig1:0-2', 'nitrogenase', 'contig1', 1, 900, 1.0, '{\"call\": \"confirmed\"}')")
+    before = persistence._generation_input_signature(store)
+    store.conn.execute("UPDATE loci SET locus_type = 'nitrogenase_candidate', confidence = NULL, "
+                       "metadata = '{\"call\": \"ko_below_threshold\"}'")
+    assert persistence._generation_input_signature(store) != before
+
+
+def test_semantic_fingerprint_records_the_kofam_ko_list(tmp_path, monkeypatch):
+    """The nitrogenase caller's KOfam thresholds come from a per-machine ko_list."""
+    fingerprint = lambda: persistence._semantic_generation_fingerprint(  # noqa: E731
+        predict_topology=False, update_legacy_predicates=False)
+    ko_list = tmp_path / "ko_list"
+    ko_list.write_text("knum\tthreshold\nK02588\t362.67\n")
+    monkeypatch.setenv("SHARUR_KOFAM_KO_LIST", str(ko_list))
+    first = fingerprint()
+    ko_list.write_text("knum\tthreshold\nK02588\t999.00\n")
+    assert fingerprint() != first
