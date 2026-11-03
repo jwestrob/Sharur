@@ -1,0 +1,268 @@
+--- a/elsa/results.py
++++ b/elsa/results.py
+@@ -27,7 +27,28 @@
+ RESULT_SCHEMA_VERSION = 1
+ MAPPING_VERSION = "coordinate-sorted-position-index-v1"
+ 
++# Order-free digest of the (protein_id, sequence) pairs in a Sharur core database's
++# ``proteins`` table. Sharur compares the recorded value with its live table, which
++# exposes re-called or corrected translations under an unchanged gene layout. Keep
++# the SQL byte-identical to ``sharur.synteny.PROTEIN_SEQUENCE_DIGEST_SQL`` and the
++# algorithm name in step with any change; both sides pin the same golden value.
++PROTEIN_SEQUENCE_DIGEST_ALGORITHM = "protein-sequence-md5-sum-v1"
++PROTEIN_SEQUENCE_DIGEST_SQL = """
++WITH element AS (
++    SELECT md5(COALESCE(md5(sequence), repeat('-', 32)) || protein_id) AS h
++    FROM proteins
++)
++SELECT
++    COUNT(*) AS protein_count,
++    md5(
++        CAST(COUNT(*) AS VARCHAR) || ':'
++        || CAST(COALESCE(SUM(('0x' || substr(h, 1, 16))::UBIGINT), 0)::HUGEINT AS VARCHAR) || ':'
++        || CAST(COALESCE(SUM(('0x' || substr(h, 17, 16))::UBIGINT), 0)::HUGEINT AS VARCHAR)
++    ) AS digest
++FROM element
++"""
+ 
++
+ class ELSAResultContractError(RuntimeError):
+     """Raised when an input or materialized result violates the result contract."""
+ 
+@@ -122,6 +143,50 @@
+     }
+ 
+ 
++def protein_sequence_digest(
++    db_path: str | Path,
++    *,
++    threads: int | None = None,
++) -> dict[str, Any]:
++    """Return the order-free protein-sequence digest of a Sharur core database.
++
++    The database is opened read-only. The result is a run-manifest input
++    artifact (``input_artifacts["protein_sequences"]``).
++    """
++
++    resolved = Path(db_path).expanduser().resolve()
++    config = {"threads": int(threads)} if threads is not None else {}
++    connection = duckdb.connect(str(resolved), read_only=True, config=config)
++    try:
++        count, digest = connection.execute(PROTEIN_SEQUENCE_DIGEST_SQL).fetchone()
++    finally:
++        connection.close()
++    return {
++        "algorithm": PROTEIN_SEQUENCE_DIGEST_ALGORITHM,
++        "digest": str(digest),
++        "protein_count": int(count),
++        "path": str(resolved),
++    }
++
++
++def embedding_manifest_fingerprint(embeddings_path: str | Path) -> dict[str, Any] | None:
++    """Fingerprint the Sharur ``embedding_manifest.json`` beside an embedding H5.
++
++    Records the encoder model name with the manifest's SHA-256; returns None
++    when the manifest is absent.
++    """
++
++    manifest = Path(embeddings_path).expanduser().resolve().parent / "embedding_manifest.json"
++    if not manifest.is_file():
++        return None
++    payload = json.loads(manifest.read_text())
++    return {
++        **fingerprint_file(manifest),
++        "model_name": payload.get("model_name") if isinstance(payload, dict) else None,
++        "embedding_dim": payload.get("embedding_dim") if isinstance(payload, dict) else None,
++    }
++
++
+ def _git_commit() -> str | None:
+     root = Path(__file__).resolve().parents[1]
+     try:
+@@ -1346,13 +1411,17 @@
+ __all__ = [
+     "ELSAResultContractError",
+     "MAPPING_VERSION",
++    "PROTEIN_SEQUENCE_DIGEST_ALGORITHM",
++    "PROTEIN_SEQUENCE_DIGEST_SQL",
+     "RESULT_SCHEMA_VERSION",
+     "ResultStoreSummary",
+     "build_run_manifest",
++    "embedding_manifest_fingerprint",
+     "fingerprint_file",
+     "fingerprint_source_tree",
+     "infer_result_sources",
+     "materialize_result_store",
++    "protein_sequence_digest",
+     "read_dataset_identity",
+     "sha256_file",
+ ]
+--- a/elsa/cli.py
++++ b/elsa/cli.py
+@@ -901,6 +901,18 @@
+             genes_df = _load_genes_from_sources(
+                 db, proteins, embeddings, embeddings_parquet,
+                 no_normalize, console,
++            )
++
++        # Digest the core's protein sequences while this run reads its genes from
++        # --db, so the sidecar records the sequences its embeddings stand for.
++        sequence_digest = None
++        if db is not None and not no_result_db:
++            from .results import protein_sequence_digest
++
++            sequence_digest = protein_sequence_digest(db, threads=max(1, jobs))
++            console.print(
++                f"  protein sequences: {sequence_digest['protein_count']:,} "
++                f"(digest {sequence_digest['digest'][:12]})"
+             )
+ 
+         # Run pipeline
+@@ -989,6 +1001,14 @@
+                 )
+             if seal_path is not None and seal_path.is_file():
+                 input_artifacts["dataset_seal"] = seal_path
++            if sequence_digest is not None:
++                input_artifacts["protein_sequences"] = sequence_digest
++            if embeddings is not None:
++                from .results import embedding_manifest_fingerprint
++
++                embedding_manifest = embedding_manifest_fingerprint(embeddings)
++                if embedding_manifest is not None:
++                    input_artifacts["embedding_manifest"] = embedding_manifest
+ 
+             console.print(
+                 f"\n[bold blue]Materializing exact result contract:[/bold blue] "
+@@ -1080,6 +1100,10 @@
+               help="Replace an identical run already present in the sidecar")
+ @click.option("--threads", type=int, default=lambda: os.cpu_count() or 1,
+               show_default="all logical CPUs")
++@click.option("--sequence-db", type=click.Path(exists=True, dir_okay=False), default=None,
++              help="Sharur core database whose protein sequences the run embedded; "
++                   "records their digest. Pass it when the core's sequences equal "
++                   "those of the original run.")
+ def materialize_results(
+     output_dir: str,
+     store: str,
+@@ -1089,12 +1113,14 @@
+     run_label: Optional[str],
+     replace_run: bool,
+     threads: int,
++    sequence_db: Optional[str],
+ ):
+     """Convert existing CSV results into the exact, run-scoped DuckDB contract."""
+     from .results import (
+         build_run_manifest,
+         infer_result_sources,
+         materialize_result_store,
++        protein_sequence_digest,
+         read_dataset_identity,
+     )
+ 
+@@ -1136,6 +1162,12 @@
+     }
+     if seal_path.is_file():
+         input_artifacts["dataset_seal"] = seal_path
++    # Recorded only on request: a checkpoint can predate the current core, so
++    # its sequences are never inferred from the dataset directory.
++    if sequence_db is not None:
++        input_artifacts["protein_sequences"] = protein_sequence_digest(
++            sequence_db, threads=threads,
++        )
+ 
+     normalized_path = (
+         Path(result_db).resolve()
+--- a/tests/test_results.py
++++ b/tests/test_results.py
+@@ -9,9 +9,12 @@
+ import pytest
+ 
+ from elsa.results import (
++    PROTEIN_SEQUENCE_DIGEST_ALGORITHM,
++    PROTEIN_SEQUENCE_DIGEST_SQL,
+     ELSAResultContractError,
+     build_run_manifest,
+     materialize_result_store,
++    protein_sequence_digest,
+ )
+ 
+ 
+@@ -404,3 +407,77 @@
+     ).fetchone()[0]
+     assert spread == 0.0
+     connection.close()
++
++
++# Shared with Sharur's tests/test_synteny.py, which pins the same value for the same rows.
++GOLDEN_SEQUENCE_ROWS = [("p1", "MKV"), ("p10", "MA"), ("q2", None), ("q3", "")]
++GOLDEN_SEQUENCE_DIGEST = "f3a85170cd50c5ae9114999152561214"
++
++
++def _core_with_sequences(path, rows) -> None:
++    connection = duckdb.connect(str(path))
++    connection.execute("CREATE TABLE proteins(protein_id VARCHAR, sequence VARCHAR)")
++    connection.executemany("INSERT INTO proteins VALUES (?, ?)", rows)
++    connection.close()
++
++
++def test_protein_sequence_digest_is_order_free_and_pinned(tmp_path):
++    digests = []
++    for name, rows in (("forward", GOLDEN_SEQUENCE_ROWS), ("reverse", GOLDEN_SEQUENCE_ROWS[::-1])):
++        core = tmp_path / f"{name}.duckdb"
++        _core_with_sequences(core, rows)
++        digests.append(protein_sequence_digest(core, threads=1))
++
++    assert digests[0]["digest"] == digests[1]["digest"] == GOLDEN_SEQUENCE_DIGEST
++    assert digests[0]["algorithm"] == PROTEIN_SEQUENCE_DIGEST_ALGORITHM
++    assert digests[0]["protein_count"] == 4
++
++
++def test_protein_sequence_digest_sql_matches_sharur():
++    sharur_synteny = pytest.importorskip("sharur.synteny")
++    if not hasattr(sharur_synteny, "PROTEIN_SEQUENCE_DIGEST_SQL"):
++        pytest.skip("the installed Sharur predates the protein-sequence digest")
++    assert PROTEIN_SEQUENCE_DIGEST_SQL == sharur_synteny.PROTEIN_SEQUENCE_DIGEST_SQL
++    assert PROTEIN_SEQUENCE_DIGEST_ALGORITHM == sharur_synteny.PROTEIN_SEQUENCE_DIGEST_ALGORITHM
++
++
++def test_materialize_results_records_sequence_digest_on_request(tmp_path):
++    from click.testing import CliRunner
++
++    from elsa.cli import main
++
++    results = tmp_path / "results"
++    results.mkdir()
++    _blocks().to_csv(results / "micro_chain_blocks.csv", index=False)
++    store = tmp_path / "store"
++    store.mkdir()
++    _genes().to_parquet(store / "metadata.parquet")
++    (store / "embeddings.npy").write_bytes(b"placeholder")
++    (store / "config.json").write_text("{}")
++    core = tmp_path / "sharur.duckdb"
++    _core_with_sequences(core, GOLDEN_SEQUENCE_ROWS)
++
++    recorded = {}
++    run_ids = {}
++    for name, extra in (("without", []), ("with", ["--sequence-db", str(core)])):
++        sidecar = tmp_path / f"{name}.duckdb"
++        result = CliRunner().invoke(
++            main,
++            [
++                "materialize-results", str(results), "--store", str(store),
++                "--result-db", str(sidecar), "--threads", "1", *extra,
++            ],
++        )
++        assert result.exit_code == 0, result.output
++        connection = duckdb.connect(str(sidecar), read_only=True)
++        run_id, inputs_json = connection.execute(
++            "SELECT run_id, inputs_json FROM current_elsa_run"
++        ).fetchone()
++        connection.close()
++        recorded[name] = json.loads(inputs_json).get("protein_sequences")
++        run_ids[name] = run_id
++
++    assert recorded["without"] is None
++    assert recorded["with"]["digest"] == GOLDEN_SEQUENCE_DIGEST
++    assert recorded["with"]["algorithm"] == PROTEIN_SEQUENCE_DIGEST_ALGORITHM
++    assert run_ids["with"] != run_ids["without"]  # the sequences are part of the run identity
