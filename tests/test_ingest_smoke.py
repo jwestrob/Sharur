@@ -352,3 +352,36 @@ def test_stage07_annotation_chunk_failure_aborts_build(tmp_path):
             builder._load_annotations()
     finally:
         builder._release_db()
+
+
+def test_stage07_cazyme_step_leaves_stage04_dbcan_table_in_place(tmp_path, monkeypatch):
+    """The classifier runs its own stamped dbCAN.hmm search, so Stage 07 copies nothing for it."""
+    import sys
+    import types
+
+    import pandas as pd
+
+    builder_cls, outputs_cls = _load_kb_module()
+    data_dir = tmp_path / "data"
+    _write(data_dir / "stage04_astra" / "dbcan_results" / "dbCAN_hits_df.tsv",
+           "sequence_id\thmm_name\np1\tGH5.hmm\n")
+    calls = []
+    fake = types.ModuleType("classify_cazymes")
+    fake.classify_cazymes = lambda **kwargs: calls.append(kwargs) or pd.DataFrame()
+    monkeypatch.setitem(sys.modules, "classify_cazymes", fake)
+    builder = builder_cls(_pipeline_outputs(outputs_cls, data_dir), data_dir / "sharur.duckdb",
+                          force=True, threads=1, enable_cazymes=True)
+    builder._init_db()
+    try:
+        builder.conn.execute("""
+            INSERT INTO bins (bin_id) VALUES ('bin1');
+            INSERT INTO contigs (contig_id, bin_id, length) VALUES ('c1', 'bin1', 900);
+            INSERT INTO proteins (protein_id, contig_id, bin_id, start, end_coord, strand)
+                VALUES ('p1', 'c1', 'bin1', 1, 900, '+');
+        """)
+        builder._classify_cazymes()
+    finally:
+        builder._release_db()
+
+    assert [call["db_path"] for call in calls] == [str(data_dir / "sharur.duckdb")]
+    assert not (data_dir / "annotations").exists()

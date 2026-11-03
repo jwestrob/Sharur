@@ -15,7 +15,6 @@ import json
 import logging
 import os
 import re
-import shutil
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -1152,18 +1151,6 @@ class KnowledgeBaseBuilder:
         if protein_count == 0:
             console.print("  No proteins found, skipping CAZyme classification")
             return
-
-        # Copy stage04 dbCAN HMM results to annotations dir for classify_cazymes cache
-        data_dir = self.db_path.parent
-        ann_dir = data_dir / "annotations"
-        ann_dir.mkdir(parents=True, exist_ok=True)
-        cached_tsv = ann_dir / "dbCAN_hits_df.tsv"
-        if not cached_tsv.exists():
-            for tsv in (self.outputs.stage04_dir.rglob("*dbCAN*_hits_df.tsv")
-                        if self.outputs.stage04_dir.exists() else []):
-                shutil.copy2(tsv, cached_tsv)
-                console.print(f"  Cached dbCAN HMM results → {cached_tsv.name}")
-                break
 
         console.print(f"  Running dbCAN 3-tool consensus CAZyme classification for {protein_count:,} proteins...")
 

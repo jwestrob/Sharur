@@ -165,8 +165,8 @@ about 3.5 s for the 2.2 GB `CAZy.dmnd` on local SSD), and the search settings (f
 mode, `-k 1`, e-value 1e-102 and the subject-ID parser). Any other cache, including one written
 before stamps existed, is ignored with a log line naming the field that differs, and the tool reruns.
 The stamp is removed before a table is rewritten and written after it, so an interrupted write
-leaves nothing that a later run reuses. Stage 04's registry table (`annotations/dbCAN_hits_df.tsv`)
-carries no stamp and is never reused, so step 2 always searches the release's own `dbCAN.hmm`.
+leaves nothing that a later run reuses. Step 2 reuses only its own stamped side table
+(`cazyme_dbcan_hmm_hits.tsv`), so it always reflects the release's own `dbCAN.hmm`.
 
 The consensus table merges HMM families and is never read back as DIAMOND evidence.
 
@@ -175,8 +175,8 @@ The consensus table merges HMM families and is never read back as DIAMOND eviden
 The `07_build_knowledge_base.py` ingest pipeline calls `classify_cazymes.py` automatically as part of the build process:
 
 1. During `_load_annotations()`, raw dbCAN HMM TSV files are **skipped** (the line `if "dbcan" in tsv.as_posix().lower(): continue`)
-2. During `_classify_cazymes()`, the full 3-tool consensus script is invoked
-3. If stage04 Astra results include a `dbCAN_hits_df.tsv`, it is copied to `annotations/`; it carries no provenance stamp, so the classifier does not reuse it
+2. During `_classify_cazymes()`, the full 3-tool consensus script is invoked; it runs its own
+   dbCAN.hmm search (or reuses its stamped side table), independent of any Stage 04 dbCAN table
 
 This ensures that only consensus-filtered results enter the database as `source='cazy'`.
 

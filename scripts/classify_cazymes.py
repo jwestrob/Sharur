@@ -1302,16 +1302,14 @@ def classify_cazymes(
             _save_diamond_cache(diamond_hits, side["diamond"], d_stamp, verbose=verbose)
         _log(f"[cazyme] Tool 1 done: {len(diamond_hits):,} hits ({_time.time() - t1:.1f}s)")
 
-        # Tool 2: HMMER vs the release's own dbCAN.hmm, every protein. A raw table is
-        # reused only with a matching stamp; Stage 04's registry table
-        # (annotations/dbCAN_hits_df.tsv) carries none and is never reused.
+        # Tool 2: HMMER vs the release's own dbCAN.hmm, every protein. This run's own
+        # side table is reused only with a matching stamp.
         t2 = _time.time()
         _log(f"[cazyme] Tool 2: dbCAN HMM search...")
         hmm_scale = dbcan_ievalue_scale(dbcan_hmm, fingerprint["records"])
         hmm_order = hmm_profile_order(dbcan_hmm)
         h_stamp = hmm_table_stamp(fingerprint, dbcan_hmm)
-        cached = [side["hmm"]] + ([Path(db_path).parent / "annotations" / "dbCAN_hits_df.tsv"] if db_path else [])
-        reuse = next((t for t in cached if stamp_matches(t, h_stamp, "dbCAN.hmm table")), None)
+        reuse = side["hmm"] if stamp_matches(side["hmm"], h_stamp, "dbCAN.hmm table") else None
         if reuse is not None:
             _log(f"[cazyme] Reusing dbCAN.hmm table {reuse}")
             hmm_domains = _astra_passing_rows(reuse, HMMER_IEVALUE, hmm_lengths(dbcan_hmm),
