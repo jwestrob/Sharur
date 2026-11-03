@@ -55,19 +55,23 @@ HIT_COLUMNS = [
 ]
 
 
-def write_model_set(root: Path, version: str = VERSION) -> Path:
-    """Write a defense-finder-models directory under ``root``; return its path."""
+def write_model_set(root: Path, version: str = VERSION, *, extra_profiles: dict | None = None,
+                    extra_models: dict | None = None) -> Path:
+    """Write a defense-finder-models directory under ``root``; return its path.
+
+    ``extra_profiles`` / ``extra_models`` add entries shaped like PROFILES / MODELS.
+    """
     family = root / "defense-finder-models"
     profiles = family / "profiles"
     profiles.mkdir(parents=True)
     (family / "metadata.yml").write_text(f"short_desc: toy\nvers: {version}\n")
-    for stem, (name, length, ga) in PROFILES.items():
+    for stem, (name, length, ga) in {**PROFILES, **(extra_profiles or {})}.items():
         lines = ["HMMER3/f [3.3 | toy]", f"NAME  {name}", f"LENG  {length}", "ALPH  amino"]
         if ga is not None:
-            lines.append(f"GA    {ga[0]:g} {ga[1]:g};")
+            lines.append(ga if isinstance(ga, str) else f"GA    {ga[0]:g} {ga[1]:g};")
         lines += ["STATS LOCAL MSV      -9.0  0.70", "HMM          A        C", "//"]
         (profiles / f"{stem}.hmm").write_text("\n".join(lines) + "\n")
-    for (subfamily, group, model), xml in MODELS.items():
+    for (subfamily, group, model), xml in {**MODELS, **(extra_models or {})}.items():
         path = family / "definitions" / subfamily / group / f"{model}.xml"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(xml)

@@ -670,26 +670,70 @@ def test_reintegration_updates_existing_indexed_replicon_columns(
     conn.close()
 
 
-def test_replicon_over_the_solver_budget_is_skipped_and_reported(monkeypatch) -> None:
+def _crowded_candidates():
+    """63 multi_loci candidates sharing proteins on 'crowded', a conflict-free single-gene
+    system on the same contig, and one a+b system on 'plain'."""
     model = _model(GeneSpec("a", "mandatory"), GeneSpec("b", "mandatory"), gap=1, multi_loci=True)
+    solo = _model(GeneSpec("s", "mandatory"), name="solo-system")
     # six separate a+b loci: a multi_loci model enumerates every combination of them
     crowded = [_hit(f"p{k}{g}", g, 10 * k + j, contig="crowded")
                for k in range(6) for j, g in enumerate("ab")]
     plain = [_hit("q1", "a", 1, contig="plain"), _hit("q2", "b", 2, contig="plain")]
-    candidates = _detect_model_systems(crowded + plain, model)
-    n_crowded = sum(1 for c in candidates if c.contig_id == "crowded")
-    assert n_crowded > 3
+    lone = [_hit("s1", "s", 500, contig="crowded")]
+    candidates = _detect_model_systems(crowded + plain, model) + _detect_model_systems(lone, solo)
+    n_crowded = sum(1 for c in candidates if c.contig_id == "crowded" and c.model_name == model.name)
+    return candidates, n_crowded
 
-    monkeypatch.setattr(colocation, "MAX_REPLICON_CANDIDATES", 3)
+
+def test_conflict_component_over_the_candidate_budget_is_skipped_and_reported(monkeypatch) -> None:
+    candidates, n_crowded = _crowded_candidates()
+    assert n_crowded > 3
+    monkeypatch.setattr(colocation, "MAX_COMPONENT_CANDIDATES", 3)
     unresolved: list[dict] = []
     selected = resolve_conflicts(candidates, unresolved=unresolved)
-    assert [s.contig_id for s in selected] == ["plain"]
-    assert unresolved == [{"genome_id": "genome-1", "contig_id": "crowded",
-                           "candidates": n_crowded, "reason": "candidates"}]
+    # The budget skips only the shared-protein component; the conflict-free system on the
+    # same contig is still called.
+    assert sorted((s.contig_id, s.model_name) for s in selected) == [
+        ("crowded", "solo-system"), ("plain", "test-system"),
+    ]
+    assert unresolved == [{
+        "genome_id": "genome-1", "contig_id": "crowded", "first_gene_index": 0,
+        "last_gene_index": 51, "candidates": n_crowded, "proteins": 12,
+        "models": ["test-system"], "reason": "candidates",
+    }]
 
-    monkeypatch.setattr(colocation, "MAX_REPLICON_CANDIDATES", 10_000)
+
+def test_conflict_component_over_the_state_budget_is_skipped_and_reported(monkeypatch) -> None:
+    candidates, _ = _crowded_candidates()
     monkeypatch.setattr(colocation, "MAX_SOLVER_STATES", 2)
-    unresolved = []
+    unresolved: list[dict] = []
     selected = resolve_conflicts(candidates, unresolved=unresolved)
-    assert {s.contig_id for s in selected} <= {"plain"}
+    assert ("crowded", "solo-system") in {(s.contig_id, s.model_name) for s in selected}
+    assert not any(s.contig_id == "crowded" and s.model_name == "test-system" for s in selected)
     assert any(u["contig_id"] == "crowded" and u["reason"] == "solver states" for u in unresolved)
+
+
+def test_component_budget_leaves_within_budget_results_unchanged() -> None:
+    candidates, _ = _crowded_candidates()
+    # Same selection as solving every candidate of a replicon together.
+    by_group = resolve_conflicts(candidates)
+    whole = []
+    for contig in ("crowded", "plain"):
+        members = sorted((c for c in candidates if c.contig_id == contig),
+                         key=colocation._system_sort_key)
+        masks = colocation._conflict_masks(members)
+        remaining = set(range(len(members)))
+        while remaining:
+            seed = min(remaining)
+            component, frontier = {seed}, [seed]
+            remaining.discard(seed)
+            while frontier:
+                current = frontier.pop()
+                linked = {i for i in remaining if masks[current] & (1 << i)}
+                component |= linked
+                remaining -= linked
+                frontier.extend(sorted(linked))
+            chosen = colocation._solve_conflict_component(members, masks, sorted(component))
+            whole.extend(members[i] for i in chosen)
+    key = colocation._system_sort_key
+    assert [key(s) for s in by_group] == sorted(key(s) for s in whole)

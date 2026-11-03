@@ -1294,6 +1294,25 @@ class KnowledgeBaseBuilder:
         finally:
             self._reacquire_db()
 
+        # Conflict components beyond the exact solver's budget carry no calls; name them
+        # so their genes are read as unevaluated rather than as lacking a system.
+        unresolved = systems_df.attrs.get("unresolved_components", [])
+        if unresolved:
+            console.print(
+                f"  [yellow]{len(unresolved)} conflict component(s) exceeded the exact "
+                f"conflict-solver budget; no {system_type} systems were called from them:[/yellow]"
+            )
+            for line in df_selection.describe_unresolved_components(unresolved):
+                console.print(f"    {line}", markup=False)
+        if source == "defensefinder" and df_selection.record_unresolved_components(
+            self.conn, unresolved
+        ):
+            console.print(
+                f"  Recorded {len(unresolved)} skipped component(s) in "
+                f"{df_selection.SOURCE_VERSIONS_TABLE}.parameters "
+                f"({df_selection.UNRESOLVED_COMPONENTS_KEY})"
+            )
+
     # --- indexes/stats -------------------------------------------------- #
     def _drop_secondary_indexes(self) -> None:
         """Remove empty secondary indexes before the bulk-load phase."""

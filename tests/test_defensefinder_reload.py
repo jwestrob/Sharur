@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import subprocess
+import sys
 from typing import TYPE_CHECKING
 
 import duckdb
 import pytest
 
+import sharur.colocation as colocation
+import sharur.dataset_seal as dataset_seal
 from sharur.defensefinder.refresh import ReloadValidationError, reload_defensefinder
+from sharur.defensefinder.selection import UNRESOLVED_COMPONENTS_KEY
 from tests.defensefinder_fixtures import VERSION, build_toy_db, hit, hits_frame, write_model_set
 
 
@@ -191,3 +197,131 @@ def test_stamp_fingerprint_ignores_columns_added_after_the_snapshot():
     assert _fingerprint(conn, "predicate_provenance", "WHERE generation_id <= 2") != before  # whole-row hash shifts
     conn.execute("UPDATE predicate_provenance SET pfam_map_sha256 = 'b' WHERE generation_id = 1")
     assert _fingerprint(conn, "predicate_provenance", "WHERE generation_id <= 2", columns=cols) != before
+
+
+def _hold_open(db_path, *, write: bool):
+    """Another process that opens the source database and keeps it open until released.
+
+    ``write`` commits one pfam row first; DuckDB keeps the commit in the WAL, so the
+    database file's size and mtime do not change.
+    """
+    statement = (
+        "c.execute(\"INSERT INTO annotations (annotation_id, protein_id, source, accession, name) "
+        "VALUES (999, 'p6', 'pfam', 'PF99999', 'concurrent')\")" if write else "pass"
+    )
+    code = (
+        "import duckdb, sys\n"
+        f"c = duckdb.connect({str(db_path)!r}, read_only={not write})\n"
+        f"{statement}\n"
+        "print('ready', flush=True)\n"
+        "sys.stdin.readline()\n"
+        "c.close()\n"
+    )
+    process = subprocess.Popen([sys.executable, "-c", code], stdin=subprocess.PIPE,
+                               stdout=subprocess.PIPE, text=True)
+    assert process.stdout.readline().strip() == "ready"
+    return process
+
+
+def _release(process) -> None:
+    process.stdin.write("\n")
+    process.stdin.flush()
+    process.wait(timeout=60)
+
+
+class TestConcurrentUse:
+    """The source may be opened between the start-of-reload checkpoint and the swap."""
+
+    @pytest.fixture
+    def during_integration(self, monkeypatch):
+        started = {}
+        original = colocation.integrate_defense_results
+
+        def install(db_path, *, write):
+            def integrate(*args, **kwargs):
+                started["process"] = _hold_open(db_path, write=write)
+                return original(*args, **kwargs)
+            monkeypatch.setattr(colocation, "integrate_defense_results", integrate)
+            return started
+
+        yield install
+        if "process" in started and started["process"].poll() is None:
+            _release(started["process"])
+
+    def test_write_committed_during_the_reload_blocks_publication(
+        self, db_path, hits_path, family, during_integration,
+    ):
+        started = during_integration(db_path, write=True)
+        with pytest.raises(ReloadValidationError, match="changed during the reload"):
+            reload_defensefinder(db_path, hits_path, family, dry_run=False)
+        _release(started["process"])
+        # The concurrent commit stays in the source; nothing was swapped or backed up.
+        assert _query(db_path, "SELECT COUNT(*) FROM annotations WHERE accession = 'PF99999'")[0][0] == 1
+        assert not list(db_path.parent.glob("*.pre-defensefinder-reload-*"))
+        assert not list(db_path.parent.glob("*.staging*"))
+
+    def test_another_open_connection_blocks_publication(
+        self, db_path, hits_path, family, during_integration,
+    ):
+        digest = _sha(db_path)
+        started = during_integration(db_path, write=False)
+        with pytest.raises(ReloadValidationError, match="open in another process"):
+            reload_defensefinder(db_path, hits_path, family, dry_run=False)
+        _release(started["process"])
+        assert _sha(db_path) == digest
+        assert not list(db_path.parent.glob("*.pre-defensefinder-reload-*"))
+
+
+class TestReportStatus:
+    def test_summary_reads_staged_until_publication_succeeds(self, db_path, hits_path, family, tmp_path):
+        reports = tmp_path / "reports"
+
+        def explode(staging):
+            raise RuntimeError("injected publication failure")
+
+        with pytest.raises(RuntimeError, match="injected"):
+            reload_defensefinder(db_path, hits_path, family, dry_run=False, report_dir=reports,
+                                 label="toy", _before_publish=explode)
+        first = (reports / "toy_reload_summary.txt").read_text().splitlines()[0]
+        assert first.startswith("DefenseFinder reload STAGED (not published)")
+        report = reload_defensefinder(db_path, hits_path, family, dry_run=False, report_dir=reports,
+                                      label="toy")
+        assert report.published
+        assert (reports / "toy_reload_summary.txt").read_text().startswith("DefenseFinder reload PUBLISHED:")
+        assert '"status": "PUBLISHED"' in (reports / "toy_reload.json").read_text()
+
+    def test_failed_reseal_after_the_swap_is_reported(self, db_path, hits_path, family, tmp_path,
+                                                      monkeypatch):
+        (db_path.parent / "dataset.seal.json").write_text("{}\n")
+
+        def fail(*args, **kwargs):
+            raise RuntimeError("seal writer failed")
+
+        monkeypatch.setattr(dataset_seal, "seal_dataset", fail)
+        reports = tmp_path / "reports"
+        with pytest.raises(RuntimeError, match="seal writer failed"):
+            reload_defensefinder(db_path, hits_path, family, dry_run=False, report_dir=reports,
+                                 label="toy")
+        text = (reports / "toy_reload_summary.txt").read_text()
+        assert text.startswith("DefenseFinder reload PUBLISHED, SEAL STALE:")
+        assert "Seal update failed after the database was replaced" in text
+        assert _query(db_path, "SELECT COUNT(*) FROM defense_systems")[0][0] == 2
+
+
+def test_reload_reports_and_records_components_beyond_the_solver_budget(
+    db_path, hits_path, family, tmp_path, monkeypatch,
+):
+    monkeypatch.setattr(colocation, "MAX_COMPONENT_CANDIDATES", 0)
+    report = reload_defensefinder(db_path, hits_path, family, dry_run=False)
+    assert [(c["first_gene_index"], c["models"], c["pass"]) for c in report.unresolved_components] == [
+        (1, ["Toy"], "DefenseFinder"), (10, ["Solo"], "DefenseFinder"),
+    ]
+    assert report.checks["caller_skips_recorded"].startswith("PASS")
+    text = report.to_text()
+    assert "Conflict components skipped by the conflict-solver budget (2;" in text
+    assert "bin_1 / c1 genes 1-2: 1 candidates over 2 proteins" in text
+    parameters = json.loads(_query(
+        db_path, "SELECT parameters FROM annotation_source_versions WHERE source = 'defensefinder'"
+    )[0][0])
+    assert [c["first_gene_index"] for c in parameters[UNRESOLVED_COMPONENTS_KEY]] == [1, 10]
+    assert parameters["coverage_profile"] == 0.4

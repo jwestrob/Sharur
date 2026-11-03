@@ -19,7 +19,10 @@ difference: annotation rows, systems per model and per model family (the
 definitions folder, comparable across releases that rename models), genomes
 with any system, and system and profile families gained or lost. Without --publish the copy
 is discarded. With --publish it atomically replaces the database, keeps the
-prior file as a backup beside it, and re-seals when a dataset seal exists.
+prior file as a backup beside it, and re-seals when a dataset seal exists. Publishing
+refuses while any other process has the database open, and when the database or its
+WAL changed during the reload; the summary reads STAGED until the swap and the seal
+update succeed, then PUBLISHED.
 
 Usage:
     # dry run; the staged copy goes to --work-dir

@@ -12,19 +12,24 @@ written by Aksha/Astra ``search``):
    E-value is at most ``i_evalue_sel`` (1e-3) and its profile coverage,
    ``(hmm_to - hmm_from + 1) / LENG``, is at least ``coverage_profile``.
 
-Defaults, read from the installed packages (2026-10-23), never from memory:
+Defaults, read from the installed packages (2026-10-23), never from memory.
+mdmparis-defense-finder 2.0.1 calls MacSyFinder 2.1.4 through the ``macsypy`` package
+(``defense_finder/__init__.py``: ``from macsypy.scripts import macsyfinder``):
 
-* macsylib 1.0.4 (the library under MacSyFinder 2.1.4), ``macsylib/config.py``
-  ``MacsyDefaults``: ``cut_ga=True``, ``e_value_search=0.1``, ``i_evalue_sel=0.001``,
-  ``coverage_profile=0.5``.
-* ``macsylib/profile.py`` ``Profile.execute``: ``--cut_ga`` when the profile has a GA
-  line, otherwise ``-E e_value_search``.
-* ``macsylib/report.py`` ``HMMReport._parse_hmm_body``: keeps a domain only when
+* ``macsypy/config.py`` ``MacsyDefaults``: ``cut_ga=True``, ``e_value_search=0.1``,
+  ``i_evalue_sel=0.001``, ``coverage_profile=0.5``.
+* ``macsypy/profile.py`` ``Profile._profile_features``: a GA line counts only when it
+  splits into exactly three tokens whose last two parse as floats (one trailing ``;``
+  dropped); ``Profile.execute``: ``--cut_ga`` when the profile has such a GA line,
+  otherwise ``-E e_value_search``.
+* ``macsypy/report.py`` ``HMMReport._parse_hmm_body``: keeps a domain only when
   ``i_evalue <= i_evalue_sel`` and ``profile coverage >= coverage_profile``. The GA
   search threshold and this selection apply together.
-* mdmparis-defense-finder 2.0.1, ``defense_finder_cli/main.py`` ``run``: ``--coverage``
-  defaults to 0.4 and reaches MacSyFinder as ``--coverage-profile 0.4``;
-  ``defense_finder/__init__.py`` leaves ``cut_ga`` at MacSyFinder's default.
+* ``defense_finder_cli/main.py`` ``run``: ``--coverage`` defaults to 0.4 and reaches
+  MacSyFinder as ``--coverage-profile 0.4``; ``defense_finder/__init__.py`` leaves
+  ``cut_ga`` at MacSyFinder's default.
+
+The separately installed macsylib 1.0.4 carries the same defaults and logic.
 
 The default coverage here is therefore DefenseFinder's 0.4; MacSyFinder's own
 default (0.5) is kept as a named constant for runs that want it.
@@ -59,7 +64,7 @@ logger = logging.getLogger(__name__)
 SOURCE = "defensefinder"
 MODEL_FAMILY = "defense-finder-models"
 
-# MacSyFinder defaults (macsylib 1.0.4 config.py MacsyDefaults).
+# MacSyFinder 2.1.4 defaults (macsypy/config.py MacsyDefaults).
 MACSYFINDER_CUT_GA = True
 MACSYFINDER_E_VALUE_SEARCH = 0.1
 MACSYFINDER_I_EVALUE_SEL = 1e-3
@@ -172,6 +177,26 @@ class SelectionStats:
         return asdict(self)
 
 
+def parse_ga_line(line: str) -> tuple[float, float] | None:
+    """GA1, GA2 from a ``GA`` header line exactly as MacSyFinder reads it; None when it rejects it.
+
+    macsypy/profile.py ``Profile._profile_features`` splits the line on whitespace into
+    exactly three tokens, drops one trailing ``;`` from the third, and needs both to parse
+    as floats. Any other shape (``GA 25 22 ;``, three values, one value) is ignored with a
+    warning, and MacSyFinder then searches that profile with ``-E e_value_search``.
+    """
+    try:
+        _header, threshold_1, threshold_2 = line.split()
+    except ValueError:
+        return None
+    if threshold_2.endswith(";"):
+        threshold_2 = threshold_2[:-1]
+    try:
+        return float(threshold_1), float(threshold_2)
+    except ValueError:
+        return None
+
+
 def parse_hmm_header(path: Path) -> ProfileInfo | None:
     """Read NAME, LENG and GA from one HMM file header (first model only)."""
     name = length = None
@@ -184,12 +209,11 @@ def parse_hmm_header(path: Path) -> ProfileInfo | None:
             elif line.startswith("LENG"):
                 length = int(line.split()[1])
             elif line.startswith("GA"):
-                parts = line.replace(";", " ").split()
-                try:
-                    ga_seq, ga_dom = float(parts[1]), float(parts[2])
-                except (IndexError, ValueError):
-                    # MacSyFinder ignores a malformed GA line (profile.py _profile_features).
-                    ga_seq = ga_dom = None
+                # A rejected GA line leaves any earlier GA in place, as MacSyFinder's
+                # ``continue`` does.
+                parsed = parse_ga_line(line)
+                if parsed is not None:
+                    ga_seq, ga_dom = parsed
             elif line.startswith(("STATS", "HMM ")):
                 break
     if name is None or length is None:
@@ -499,3 +523,48 @@ def record_source_version(
             datetime.now(timezone.utc).replace(tzinfo=None),
         ],
     )
+
+
+#: Key in the DefenseFinder record's ``parameters`` JSON listing the conflict components the
+#: system caller skipped on its latest run (an empty list means every component was solved).
+UNRESOLVED_COMPONENTS_KEY = "caller_unresolved_components"
+
+
+def record_unresolved_components(conn: duckdb.DuckDBPyConnection, unresolved: list[dict]) -> bool:
+    """Store the caller's skipped conflict components in the DefenseFinder record.
+
+    Writes ``parameters[UNRESOLVED_COMPONENTS_KEY]`` of the ``annotation_source_versions``
+    row for ``defensefinder``. Returns False, and creates nothing, when the database has
+    no such row (DefenseFinder rows loaded before the record existed).
+    """
+    tables = {row[0] for row in conn.execute(
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
+    ).fetchall()}
+    if SOURCE_VERSIONS_TABLE not in tables:
+        return False
+    row = conn.execute(
+        f"SELECT parameters FROM {SOURCE_VERSIONS_TABLE} WHERE source = ?", [SOURCE]
+    ).fetchone()
+    if row is None:
+        return False
+    parameters = json.loads(row[0]) if row[0] else {}
+    parameters[UNRESOLVED_COMPONENTS_KEY] = unresolved
+    conn.execute(
+        f"UPDATE {SOURCE_VERSIONS_TABLE} SET parameters = ? WHERE source = ?",
+        [json.dumps(parameters, sort_keys=True), SOURCE],
+    )
+    return True
+
+
+def describe_unresolved_components(unresolved: list[dict], limit: int = 10) -> list[str]:
+    """One line per skipped conflict component, for console and report output."""
+    lines = [
+        f"{entry['genome_id']} / {entry['contig_id']} genes {entry['first_gene_index']}-"
+        f"{entry['last_gene_index']}: {entry['candidates']:,} candidates over "
+        f"{entry['proteins']:,} proteins ({entry['reason']}; pass {entry.get('pass', '-')}; "
+        f"models {', '.join(entry['models'][:5])}{', ...' if len(entry['models']) > 5 else ''})"
+        for entry in unresolved[:limit]
+    ]
+    if len(unresolved) > limit:
+        lines.append(f"... and {len(unresolved) - limit} more")
+    return lines

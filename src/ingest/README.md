@@ -460,7 +460,7 @@ checkpointed V2 generation.
 | cazy | 1e-5 | dbCAN has own thresholds |
 
 **DefenseFinder hit selection.** `defensefinder` rows follow MacSyFinder/DefenseFinder
-rules, read from the installed packages (macsylib 1.0.4 `MacsyDefaults`, DefenseFinder
+rules, read from the installed packages (MacSyFinder 2.1.4 `macsypy` `MacsyDefaults`, DefenseFinder
 2.0.1 CLI): a domain passes the profile's GA line (full-sequence score >= GA1, domain
 score >= GA2; full-sequence E <= 0.1 for a profile without GA), then i-Evalue <= 1e-3 and
 profile coverage `(hmm_to - hmm_from + 1) / LENG` >= 0.4, followed by FAM-variant dedup.

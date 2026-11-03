@@ -12,12 +12,16 @@ hits from the annotations table and protein positions from the proteins table,
 both already indexed in DuckDB.
 
 The algorithm is:
-  1. Parse XML model definitions (DefenseFinder or TXSScan)
+  1. Parse XML model definitions (DefenseFinder or TXSScan) into passes: one per
+     DefenseFinder sub-family (DefenseFinder, RM), as DefenseFinder runs them, or
+     one pass for every model of the family
   2. Load HMM hits from DuckDB (annotations + proteins JOIN)
-  3. For each model, filter hits to relevant profiles, cluster on each contig
-     within inter_gene_max_space, validate clusters against quorum rules
+  3. Per pass: keep hits of the pass's profiles, keep the best hit per protein,
+     then for each model cluster on each contig within inter_gene_max_space and
+     validate clusters against quorum rules
   4. Handle loner genes and multi_loci merging (TXSScan only)
-  5. Resolve overlapping candidates with an exact, deterministic conflict solver
+  5. Per pass: resolve overlapping candidates with an exact, deterministic
+     conflict solver; the passes' calls are concatenated
 
 Output: (systems_df, genes_df) DataFrames matching the schema produced by
 validate_defense_systems.py and validate_secretion_systems.py.
@@ -88,6 +92,9 @@ class SystemModel:
     forbidden_profiles: set[str] = field(default_factory=set)
     loner_profiles: set[str] = field(default_factory=set)
     multi_system_profiles: set[str] = field(default_factory=set)
+    # Score weight of a hit made through an exchangeable profile. MacSyFinder's
+    # default is 0.8; validate_systems sets the caller's value (DefenseFinder: 1.0).
+    exchangeable_weight: float = 0.8
 
     def _build_lookups(self) -> None:
         """Populate derived lookup tables from gene specs."""
@@ -359,16 +366,47 @@ def parse_models_for_family(
         logger.error(f"No definitions/ subdirectory in {family_dir}")
         return {}
 
+    return _parse_definition_trees(_definition_roots(definitions_dir, subfamilies), model_family)
+
+
+def _parse_definition_trees(roots: list[Path], model_family: str) -> dict[str, SystemModel]:
+    """Parse every model XML under ``roots`` (sorted paths, so later duplicates win)."""
     models: dict[str, SystemModel] = {}
-    xml_paths = sorted(
-        xml for root in _definition_roots(definitions_dir, subfamilies) for xml in root.rglob("*.xml")
-    )
+    xml_paths = sorted(xml for root in roots for xml in root.rglob("*.xml"))
     for xml_path in xml_paths:
         model = _parse_model_xml(xml_path, family=model_family)
         if model is not None:
             models[model.name] = model
-
     return models
+
+
+def _model_passes(
+    models_dir: Path,
+    model_family: str,
+    subfamilies: tuple[str, ...] | None,
+    separate: bool,
+) -> list[tuple[str, dict[str, SystemModel]]]:
+    """Model sets that are called independently, as (pass name, models).
+
+    With ``separate``, each ``definitions/`` sub-family directory matched by
+    ``subfamilies`` is its own pass, the way DefenseFinder runs one MacSyFinder
+    invocation per sub-family (defense_finder/__init__.py run(): DefenseFinder,
+    or DefenseFinder_1..5 for 1.x models, then RM). Otherwise every parsed model
+    forms one pass, like a single ``macsyfinder --models FAMILY all`` run.
+    """
+    if not separate or not subfamilies:
+        models = parse_models_for_family(models_dir, model_family, subfamilies)
+        name = "+".join(subfamilies) if subfamilies else "all"
+        return [(name, models)] if models else []
+    definitions_dir = models_dir / model_family / "definitions"
+    if not definitions_dir.is_dir():
+        logger.error(f"No definitions/ subdirectory in {models_dir / model_family}")
+        return []
+    passes = [
+        (root.name, _parse_definition_trees([root], model_family))
+        for root in _definition_roots(definitions_dir, subfamilies)
+    ]
+    return [(name, models) for name, models in passes if models]
 
 
 # ------------------------------------------------------------------ #
@@ -907,7 +945,11 @@ def _validate_cluster(
 
 
 def _profile_role_weight(hit: HitRecord, model: SystemModel) -> float:
-    """Return MacSyFinder's default role/exchangeable weight for one hit."""
+    """Return the role weight of one hit, times the model's exchangeable weight for exchangeables.
+
+    Role weights are MacSyFinder's defaults; the exchangeable weight is the
+    caller's (macsypy/cluster.py Cluster.score: ``hit_weights.exchangeable``).
+    """
     slot = model.profile_to_gene_slot[hit.accession]
     role_weight = {
         "mandatory": 1.0,
@@ -916,7 +958,7 @@ def _profile_role_weight(hit: HitRecord, model: SystemModel) -> float:
         "forbidden": 0.0,
     }[slot.presence]
     if hit.accession != slot.name:
-        role_weight *= 0.8
+        role_weight *= model.exchangeable_weight
     return role_weight
 
 
@@ -1157,9 +1199,12 @@ def _detect_model_systems(
 # type-IV-filament genes gives multi_loci models thousands of cluster
 # combinations: MacSyFinder 2.1.4 runs its best-solution search for hours on
 # such a replicon (its --timeout then drops the replicon), and so would the
-# exact solver here. A replicon whose candidates or solver states exceed these
-# budgets is skipped and reported, and no systems are called on it.
-MAX_REPLICON_CANDIDATES = 5_000
+# exact solver here. Candidates can conflict only through a shared member
+# protein, so the budget applies to each group of candidates linked by shared
+# proteins: a group beyond MAX_COMPONENT_CANDIDATES candidates, or a conflict
+# component beyond MAX_SOLVER_STATES memoized states, is skipped and reported,
+# and every other system on the same replicon is still called.
+MAX_COMPONENT_CANDIDATES = 5_000
 MAX_SOLVER_STATES = 2_000_000
 
 
@@ -1167,16 +1212,90 @@ class ConflictBudgetExceeded(RuntimeError):
     """The exact solver for one conflict component exceeded MAX_SOLVER_STATES."""
 
 
-def _record_unresolved(unresolved: list[dict] | None, replicon_key: tuple[str, str],
-                       n_candidates: int, reason: str) -> None:
-    genome_id, contig_id = replicon_key
+def _record_unresolved(unresolved: list[dict] | None, members: list[SystemHit],
+                       reason: str) -> None:
+    """Report one skipped component: its replicon, gene span, candidates and models."""
+    first = members[0]
+    proteins = set().union(*(member.protein_set for member in members))
+    entry = {
+        "genome_id": first.genome_id,
+        "contig_id": first.contig_id,
+        "first_gene_index": min(min(member.gene_indices) for member in members),
+        "last_gene_index": max(max(member.gene_indices) for member in members),
+        "candidates": len(members),
+        "proteins": len(proteins),
+        "models": sorted({member.model_name for member in members}),
+        "reason": reason,
+    }
     logger.warning(
-        f"  Skipping replicon {genome_id} / {contig_id}: {n_candidates} candidate systems exceed "
-        f"the exact conflict-solver budget ({reason}); no systems are called on it"
+        "  Skipping a conflict component on %s / %s (genes %s-%s): %s candidate systems "
+        "over %s proteins exceed the exact conflict-solver budget (%s); no systems are "
+        "called from it (models: %s)",
+        entry["genome_id"], entry["contig_id"], entry["first_gene_index"],
+        entry["last_gene_index"], entry["candidates"], entry["proteins"], reason,
+        ", ".join(entry["models"][:10]),
     )
     if unresolved is not None:
-        unresolved.append({"genome_id": genome_id, "contig_id": contig_id,
-                           "candidates": n_candidates, "reason": reason})
+        unresolved.append(entry)
+
+
+def _shared_protein_groups(hits: list[SystemHit]) -> list[list[int]]:
+    """Indices of candidates linked through shared member proteins, each group ascending.
+
+    Built from a protein -> candidates index, so its cost is linear in the
+    candidates' member count. Conflicts need a shared protein, so every conflict
+    component lies inside one group.
+    """
+    parent = list(range(len(hits)))
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    first_with_protein: dict[str, int] = {}
+    for index, hit in enumerate(hits):
+        for protein_id in hit.protein_ids:
+            other = first_with_protein.setdefault(protein_id, index)
+            if other != index:
+                left, right = find(index), find(other)
+                if left != right:
+                    parent[max(left, right)] = min(left, right)
+
+    groups: dict[int, list[int]] = defaultdict(list)
+    for index in range(len(hits)):
+        groups[find(index)].append(index)
+    return sorted(groups.values(), key=lambda group: group[0])
+
+
+def _resolve_group(members: list[SystemHit], unresolved: list[dict] | None) -> list[SystemHit]:
+    """Solve each conflict component of one shared-protein group exactly."""
+    conflicts = _conflict_masks(members)
+    remaining = set(range(len(members)))
+    chosen: list[SystemHit] = []
+    while remaining:
+        seed = min(remaining)
+        component = {seed}
+        frontier = [seed]
+        remaining.remove(seed)
+        while frontier:
+            current = frontier.pop()
+            neighbors = {index for index in remaining if conflicts[current] & (1 << index)}
+            if neighbors:
+                component.update(neighbors)
+                remaining.difference_update(neighbors)
+                frontier.extend(sorted(neighbors))
+
+        component_indices = sorted(component)
+        try:
+            selected_indices = _solve_conflict_component(members, conflicts, component_indices)
+        except ConflictBudgetExceeded:
+            _record_unresolved(unresolved, [members[index] for index in component_indices],
+                               "solver states")
+            continue
+        chosen.extend(members[index] for index in selected_indices)
+    return chosen
 
 
 def resolve_conflicts(hits: list[SystemHit],
@@ -1191,14 +1310,15 @@ def resolve_conflicts(hits: list[SystemHit],
     - different models may share a hit only when that hit is ``multi_model``
       in both models.
 
-    Each connected conflict component is solved exactly as a weighted
-    independent-set problem. Components are normally tiny because conflicts
-    require an identical protein.
+    Candidates are grouped by shared member proteins; each conflict component
+    within a group is solved exactly as a weighted independent-set problem.
+    Components are normally tiny because conflicts require an identical protein.
 
     Args:
         hits: All candidate SystemHits across all models and genomes.
-        unresolved: Receives one dict per replicon skipped because it exceeds
-            MAX_REPLICON_CANDIDATES or MAX_SOLVER_STATES.
+        unresolved: Receives one dict per component skipped because it exceeds
+            MAX_COMPONENT_CANDIDATES or MAX_SOLVER_STATES (genome_id, contig_id,
+            gene span, candidates, proteins, models, reason).
 
     Returns:
         The selected non-conflicting subset.
@@ -1216,41 +1336,14 @@ def resolve_conflicts(hits: list[SystemHit],
             by_replicon[replicon_key],
             key=_system_sort_key,
         )
-        if len(replicon_hits) > MAX_REPLICON_CANDIDATES:
-            _record_unresolved(unresolved, replicon_key, len(replicon_hits), "candidates")
-            continue
-        conflicts = _conflict_masks(replicon_hits)
-        remaining = set(range(len(replicon_hits)))
-        replicon_selected: list[SystemHit] = []
-        within_budget = True
-
-        while remaining:
-            seed = min(remaining)
-            component = {seed}
-            frontier = [seed]
-            remaining.remove(seed)
-            while frontier:
-                current = frontier.pop()
-                neighbors = {index for index in remaining if conflicts[current] & (1 << index)}
-                if neighbors:
-                    component.update(neighbors)
-                    remaining.difference_update(neighbors)
-                    frontier.extend(sorted(neighbors))
-
-            component_indices = sorted(component)
-            try:
-                selected_indices = _solve_conflict_component(
-                    replicon_hits,
-                    conflicts,
-                    component_indices,
-                )
-            except ConflictBudgetExceeded:
-                _record_unresolved(unresolved, replicon_key, len(replicon_hits), "solver states")
-                within_budget = False
-                break
-            replicon_selected.extend(replicon_hits[index] for index in selected_indices)
-        if within_budget:
-            selected.extend(replicon_selected)
+        # Members keep the replicon's sort order, so indices inside a group are
+        # monotone in the replicon order and the solver's tie-breaks are unchanged.
+        for group in _shared_protein_groups(replicon_hits):
+            members = [replicon_hits[index] for index in group]
+            if len(members) > MAX_COMPONENT_CANDIDATES:
+                _record_unresolved(unresolved, members, "candidates")
+                continue
+            selected.extend(_resolve_group(members, unresolved))
 
     return sorted(selected, key=_system_sort_key)
 
@@ -1425,6 +1518,20 @@ DEFAULT_MODEL_SUBFAMILIES: dict[str, tuple[str, ...]] = {
     "defensefinder": ("DefenseFinder", "RM"),
 }
 
+# Sources whose sub-families are separate MacSyFinder runs. DefenseFinder 2.0.1 calls
+# macsyfinder once per sub-family (defense_finder/__init__.py run()); each run searches
+# only its own models' genes and exchangeables (macsypy/scripts/macsyfinder.py
+# search_systems), keeps the best hit per protein among those (get_best_hits, key
+# 'score') and picks its own best solution; the post-treatment concatenates the runs'
+# best_solution.tsv files (defense_finder_posttreat/best_solution.py get()).
+SEPARATE_SUBFAMILY_PASSES: frozenset[str] = frozenset({"defensefinder"})
+
+# MacSyFinder's default exchangeable weight (macsypy/config.py MacsyDefaults) and the
+# callers that override it: DefenseFinder 2.0.1 passes --exchangeable-weight 1 for the
+# DefenseFinder and RM runs (defense_finder/__init__.py run()).
+MACSYFINDER_EXCHANGEABLE_WEIGHT = 0.8
+EXCHANGEABLE_WEIGHTS: dict[str, float] = {"defensefinder": 1.0}
+
 
 def validate_systems(
     db_path: str | Path,
@@ -1483,19 +1590,28 @@ def validate_systems(
     if model_family is None:
         model_family = _model_family_for_source(source)
 
-    # Phase 1: Parse models
+    # Phase 1: Parse models, one set per independently called pass
     if subfamilies is None:
         subfamilies = DEFAULT_MODEL_SUBFAMILIES.get(source)
     if verbose:
         scope = f" (sub-families {', '.join(subfamilies)})" if subfamilies else ""
         logger.info(f"Parsing {model_family} models from {models_dir / model_family}{scope}...")
-    models = parse_models_for_family(models_dir, model_family, subfamilies)
-    if not models:
+    passes = _model_passes(models_dir, model_family, subfamilies,
+                           separate=source in SEPARATE_SUBFAMILY_PASSES)
+    if not passes:
         raise RuntimeError(
             f"No parseable models found for family {model_family!r} under {models_dir}"
         )
+    exchangeable_weight = EXCHANGEABLE_WEIGHTS.get(source, MACSYFINDER_EXCHANGEABLE_WEIGHT)
+    for _pass_name, pass_models in passes:
+        for model in pass_models.values():
+            model.exchangeable_weight = exchangeable_weight
     if verbose:
-        logger.info(f"  Loaded {len(models)} system models")
+        logger.info(
+            "  Loaded %d system models in %d pass(es): %s",
+            sum(len(pass_models) for _, pass_models in passes), len(passes),
+            ", ".join(f"{name} ({len(pass_models)})" for name, pass_models in passes),
+        )
 
     # Phase 2: Load hits from DuckDB
     if verbose:
@@ -1507,7 +1623,9 @@ def validate_systems(
     if not all_hits:
         if verbose:
             logger.info("  No HMM hits found — nothing to validate")
-        return pd.DataFrame(), pd.DataFrame()
+        systems_df, genes_df = pd.DataFrame(), pd.DataFrame()
+        systems_df.attrs["unresolved_components"] = []
+        return systems_df, genes_df
     if verbose:
         logger.info(f"  Loaded {len(all_hits)} HMM hits")
 
@@ -1530,63 +1648,61 @@ def validate_systems(
             f"under {family_dir}"
         )
 
-    # MacSyFinder resolves competing profiles globally before any model sees
-    # the hits. This also collapses repeated-domain rows on the same protein.
-    raw_hit_count = len(all_hits)
-    all_hits = _select_best_hits_per_position(all_hits)
-    if verbose:
-        logger.info(
-            "  Selected %d best protein-position hits from %d raw/domain rows",
-            len(all_hits),
-            raw_hit_count,
-        )
-
-    # Build deterministic indices after best-hit selection.
-    hits_by_accession = _index_hits_by_accession(all_hits)
-
-    # Build a quick set of all accessions present in the data
-    all_accessions_in_data = set(hits_by_accession.keys())
-
-    # Phase 3+4: Cluster and validate per model
-    if verbose:
-        logger.info("Clustering and validating...")
-
-    candidate_hits: list[SystemHit] = []
-    models_with_hits = 0
-
-    for model_name in sorted(models):
-        model = models[model_name]
-        # Quick check: does this model have ANY relevant profiles in the data?
-        relevant_profiles = model.all_profiles & all_accessions_in_data
-        if not relevant_profiles:
-            continue
-        models_with_hits += 1
-
-        model_hits = [
-            hit
-            for profile in sorted(relevant_profiles)
-            for hit in hits_by_accession.get(profile, ())
-        ]
-        candidate_hits.extend(_detect_model_systems(model_hits, model))
-
-    if verbose:
-        logger.info(
-            f"  {models_with_hits} models matched hits; "
-            f"{len(candidate_hits)} candidate systems before conflict resolution"
-        )
-
-    # Phase 5: Conflict resolution
+    # Phases 3-5 run once per pass. A pass sees only hits of profiles its own
+    # models reference (genes and exchangeables), as a MacSyFinder run searches only
+    # those profiles; profiles no called model references never compete.
+    selected_hits: list[SystemHit] = []
     unresolved: list[dict] = []
-    selected_hits = resolve_conflicts(candidate_hits, unresolved=unresolved)
-    if unresolved and verbose:
-        logger.info(f"  {len(unresolved)} replicons skipped by the conflict-solver budget")
+    for pass_name, pass_models in passes:
+        pass_profiles = set().union(*(model.all_profiles for model in pass_models.values()))
+        pass_hits = [hit for hit in all_hits if hit.accession in pass_profiles]
 
+        # MacSyFinder resolves competing profiles within a run before any model
+        # sees the hits. This also collapses repeated-domain rows on the same protein.
+        best_hits = _select_best_hits_per_position(pass_hits)
+        hits_by_accession = _index_hits_by_accession(best_hits)
+        accessions_in_data = set(hits_by_accession)
+
+        candidate_hits: list[SystemHit] = []
+        models_with_hits = 0
+        for model_name in sorted(pass_models):
+            model = pass_models[model_name]
+            relevant_profiles = model.all_profiles & accessions_in_data
+            if not relevant_profiles:
+                continue
+            models_with_hits += 1
+            model_hits = [
+                hit
+                for profile in sorted(relevant_profiles)
+                for hit in hits_by_accession.get(profile, ())
+            ]
+            candidate_hits.extend(_detect_model_systems(model_hits, model))
+
+        pass_unresolved: list[dict] = []
+        pass_selected = resolve_conflicts(candidate_hits, unresolved=pass_unresolved)
+        for entry in pass_unresolved:
+            entry["pass"] = pass_name
+        unresolved.extend(pass_unresolved)
+        selected_hits.extend(pass_selected)
+        if verbose:
+            logger.info(
+                "  Pass %s: %d best protein-position hits from %d rows of its profiles; "
+                "%d models matched; %d candidates; %d systems%s",
+                pass_name, len(best_hits), len(pass_hits), models_with_hits,
+                len(candidate_hits), len(pass_selected),
+                f"; {len(pass_unresolved)} components skipped by the conflict-solver budget"
+                if pass_unresolved else "",
+            )
+
+    # Deterministic order (and system IDs) across passes: IDs number each
+    # (genome, model) in this order, so a model's IDs depend only on its own calls.
+    selected_hits.sort(key=_system_sort_key)
     if verbose:
         logger.info(f"  {len(selected_hits)} systems after conflict resolution")
 
     # Build output DataFrames
     systems_df, genes_df = _build_output_dataframes(selected_hits, source)
-    systems_df.attrs["unresolved_replicons"] = unresolved
+    systems_df.attrs["unresolved_components"] = unresolved
 
     elapsed = time.time() - t0
     if verbose:

@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
+from types import SimpleNamespace
 
 import duckdb
 import pytest
 
+import sharur.colocation as colocation
 from sharur.defensefinder import selection as sel
 from tests.defensefinder_fixtures import VERSION, hit, hits_frame, write_model_set
 
@@ -27,7 +30,7 @@ def _kept(model_set, *rows, **params):
 
 class TestDefaults:
     def test_thresholds_follow_the_installed_macsyfinder_and_defensefinder_defaults(self):
-        # macsylib 1.0.4 MacsyDefaults; DefenseFinder 2.0.1 overrides coverage to 0.4.
+        # MacSyFinder 2.1.4 (macsypy/config.py) MacsyDefaults; DefenseFinder 2.0.1 overrides coverage to 0.4.
         assert sel.MACSYFINDER_I_EVALUE_SEL == 1e-3
         assert sel.MACSYFINDER_COVERAGE_PROFILE == 0.5
         assert sel.MACSYFINDER_E_VALUE_SEARCH == 0.1
@@ -215,3 +218,90 @@ def test_stage07_loads_defensefinder_hits_with_macsyfinder_selection(tmp_path):
         builder._release_db()
     assert rows == [("p1", "Solo__SoloA"), ("p4", "RM_Type_X__MTases_FAM_1")]
     assert record == (VERSION, 5, 3, 2)
+
+
+# GA header lines and whether MacSyFinder 2.1.4 (macsypy/profile.py Profile._profile_features)
+# searches the profile with --cut_ga: exactly three tokens, one trailing ';' dropped.
+GA_LINES = {
+    "GA    25.00 22.00;": (25.0, 22.0),
+    "GA 25 22": (25.0, 22.0),
+    "GA    25.00;": None,
+    "GA    25.00 22.00 ;": None,
+    "GA    25.00 22.00 21.00;": None,
+    "GA    25.00; 22.00;": None,
+}
+
+
+class TestGaParsing:
+    @pytest.mark.parametrize(("line", "expected"), list(GA_LINES.items()))
+    def test_ga_line_is_read_as_macsyfinder_reads_it(self, line, expected):
+        assert sel.parse_ga_line(line) == expected
+
+    def test_rejected_ga_line_leaves_the_profile_on_the_evalue_search(self, tmp_path):
+        family = write_model_set(tmp_path / "models", extra_profiles={
+            "Solo__SoloB": ("Solo__SoloB", 100, "GA    25.00 22.00 ;"),
+        })
+        info = {p.stem: p for p in sel.load_model_set(family).profiles}["Solo__SoloB"]
+        assert (info.ga_seq, info.ga_dom) == (None, None)
+
+    @pytest.mark.parametrize("line", list(GA_LINES))
+    def test_ga_parsing_agrees_with_installed_macsyfinder(self, line, tmp_path):
+        profile_module = pytest.importorskip("macsypy.profile")
+        path = tmp_path / "x.hmm"
+        path.write_text("\n".join([
+            "HMMER3/f [3.3 | toy]", "NAME  X", "LENG  100", "ALPH  amino", line,
+            "STATS LOCAL MSV      -9.0  0.70", "HMM          A        C", "//",
+        ]) + "\n")
+        profile = profile_module.Profile.__new__(profile_module.Profile)
+        profile.path, profile.gene = str(path), SimpleNamespace(name="X")
+        _length, uses_cut_ga = profile._profile_features()
+        info = sel.parse_hmm_header(path)
+        assert uses_cut_ga == (info.ga_seq is not None)
+
+
+def test_stage07_reports_and_records_conflict_components_beyond_the_budget(
+    tmp_path, monkeypatch, capsys,
+):
+    module = _load_kb_module()
+    data = tmp_path / "data"
+    outputs = module.PipelineOutputs(**{
+        name: data / name for name in (
+            "stage00_dir", "stage01_dir", "stage02_dir", "stage03_dir", "stage04_dir",
+            "stage05a_dir", "stage05b_dir", "stage05c_dir", "stage06_dir",
+        )
+    })
+    hits_dir = outputs.stage04_dir / "defensefinder_results"
+    hits_dir.mkdir(parents=True)
+    hits_frame(hit("p1", "Solo__SoloA"), hit("p3", "Solo__SoloA")).to_csv(
+        hits_dir / "DefenseFinder_hits_df.tsv", sep="\t", index=False)
+    family = write_model_set(tmp_path / "models")
+    builder = module.KnowledgeBaseBuilder(outputs, tmp_path / "sharur.duckdb", force=True, threads=1,
+                                          defensefinder_models=family)
+    builder._init_db()
+    try:
+        builder.conn.execute("INSERT INTO bins (bin_id) VALUES ('b1')")
+        builder.conn.execute("INSERT INTO contigs (contig_id, bin_id, length) VALUES ('c1', 'b1', 90000)")
+        for i in (1, 3):
+            builder.conn.execute(
+                "INSERT INTO proteins (protein_id, contig_id, bin_id, start, end_coord, strand, "
+                "gene_index) VALUES (?, 'c1', 'b1', ?, ?, '+', ?)",
+                [f"p{i}", i * 10000, i * 10000 + 600, i * 10],
+            )
+        builder._load_annotations()
+        # Each Solo candidate is its own component; a budget of zero skips and reports both.
+        monkeypatch.setattr(colocation, "MAX_COMPONENT_CANDIDATES", 0)
+        builder._validate_defense_systems()
+        systems = builder.conn.execute("SELECT COUNT(*) FROM defense_systems").fetchone()[0]
+        parameters = builder.conn.execute(
+            "SELECT parameters FROM annotation_source_versions WHERE source = 'defensefinder'"
+        ).fetchone()[0]
+    finally:
+        builder._release_db()
+    out = " ".join(capsys.readouterr().out.split())
+    assert systems == 0
+    assert "2 conflict component(s) exceeded the exact conflict-solver budget" in out
+    assert "b1 / c1 genes 10-10" in out
+    skipped = json.loads(parameters)[sel.UNRESOLVED_COMPONENTS_KEY]
+    assert [(s["contig_id"], s["first_gene_index"], s["reason"], s["pass"]) for s in skipped] == [
+        ("c1", 10, "candidates", "DefenseFinder"), ("c1", 30, "candidates", "DefenseFinder"),
+    ]

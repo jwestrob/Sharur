@@ -17,6 +17,20 @@ A dry run reports the difference and discards the copy. ``publish`` atomically
 replaces the database (the staging file must live on the same filesystem), keeps
 the prior file as a hard-linked (or copied) backup beside it, and re-seals when a
 dataset seal exists.
+
+Publishing guards against concurrent use of the source database. DuckDB commits
+land in ``<db>.wal`` before a checkpoint touches the database file, so the change
+check covers the size and mtime of both files. Right before the swap the reload
+opens the source read-write, which takes DuckDB's exclusive file lock and fails
+while any other process has the database open (read-only or read-write), re-checks
+both files, and holds that lock through ``os.replace``. DuckDB locks with POSIX
+``fcntl`` record locks on macOS and Linux; the lock stays on the original inode, so
+from the final check until the swap no other DuckDB process can open or write the
+source, and processes that open the path afterwards get the new file. The backup
+link is made before the lock, because POSIX drops a process's ``fcntl`` locks when
+it closes any descriptor of that file (a fallback copy would). The guarantee binds
+DuckDB clients and other ``fcntl`` lock users; advisory locks can be unreliable on
+network filesystems.
 """
 
 from __future__ import annotations
@@ -42,10 +56,12 @@ from sharur.defensefinder.selection import (
     SelectionStats,
     annotation_rows,
     dedup_fam_variants,
+    describe_unresolved_components,
     file_sha256,
     load_model_set,
     read_hits,
     record_source_version,
+    record_unresolved_components,
     select_hits,
 )
 
@@ -97,12 +113,24 @@ class ReloadReport:
     after: Snapshot = field(default_factory=Snapshot)
     previous_model_version: str | None = None
     affected_proteins: int = 0
-    unresolved_replicons: int = 0
+    unresolved_components: list[dict] = field(default_factory=list)
     checks: dict[str, str] = field(default_factory=dict)
     new_tables: list[str] = field(default_factory=list)
     backup: Path | None = None
     resealed: bool = False
+    # True once os.replace and the seal update have succeeded.
+    published: bool = False
+    # Set when the database was replaced but re-sealing failed.
+    seal_error: str | None = None
     elapsed_s: float = 0.0
+
+    @property
+    def status(self) -> str:
+        if self.dry_run:
+            return "DRY RUN"
+        if self.seal_error is not None:
+            return "PUBLISHED, SEAL STALE"
+        return "PUBLISHED" if self.published else "STAGED (not published)"
 
     # --- derived views ------------------------------------------------- #
     @staticmethod
@@ -145,7 +173,7 @@ class ReloadReport:
         fam_lost = sorted(set(fam_before) - set(fam_after))
         s = self.stats
         lines = [
-            f"DefenseFinder reload {'DRY RUN' if self.dry_run else 'PUBLISHED'}: {self.database}",
+            f"DefenseFinder reload {self.status}: {self.database}",
             f"Model set: {self.model_family} {self.model_version or '(unversioned)'} "
             f"({self.profile_count:,} profiles); before-state families from "
             f"{self.previous_model_version or 'the same set'}",
@@ -180,8 +208,12 @@ class ReloadReport:
             f"Profile families with hits, no longer present ({len(fam_lost)}): {', '.join(fam_lost)}",
             f"Proteins with regenerated semantics: {self.affected_proteins:,}",
         ]
-        if self.unresolved_replicons:
-            lines.append(f"Replicons skipped by the conflict-solver budget: {self.unresolved_replicons}")
+        if self.unresolved_components:
+            lines.append(
+                f"Conflict components skipped by the conflict-solver budget "
+                f"({len(self.unresolved_components)}; no systems called from their genes):"
+            )
+            lines.extend(f"  {line}" for line in describe_unresolved_components(self.unresolved_components))
         lines.append("Checks:")
         lines.extend(f"  {name}: {result}" for name, result in self.checks.items())
         if self.new_tables:
@@ -190,6 +222,8 @@ class ReloadReport:
             lines.append(f"Backup: {self.backup}")
         if not self.dry_run:
             lines.append(f"Resealed: {self.resealed}")
+            if self.seal_error is not None:
+                lines.append(f"Seal update failed after the database was replaced: {self.seal_error}")
         lines.append(f"Elapsed: {self.elapsed_s:.1f}s")
         return "\n".join(lines)
 
@@ -221,7 +255,8 @@ class ReloadReport:
 
         record = report_dir / f"{label}_reload.json"
         payload = {
-            "database": str(self.database), "dry_run": self.dry_run,
+            "database": str(self.database), "dry_run": self.dry_run, "status": self.status,
+            "published": self.published, "seal_error": self.seal_error,
             "hits_path": str(self.hits_path), "hits_sha256": self.hits_sha256,
             "model_family": self.model_family, "model_version": self.model_version,
             "previous_model_version": self.previous_model_version,
@@ -229,7 +264,7 @@ class ReloadReport:
             "selection": self.stats.to_dict(), "sensitivity": self.sensitivity,
             "before": asdict(self.before), "after": asdict(self.after),
             "affected_proteins": self.affected_proteins,
-            "unresolved_replicons": self.unresolved_replicons,
+            "unresolved_components": self.unresolved_components,
             "checks": self.checks, "new_tables": self.new_tables,
             "backup": str(self.backup) if self.backup else None,
             "resealed": self.resealed, "elapsed_s": round(self.elapsed_s, 1),
@@ -399,9 +434,36 @@ def _set_affected(conn, affected: list[str]) -> None:
         conn.unregister("_affected_df")
 
 
-def _db_state(path: Path) -> tuple[int, int]:
+def _wal_path(path: Path) -> Path:
+    return path.with_name(path.name + ".wal")
+
+
+def _db_state(path: Path) -> tuple[int, int, int, int]:
+    """Size and mtime of the database file and of its WAL ((0, 0) when absent).
+
+    DuckDB writes commits to the WAL and folds them into the database file only at a
+    checkpoint, so a committed write by another process can leave the database file's
+    size and mtime unchanged.
+    """
     stat = path.stat()
-    return stat.st_size, stat.st_mtime_ns
+    wal = _wal_path(path)
+    try:
+        wal_stat = wal.stat()
+        wal_state = (wal_stat.st_size, wal_stat.st_mtime_ns)
+    except FileNotFoundError:
+        wal_state = (0, 0)
+    return stat.st_size, stat.st_mtime_ns, *wal_state
+
+
+def _exclusive_source_lock(db: Path, config: dict) -> duckdb.DuckDBPyConnection:
+    """Open the source read-write: DuckDB's exclusive lock, held by the caller until closed."""
+    try:
+        return duckdb.connect(str(db), config=config)
+    except duckdb.IOException as exc:
+        raise ReloadValidationError(
+            f"{db} is open in another process; close every connection to it and rerun the "
+            f"publish (staged copy discarded): {exc}"
+        ) from exc
 
 
 def selection_sensitivity(gates: pd.DataFrame, hits: pd.DataFrame,
@@ -477,7 +539,7 @@ def reload_defensefinder(
 
     from sharur.storage.migrations import MIGRATIONS, get_current_version
 
-    wal = db.with_name(db.name + ".wal")
+    wal = _wal_path(db)
     latest = max(v for v, _, _ in MIGRATIONS)
     if dry_run:
         # A dry run only reads the source: an outstanding WAL would make a file copy stale.
@@ -594,7 +656,7 @@ def reload_defensefinder(
             db_path=staging, models_dir=model_set.models_dir, model_family=model_set.family,
             source=SOURCE, verbose=False, connect_config=config,
         )
-        report.unresolved_replicons = len(systems_df.attrs.get("unresolved_replicons", []))
+        report.unresolved_components = list(systems_df.attrs.get("unresolved_components", []))
 
         # Every protein whose DefenseFinder-derived evidence can change: former and new raw
         # hits, former system members (annotations, member table, summary table, semantic
@@ -678,6 +740,10 @@ def reload_defensefinder(
             ).fetchone()[0]
             check("system_members_annotated", members == 0,
                   f"{members} system_proteins rows without a {SYSTEM_SOURCE} annotation")
+            recorded = record_unresolved_components(conn, report.unresolved_components)
+            check("caller_skips_recorded", recorded,
+                  f"{len(report.unresolved_components)} skipped conflict component(s) in "
+                  f"{SOURCE_VERSIONS_TABLE}.parameters")
             if regenerate_semantics and affected:
                 stamps = conn.execute(
                     f"SELECT scope FROM {_APPENDED} WHERE generation_id > {provenance_max}"
@@ -694,34 +760,59 @@ def reload_defensefinder(
         finally:
             conn.close()
 
-        if report_dir is not None:
-            report.elapsed_s = time.monotonic() - started
-            report.write(Path(report_dir), label or db.parent.name)
+        def write_report() -> None:
+            if report_dir is not None:
+                report.elapsed_s = time.monotonic() - started
+                report.write(Path(report_dir), label or db.parent.name)
+
+        # Labelled DRY RUN, or STAGED until the swap and the seal update succeed.
+        write_report()
         if dry_run:
             return report
 
         if _db_state(db) != source_state:
             raise ReloadValidationError(f"{db} changed during the reload; staged copy discarded")
-        if _before_publish is not None:
-            _before_publish(staging)
 
+        # The backup comes before the lock: a fallback copy opens and closes the source,
+        # and closing any descriptor of a file drops the process's fcntl locks on it.
         backup = db.with_name(f"{db.name}.pre-defensefinder-reload-{time.strftime('%Y%m%dT%H%M%S')}")
         try:
             os.link(db, backup)
         except OSError:
             shutil.copy2(db, backup)
-        os.replace(staging, db)
+        swapped = False
+        try:
+            lock = _exclusive_source_lock(db, config)
+            try:
+                if wal.exists() or _db_state(db) != source_state:
+                    raise ReloadValidationError(
+                        f"{db} changed during the reload; staged copy discarded"
+                    )
+                if _before_publish is not None:
+                    _before_publish(staging)
+                os.replace(staging, db)
+                swapped = True
+            finally:
+                lock.close()
+        finally:
+            if not swapped:
+                backup.unlink(missing_ok=True)
         report.backup = backup
 
         seal = db.parent / "dataset.seal.json"
         if reseal and seal.exists():
             from sharur.dataset_seal import seal_dataset
 
-            seal_dataset(db, output_path=seal, force=True)
+            try:
+                seal_dataset(db, output_path=seal, force=True)
+            except Exception as exc:
+                report.seal_error = f"{type(exc).__name__}: {exc}"
+                report.published = True
+                write_report()
+                raise
             report.resealed = True
-        if report_dir is not None:
-            report.elapsed_s = time.monotonic() - started
-            report.write(Path(report_dir), label or db.parent.name)
+        report.published = True
+        write_report()
         return report
     finally:
         for leftover in (staging, staging.with_name(staging.name + ".wal")):
