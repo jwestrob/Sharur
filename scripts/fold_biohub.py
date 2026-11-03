@@ -1,35 +1,53 @@
 #!/usr/bin/env python3
-"""Fold proteins with ESMFold2 through the Biohub batch API and write PDB files.
+"""Fold proteins with ESMFold2 through the Biohub batch API, optionally with an MSA and ligands.
 
 No GPU and no third-party packages: the script only talks HTTP (stdlib urllib), so it
 runs on the Mac or the biotite login node without loading either.
 
 Usage:
-    python scripts/fold_biohub.py OUT_DIR input.faa [more.faa ...] [--pae] [--model NAME]
+    # plain fold (fast model, endpoint "fold")
+    python scripts/fold_biohub.py OUT_DIR input.faa [more.faa ...]
 
-Auth: BIOHUB_API_KEY, or ESM_API_KEY (the same key works). On Jacob's Mac ESM_API_KEY is
-set in the shell environment; on biotite it is not set (as of 2026-11-03).
+    # protein + ligands and/or MSA (full model, endpoint "fold_all_atom")
+    python scripts/fold_biohub.py OUT_DIR one_protein.faa --msa family.a3m --ligand HEC:auto
+    python scripts/fold_biohub.py OUT_DIR many.faa --msa-dir msas/ --ligand HEC:auto --ligand CA:2
+    python scripts/fold_biohub.py OUT_DIR p.faa --smiles "CC(=O)O:1"
 
-Output, per sequence (named from the first header token, sanitized):
-    OUT_DIR/<name>.pdb    atom37 coordinates, pLDDT x 100 in the B-factor column
-    OUT_DIR/<name>.json   model, pTM, per-residue pLDDT, sequence (and PAE with --pae)
-    OUT_DIR/summary.tsv   name, length, mean pLDDT, pTM, full header
+Options:
+    --msa FILE          one MSA for a single input sequence (aligned FASTA or A3M)
+    --msa-dir DIR       per-sequence MSAs named <name>.a3m / .fa / .fasta / .aln (name = sanitized
+                        first header token, as used for the output files)
+    --ligand CCD:N      add N copies of a CCD ligand (repeatable). HEC:auto adds one c-type heme
+                        per CxxCH motif in each sequence.
+    --smiles SMI:N      add N copies of a SMILES ligand (repeatable)
+    --model NAME        default esmfold2-fast-2026-05 for plain folds, esmfold2-2026-05 for all-atom
+    --pae               request and save PAE
 
-API facts (docs.biohub.ai/api/protein/models/batch_overview, checked 2026-11-03):
-    - base https://biohub.ai/api/v1/batch, endpoints submit/list/status/cancel, Bearer auth
-    - model esmfold2-fast-2026-05; up to 4,096 tokens per sequence; 2,000 items per submit
-    - quota 5,000 fold items per user per day; 429 responses carry Retry-After
-    - each finished task returns a signed URL to a JSON with `coordinates` (atom37, null for
-      absent atoms), `plddt` (0-1 scale) and `ptm`; there is no PDB string
-    - sequences may contain only amino-acid letters (plus X, B, Z, U, O, ':' and '|'); a
-      trailing '*' from gene callers is rejected with 422, so this script strips it
-    - results are deleted 31 days after submission
+MSA handling: lowercase A3M insertions are dropped; the row whose ungapped sequence equals the
+query (else the first row) becomes the anchor; columns where the anchor has a gap are removed, so
+every row has the query's length. Build MSAs on biotite (mafft on a protein family, or
+colabfold_search); this script only reads them.
+
+Auth: BIOHUB_API_KEY, or ESM_API_KEY (the same key works). On Jacob's Mac ESM_API_KEY is set in
+the shell environment; on biotite it is not set (as of 2026-11-03).
+
+Output per sequence: <name>.pdb (protein ATOM records plus ligand HETATM records on chains B, C, ...;
+pLDDT x 100 in the B-factor column), <name>.json (model, pTM, ipTM, pLDDT, PAE if requested), and
+summary.tsv. With HEC ligands, summary.tsv also reports how many hemes sit on a CxxCH motif
+(motif His axial to Fe within 2.6 A and both Cys SG within 2.7 A of the heme vinyl carbons).
+
+API facts (docs.biohub.ai, checked 2026-11-03): base https://biohub.ai/api/v1/batch; endpoints
+fold / fold_all_atom; up to 4,096 tokens per item (ligand atoms count); 2,000 items per submission;
+5,000 items per user per day shared across fold endpoints; a trailing '*' is rejected (stripped
+here); results expire after 31 days. Covalent bonds are supported by the API but not exposed here;
+hemes placed without them landed on their CxxCH motifs in 32/34 test cases.
 """
 import argparse
 import json
 import math
 import os
 import re
+import string
 import sys
 import time
 import urllib.error
@@ -41,14 +59,16 @@ ATOM37 = ["N", "CA", "C", "CB", "O", "CG", "CG1", "CG2", "OG", "OG1", "SG", "CD"
           "OH", "CZ", "CZ2", "CZ3", "NZ", "OXT"]
 AA3 = dict(A="ALA", R="ARG", N="ASN", D="ASP", C="CYS", Q="GLN", E="GLU", G="GLY", H="HIS", I="ILE", L="LEU",
            K="LYS", M="MET", F="PHE", P="PRO", S="SER", T="THR", W="TRP", Y="TYR", V="VAL")
+AA1 = {v: k for k, v in AA3.items()}
 MAX_ITEMS = 2000
+CHAIN_IDS = string.ascii_uppercase[1:] + string.ascii_lowercase + string.digits
 
 
 def headers():
     key = os.environ.get("BIOHUB_API_KEY") or os.environ.get("ESM_API_KEY")
     if not key:
         sys.exit("set BIOHUB_API_KEY or ESM_API_KEY")
-    return {"Authorization": f"Bearer {key}", "Content-Type": "application/json", "User-Agent": "sharur-fold/0.1"}
+    return {"Authorization": f"Bearer {key}", "Content-Type": "application/json", "User-Agent": "sharur-fold/0.2"}
 
 
 def post(path, body, H):
@@ -60,7 +80,7 @@ def post(path, body, H):
             if e.code == 429:
                 time.sleep(int(e.headers.get("Retry-After", "30")))
                 continue
-            sys.exit(f"HTTP {e.code} on {path}: {e.read().decode()[:300]}")
+            sys.exit(f"HTTP {e.code} on {path}: {e.read().decode()[:400]}")
     sys.exit("rate-limited repeatedly")
 
 
@@ -68,20 +88,48 @@ def read_fasta(paths):
     recs, h, s = [], None, []
     for p in paths:
         for line in open(p):
-            line = line.strip()
+            line = line.rstrip("\n")
             if line.startswith(">"):
                 if h is not None:
                     recs.append((h, "".join(s)))
-                h, s = line[1:], []
-            elif line:
-                s.append(line)
+                h, s = line[1:].strip(), []
+            elif line.strip():
+                s.append(line.strip())
         if h is not None:
             recs.append((h, "".join(s)))
             h, s = None, []
     return recs
 
 
-def to_pdb(seq, coords, plddt):
+def load_msa(path, query):
+    rows = [re.sub(r"[a-z.]", "", s) for _, s in read_fasta([path])]  # drop A3M insertions
+    rows = [r.upper().replace(".", "-") for r in rows if r]
+    if not rows:
+        sys.exit(f"empty MSA: {path}")
+    anchor = next((i for i, r in enumerate(rows) if r.replace("-", "") == query), 0)
+    cols = [k for k, a in enumerate(rows[anchor]) if a != "-"]
+    out = ["".join(r[k] if k < len(r) else "-" for k in cols) for r in rows]
+    out.insert(0, out.pop(anchor))
+    if out[0] != query:
+        print(f"  note: MSA anchor row differs from the query in {sum(a != b for a, b in zip(out[0], query))} positions "
+              f"({path}); using the query as row 1", flush=True)
+        out[0] = query
+    if len({len(r) for r in out}) != 1 or len(out[0]) != len(query):
+        sys.exit(f"MSA {path} does not map onto the query (length {len(query)})")
+    return out
+
+
+def parse_counts(specs, kind):
+    out = []
+    for s in specs or []:
+        val, _, n = s.rpartition(":")
+        if not val:
+            sys.exit(f"--{kind} expects VALUE:N, got {s}")
+        out.append((val, n))
+    return out
+
+
+def to_pdb_atom37(seq, coords, plddt):
     out, n = [], 1
     for i, (aa, res) in enumerate(zip(seq, coords)):
         for name, xyz in zip(ATOM37, res):
@@ -91,37 +139,122 @@ def to_pdb(seq, coords, plddt):
             out.append(f"ATOM  {n:5d} {nm} {AA3.get(aa, 'UNK')} A{i + 1:4d}    "
                        f"{xyz[0]:8.3f}{xyz[1]:8.3f}{xyz[2]:8.3f}  1.00{plddt[i] * 100:6.2f}           {name[0]}")
             n += 1
-    return "\n".join(out + ["TER", "END"]) + "\n"
+    return "\n".join(out + ["TER", "END"]) + "\n", None
+
+
+def to_pdb_complex(c, lig_names):
+    """Write the fold_all_atom `complex` object; return (pdb_text, atoms) for scoring."""
+    chains = [c["metadata"]["chain_lookup"][str(x)] for x in c["chain_id"]]
+    lines, atoms, n, resno = [], [], 1, {}
+    for t, (a0, a1) in enumerate(c["token_to_atoms"]):
+        ch = chains[t]
+        resno[ch] = resno.get(ch, 0) + 1
+        tok = c["sequence"][t]
+        if ch == "A":
+            rn = tok if len(tok) == 3 else AA3.get(tok, "UNK")
+        else:
+            rn = lig_names.get(ch, "LIG")[:3]
+        for k in range(a0, a1):
+            x, y, z = c["atom_positions"][k]
+            an, el = c["atom_names"][k], c["atom_elements"][k]
+            nm = f" {an:<3}" if len(an) < 4 else an[:4]
+            rec = "HETATM" if c["atom_hetero"][k] else "ATOM  "
+            lines.append(f"{rec}{n:5d} {nm} {rn:>3} {ch}{resno[ch]:4d}    {x:8.3f}{y:8.3f}{z:8.3f}  1.00"
+                         f"{c['plddt'][t] * 100:6.2f}          {el:>2}")
+            atoms.append((ch, resno[ch], rn, an, (x, y, z), c["plddt"][t]))
+            n += 1
+    return "\n".join(lines + ["END"]) + "\n", atoms
+
+
+def heme_check(atoms, query):
+    motif = {m.start() + 5: (m.start() + 1, m.start() + 4) for m in re.finditer(r"(?=C..CH)", query)}
+    prot = [a for a in atoms if a[0] == "A"]
+    ne2 = [(a[1], a[4]) for a in prot if a[2] == "HIS" and a[3] == "NE2"]
+    sg = {a[1]: a[4] for a in prot if a[2] == "CYS" and a[3] == "SG"}
+    n_hec, n_ok = 0, 0
+    for ch in sorted({a[0] for a in atoms if a[0] != "A"}):
+        het = {a[3]: a[4] for a in atoms if a[0] == ch}
+        if "FE" not in het or not ({"CAB", "CAC"} & het.keys()):
+            continue
+        n_hec += 1
+        ax = [r for r, p in ne2 if math.dist(het["FE"], p) < 2.6]
+        mh = [r for r in ax if r in motif]
+        if mh:
+            vin = [het[k] for k in ("CAB", "CAC") if k in het]
+            d = [min(math.dist(sg[c], v) for v in vin) for c in motif[mh[0]] if c in sg]
+            n_ok += len(d) == 2 and max(d) < 2.7
+    return n_hec, n_ok
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap = argparse.ArgumentParser(description="Fold with ESMFold2 via the Biohub batch API (see module docstring).")
     ap.add_argument("out_dir")
     ap.add_argument("fasta", nargs="+")
-    ap.add_argument("--model", default="esmfold2-fast-2026-05")
+    ap.add_argument("--model", default=None)
+    ap.add_argument("--msa", help="MSA for a single input sequence (aligned FASTA or A3M)")
+    ap.add_argument("--msa-dir", help="directory of per-sequence MSAs named <name>.a3m/.fa/.fasta/.aln")
+    ap.add_argument("--ligand", action="append", help="CCD:N, repeatable; HEC:auto = one heme per CxxCH")
+    ap.add_argument("--smiles", action="append", help="SMILES:N, repeatable")
     ap.add_argument("--pae", action="store_true", help="request and save the PAE matrix")
     ap.add_argument("--poll", type=int, default=15, help="seconds between status checks")
     a = ap.parse_args()
     H = headers()
     os.makedirs(a.out_dir, exist_ok=True)
 
-    recs = [(h, s.rstrip("*")) for h, s in read_fasta(a.fasta)]
+    recs = [(h, s.rstrip("*").upper()) for h, s in read_fasta(a.fasta)]
     bad = [h for h, s in recs if "*" in s]
     if bad:
         sys.exit(f"internal stop codon in {len(bad)} sequences, e.g. {bad[0][:60]}")
+    if a.msa and len(recs) != 1:
+        sys.exit("--msa takes one input sequence; use --msa-dir for several")
     names, seen = [], {}
     for h, _ in recs:
         nm = re.sub(r"[^A-Za-z0-9_.-]", "_", h.split()[0])[:100] or "seq"
         seen[nm] = seen.get(nm, 0) + 1
         names.append(nm if seen[nm] == 1 else f"{nm}_{seen[nm]}")
 
-    tasks = []  # (index, task_id)
-    for start in range(0, len(recs), MAX_ITEMS):
-        chunk = recs[start:start + MAX_ITEMS]
-        body = {"endpoint": "fold",
-                "payload": [{"model": a.model, "sequence": s, "include_pae": a.pae} for _, s in chunk]}
-        batch = post("/submit", body, H)["data"]["batch_id"]
-        print(f"batch {batch}: {len(chunk)} items", flush=True)
+    ligs, smis = parse_counts(a.ligand, "ligand"), parse_counts(a.smiles, "smiles")
+    all_atom = bool(ligs or smis or a.msa or a.msa_dir)
+    model = a.model or ("esmfold2-2026-05" if all_atom else "esmfold2-fast-2026-05")
+    endpoint = "fold_all_atom" if all_atom else "fold"
+
+    payload, lig_maps = [], []
+    for nm, (h, s) in zip(names, recs):
+        if not all_atom:
+            payload.append({"model": model, "sequence": s, "include_pae": a.pae})
+            lig_maps.append({})
+            continue
+        prot = {"type": "protein", "id": "A", "sequence": s}
+        mpath = a.msa
+        if a.msa_dir:
+            mpath = next((os.path.join(a.msa_dir, nm + ext) for ext in (".a3m", ".fa", ".fasta", ".aln")
+                          if os.path.exists(os.path.join(a.msa_dir, nm + ext))), None)
+            if not mpath:
+                print(f"  note: no MSA for {nm} in {a.msa_dir}; folding single-sequence", flush=True)
+        if mpath:
+            prot["msa"] = {"sequences": load_msa(mpath, s)}
+        ents, lmap, k = [prot], {}, 0
+        for code, n in ligs:
+            cnt = len(re.findall(r"(?=C..CH)", s)) if n == "auto" else int(n)
+            for _ in range(cnt):
+                cid = CHAIN_IDS[k]; k += 1
+                ents.append({"type": "ligand", "id": cid, "ccd": [code]}); lmap[cid] = code
+        for smi, n in smis:
+            for _ in range(int(n)):
+                cid = CHAIN_IDS[k]; k += 1
+                ents.append({"type": "ligand", "id": cid, "smiles": smi}); lmap[cid] = "LIG"
+        payload.append({"model": model, "all_atom_input": {"sequences": ents}, "include_pae": a.pae,
+                        "include_pair_chains_iptm": True})
+        lig_maps.append(lmap)
+        desc = ", ".join(f"{v}x{sum(1 for x in lmap.values() if x == v)}" for v in dict.fromkeys(lmap.values()))
+        print(f"  {nm}: L={len(s)}{' + MSA ' + str(len(prot['msa']['sequences'])) + ' rows' if 'msa' in prot else ''}"
+              f"{' + ' + desc if desc else ''}", flush=True)
+
+    tasks = []
+    for start in range(0, len(payload), MAX_ITEMS):
+        chunk = payload[start:start + MAX_ITEMS]
+        batch = post("/submit", {"endpoint": endpoint, "payload": chunk}, H)["data"]["batch_id"]
+        print(f"batch {batch}: {len(chunk)} items, endpoint {endpoint}, model {model}", flush=True)
         tasks += [(start + i, f"{batch}-{i:05d}") for i in range(len(chunk))]
 
     pending, rows, failed = dict(tasks), [], []
@@ -139,16 +272,28 @@ def main():
                 continue
             j = json.loads(urllib.request.urlopen(d["response"], timeout=120).read())
             h, s = recs[i]
-            open(f"{a.out_dir}/{names[i]}.pdb", "w").write(to_pdb(s, j["coordinates"], j["plddt"]))
-            keep = {k: j.get(k) for k in ("model", "ptm", "plddt", "sequence", "pae")}
+            if all_atom:
+                pdb, atoms = to_pdb_complex(j["complex"], lig_maps[i])
+                ca = [x[5] for x in atoms if x[0] == "A" and x[3] == "CA"]
+                mp = 100 * sum(ca) / max(1, len(ca))
+                n_hec, n_ok = heme_check(atoms, s) if "HEC" in lig_maps[i].values() else (0, 0)
+            else:
+                pdb, _ = to_pdb_atom37(s, j["coordinates"], j["plddt"])
+                mp = 100 * sum(j["plddt"]) / len(j["plddt"])
+                n_hec = n_ok = 0
+            open(f"{a.out_dir}/{names[i]}.pdb", "w").write(pdb)
+            keep = {k: j.get(k) for k in ("model", "ptm", "interface_ptm", "plddt", "pae", "pair_chains_iptm")}
             json.dump(keep, open(f"{a.out_dir}/{names[i]}.json", "w"))
-            mp = 100 * sum(j["plddt"]) / len(j["plddt"])
-            rows.append((names[i], len(s), round(mp, 1), round(j["ptm"], 3), h))
-            print(f"done {names[i]}  L={len(s)}  pLDDT={mp:.1f}  pTM={j['ptm']:.2f}", flush=True)
+            iptm = j.get("interface_ptm")
+            rows.append((names[i], len(s), round(mp, 1), round(j["ptm"], 3), "" if iptm is None else round(iptm, 3),
+                         f"{n_ok}/{n_hec}" if n_hec else "", h))
+            print(f"done {names[i]}  L={len(s)}  pLDDT={mp:.1f}  pTM={j['ptm']:.2f}"
+                  f"{f'  ipTM={iptm:.2f}' if iptm is not None else ''}{f'  hemes on CxxCH {n_ok}/{n_hec}' if n_hec else ''}",
+                  flush=True)
             del pending[i]
 
     with open(f"{a.out_dir}/summary.tsv", "w") as f:
-        f.write("name\tlength\tmean_plddt\tptm\theader\n")
+        f.write("name\tlength\tprotein_plddt\tptm\tiptm\themes_on_cxxch\theader\n")
         for r in sorted(rows):
             f.write("\t".join(map(str, r)) + "\n")
     print(f"{len(rows)} structures, {len(failed)} failed -> {a.out_dir}")
