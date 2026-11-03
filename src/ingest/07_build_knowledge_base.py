@@ -29,6 +29,7 @@ from rich.console import Console
 
 from sharur.contig_context import assemblies_from_stage00, fasta_records, parse_partial
 from sharur.defensefinder import selection as df_selection
+from sharur.kofam import SCORE_BASIS_FULL, kofam_scores, record_ko_score_basis
 from sharur.storage.migrations import run_migrations
 from sharur.storage.schema import SCHEMA
 
@@ -242,6 +243,9 @@ class KnowledgeBaseBuilder:
         self.pfam_acc_to_desc: Dict[str, str] = {}
         self.kegg_def: Dict[str, str] = {}
         self.kegg_def_short: Dict[str, str] = {}
+        # KO -> KOfam score_type ('full'/'domain'/None); None when no ko_list was found.
+        self.kegg_score_types: Optional[Dict[str, Optional[str]]] = None
+        self.ko_list_path: Optional[Path] = None
         self._load_reference_maps()
 
     def _load_reference_maps(self) -> None:
@@ -269,6 +273,12 @@ class KnowledgeBaseBuilder:
                 kdf = pd.read_csv(ko_path, sep="\t")
                 self.kegg_def = dict(zip(kdf["knum"], kdf["definition"]))
                 self.kegg_def_short = dict(zip(kdf["knum"], kdf.get("simplified_definition", kdf["definition"])))
+                if "score_type" in kdf:
+                    self.ko_list_path = ko_path
+                    self.kegg_score_types = {
+                        ko: score_type if score_type in ("full", "domain") else None
+                        for ko, score_type in zip(kdf["knum"], kdf["score_type"], strict=True)
+                    }
             except Exception as exc:
                 logger.warning(f"Failed to load KO reference ({ko_path}): {exc}")
 
@@ -744,6 +754,8 @@ class KnowledgeBaseBuilder:
         # Astra PFAM/KOFAM TSV
         tsv_files = list(self.outputs.stage04_dir.rglob("*_hits_df.tsv")) if self.outputs.stage04_dir.exists() else []
         console.print(f"  Found {len(tsv_files)} annotation TSV files")
+        # Which score the KO rows store, per KO table (None: the table's layout leaves it unknown).
+        ko_loads: list[tuple[Path, Optional[str], int, int]] = []
         for tsv in tsv_files:
             # Skip dbCAN raw HMM hits — _classify_cazymes() handles CAZy
             # annotation loading via 3-tool consensus pipeline
@@ -843,6 +855,16 @@ class KnowledgeBaseBuilder:
                 if "env_to" in df:
                     df["end_aa"] = df["end_aa"].fillna(df["env_to"])
 
+                # KOfam compares a KO's threshold with the full-sequence bitscore or,
+                # for score_type 'domain', the best domain bitscore: store that score,
+                # one row per (protein, KO) (the score fill above takes one domain's).
+                # The best-hit dedup below ranks a protein's KOs on this score.
+                ko_basis: Optional[str] = None
+                ko_raw_rows = len(df)
+                if source == "kegg" and {"score_primary", "dom_bitscore"} <= set(df.columns):
+                    df, ko_basis = kofam_scores(df, self.kegg_score_types, full="score_primary",
+                                                domain="dom_bitscore")
+
                 df["source"] = source
 
                 # Apply e-value threshold filtering
@@ -866,10 +888,27 @@ class KnowledgeBaseBuilder:
 
                 n_rows = self._insert_annotation_frame(df)
                 console.print(f"    {source}: {n_rows:,} annotations from {tsv.name} ({time.time()-t_ann:.1f}s)")
+                if source == "kegg":
+                    ko_loads.append((tsv, ko_basis, ko_raw_rows, n_rows))
             except Exception as exc:
                 logger.exception(f"Failed to load annotations from {tsv}")
                 console.print(f"    [red]FAILED: {tsv.name}: {exc}[/red]")
                 raise
+
+        if ko_loads:
+            bases = {basis for _, basis, _, _ in ko_loads}
+            basis = bases.pop() if len(bases) == 1 else None
+            record_ko_score_basis(
+                self.conn, "kegg", basis, ko_list=self.ko_list_path,
+                hits_paths=[tsv for tsv, _, _, _ in ko_loads],
+                raw_rows=sum(raw for _, _, raw, _ in ko_loads), loaded_rows=sum(n for *_, n in ko_loads),
+            )
+            if basis is None:
+                logger.warning("KO tables lack full-sequence and domain bitscores (or mix score bases): "
+                               "KO scores are stored without a recorded basis")
+            elif basis == SCORE_BASIS_FULL:
+                logger.warning("KOfam ko_list not found: KO rows store the full-sequence bitscore for every KO, "
+                               "including score_type 'domain' KOs")
 
         # dbCAN JSON — backward compatibility for datasets that ran dbcan_cazyme.py.
         # For new ingestions, _classify_cazymes() runs DIAMOND directly and takes precedence.
