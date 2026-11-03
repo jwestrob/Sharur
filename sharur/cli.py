@@ -1489,7 +1489,10 @@ def reverify_command(
         False, "--compare",
         help="Run each triple under the baseline (as recorded unless --baseline) and under "
              "--substitute; report every result that changes."),
-    workers: Optional[int] = typer.Option(None, "--workers", "-j", help="Parallel replay processes."),
+    workers: Optional[int] = typer.Option(
+        None, "--workers", "-j",
+        help="Parallel replay processes (default: CPUs / --threads); capped so workers x "
+             "(--memory-limit + 1.5 GiB) fits half of available memory."),
     threads: int = typer.Option(2, "--threads", help="DuckDB threads per replay connection."),
     memory_limit: str = typer.Option("4GB", "--memory-limit", help="DuckDB memory limit per connection."),
     timeout: float = typer.Option(1800.0, "--timeout", help="Seconds per shell triple."),

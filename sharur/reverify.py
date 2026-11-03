@@ -38,15 +38,19 @@ written in ``expected``, equals it.
 from __future__ import annotations
 
 import concurrent.futures as cf
+import contextlib
 import decimal
 import json
+import logging
 import multiprocessing
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from dataclasses import asdict, dataclass, field
 from decimal import ROUND_HALF_EVEN, ROUND_HALF_UP, Decimal
@@ -54,6 +58,7 @@ from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 STATUSES = ("OK", "FAIL", "ERROR")
+logger = logging.getLogger(__name__)
 _SQL_START = re.compile(r"(?is)^\s*(?:--[^\n]*\n\s*)*\(?\s*(select|with|from|pragma|describe|summarize|show|values)\b")
 _PY_CMD = re.compile(r"^\s*(?:\S*/)?python3?\s+(-c|-m|\S+\.py)\b")
 _IMPORT_NAME = re.compile(r"__import__\(\s*['\"]([A-Za-z_][\w.]*)['\"]")
@@ -389,14 +394,126 @@ def _shim_config(sub: Substitution, threads: int, memory_limit: str, temp_dir: s
 
 
 # --------------------------------------------------------------------------- #
+# Pool sizing
+# --------------------------------------------------------------------------- #
+# Resident memory a worker holds beyond its DuckDB limit: the interpreter, pandas and numpy,
+# fetched results, and helper modules a replay imports. Workers with a 4 GB limit reached
+# 1.7-5.5 GB resident replaying the SR-VP defense findings (2026-11-02).
+WORKER_OVERHEAD_BYTES = 3 << 29  # 1.5 GiB
+# Share of currently available memory the pool may commit.
+MEMORY_FRACTION = 0.5
+
+_UNITS = {"": 1, "B": 1, "K": 1 << 10, "KB": 1 << 10, "KIB": 1 << 10, "M": 1 << 20, "MB": 1 << 20,
+          "MIB": 1 << 20, "G": 1 << 30, "GB": 1 << 30, "GIB": 1 << 30, "T": 1 << 40, "TB": 1 << 40,
+          "TIB": 1 << 40}
+
+
+def memory_bytes(text: str) -> int:
+    """Bytes in a DuckDB-style size (``4GB``, ``512MiB``, ``1.5 G``); units count in 1024s."""
+    m = re.fullmatch(r"\s*([\d.]+)\s*([A-Za-z]*)\s*", str(text))
+    if not m or m.group(2).upper() not in _UNITS:
+        raise ValueError(f"memory size not understood: {text!r}")
+    return int(float(m.group(1)) * _UNITS[m.group(2).upper()])
+
+
+def available_memory() -> int | None:
+    """Bytes this process can still commit: free memory, capped by a Slurm allocation."""
+    avail: int | None = None
+    try:
+        import psutil  # noqa: PLC0415
+
+        avail = int(psutil.virtual_memory().available)
+    except ImportError:
+        try:
+            meminfo = Path("/proc/meminfo").read_text()
+            m = re.search(r"^MemAvailable:\s+(\d+) kB", meminfo, re.M)
+            avail = int(m.group(1)) * 1024 if m else None
+        except OSError:
+            try:  # macOS: free, inactive, speculative and purgeable pages can be reclaimed
+                out = subprocess.run(["vm_stat"], capture_output=True, text=True, timeout=5, check=False).stdout
+                page = int(re.search(r"page size of (\d+) bytes", out).group(1))
+                pages = sum(int(n) for n in re.findall(
+                    r"Pages (?:free|inactive|speculative|purgeable):\s+(\d+)", out))
+                avail = pages * page
+            except (OSError, AttributeError, ValueError, subprocess.SubprocessError):
+                avail = None
+    slurm_mb = os.environ.get("SLURM_MEM_PER_NODE")
+    if not slurm_mb and os.environ.get("SLURM_MEM_PER_CPU"):
+        cpus = os.environ.get("SLURM_CPUS_ON_NODE") or os.environ.get("SLURM_CPUS_PER_TASK") or "1"
+        slurm_mb = str(int(os.environ["SLURM_MEM_PER_CPU"]) * int(cpus))
+    if slurm_mb and slurm_mb.isdigit():
+        cap = int(slurm_mb) << 20
+        avail = cap if avail is None else min(avail, cap)
+    return avail
+
+
+def plan_workers(requested: int | None, threads: int, memory_limit: str, n_jobs: int,
+                 available: int | None = None) -> tuple[int, str | None]:
+    """Worker count for a replay pool, and a note when free memory lowered it.
+
+    The default is one worker per ``threads`` CPUs. Any count, requested or default, is
+    capped so that workers * (``memory_limit`` + ``WORKER_OVERHEAD_BYTES``) stays within
+    ``MEMORY_FRACTION`` of available memory, with one worker always allowed.
+    """
+    cpu_default = max(1, (os.cpu_count() or 2) // max(1, threads))
+    want = max(1, min(requested or cpu_default, n_jobs or 1))
+    avail = available_memory() if available is None else available
+    if avail is None:
+        return want, None
+    per_worker = memory_bytes(memory_limit) + WORKER_OVERHEAD_BYTES
+    budget = int(avail * MEMORY_FRACTION)
+    fits = max(1, budget // per_worker)
+    if want <= fits:
+        return want, None
+    gib = 1 << 30
+    return fits, (f"{want} workers lowered to {fits}: {avail / gib:.1f} GiB available, "
+                  f"{MEMORY_FRACTION:.0%} budget at {per_worker / gib:.1f} GiB per worker "
+                  f"(--memory-limit {memory_limit} + {WORKER_OVERHEAD_BYTES / gib:.1f} GiB)")
+
+
+# --------------------------------------------------------------------------- #
 # Worker
 # --------------------------------------------------------------------------- #
 _WORKER: dict[str, Any] = {}
+# Seconds between a worker's checks that the process that started it is still alive.
+PARENT_POLL_SECONDS = 1.0
 
 
-def _worker_init(root: str, shim_dir: str, threads: int, memory_limit: str, temp_dir: str) -> None:
+def _kill_shell_group() -> None:
+    """SIGKILL the process group of the shell triple this worker is running, if any.
+
+    The group outlives /bin/sh while anything the command started is still in it, so the
+    kill goes to the group whether or not the shell itself has exited.
+    """
+    proc = _WORKER.get("shell")
+    if proc is not None:
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(proc.pid, signal.SIGKILL)
+
+
+def _exit_worker(*_: Any) -> None:
+    _kill_shell_group()
+    os._exit(1)
+
+
+def _watch_parent(parent_pid: int) -> None:
+    """Exit when the reverify process goes away; a worker reparented to init is an orphan."""
+    while True:
+        time.sleep(PARENT_POLL_SECONDS)
+        if os.getppid() != parent_pid:
+            _exit_worker()
+
+
+def _worker_init(root: str, shim_dir: str, threads: int, memory_limit: str, temp_dir: str,
+                 parent_pid: int | None = None) -> None:
     _WORKER.update(root=root, shim_dir=shim_dir, threads=threads,
                    memory_limit=memory_limit, temp_dir=temp_dir)
+    # A worker lives only as long as the reverify process: SIGTERM from the pool, or the
+    # parent's death by any signal, ends the worker and the shell triple it is running.
+    signal.signal(signal.SIGTERM, _exit_worker)
+    if parent_pid is not None:
+        threading.Thread(target=_watch_parent, args=(parent_pid,), name="reverify-parent-watch",
+                         daemon=True).start()
     # Replayed code and DuckDB's native progress bar write to fds 1 and 2; the parent's
     # stdout carries the report, so workers write to /dev/null.
     devnull = os.open(os.devnull, os.O_WRONLY)
@@ -483,11 +600,27 @@ def _run_one(triple: Triple, shim_cfg: str, timeout: float) -> Outcome:
             command = query[len("shell:"):] if query.startswith("shell:") else query
             env = dict(os.environ)
             env["PYTHONPATH"] = os.pathsep.join(filter(None, [_WORKER["shim_dir"], env.get("PYTHONPATH")]))
-            proc = subprocess.run(command, shell=True, cwd=root, capture_output=True, text=True,
-                                  timeout=timeout, executable="/bin/sh", env=env)
-            out = proc.stdout.strip()
+            # Its own session, so a timeout or the worker's exit kills every process the
+            # command starts, not only /bin/sh.
+            proc = subprocess.Popen(command, shell=True, cwd=root, stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE, text=True, executable="/bin/sh", env=env,
+                                    start_new_session=True)
+            _WORKER["shell"] = proc
+            try:
+                stdout, stderr = proc.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                _kill_shell_group()
+                try:  # a descendant that left the group could hold the pipes open
+                    proc.communicate(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                raise
+            finally:
+                _kill_shell_group()  # background children the command left behind
+                _WORKER.pop("shell", None)
+            out = stdout.strip()
             if proc.returncode != 0 and not out:
-                raise RuntimeError(f"exit {proc.returncode}: {proc.stderr.strip()[-300:]}")
+                raise RuntimeError(f"exit {proc.returncode}: {stderr.strip()[-300:]}")
             try:
                 observed = json.loads(out)
             except (json.JSONDecodeError, ValueError):
@@ -628,6 +761,8 @@ class ReverifyReport:
     selected_findings: int
     seconds: float
     citations: dict[str, list[str]] = field(default_factory=dict)
+    workers: int = 0
+    worker_note: str | None = None
 
     def counts(self, which: str = "replay") -> dict[str, int]:
         out = dict.fromkeys(STATUSES, 0)
@@ -660,6 +795,7 @@ class ReverifyReport:
             "baseline_substitutions": self.baseline_substitutions,
             "compare": self.compare, "selected_findings": self.selected_findings,
             "triples": len(self.results), "seconds": round(self.seconds, 1),
+            "workers": self.workers, "worker_note": self.worker_note,
             "replay_counts": self.counts("replay"),
             "baseline_counts": self.counts("baseline") if self.compare else None,
             "changed": len(self.changed()) if self.compare else None,
@@ -669,7 +805,9 @@ class ReverifyReport:
 
     def to_markdown(self, limit: int = 200) -> str:
         lines = [f"# Reverify: {len(self.results)} triples from {self.selected_findings} findings "
-                 f"({self.seconds:.0f} s)", ""]
+                 f"({self.seconds:.0f} s, {self.workers} worker{'' if self.workers == 1 else 's'})", ""]
+        if self.worker_note:
+            lines.append(f"Workers: {self.worker_note}.")
         if self.baseline_substitutions:
             lines.append("Baseline substitutions: " + "; ".join(
                 f"`{k}` → `{v}`" for k, v in self.baseline_substitutions.items()))
@@ -760,6 +898,21 @@ def find_citations(finding_ids: Iterable[str], globs: Sequence[str], root: Path)
     return out
 
 
+def _terminate_pool(pool: cf.ProcessPoolExecutor) -> None:
+    """Stop a replay pool now: drop queued replays, SIGTERM every worker, reap them."""
+    procs = list((getattr(pool, "_processes", None) or {}).values())
+    pool.shutdown(wait=False, cancel_futures=True)
+    for proc in procs:
+        if proc.is_alive():
+            proc.terminate()  # the worker's SIGTERM handler kills its shell triple's group
+    deadline = time.time() + 10
+    for proc in procs:
+        proc.join(max(0.0, deadline - time.time()))
+        if proc.is_alive():
+            proc.kill()
+            proc.join(5)
+
+
 def reverify(
     findings: Sequence[Path],
     *,
@@ -813,36 +966,54 @@ def reverify(
         if compare:
             jobs.append((i, "baseline", plain_cfg))
         jobs.append((i, "replay", sub_cfg))
-    n_workers = max(1, min(workers or max(1, (os.cpu_count() or 2) // max(1, threads)), len(jobs) or 1))
+    n_workers, worker_note = plan_workers(workers, threads, memory_limit, len(jobs))
+    if worker_note:
+        logger.warning("reverify: %s", worker_note)
     started = time.time()
+    # SIGTERM (pkill, a scheduler) becomes KeyboardInterrupt so the pool is torn down below.
+    previous_term: Any = None
+    term_installed = threading.current_thread() is threading.main_thread()
+    if term_installed:
+        def _on_term(signum: int, frame: Any) -> None:
+            raise KeyboardInterrupt(f"signal {signum}")
+
+        previous_term = signal.signal(signal.SIGTERM, _on_term)
+    pool: cf.ProcessPoolExecutor | None = None
     try:
         ctx = multiprocessing.get_context("spawn")
-        with cf.ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx,
-                                    initializer=_worker_init,
-                                    initargs=(str(root), str(shim_dir), threads, memory_limit, str(spill))) as pool:
-            # No max_tasks_per_child: CPython 3.12's pool stops replacing retired workers and
-            # hangs. Each task drops the helper modules it imported, which gives the same isolation.
-            futures = {pool.submit(_run_one, results[i].triple, cfg, timeout): (i, slot)
-                       for i, slot, cfg in jobs}
-            done = 0
-            for fut in cf.as_completed(futures):
-                i, slot = futures[fut]
-                try:
-                    outcome = fut.result()
-                except Exception as exc:  # noqa: BLE001 - a crashed worker is an ERROR
-                    outcome = Outcome("ERROR", error=f"worker: {type(exc).__name__}: {exc}"[:500])
-                setattr(results[i], slot, outcome)
-                done += 1
-                if progress is not None:
-                    progress(done, len(jobs), results[i], slot)
+        # No max_tasks_per_child: CPython 3.12's pool stops replacing retired workers and
+        # hangs. Each task drops the helper modules it imported, which gives the same isolation.
+        pool = cf.ProcessPoolExecutor(
+            max_workers=n_workers, mp_context=ctx, initializer=_worker_init,
+            initargs=(str(root), str(shim_dir), threads, memory_limit, str(spill), os.getpid()))
+        futures = {pool.submit(_run_one, results[i].triple, cfg, timeout): (i, slot)
+                   for i, slot, cfg in jobs}
+        done = 0
+        for fut in cf.as_completed(futures):
+            i, slot = futures[fut]
+            try:
+                outcome = fut.result()
+            except Exception as exc:  # noqa: BLE001 - a crashed worker is an ERROR
+                outcome = Outcome("ERROR", error=f"worker: {type(exc).__name__}: {exc}"[:500])
+            setattr(results[i], slot, outcome)
+            done += 1
+            if progress is not None:
+                progress(done, len(jobs), results[i], slot)
+        pool.shutdown(wait=True)
+    except BaseException:
+        if pool is not None:
+            _terminate_pool(pool)
+        raise
     finally:
+        if term_installed:
+            signal.signal(signal.SIGTERM, previous_term if previous_term is not None else signal.SIG_DFL)
         shutil.rmtree(tmp, ignore_errors=True)
     report = ReverifyReport(
         root=str(root), findings=[str(f) for f in files], substitutions=dict(sub.map),
         baseline_substitutions=dict(base.map),
         compare=compare, results=results,
         selected_findings=len({(t.source, t.finding_id) for t in triples}),
-        seconds=time.time() - started,
+        seconds=time.time() - started, workers=n_workers, worker_note=worker_note,
     )
     if report_globs:
         report.citations = find_citations([r.triple.finding_id for r in report.attention()], report_globs, root)

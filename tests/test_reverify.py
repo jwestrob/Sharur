@@ -2,14 +2,27 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
+import signal
+import subprocess
 import sys
+import time
 from pathlib import Path
 
 import duckdb
 import pytest
 
-from sharur.reverify import classify, match, reverify
+from sharur.reverify import (
+    WORKER_OVERHEAD_BYTES,
+    available_memory,
+    classify,
+    match,
+    memory_bytes,
+    plan_workers,
+    reverify,
+)
 
 
 def _db(path: Path, n: int) -> Path:
@@ -176,3 +189,123 @@ def test_substitution_text_is_idempotent_and_whole_path(tmp_path: Path):
     assert once.count("sharur.duckdb.pre-x") == 1 and "sharur.duckdb.wal" in once
     assert sub.text(once) == once
     assert sub.text(f"'{root}/data/ds/sharur.duckdb'") == f"'{root}/data/ds/sharur.duckdb.pre-x'"
+
+
+# --------------------------------------------------------------------------- #
+# Pool sizing and process lifetime
+# --------------------------------------------------------------------------- #
+GiB = 1 << 30
+
+
+def test_memory_bytes_parses_duckdb_sizes():
+    assert memory_bytes("4GB") == 4 * GiB
+    assert memory_bytes("512MiB") == 512 << 20
+    assert memory_bytes("1.5 G") == int(1.5 * GiB)
+    with pytest.raises(ValueError, match="not understood"):
+        memory_bytes("lots")
+
+
+def test_plan_workers_fits_the_pool_to_available_memory(monkeypatch):
+    monkeypatch.setattr("os.cpu_count", lambda: 16)
+    per_worker = 4 * GiB + WORKER_OVERHEAD_BYTES
+    # 2026-11-02: eight 4 GB workers on a loaded 48 GB laptop
+    n, note = plan_workers(8, 2, "4GB", 1000, available=12 * GiB)
+    assert n == 1
+    assert "8 workers lowered to 1" in note
+    n, note = plan_workers(None, 2, "4GB", 1000, available=64 * GiB)
+    assert n == (32 * GiB) // per_worker
+    assert n < 8
+    assert note
+    assert plan_workers(2, 2, "4GB", 1000, available=64 * GiB) == (2, None)
+    assert plan_workers(8, 2, "4GB", 3, available=512 * GiB) == (3, None)
+    # one worker always runs, however little memory is free
+    assert plan_workers(None, 2, "1GB", 1000, available=1 * GiB)[0] == 1
+    # memory unknown: the CPU-based count stands
+    monkeypatch.setattr("sharur.reverify.available_memory", lambda: None)
+    assert plan_workers(8, 2, "4GB", 1000) == (8, None)
+
+
+def test_available_memory_respects_a_slurm_allocation(monkeypatch):
+    monkeypatch.setenv("SLURM_MEM_PER_NODE", "1024")
+    assert available_memory() <= 1 * GiB
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _wait_gone(pids, seconds: float) -> list[int]:
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        if not any(_alive(p) for p in pids):
+            return []
+        time.sleep(0.1)
+    return [p for p in pids if _alive(p)]
+
+
+def _kill_all(pids) -> None:
+    for pid in pids:
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.kill(pid, signal.SIGKILL)
+
+
+def _sleeper_dataset(tmp_path: Path, pidfile: Path, seconds: int) -> Path:
+    """A dataset whose one triple records its shell, worker and child PIDs, then waits."""
+    ds = tmp_path / "repo" / "data" / "ds" / "exploration"
+    ds.mkdir(parents=True)
+    query = (f"shell: sleep {seconds} & echo $$ $PPID $! > {pidfile}.tmp; "
+             f"mv {pidfile}.tmp {pidfile}; wait; echo 1")
+    (ds / "findings.jsonl").write_text(json.dumps(
+        {"id": "S1", "title": "sleeper", "verification": [{"claim": "c", "query": query, "expected": 1}]}) + "\n")
+    return ds.parent
+
+
+def test_shell_timeout_kills_every_process_the_command_started(tmp_path: Path):
+    pidfile = tmp_path / "pids"
+    ds = _sleeper_dataset(tmp_path, pidfile, 60)
+    report = reverify([ds], workers=1, timeout=3)
+    shell_pid, _worker_pid, sleep_pid = (int(x) for x in pidfile.read_text().split())
+    try:
+        assert report.results[0].replay.status == "ERROR"
+        assert "timeout" in report.results[0].replay.error
+        assert _wait_gone([shell_pid, sleep_pid], 5) == []
+    finally:
+        _kill_all([shell_pid, sleep_pid])
+
+
+@pytest.mark.parametrize("sig", ["SIGKILL", "SIGTERM"])
+def test_workers_and_their_shell_children_exit_with_the_reverify_process(tmp_path: Path, sig: str):
+    """Killing `sharur reverify` must not leave replay workers behind (2026-11-02 hang)."""
+    pidfile = tmp_path / "pids"
+    ds = _sleeper_dataset(tmp_path, pidfile, 120)
+    driver = tmp_path / "driver.py"
+    driver.write_text("import sys\nfrom pathlib import Path\nfrom sharur.reverify import reverify\n"
+                      "if __name__ == '__main__':\n"
+                      "    reverify([Path(sys.argv[1])], workers=1, timeout=300)\n")
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join(
+        filter(None, [str(Path(__file__).resolve().parents[1]), os.environ.get("PYTHONPATH")])))
+    parent = subprocess.Popen([sys.executable, str(driver), str(ds)], env=env,
+                              stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    pids: list[int] = []
+    try:
+        deadline = time.time() + 90
+        while not pidfile.exists():
+            assert parent.poll() is None, parent.stderr.read().decode()[-2000:]
+            assert time.time() < deadline, "replay never started"
+            time.sleep(0.1)
+        pids = [int(x) for x in pidfile.read_text().split()]
+        assert all(_alive(p) for p in pids)
+        parent.send_signal(getattr(signal, sig))
+        parent.wait(timeout=30)
+        assert _wait_gone(pids, 15) == [], "orphaned replay processes"
+    finally:
+        if parent.poll() is None:
+            parent.kill()
+            parent.wait()
+        _kill_all(pids)

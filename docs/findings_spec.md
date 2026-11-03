@@ -397,6 +397,12 @@ including `duckdb.connect` and `ATTACH` calls inside helper scripts and Python p
 shell triple starts. Every replayed connection is read-only, with per-connection thread and
 memory limits (`--threads`, `--memory-limit`) and `--workers` parallel processes.
 
+The pool fits available memory: workers × (`--memory-limit` + 1.5 GiB) stays within half of the
+memory free at launch (capped by a Slurm allocation), and the report states when that lowered
+`--workers`. Replay processes live only as long as `sharur reverify`: a worker exits within a second
+of the parent's death by any signal, and each shell triple runs in its own process group, which
+a timeout or the worker's exit kills whole.
+
 ---
 
 ## Falsification
