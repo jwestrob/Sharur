@@ -30,6 +30,7 @@ Detailed guides live in `docs/` and `.claude/skills/`. **Read the relevant doc b
 | Serving one large DuckDB to many agents | `docs/query_service.md`, `sharur/query/` |
 | Writing structured findings | `docs/findings_spec.md` |
 | Re-checking findings after a database refresh (`sharur reverify`) | `docs/findings_spec.md` § Replaying verification |
+| Writing to a canonical database (stage, diff, reverify, publish) | `docs/guides/staged-writes.md` |
 | Inspecting cases, comparing ORF context, or adding assembly evidence | `docs/cases_and_evidence.md` |
 
 **Other key docs:**
@@ -93,7 +94,9 @@ Use `Sharur(path, read_only=True)` directly for a single analyst or modest local
 concurrency with explicit DuckDB thread, memory, and spill budgets. Route every
 large coordinated campaign through one query-service owner instead of opening
 one large DuckDB connection per agent. Serialize canonical DuckDB writes in a
-maintenance window, then seal and restage the updated database.
+maintenance window, then seal and restage the updated database. Make canonical writes
+through `sharur stage run` (`docs/guides/staged-writes.md`): the writer runs on a clone, and
+the table diff and the findings it moves are reviewed before `sharur stage publish`.
 
 Read `docs/query_service.md`, `docs/agent_ops_spec.md`, and
 `docs/subagent_guide.md` before launching a distributed campaign.
