@@ -110,6 +110,10 @@ ELSA store position indices and Sharur `proteins.gene_index` values are
 separate coordinate contracts. Exact relational membership replaces legacy
 CSV string scans. Dataset-seal mismatch fails closed; use
 `allow_stale_synteny=True` only for a reviewed, explicitly historical run.
+A run that recorded a protein-sequence digest is also compared with the live
+`proteins` sequences (`sequence_identity_check` in the capability evidence);
+changed sequences fail closed as `sequence_mismatch`. Runs built before ELSA
+recorded the digest report `sequence_identity_check="unverified"`.
 
 ## SQL patterns
 

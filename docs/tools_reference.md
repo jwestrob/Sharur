@@ -235,8 +235,11 @@ b.get_synteny_cluster("cluster:SOURCE_ID", run_id="elsa-RUN_ID")
 
 ELSA evidence is inferred. Functional names follow caller-emitted resources.
 Cluster citations include both `run_id` and `cluster_key`.
-Dataset-seal drift fails closed in the query API and appears as
-`synteny_state="stale"` in `inspect()`. Reviewed historical access is explicit:
+Dataset-seal drift and protein-sequence drift (a run's recorded sequence
+digest against the live `proteins` table) fail closed in the query API and
+appear as `synteny_state="stale"` in `inspect()`; runs that predate the digest
+report `sequence_identity_check="unverified"` in the capability evidence.
+Reviewed historical access is explicit:
 
 ```python
 b = Sharur(

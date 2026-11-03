@@ -59,6 +59,15 @@ Query methods enforce the dataset-seal comparison. A stale sidecar raises
 `SyntenyDatasetMismatchError`, and `inspect()` records `synteny_state="stale"`
 with zero attached memberships.
 
+The run's recorded protein-sequence digest
+(`elsa_runs.inputs_json["protein_sequences"]`, algorithm
+`protein-sequence-md5-sum-v1`) is compared with the live `proteins` table.
+`capability.evidence["sequence_identity_check"]` reads `match`, `mismatch`
+(the sidecar is stale: sequences changed under an unchanged gene layout), or
+`unverified` (the run predates the digest; seal and gene-layout checks still
+apply). Treat an `unverified` run as current only for proteins whose
+sequences you know are unchanged since the ELSA run.
+
 Historical analysis requires an explicit, documented opt-in:
 
 ```python
