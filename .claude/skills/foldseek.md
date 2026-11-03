@@ -150,6 +150,7 @@ python scripts/fold_biohub.py OUT_DIR p.faa --smiles "CC(=O)O:1"
   - `colabfold_search` builds a general MSA. Carry the mmseqs bad-node exclude line.
 - **Output.** `<name>.pdb` has the protein on chain A and ligands as HETATM on chains B, C, …, with pLDDT × 100 in the B-factor column. `<name>.json` holds pTM, ipTM, pLDDT and optional PAE. `summary.tsv` has `protein_plddt`, `ptm`, `iptm`, and, with HEC ligands, `hemes_on_cxxch`: the motif His is axial to Fe within 2.6 Å and both Cys SG lie within 2.7 Å of the heme vinyl carbons.
 - **What worked (SR-VP, 2026-11-03).** A Methanoperedens 5-heme cytochrome went from pTM 0.28 / pLDDT 38 (single sequence, no ligand) to pTM 0.68 / pLDDT 76 with a 52-sequence family MSA plus `HEC:auto`. Without covalent-bond constraints, 32 of 34 hemes landed on their CxxCH motifs across five proteins. Adding Ca²⁺ ions made the fold worse.
+- **Non-standard residues.** Use `--mod POS:CCD` (1-based position), for example `--mod 349:PYL` on a K placeholder for pyrrolysine. Writing `O` or `U` in the sequence gives an UNK residue with only the backbone and CB. The modification builds the full side chain (MtbB with Pyl: pTM 0.81).
 - **Gotchas.**
   - Strip the trailing `*` that gene callers write. The script does this; the API otherwise fails each task with `422: Invalid character(s)`.
   - Limits: 4,096 tokens per item (ligand atoms count), 2,000 items per submission (the script splits larger inputs) and 5,000 fold items per user per day. Results expire after 31 days.

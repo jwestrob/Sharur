@@ -20,6 +20,9 @@ Options:
     --ligand CCD:N      add N copies of a CCD ligand (repeatable). HEC:auto adds one c-type heme
                         per CxxCH motif in each sequence.
     --smiles SMI:N      add N copies of a SMILES ligand (repeatable)
+    --mod POS:CCD       residue modification, 1-based position, e.g. 349:PYL for pyrrolysine on a K
+                        placeholder (repeatable). Writing O/U in the sequence gives an UNK residue with
+                        backbone + CB only; the modification builds the real side chain.
     --model NAME        default esmfold2-fast-2026-05 for plain folds, esmfold2-2026-05 for all-atom
     --pae               request and save PAE
 
@@ -195,6 +198,7 @@ def main():
     ap.add_argument("--msa-dir", help="directory of per-sequence MSAs named <name>.a3m/.fa/.fasta/.aln")
     ap.add_argument("--ligand", action="append", help="CCD:N, repeatable; HEC:auto = one heme per CxxCH")
     ap.add_argument("--smiles", action="append", help="SMILES:N, repeatable")
+    ap.add_argument("--mod", action="append", help="POS:CCD residue modification (1-based), repeatable")
     ap.add_argument("--pae", action="store_true", help="request and save the PAE matrix")
     ap.add_argument("--poll", type=int, default=15, help="seconds between status checks")
     a = ap.parse_args()
@@ -214,7 +218,8 @@ def main():
         names.append(nm if seen[nm] == 1 else f"{nm}_{seen[nm]}")
 
     ligs, smis = parse_counts(a.ligand, "ligand"), parse_counts(a.smiles, "smiles")
-    all_atom = bool(ligs or smis or a.msa or a.msa_dir)
+    mods = [{"position": int(p) - 1, "ccd": c} for p, c in (m.split(":", 1) for m in (a.mod or []))]
+    all_atom = bool(ligs or smis or a.msa or a.msa_dir or mods)
     model = a.model or ("esmfold2-2026-05" if all_atom else "esmfold2-fast-2026-05")
     endpoint = "fold_all_atom" if all_atom else "fold"
 
@@ -225,6 +230,8 @@ def main():
             lig_maps.append({})
             continue
         prot = {"type": "protein", "id": "A", "sequence": s}
+        if mods:
+            prot["modifications"] = mods
         mpath = a.msa
         if a.msa_dir:
             mpath = next((os.path.join(a.msa_dir, nm + ext) for ext in (".a3m", ".fa", ".fasta", ".aln")
