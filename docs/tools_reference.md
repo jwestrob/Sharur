@@ -2,6 +2,15 @@
 
 **Load this doc when:** Using Aksha, ESM2, structure prediction (Protenix v2, ESMFold2), Foldseek, ELSA, CAZyme/HydDB pipelines, V2 predicates, or hypothesis tracking.
 
+## Waiting on Slurm jobs
+
+`scripts/slurm_wait.py JOBID [JOBID ...] --host USER@HOST --log 'LOGDIR/name_%j.out'` polls
+`sacct` until every job and array task ends, prints the final states and the tail of each failed
+task's log, and exits 0 only when every task COMPLETED. A pending job stuck on
+`DependencyNeverSatisfied` counts as failed. Start it as a background command right after
+`sbatch`; a harness that reports background exits (Claude Code `run_in_background`) then wakes
+the session when the jobs end.
+
 ## Aksha Annotation Pipeline
 
 [Aksha](https://github.com/jwestrob/aksha), Astra's successor, manages pre-installed HMM
