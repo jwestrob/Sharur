@@ -152,3 +152,27 @@ def test_replays_open_databases_read_only(repo: Path):
 def test_compare_needs_a_substitution(repo: Path):
     with pytest.raises(ValueError):
         reverify([repo / "data" / "ds"], compare=True)
+
+
+def test_substitution_to_a_name_that_extends_the_original(repo: Path):
+    """A backup named <db>.pre-... must not be rewritten a second time (attach + helper ATTACH)."""
+    live = repo / "data" / "ds" / "sharur.duckdb"
+    backup = live.with_name("sharur.duckdb.pre-reload-1")
+    _db(backup, 12)
+    report = reverify([repo / "data" / "ds"], ids=["F1", "F2", "F3"], workers=2, compare=True,
+                      baseline_substitutions=[("data/ds/sharur.duckdb", str(backup))])
+    errors = [r for r in report.results if r.baseline.status == "ERROR" or r.replay.status == "ERROR"]
+    assert errors == []
+    changed = {(r.triple.finding_id, r.triple.index) for r in report.changed()}
+    assert changed == {("F1", 1), ("F2", 1), ("F3", 1), ("F3", 2)}
+
+
+def test_substitution_text_is_idempotent_and_whole_path(tmp_path: Path):
+    from sharur.reverify import Substitution
+
+    root = tmp_path
+    sub = Substitution([("data/ds/sharur.duckdb", str(root / "data/ds/sharur.duckdb.pre-x"))], root)
+    once = sub.text("ATTACH 'data/ds/sharur.duckdb' AS a; -- data/ds/sharur.duckdb.wal stays")
+    assert once.count("sharur.duckdb.pre-x") == 1 and "sharur.duckdb.wal" in once
+    assert sub.text(once) == once
+    assert sub.text(f"'{root}/data/ds/sharur.duckdb'") == f"'{root}/data/ds/sharur.duckdb.pre-x'"

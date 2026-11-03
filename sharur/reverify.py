@@ -243,6 +243,22 @@ def dependency_text(triple: Triple, root: Path, _cache: dict[Path, str] | None =
 # --------------------------------------------------------------------------- #
 # Path substitution
 # --------------------------------------------------------------------------- #
+# A path matches only as a whole path: never inside a longer name (``sharur.duckdb`` inside
+# ``sharur.duckdb.pre-reload``) and a relative path never inside an absolute one. That keeps
+# a rewrite idempotent when the replacement path starts with the original.
+_BOUNDARY_BEFORE_ABS = r"(?<![\w.-])"
+_BOUNDARY_BEFORE_REL = r"(?<![\w./-])"
+_BOUNDARY_AFTER = r"(?![\w.-])"
+
+
+def _boundary_pattern(variants: Sequence[str]) -> re.Pattern | None:
+    if not variants:
+        return None
+    return re.compile("|".join(
+        (_BOUNDARY_BEFORE_ABS if v.startswith("/") else _BOUNDARY_BEFORE_REL) + re.escape(v) + _BOUNDARY_AFTER
+        for v in variants))
+
+
 class Substitution:
     """Rewrites paths in text and resolves ``duckdb.connect`` targets."""
 
@@ -262,8 +278,7 @@ class Substitution:
             variants[old] = new_abs
         ordered = sorted(variants, key=len, reverse=True)
         self._variants = variants
-        self._pattern = (re.compile("|".join(r"(?<![\w-])" + re.escape(v) for v in ordered))
-                         if ordered else None)
+        self._pattern = _boundary_pattern(ordered)
 
     def __bool__(self) -> bool:
         return bool(self.map)
@@ -304,8 +319,9 @@ if _cfg:
         _map = _cfg.get("map", {})
         _variants = _cfg.get("variants", {})
         _root = _cfg.get("root", ".")
-        _pat = _re.compile("|".join(r"(?<![\w-])" + _re.escape(v)
-                                    for v in sorted(_variants, key=len, reverse=True))) if _variants else None
+        _pat = _re.compile("|".join(
+            (r"(?<![\w.-])" if v.startswith("/") else r"(?<![\w./-])") + _re.escape(v) + r"(?![\w.-])"
+            for v in sorted(_variants, key=len, reverse=True))) if _variants else None
 
         def _rw(sql):
             return _pat.sub(lambda m: _variants[m.group(0)], sql) if (_pat and isinstance(sql, str)) else sql
@@ -354,6 +370,7 @@ if _cfg:
             cfg = dict(config or {})
             cfg.pop("access_mode", None)
             con = _real(db, read_only=True if is_file else read_only, config=cfg, **kw)
+            con.execute("SET enable_progress_bar = false")
             con.execute(f"SET threads = {int(_cfg.get('threads', 2))}")
             con.execute(f"SET memory_limit = '{_cfg.get('memory_limit', '4GB')}'")
             if _cfg.get("temp_directory"):
@@ -380,6 +397,11 @@ _WORKER: dict[str, Any] = {}
 def _worker_init(root: str, shim_dir: str, threads: int, memory_limit: str, temp_dir: str) -> None:
     _WORKER.update(root=root, shim_dir=shim_dir, threads=threads,
                    memory_limit=memory_limit, temp_dir=temp_dir)
+    # Replayed code and DuckDB's native progress bar write to fds 1 and 2; the parent's
+    # stdout carries the report, so workers write to /dev/null.
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(devnull, 1)
+    os.dup2(devnull, 2)
     # The shim patches duckdb.connect for this process too; the configuration
     # is swapped per task, so it reads the environment at call time.
     os.environ.setdefault("SHARUR_REVERIFY_SHIM", json.dumps({"root": root, "map": {}, "variants": {}}))
@@ -703,7 +725,7 @@ def _outcome_text(outcome: Outcome | None) -> str:
 
 def write_tsv(report: ReverifyReport, path: Path) -> None:
     cols = ["key", "finding_id", "triple", "kind", "status", "baseline_status", "changed", "flags",
-            "seconds", "claim", "expected", "observed", "baseline_observed", "error"]
+            "seconds", "claim", "expected", "observed", "baseline_observed", "error", "baseline_error"]
     with path.open("w") as handle:
         handle.write("\t".join(cols) + "\n")
         for r in report.results:
@@ -712,7 +734,7 @@ def write_tsv(report: ReverifyReport, path: Path) -> None:
                    rec.status if rec else "", r.changed if rec else "", ",".join(r.flags),
                    f"{r.replay.seconds:.1f}", r.triple.claim, _short(r.triple.expected, 400),
                    _short(r.replay.observed, 400), _short(rec.observed, 400) if rec else "",
-                   (r.replay.error or "")]
+                   (r.replay.error or ""), (rec.error or "") if rec else ""]
             handle.write("\t".join(str(x).replace("\t", " ").replace("\n", " ") for x in row) + "\n")
 
 
