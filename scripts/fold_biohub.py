@@ -25,6 +25,8 @@ Options:
                         backbone + CB only; the modification builds the real side chain.
     --model NAME        default esmfold2-fast-2026-05 for plain folds, esmfold2-2026-05 for all-atom
     --pae               request and save PAE
+    --copies N          fold N copies of each protein as one homo-oligomer (chains A, B, C, ...); the
+                        complex must stay within 4,096 tokens. Uses the all-atom endpoint.
 
 MSA handling: lowercase A3M insertions are dropped; the row whose ungapped sequence equals the
 query (else the first row) becomes the anchor; columns where the anchor has a gap are removed, so
@@ -145,7 +147,7 @@ def to_pdb_atom37(seq, coords, plddt):
     return "\n".join(out + ["TER", "END"]) + "\n", None
 
 
-def to_pdb_complex(c, lig_names):
+def to_pdb_complex(c, lig_names, protein_chains=("A",)):
     """Write the fold_all_atom `complex` object; return (pdb_text, atoms) for scoring."""
     chains = [c["metadata"]["chain_lookup"][str(x)] for x in c["chain_id"]]
     lines, atoms, n, resno = [], [], 1, {}
@@ -153,7 +155,7 @@ def to_pdb_complex(c, lig_names):
         ch = chains[t]
         resno[ch] = resno.get(ch, 0) + 1
         tok = c["sequence"][t]
-        if ch == "A":
+        if ch in protein_chains:
             rn = tok if len(tok) == 3 else AA3.get(tok, "UNK")
         else:
             rn = lig_names.get(ch, "LIG")[:3]
@@ -200,6 +202,7 @@ def main():
     ap.add_argument("--smiles", action="append", help="SMILES:N, repeatable")
     ap.add_argument("--mod", action="append", help="POS:CCD residue modification (1-based), repeatable")
     ap.add_argument("--pae", action="store_true", help="request and save the PAE matrix")
+    ap.add_argument("--copies", type=int, default=1, help="fold N copies of each protein as a homo-oligomer")
     ap.add_argument("--poll", type=int, default=15, help="seconds between status checks")
     a = ap.parse_args()
     H = headers()
@@ -219,7 +222,9 @@ def main():
 
     ligs, smis = parse_counts(a.ligand, "ligand"), parse_counts(a.smiles, "smiles")
     mods = [{"position": int(p) - 1, "ccd": c} for p, c in (m.split(":", 1) for m in (a.mod or []))]
-    all_atom = bool(ligs or smis or a.msa or a.msa_dir or mods)
+    all_atom = bool(ligs or smis or a.msa or a.msa_dir or mods or a.copies > 1)
+    prot_ids = list(string.ascii_uppercase[:max(1, a.copies)])
+    lig_ids = [x for x in CHAIN_IDS if x not in prot_ids]
     model = a.model or ("esmfold2-2026-05" if all_atom else "esmfold2-fast-2026-05")
     endpoint = "fold_all_atom" if all_atom else "fold"
 
@@ -240,15 +245,18 @@ def main():
                 print(f"  note: no MSA for {nm} in {a.msa_dir}; folding single-sequence", flush=True)
         if mpath:
             prot["msa"] = {"sequences": load_msa(mpath, s)}
-        ents, lmap, k = [prot], {}, 0
+        if a.copies * len(s) > 4096:
+            sys.exit(f"{nm}: {a.copies} x {len(s)} residues exceeds the API's 4,096 tokens per complex")
+        ents = [prot] + [{**prot, "id": cid} for cid in prot_ids[1:]]
+        lmap, k = {}, 0
         for code, n in ligs:
             cnt = len(re.findall(r"(?=C..CH)", s)) if n == "auto" else int(n)
             for _ in range(cnt):
-                cid = CHAIN_IDS[k]; k += 1
+                cid = lig_ids[k]; k += 1
                 ents.append({"type": "ligand", "id": cid, "ccd": [code]}); lmap[cid] = code
         for smi, n in smis:
             for _ in range(int(n)):
-                cid = CHAIN_IDS[k]; k += 1
+                cid = lig_ids[k]; k += 1
                 ents.append({"type": "ligand", "id": cid, "smiles": smi}); lmap[cid] = "LIG"
         if len(ents) > 36:
             sys.exit(f"{nm}: {len(ents)} chains; the API allows at most 36 per complex (1 protein + 35 ligands). "
@@ -257,7 +265,7 @@ def main():
                         "include_pair_chains_iptm": True})
         lig_maps.append(lmap)
         desc = ", ".join(f"{v}x{sum(1 for x in lmap.values() if x == v)}" for v in dict.fromkeys(lmap.values()))
-        print(f"  {nm}: L={len(s)}{' + MSA ' + str(len(prot['msa']['sequences'])) + ' rows' if 'msa' in prot else ''}"
+        print(f"  {nm}: L={len(s)}{f' x {a.copies} copies' if a.copies > 1 else ''}{' + MSA ' + str(len(prot['msa']['sequences'])) + ' rows' if 'msa' in prot else ''}"
               f"{' + ' + desc if desc else ''}", flush=True)
 
     tasks = []
@@ -291,7 +299,7 @@ def main():
             j = json.loads(urllib.request.urlopen(d["response"], timeout=120).read())
             h, s = recs[i]
             if all_atom:
-                pdb, atoms = to_pdb_complex(j["complex"], lig_maps[i])
+                pdb, atoms = to_pdb_complex(j["complex"], lig_maps[i], tuple(prot_ids))
                 ca = [x[5] for x in atoms if x[0] == "A" and x[3] == "CA"]
                 mp = 100 * sum(ca) / max(1, len(ca))
                 n_hec, n_ok = heme_check(atoms, s) if "HEC" in lig_maps[i].values() else (0, 0)
