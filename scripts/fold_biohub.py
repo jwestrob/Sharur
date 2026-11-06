@@ -25,6 +25,10 @@ Options:
                         backbone + CB only; the modification builds the real side chain.
     --model NAME        default esmfold2-fast-2026-05 for plain folds, esmfold2-2026-05 for all-atom
     --pae               request and save PAE
+    --all-atom          use the all-atom endpoint and full model even for a plain fold (for like-for-like
+                        comparisons with oligomer or ligand folds)
+    --resume BATCH_ID   collect an earlier submission of the same inputs (after an interruption) without
+                        resubmitting; models already in OUT_DIR are skipped
     --copies N          fold N copies of each protein as one homo-oligomer (chains A, B, C, ...); the
                         complex must stay within 4,096 tokens. Uses the all-atom endpoint.
 
@@ -76,17 +80,32 @@ def headers():
     return {"Authorization": f"Bearer {key}", "Content-Type": "application/json", "User-Agent": "sharur-fold/0.2"}
 
 
-def post(path, body, H):
-    for _ in range(8):
+TRANSIENT_HTTP = (500, 502, 503, 504)
+
+
+def post(path, body, H, attempts=10):
+    """POST with retries: 429 waits for Retry-After; 5xx and dropped connections back off (15 s, doubling, max 5 min)."""
+    for attempt in range(attempts):
         req = urllib.request.Request(BASE + path, data=json.dumps(body).encode(), headers=H, method="POST")
+        wait = min(300, 15 * 2 ** attempt)
         try:
             return json.loads(urllib.request.urlopen(req, timeout=120).read().decode())
         except urllib.error.HTTPError as e:
             if e.code == 429:
                 time.sleep(int(e.headers.get("Retry-After", "30")))
                 continue
+            if e.code in TRANSIENT_HTTP and attempt < attempts - 1:
+                print(f"HTTP {e.code} on {path}; retrying in {wait} s", file=sys.stderr, flush=True)
+                time.sleep(wait)
+                continue
             sys.exit(f"HTTP {e.code} on {path}: {e.read().decode()[:400]}")
-    sys.exit("rate-limited repeatedly")
+        except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
+            if attempt < attempts - 1:
+                print(f"{type(e).__name__} on {path}; retrying in {wait} s", file=sys.stderr, flush=True)
+                time.sleep(wait)
+                continue
+            sys.exit(f"{type(e).__name__} on {path}: {e}")
+    sys.exit(f"{path}: gave up after {attempts} attempts")
 
 
 def read_fasta(paths):
@@ -203,7 +222,11 @@ def main():
     ap.add_argument("--mod", action="append", help="POS:CCD residue modification (1-based), repeatable")
     ap.add_argument("--pae", action="store_true", help="request and save the PAE matrix")
     ap.add_argument("--copies", type=int, default=1, help="fold N copies of each protein as a homo-oligomer")
+    ap.add_argument("--all-atom", action="store_true", help="force the all-atom endpoint and full model")
     ap.add_argument("--poll", type=int, default=15, help="seconds between status checks")
+    ap.add_argument("--resume", action="append", metavar="BATCH_ID",
+                    help="collect an earlier submission of the same inputs instead of submitting again "
+                         "(one batch id per 2,000-item chunk, in order); models already in OUT_DIR are skipped")
     a = ap.parse_args()
     H = headers()
     os.makedirs(a.out_dir, exist_ok=True)
@@ -222,7 +245,7 @@ def main():
 
     ligs, smis = parse_counts(a.ligand, "ligand"), parse_counts(a.smiles, "smiles")
     mods = [{"position": int(p) - 1, "ccd": c} for p, c in (m.split(":", 1) for m in (a.mod or []))]
-    all_atom = bool(ligs or smis or a.msa or a.msa_dir or mods or a.copies > 1)
+    all_atom = bool(ligs or smis or a.msa or a.msa_dir or mods or a.copies > 1 or a.all_atom)
     prot_ids = list(string.ascii_uppercase[:max(1, a.copies)])
     lig_ids = [x for x in CHAIN_IDS if x not in prot_ids]
     model = a.model or ("esmfold2-2026-05" if all_atom else "esmfold2-fast-2026-05")
@@ -269,11 +292,22 @@ def main():
               f"{' + ' + desc if desc else ''}", flush=True)
 
     tasks = []
-    for start in range(0, len(payload), MAX_ITEMS):
+    resume = [b for arg in (a.resume or []) for b in arg.split(",") if b]
+    chunks = list(range(0, len(payload), MAX_ITEMS))
+    if resume and len(resume) != len(chunks):
+        sys.exit(f"--resume needs {len(chunks)} batch id(s) for {len(payload)} inputs, got {len(resume)}")
+    for k, start in enumerate(chunks):
         chunk = payload[start:start + MAX_ITEMS]
-        batch = post("/submit", {"endpoint": endpoint, "payload": chunk}, H)["data"]["batch_id"]
-        print(f"batch {batch}: {len(chunk)} items, endpoint {endpoint}, model {model}", flush=True)
-        tasks += [(start + i, f"{batch}-{i:05d}") for i in range(len(chunk))]
+        if resume:
+            batch = resume[k]
+            print(f"batch {batch}: resuming {len(chunk)} items", flush=True)
+        else:
+            batch = post("/submit", {"endpoint": endpoint, "payload": chunk}, H)["data"]["batch_id"]
+            print(f"batch {batch}: {len(chunk)} items, endpoint {endpoint}, model {model}", flush=True)
+        tasks += [(start + i, f"{batch}-{i:05d}") for i in range(len(chunk))
+                  if not (resume and os.path.exists(f"{a.out_dir}/{names[start + i]}.pdb"))]
+    if resume:
+        print(f"{len(payload) - len(tasks)} already in {a.out_dir}; collecting {len(tasks)}", flush=True)
 
     pending, rows, failed, retries = dict(tasks), [], [], {}
     while pending:
@@ -318,7 +352,21 @@ def main():
                   flush=True)
             del pending[i]
 
-    with open(f"{a.out_dir}/summary.tsv", "w") as f:
+    summary = f"{a.out_dir}/summary.tsv"
+    if resume:
+        # Rows for models collected before the interruption, from their saved JSON.
+        fresh = {r[0] for r in rows}
+        for i, (h, s) in enumerate(recs):
+            path = f"{a.out_dir}/{names[i]}.json"
+            if names[i] in fresh or not os.path.exists(path):
+                continue
+            j = json.load(open(path))
+            pl = j.get("plddt") or []
+            flat = [x for row in pl for x in (row if isinstance(row, list) else [row])]
+            mp = 100 * sum(flat) / max(1, len(flat))
+            iptm = j.get("interface_ptm")
+            rows.append((names[i], len(s), round(mp, 1), round(j["ptm"], 3), "" if iptm is None else round(iptm, 3), "", h))
+    with open(summary, "w") as f:
         f.write("name\tlength\tprotein_plddt\tptm\tiptm\themes_on_cxxch\theader\n")
         for r in sorted(rows):
             f.write("\t".join(map(str, r)) + "\n")
