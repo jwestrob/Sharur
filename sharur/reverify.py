@@ -85,6 +85,9 @@ class Triple:
     attach: dict[str, str] | None
     default_db: str | None
     kind: str = ""
+    # statistical checks (sharur/stat_checks.py): per-value tolerances and the recorded claim
+    tolerance: dict | None = None
+    stat: dict | None = None
 
     @property
     def key(self) -> str:
@@ -195,6 +198,7 @@ def load_triples(findings: Sequence[Path], root: Path, db: Path | None = None) -
                         claim=str(item.get("claim") or ""), query=item["query"],
                         expected=item.get("expected"), attach=attach, default_db=default_db,
                         kind=classify(item["query"], attach),
+                        tolerance=item.get("tolerance"), stat=item.get("statistical_claim"),
                     ))
     return triples
 
@@ -690,6 +694,26 @@ def _install_sql_prelude(con: Any) -> None:
         install_prelude(con, udfs=False)
 
 
+def _statistical_flags(triple: Triple, root: Path) -> list[str]:
+    """Input, seal and pre-registration flags of a statistical check (none for count checks)."""
+    if triple.stat is None:
+        return []
+    from sharur.stat_checks import static_flags  # noqa: PLC0415
+
+    return static_flags(triple, root)
+
+
+def _statistical_rejudge(result: TripleResult, outcome: Outcome, root: Path) -> Outcome:
+    """Tolerance and verdict rules of a statistical check; count checks pass through unchanged."""
+    if result.triple.tolerance is None and result.triple.stat is None:
+        return outcome
+    from sharur.stat_checks import rejudge  # noqa: PLC0415
+
+    outcome, flags = rejudge(result.triple, outcome, root)
+    result.flags.extend(f for f in flags if f not in result.flags)
+    return outcome
+
+
 # --------------------------------------------------------------------------- #
 # Comparison
 # --------------------------------------------------------------------------- #
@@ -853,6 +877,8 @@ class ReverifyReport:
                 else:
                     lines.append(f"- #{r.triple.index} {r.replay.status} {r.triple.claim[:160]} | "
                                  f"expected {exp} | {_outcome_text(r.replay)}")
+                if r.triple.stat is not None and r.flags:
+                    lines.append(f"  - statistical check: {'; '.join(r.flags)}")
             lines.append("")
         return "\n".join(lines)
 
@@ -969,7 +995,7 @@ def reverify(
     plain_cfg = _shim_config(base, threads, memory_limit, str(spill))
     sub_cfg = _shim_config(sub, threads, memory_limit, str(spill))
 
-    results = [TripleResult(t, flags_for(t)) for t in triples]
+    results = [TripleResult(t, flags_for(t) + _statistical_flags(t, root)) for t in triples]
     jobs: list[tuple[int, str, str]] = []
     for i, _ in enumerate(results):
         if compare:
@@ -1004,6 +1030,7 @@ def reverify(
                 outcome = fut.result()
             except Exception as exc:  # noqa: BLE001 - a crashed worker is an ERROR
                 outcome = Outcome("ERROR", error=f"worker: {type(exc).__name__}: {exc}"[:500])
+            outcome = _statistical_rejudge(results[i], outcome, root)
             setattr(results[i], slot, outcome)
             done += 1
             if progress is not None:

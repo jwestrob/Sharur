@@ -31,6 +31,7 @@ Detailed guides live in `docs/` and `.claude/skills/`. **Read the relevant doc b
 | Querying in SQL: neighbors, slots, feature presence, FASTA to disk (read-only, sequence-free) | `docs/guides/sql-surface.md` |
 | Writing structured findings | `docs/findings_spec.md` |
 | Re-checking findings after a database refresh (`sharur reverify`) | `docs/findings_spec.md` § Replaying verification |
+| Pre-registering predictions; recording a statistical result as a check | `docs/guides/statistical-checks.md` |
 | Writing to a canonical database (stage, diff, reverify, publish) | `docs/guides/staged-writes.md` |
 | Inspecting cases, comparing ORF context, or adding assembly evidence | `docs/cases_and_evidence.md` |
 

@@ -75,6 +75,7 @@ nav:
       - Browsing a dataset: guides/browser.md
       - Cases and context comparison: cases_and_evidence.md
       - Structured findings: findings_spec.md
+      - Statistical checks and pre-registration: guides/statistical-checks.md
       - Tools (Astra, ELSA, ESM3, Foldseek): tools_reference.md
       - Data organization: DATA_ORGANIZATION.md
   - Campaigns:

@@ -391,6 +391,15 @@ sharur reverify data/srvp_archaea data/srvp_joint --touching 'defense_systems|de
 sharur reverify data/srvp_archaea --compare -b data/srvp_archaea/sharur.duckdb=BACKUP.duckdb
 ```
 
+A statistical result is a triple with three more keys: `check: "statistical"`, a per-value
+`tolerance` and a `statistical_claim` (statistic, effect size and interval, independent events,
+correction, the controls it must beat, verdict rules and verdict, the pre-registration and
+dataset seal it refers to, and the script and input hashes that reproduce it). `sharur
+reverify` recomputes it within the tolerance and re-applies the verdict rules; `sharur stats
+check` checks it as recorded. See [Statistical checks and pre-registration](guides/statistical-checks.md).
+SQL triples may call the [SQL surface](guides/sql-surface.md) macros (`slot_tally(...)`,
+`neighbors(...)`), which every replay connection carries.
+
 `--touching REGEX` selects findings whose queries, or the local scripts those queries run or
 import, match; the whole finding is replayed. Substitutions redirect every path a replay touches,
 including `duckdb.connect` and `ATTACH` calls inside helper scripts and Python processes that a

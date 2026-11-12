@@ -1356,8 +1356,10 @@ stage_app = typer.Typer(help="Run a writer against a staged clone of a dataset d
 app.add_typer(stage_app, name="stage")
 
 from sharur.sql.cli import sql_app  # noqa: E402
+from sharur.stats_cli import stats_app  # noqa: E402
 
 app.add_typer(sql_app, name="sql")
+app.add_typer(stats_app, name="stats")
 
 
 @stage_app.command(
