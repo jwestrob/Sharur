@@ -618,11 +618,8 @@ pip install pyrodigal
 ```
 
 ### MinCED not found
-MinCED is a Java-based tool. Known wrapper script location:
-```bash
-~/.pyenv/versions/miniconda3-latest/bin/minced
-```
-Ensure this is on your PATH, or install via conda: `conda install -c bioconda minced`.
+MinCED is a Java tool; `environment.yml` installs it with its Java runtime. In another
+environment install it with `conda install -c bioconda minced` and check `minced --version`.
 
 ### Aksha not found
 Install Aksha (github.com/jwestrob/aksha; see INSTALL.md) and verify with `which aksha` and `sharur doctor`. Stage 04 falls back to a legacy `astra` executable. HMM database files live at `~/.config/Astra/`; Aksha's registry of installed databases is in its own config directory.
@@ -648,8 +645,10 @@ pip install -e .
 ```
 
 ### DuckDB version mismatch
+Sharur runs on DuckDB 1.x; DuckDB 2.0 stops Stage 07 at "Load proteins/contigs" with
+`ResourceInUseException`.
 ```bash
-pip install --upgrade duckdb
+pip install -U "duckdb<2"
 ```
 
 ### "CUDA out of memory" (Stage 06)
@@ -660,7 +659,7 @@ Reduce batch size in the embeddings script, or use CPU (10-20x slower but works)
 ## Dependencies
 
 ### Core Pipeline (Stages 00, 03, 04, 05c, 07)
-- Python 3.8+
+- Python 3.10+ (3.12 for Aksha, whose runtime ships for Linux x86-64)
 - DuckDB, Pandas, Biopython
 - Typer, Rich (CLI framework)
 - [Aksha](https://github.com/jwestrob/aksha) (HMM search; successor to Astra)
