@@ -10,7 +10,7 @@ import pytest
 from typer.testing import CliRunner
 
 from sharur.sql import (
-    PRELUDE_PATH,
+    available_tables,
     install_prelude,
     looks_like_sequence,
     parse_prelude,
@@ -158,14 +158,23 @@ def test_generic_client_runs_the_file_after_attach_and_use(db):
     mem = duckdb.connect()
     mem.execute(f"ATTACH '{db}' AS ds (READ_ONLY)")
     mem.execute("USE ds")
-    mem.execute(PRELUDE_PATH.read_text())
+    # `sharur sql prelude --db`: the script for this database, without the macros of absent
+    # optional layers (DuckDB 1.3+ binds a table macro's tables when it is created).
+    mem.execute(prelude_text(available_tables(mem)))
     assert mem.execute("SELECT count(*) FROM genes()").fetchone()[0] == 18
-    mem2 = duckdb.connect()
-    mem2.execute(f"ATTACH '{db}' AS ds (READ_ONLY)")
-    mem2.execute("USE ds")
-    mem2.execute(prelude_text())
-    assert "slot_tally" in {r[0] for r in mem2.execute("SELECT name FROM sharur_sql()").fetchall()}
-    assert mem2.execute("SELECT count(*) FROM slot('K90001')").fetchone()[0] == 3
+    names = {r[0] for r in mem.execute("SELECT name FROM sharur_sql()").fetchall()}
+    assert "slot_tally" in names and "family_proteins" not in names
+    assert mem.execute("SELECT count(*) FROM slot('K90001')").fetchone()[0] == 3
+
+
+def test_prelude_script_leaves_out_only_absent_layers():
+    core = {"proteins", "annotations", "bins"}
+    families = core | {"protein_families", "family_stats", "protein_family_runs"}
+    assert "MACRO family_proteins" not in prelude_text(core) and "MACRO neighbors" in prelude_text(core)
+    assert "MACRO family_proteins" in prelude_text(families)
+    assert "MACRO resembles_of" not in prelude_text(families)
+    assert "MACRO resembles_of" in prelude_text(families | {"family_annotations"})
+    assert "MACRO resembles_presence" in prelude_text()
 
 
 # --------------------------------------------------------------------------- tables and features

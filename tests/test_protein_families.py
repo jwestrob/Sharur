@@ -292,9 +292,13 @@ def test_sql_surface_exposes_families(families, tmp_path):
     shutil.copyfile(families["full"], db)
     plain = duckdb.connect(str(db), read_only=True)
     report = install_prelude(plain)
-    assert report.ok and {"family_proteins", "family_presence", "families_of"} <= set(report.installed)
-    with pytest.raises(duckdb.CatalogException, match="protein_families"):
-        plain.execute("FROM family_proteins('fam:x:y')").fetchall()
+    family_macros = {"family_proteins", "family_presence", "families_of"}
+    assert report.ok
+    if family_macros <= set(report.installed):  # DuckDB binds the macro's tables on use
+        with pytest.raises(duckdb.CatalogException, match="protein_families"):
+            plain.execute("FROM family_proteins('fam:x:y')").fetchall()
+    else:  # DuckDB 1.3+ binds them at creation: the layer's macros wait for the layer
+        assert family_macros <= {u["name"] for u in report.unavailable if u["layer"] == "protein families"}
     plain.close()
     con = store.connect(db, threads=2, memory_limit="1GB")
     store.load_staging(con, families["staging"], log=lambda _m: None)

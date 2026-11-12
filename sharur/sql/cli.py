@@ -50,14 +50,28 @@ def render(columns: list[str], rows: list[tuple], fmt: QueryFormat, *, total: in
 @sql_app.command("prelude")
 def prelude_command(
     out: Path | None = typer.Option(None, "--out", "-o", help="Write the script here instead of stdout."),
+    db: Path | None = typer.Option(
+        None, "--db", "-d",
+        help="Dataset DuckDB the script is for: leaves out macros of optional layers it lacks "
+             "(needed with DuckDB 1.3 and later, which stop the script at the first such macro).",
+    ),
 ):
     """Print the prelude as one SQL script for a generic DuckDB client.
 
     Run it after `ATTACH 'data/DATASET/sharur.duckdb' AS ds (READ_ONLY); USE ds;`.
     """
-    from sharur.sql import prelude_text  # noqa: PLC0415
+    from sharur.sql import available_tables, prelude_text  # noqa: PLC0415
 
-    text = prelude_text()
+    tables = None
+    if db is not None:
+        import duckdb  # noqa: PLC0415
+
+        con = duckdb.connect(str(db), read_only=True)
+        try:
+            tables = available_tables(con)
+        finally:
+            con.close()
+    text = prelude_text(tables)
     if out is not None:
         out.write_text(text)
         typer.echo(f"Wrote {out}", err=True)
@@ -86,6 +100,8 @@ def objects_command(
     typer.echo(render(columns, rows, output_format))
     if report.skipped:
         typer.echo(f"prelude skipped: {report.skipped}", err=True)
+    for item in report.unavailable:
+        typer.echo(f"not installed {item['name']}: the {item['layer']} layer is not in this database", err=True)
     for item in report.failed:
         typer.echo(f"failed {item['name']}: {item['error']}", err=True)
 

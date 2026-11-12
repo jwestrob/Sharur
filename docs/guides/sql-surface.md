@@ -41,7 +41,12 @@ USE ds;
 
 A client without `.read` takes the file's text as one multi-statement query;
 `sharur sql prelude --out prelude.sql` writes the same script with a registry macro appended.
-`FROM sharur_sql()` then lists every object with its signature.
+`FROM sharur_sql()` then lists every object with its signature. DuckDB 1.3 and later bind a table
+macro's tables when the macro is created, so on a database without the protein-family or
+remote-homology layer those macros cannot be created; `sharur sql prelude --db
+data/DATASET/sharur.duckdb --out prelude.sql` writes the script for that database without them,
+and Python connections leave them out on their own (`sharur sql objects` lists them as not
+installed).
 
 ## Feature specs
 

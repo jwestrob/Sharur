@@ -87,7 +87,7 @@ CREATE OR REPLACE TEMP MACRO feature_proteins(features) AS TABLE
         FROM (SELECT unnest(id_list(features)) AS f)
     ),
     spec_src AS MATERIALIZED (
-        SELECT feature, key, unnest(CASE WHEN ns = 'ko' THEN ['kofam', 'kegg'] ELSE [ns] END) AS src
+        SELECT feature, key, unnest(CASE WHEN ns = 'ko' THEN ['kofam', 'kegg'] ELSE [ns] END) AS spec_source
         FROM spec
         WHERE ns IS NOT NULL AND ns NOT IN ('predicate', 'defense', 'secretion', 'crispr')
     ),
@@ -99,7 +99,7 @@ CREATE OR REPLACE TEMP MACRO feature_proteins(features) AS TABLE
         FROM annotations a
         WHERE a.accession IN (SELECT key FROM spec)
            OR a.name IN (SELECT key FROM spec)
-           OR a.source IN (SELECT src FROM spec_src WHERE key = '*')
+           OR a.source IN (SELECT spec_source FROM spec_src WHERE key = '*')
     ),
     ann_hits AS (
         SELECT s.feature, a.protein_id, a.source, a.accession, a.name
@@ -108,7 +108,7 @@ CREATE OR REPLACE TEMP MACRO feature_proteins(features) AS TABLE
         UNION ALL
         SELECT s.feature, a.protein_id, a.source, a.accession, a.name
         FROM ann a JOIN spec_src s
-          ON a.source = s.src AND (a.accession = s.key OR a.name = s.key OR s.key = '*')
+          ON a.source = s.spec_source AND (a.accession = s.key OR a.name = s.key OR s.key = '*')
     ),
     pred_hits AS (
         SELECT s.feature, pp.protein_id, 'predicate' AS source, s.key AS accession, s.key AS name
