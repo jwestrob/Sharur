@@ -4,14 +4,14 @@ channels:
   - bioconda
   - defaults
 dependencies:
-  # Python
+  # Python (Aksha, the Stage 04 HMM search, ships wheels for Python 3.12)
   - python=3.12
   - pip
 
   # Compiled scientific libs (conda-forge)
   - numpy
   - scipy
-  - pandas
+  - pandas<3             # Aksha 0.2.1's KOFAM installer fails on pandas 3
   - pyarrow
   - h5py
   - matplotlib
@@ -20,9 +20,10 @@ dependencies:
   - prodigal
   - diamond
   - hmmer
+  - minced
+  - mmseqs2             # optional Stage 09 protein families (--with-families)
   - quast
   - dfast_qc            # invoked by src/ingest/02_dfast_qc.py
-  - minced
   - gecco
   - dbcan               # run_dbcan / dbCAN HMMdb
   - kalign3             # multiple sequence alignment
@@ -34,6 +35,8 @@ dependencies:
   # pip-only packages
   - pip:
       - -e ".[all,dev]"
-      # Defense system co-location validation
+      # Aksha runs Stage 04's HMM searches; its compiled runtime ships for Linux x86-64 only.
+      - aksha; sys_platform == "linux" and platform_machine == "x86_64"
+      # MacSyFinder's `macsydata` downloads the DefenseFinder models that Stage 07's
+      # defense-system caller reads (see INSTALL.md).
       - macsyfinder==2.1.4
-      - --no-deps mdmparis-defense-finder
