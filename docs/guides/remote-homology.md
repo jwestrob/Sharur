@@ -7,14 +7,14 @@ optional layers:
 
 | Layer | Unit | Search | Stored in |
 |---|---|---|---|
-| CDD per protein | every unique protein sequence | RPS-BLAST against CDD, hits at E ≤ 0.01 | the best model of each region in `annotations` (`source = 'cdd'`); every hit in the stage's staging file |
+| CDD per protein | every unique protein sequence | RPS-BLAST against CDD, hits at E ≤ 0.01 | the best model of each region in `protein_resemblance` (`source = 'cdd'`); every hit in the stage's staging file |
 | Family tier | one profile per protein family | MAFFT alignment of up to 250 unique members (representative first), optional HHblits enrichment against UniRef30, HHsearch against Pfam and PDB profile databases | `family_annotations` |
 
 Both layers are **observed similarity**. A row says that a protein, or the family it belongs
 to, resembles a profile; it names no system, pathway or function. The SQL surface labels these
-rows `evidence = 'resembles'`, they stay out of the curated system tables, and predicate
-generation leaves CDD rows out, so `unannotated` keeps meaning "no hit in the curated
-sources".
+rows `evidence = 'resembles'`. Both layers live in their own tables, so `annotations` holds the
+curated per-domain hits alone: predicates, `unannotated` ("no hit in the curated sources") and
+every query that counts annotation rows read the same rows with or without the layers.
 
 ## The "resembles" rule
 
@@ -146,7 +146,7 @@ manageable:
 
 - **The staging file holds every hit** at E ≤ 0.01, per unique sequence (`cdd_hits`,
   `cdd_models`), with its query and model ranges.
-- **Activation writes the best model of each region** to `annotations`. Per sequence, hits are
+- **Activation writes the best model of each region** to `protein_resemblance`. Per sequence, hits are
   taken by bit score (ties: lower E-value, then lower model id); a hit is kept when, against
   every hit kept before it, the two query ranges share at most `--max-overlap` (default 0.5) of
   the shorter range. This is the overlap measure `sharur architecture` uses for Pfam domains.
@@ -211,13 +211,15 @@ copy waits for `sharur stage publish` or `sharur stage discard`.
   exist with the clustering input digest the search recorded, and every searched family must
   exist in it.
 - Family rows of the same clustering run and source are replaced; other runs stay.
-- CDD rows replace every `annotations` row with `source = 'cdd'`: the best model of each
+- CDD rows replace the `protein_resemblance` rows of source `cdd`: the best model of each
   region by default, every hit with `--cdd-rows all`. Before that, the database's set of unique
   protein sequences must hash to the digest recorded when they were exported for the search; a
-  database with added, removed or changed proteins needs a new CDD run.
-  `annotation_source_versions` records the database name and version, the E-value cutoff, the
-  region rule, the rows stored and the protein-level count of every hit, and the staging file
-  that holds the full table.
+  database with added, removed or changed proteins needs a new CDD run. Every row carries the
+  search and the database name and version; `protein_resemblance_runs` records the E-value
+  cutoff, the region rule, the rows stored and the protein-level count of every hit, and the
+  staging file that holds the full table.
+- Activation (re)creates the views `family_resemblance` and `family_annotations_carried`
+  (below).
 
 A staging file that was loaded more than once keeps free blocks; `sharur remote-homology
 compact-staging --staging FILE` rewrites it whole (every table checked by row count and content
@@ -225,7 +227,27 @@ fingerprint, then one atomic rename) before it is copied or activated.
 
 `sharur remote-homology status --db ...` and `sharur preflight` (the `remote_homology`
 capability) report the searches, how many families meet the rule, and CDD coverage: the rows
-stored in `annotations` and the protein-level count of every hit in the staging file.
+stored in `protein_resemblance` and the protein-level count of every hit in the staging file.
+
+### Databases activated by earlier releases
+
+Earlier releases wrote the CDD rows to `annotations` (`source = 'cdd'`) and the database name
+and version to `annotation_source_versions`. `status` reports such rows
+(`annotation_rows_to_move`), `preflight` marks the capability `stale`, and the SQL surface
+leaves them out until they move:
+
+```bash
+sharur remote-homology migrate --db data/DS/sharur.duckdb            # staged: diff, then publish
+sharur stage publish data/DS/sharur.duckdb.resemblance-table.staging
+```
+
+`migrate` follows the staged-write protocol (label `resemblance-table`; `--publish` publishes
+directly). In one transaction on the clone it copies the rows to `protein_resemblance` with the
+recorded database name, version and search, checks the copy against the originals by row count
+and content fingerprint, moves the `annotation_source_versions` entry to
+`protein_resemblance_runs`, deletes the rows from `annotations` and creates the family-tier
+views. `annotations` is only deleted from, so its other rows stay exactly as they were. A
+database without such rows gets the views and nothing else.
 
 ## Tables
 
@@ -235,7 +257,9 @@ stored in `annotations` and the protein-level count of every hit in the staging 
 | `family_annotation_status` | searched family | `status` (`ok`, `error`, `pending`), member, genome and sequence counts, representative, `n_hits`, `verified` (query length matched), `seconds`, `steps` |
 | `family_annotation_runs` | search | `search_run`, `clustering_run`, selection rule, `msa_kinds`, `targets`, `databases` (names, versions, paths), parameters, tool versions, family counts, export and configuration digests |
 | `family_resemblance` (view) | hit meeting the rule | the hit columns plus `hit_class` (`characterized`, `unknown_function`) and `evidence` = `resembles` |
-| `annotations` (`source = 'cdd'`) | best CDD model per region and protein (default) | `accession` (model, e.g. `cd00009`), `name`, `description`, `evalue`, `score` (bits), `start_aa`, `end_aa` |
+| `protein_resemblance` | best CDD model per region and protein (default) | `protein_id`, `source` (`cdd`), `search_run`, `db_name`, `db_version`, `accession` (model, e.g. `cd00009`), `name`, `description`, `evalue`, `score` (bits), `start_aa`, `end_aa` |
+| `protein_resemblance_runs` | source | `search_run`, `loaded_at`, `db_name`, `db_version`, `db_prefix`, `selection_rule`, `rows_stored`, `protein_rows_all` (every hit, expanded to proteins), `rows_loaded`, `proteins`, `staging_path`, `parameters` |
+| `family_annotations_carried` (view) | family hit and family of another clustering run with the same representative | `family_id` and `clustering_run` of the target family, `source_run`, `source_family_id`, `source_members`, `target_members`, the hit columns, `unknown_function`, `evidence` = `resembles` |
 | `cdd_hits`, `cdd_models`, `cdd_runs` (staging file) | every hit per unique sequence; model; search | `hit_id`, `sequence_md5`, `pssm_id`, E-value, bits, ranges, `best_in_region`; accession, name, description, length; database name and version, E-value cutoff, region rule and `max_overlap`, counts, export digest |
 
 Query coordinates (`q_start`, `q_end`) refer to the family representative's sequence, which
@@ -246,7 +270,7 @@ leads every family alignment.
 Each SQL-surface macro below needs the remote-homology tables ([SQL surface](sql-surface.md)):
 
 ```sql
--- what one protein resembles: hits of its families in every clustering run, and its own CDD hits
+-- what one protein resembles: hits of its families in every clustering run, and its own protein_resemblance rows
 FROM resembles_of('PROTEIN_ID');                               -- min_probability := 90, min_cols := 30
 -- proteins resembling a target, in the feature_proteins shape (evidence = 'resembles')
 FROM resembles_proteins('PF00004');
@@ -256,9 +280,11 @@ FROM resembles_presence('PF00004', min_completeness := 90);
 FROM feature_proteins('cdd:cd00009');
 ```
 
-An unqualified spec (`PF00004`, `AAA`) matches the curated sources only; CDD rows appear when
-the spec names `cdd:`. `protein_summary`, `neighbors` and `slot` list CDD hits in their own
-`resembles` column, outside `other` and `n_annotations`.
+An unqualified spec (`PF00004`, `AAA`) matches `annotations` only; CDD rows appear when the
+spec names `cdd:`. `protein_summary`, `neighbors` and `slot` list CDD hits in their own
+`resembles` column, apart from `other` and `n_annotations`. `protein_resemblance_rows()` is
+the table itself, and an empty table of the same shape on a database without the layer, so
+these macros work on every database.
 
 ### Hits under another clustering run
 
@@ -270,11 +296,8 @@ shared representative:
 ```sql
 -- hits of every searched run, on the families of TARGET_RUN that share the searched family's representative
 FROM family_annotations_via('TARGET_RUN');
--- the same join for a client without the SQL surface
-SELECT t.family_id, h.family_id AS source_family_id, h.source, h.hit_accession, h.probability, h.aligned_cols
-FROM family_annotations h
-JOIN family_stats s ON s.family_id = h.family_id AND s.clustering_run = h.clustering_run
-JOIN family_stats t ON t.rep_protein_id = s.rep_protein_id AND t.clustering_run = 'TARGET_RUN';
+-- the stored view: the same rows for every target run, readable by any DuckDB client
+FROM family_annotations_carried WHERE clustering_run = 'TARGET_RUN';
 ```
 
 `source_members` and `target_members` show how much a family grew. Check the premise before

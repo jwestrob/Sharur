@@ -221,9 +221,9 @@ report/draft files remain independently writable.
   validated system-caller rows. **CRITICAL: NEVER report raw system-profile HMM hits as
   systems.** Only purpose-built caller output such as the current `defense_systems`
   table (materialized by `sharur/colocation.py`) supports a named system claim.
-- **Remote homology (`evidence = 'resembles'`):** CDD rows (`annotations.source = 'cdd'`)
-  and family-tier HHsearch hits (`family_annotations`, `family_resemblance`) are observed
-  similarity. Cite them as "resembles X (source, database and version, probability or E-value,
+- **Remote homology (`evidence = 'resembles'`):** CDD rows (`protein_resemblance`, apart from
+  `annotations`) and family-tier HHsearch hits (`family_annotations`, `family_resemblance`,
+  `family_annotations_carried` for other clustering runs) are observed similarity. Cite them as "resembles X (source, database and version, probability or E-value,
   aligned columns)", keep `hit_class = 'unknown_function'` hits separate from characterized
   ones, and tag any function drawn from them UNVERIFIED. A system, pathway or function name
   still rests on a curated caller's call; `unannotated` keeps its curated-source meaning

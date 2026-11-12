@@ -1497,6 +1497,7 @@ $ sharur remote-homology [OPTIONS] COMMAND [ARGS]...
 * `load-cdd`: Load the CDD hits (per unique sequence)...
 * `compact-staging`: Rewrite a staging file without free blocks...
 * `activate`: Stage DB, load the remote-homology rows...
+* `migrate`: Move CDD rows that earlier releases wrote...
 * `status`: Searches loaded, families resembling...
 
 #### `sharur remote-homology check`
@@ -1679,7 +1680,29 @@ $ sharur remote-homology activate [OPTIONS]
 * `--work-dir PATH`: Directory for the staged clone (default: beside DB).
 * `--publish`: Publish the staged copy when the load succeeds.
 * `--verify-digest / --no-verify-digest`: [default: verify-digest]
-* `--cdd-rows TEXT`: CDD rows written to annotations: best_per_region (the best model of each region) or all. The full hit table stays in the staging file.  [default: best_per_region]
+* `--cdd-rows TEXT`: CDD rows written to protein_resemblance: best_per_region (the best model of each region) or all. The full hit table stays in the staging file.  [default: best_per_region]
+* `--help`: Show this message and exit.
+
+#### `sharur remote-homology migrate`
+
+Move CDD rows that earlier releases wrote to annotations into protein_resemblance (staged write).
+
+The rows, their database name and version, and the annotation_source_versions entry move in
+one transaction on a staged clone; the diff covers annotations, annotation_source_versions and
+the protein_resemblance tables. The family-tier views are (re)created.
+
+**Usage**:
+
+```console
+$ sharur remote-homology migrate [OPTIONS]
+```
+
+**Options**:
+
+* `-d, --db PATH`: Dataset sharur.duckdb.  [required]
+* `-l, --label TEXT`: [default: resemblance-table]
+* `--work-dir PATH`: Directory for the staged clone (default: beside DB).
+* `--publish`: Publish the staged copy when the move succeeds.
 * `--help`: Show this message and exit.
 
 #### `sharur remote-homology status`

@@ -61,7 +61,7 @@ Every macro that takes features accepts a comma-separated string or a list:
 | `predicate:hydrogenase` | `protein_predicates` |
 | `defense:CBASS`, `secretion:TYPE` | a curated `defense_systems` / `secretion_systems` call, by type or subtype |
 | `crispr:I-B` | a `crispr_cas_systems` call with status `crispr_cas` or `cas` |
-| `cdd:cd00009`, `cdd:*` | CDD hits (remote homology); an unqualified spec leaves them out |
+| `cdd:cd00009`, `cdd:*` | CDD hits (remote homology, `protein_resemblance`); an unqualified spec reads `annotations` only |
 | a protein ID | that protein (anchor arguments) |
 
 Each match carries `evidence`: `observed` for per-domain hits, `caller` for curated system
@@ -78,14 +78,15 @@ similarity to a profile and name nothing.
 | `genomes()` | `bins` with `domain`, `phylum`, `class`, `"order"`, `family`, `genus`, `species` |
 | `feature_proteins(features)` | one row per matching protein: `feature`, `protein_id`, `bin_id`, `contig_id`, `gene_index`, `strand`, `source`, `accession`, `name`, `evidence` |
 | `feature_presence(features, min_completeness := 0, max_contamination := 100)` | every genome × feature: `present`, `n_proteins`, `sources`, `evidence`, completeness, contamination, GTDB ranks |
-| `neighbors(anchor, k := 5)` | genes within `k` positions of each anchor, `offset` in the anchor's orientation (negative = upstream), `same_strand`, distance to each contig end, and each gene's `pfam`, `ko`, `ko_name`, `systems`, `other`, `resembles` (CDD hits) |
+| `neighbors(anchor, k := 5)` | genes within `k` positions of each anchor, `offset` in the anchor's orientation (negative = upstream), `same_strand`, distance to each contig end, and each gene's `pfam`, `ko`, `ko_name`, `systems`, `other`, `resembles` (`protein_resemblance` rows, e.g. CDD) |
 | `neighbor_features(anchor, k := 5, src := 'pfam')` | per oriented offset and strand: each feature's number of genomes and anchors |
 | `slot(anchor, side := 'upstream', partner := NULL, max_span := 10, min_completeness := 0, max_contamination := 100)` | per anchor protein: the gene beside it (`side` = `upstream` or `downstream`), or every gene between it and its nearest `partner` within `max_span` genes (`side` = `upstream`, `downstream` or `either`); occupant strand, length, annotations, `at_contig_edge`, genome completeness and ranks |
 | `slot_tally(anchor, occupant, side, partner, rank := 'order', split := NULL, max_span, min_completeness, max_contamination)` | per taxon (and per `split` feature presence): genomes with an anchor, with an `occupant` match on the same strand or either strand, with an occupant lacking any Pfam hit, at a contig edge, without a partner in range |
 | `protein_summary(ids)`, `anchor_proteins(anchor)` | the building blocks above |
 | `family_proteins(families)`, `family_presence(families, min_completeness := 0, max_contamination := 100)`, `families_of(ids)` | protein families in the `feature_proteins` / `feature_presence` shapes, and each protein's family in every clustering run; need the family layer ([Protein families](protein-families.md)) |
-| `resembles_of(ids, min_probability := 90, min_cols := 30)`, `resembles_proteins(targets, ...)`, `resembles_presence(targets, ..., min_completeness := 0, max_contamination := 100)` | what proteins resemble (their families' Pfam and PDB hits at the rule, their own CDD hits), proteins resembling targets in the `feature_proteins` shape, and the genome × target grid; `evidence` = `resembles`; need the remote-homology layer ([Remote homology](remote-homology.md)) |
-| `family_annotations_via(target_run)` | family-tier hits of other clustering runs on the families of `target_run` that share the searched family's representative |
+| `resembles_of(ids, min_probability := 90, min_cols := 30)`, `resembles_proteins(targets, ...)`, `resembles_presence(targets, ..., min_completeness := 0, max_contamination := 100)` | what proteins resemble (their families' Pfam and PDB hits at the rule, their own `protein_resemblance` rows), proteins resembling targets in the `feature_proteins` shape, and the genome × target grid; `evidence` = `resembles`; need the remote-homology layer ([Remote homology](remote-homology.md)) |
+| `family_annotations_via(target_run)` | family-tier hits of other clustering runs on the families of `target_run` that share the searched family's representative (the stored view `family_annotations_carried` holds every target run for clients without the surface) |
+| `protein_resemblance_rows()` | the `protein_resemblance` table, or an empty table of its shape on a database without the remote-homology layer |
 | `strand_sign(s)`, `id_list(x)`, `rank_of(taxonomy, rank)` | scalar helpers |
 | `write_fasta(path, ids)` | Python connections only: writes FASTA, returns `{path, n_sequences, n_requested, n_missing}` |
 
