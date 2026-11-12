@@ -408,3 +408,47 @@ CREATE OR REPLACE TEMP MACRO slot_tally(anchor, occupant, side := 'upstream', pa
     FROM x
     GROUP BY ALL
     ORDER BY phylum NULLS FIRST, genomes_with_anchor DESC, taxon, genome_has_split;
+
+
+-- @object family_proteins table_macro: members of protein families or subfamilies (family_id values of any clustering run) in the feature_proteins shape: feature, protein_id, bin_id, contig_id, gene_index, strand, source (the clustering run), accession (the family id), name (the run's level), evidence; needs the protein-family layer (docs/guides/protein-families.md)
+CREATE OR REPLACE TEMP MACRO family_proteins(families) AS TABLE
+    SELECT f.family_id AS feature, f.protein_id, p.bin_id, p.contig_id, p.gene_index, p.strand,
+           f.clustering_run AS source, f.family_id AS accession, r.level AS name, 'observed' AS evidence
+    FROM protein_families f
+    JOIN protein_family_runs r USING (clustering_run)
+    JOIN proteins p USING (protein_id)
+    WHERE f.family_id IN (SELECT unnest(id_list(families)));
+
+
+-- @object family_presence table_macro: every genome x family (or subfamily) in the feature_presence shape: present, n_proteins, sources, evidence, completeness, contamination and GTDB ranks; needs the protein-family layer
+CREATE OR REPLACE TEMP MACRO family_presence(families, min_completeness := 0, max_contamination := 100) AS TABLE
+    WITH hit AS MATERIALIZED (
+        SELECT feature, bin_id, count(DISTINCT protein_id) AS n_proteins,
+               list(DISTINCT source ORDER BY source) AS sources,
+               list(DISTINCT evidence ORDER BY evidence) AS evidence
+        FROM family_proteins(families)
+        GROUP BY feature, bin_id
+    ),
+    g AS MATERIALIZED (
+        SELECT * FROM genomes()
+        WHERE coalesce(completeness, 0) >= min_completeness
+          AND coalesce(contamination, 0) <= max_contamination
+    ),
+    f AS (SELECT DISTINCT unnest(id_list(families)) AS feature)
+    SELECT g.bin_id, f.feature, h.bin_id IS NOT NULL AS present, coalesce(h.n_proteins, 0) AS n_proteins,
+           h.sources, h.evidence, g.completeness, g.contamination, g.n_contigs,
+           g.domain, g.phylum, g.class, g."order", g.family, g.genus, g.species
+    FROM g CROSS JOIN f
+    LEFT JOIN hit h ON h.bin_id = g.bin_id AND h.feature = f.feature;
+
+
+-- @object families_of table_macro: per protein (a list or comma-separated IDs), its family in every clustering run: clustering_run, level, is_default, family_id, is_representative, parent_family_id, n_members, n_genomes, n_orders, pfam_dark, dominant_pfam_architecture, dominant_ko; needs the protein-family layer
+CREATE OR REPLACE TEMP MACRO families_of(ids) AS TABLE
+    SELECT f.protein_id, f.clustering_run, r.level, r.is_default, f.family_id, f.is_representative,
+           s.parent_family_id, s.n_members, s.n_genomes, s.n_orders, s.pfam_dark,
+           s.dominant_pfam_architecture, s.dominant_ko
+    FROM protein_families f
+    JOIN protein_family_runs r USING (clustering_run)
+    LEFT JOIN family_stats s ON s.clustering_run = f.clustering_run AND s.family_id = f.family_id
+    WHERE f.protein_id IN (SELECT unnest(id_list(ids)))
+    ORDER BY f.protein_id, r.level, f.clustering_run;

@@ -285,6 +285,33 @@ def test_activation_loads_runs_and_checks_identity(families, tmp_path):
 
 
 @requires_mmseqs
+def test_sql_surface_exposes_families(families, tmp_path):
+    from sharur.sql import install_prelude
+
+    db = tmp_path / "sql.duckdb"
+    shutil.copyfile(families["full"], db)
+    plain = duckdb.connect(str(db), read_only=True)
+    report = install_prelude(plain)
+    assert report.ok and {"family_proteins", "family_presence", "families_of"} <= set(report.installed)
+    with pytest.raises(duckdb.CatalogException, match="protein_families"):
+        plain.execute("FROM family_proteins('fam:x:y')").fetchall()
+    plain.close()
+    con = store.connect(db, threads=2, memory_limit="1GB")
+    store.load_staging(con, families["staging"], log=lambda _m: None)
+    con.close()
+    with DuckDBStore(db, read_only=True) as ro:
+        fx = ro.conn.execute("SELECT family_id FROM protein_family_levels WHERE protein_id = 'xa_g1_1'").fetchone()[0]
+        presence = ro.conn.execute(f"SELECT bin_id, present, n_proteins, sources FROM family_presence('{fx}') "
+                                   "ORDER BY bin_id").fetchall()
+        assert [r[:3] for r in presence] == [("g1", True, 3), ("g2", True, 2), ("g3", True, 2), ("g4", False, 0)]
+        assert presence[0][3] == [families["result"]["family_run"]]
+        members = ro.conn.execute(f"SELECT protein_id, evidence FROM family_proteins('{fx}') ORDER BY 1").fetchall()
+        assert len(members) == 7 and {e for _, e in members} == {"observed"}
+        rows = ro.conn.execute("SELECT level, family_id, n_members FROM families_of('xa_g1_1')").fetchall()
+        assert [r[0] for r in rows] == ["family", "subfamily"] and rows[0][1:] == (fx, 7)
+
+
+@requires_mmseqs
 def test_activate_command_stages_and_publishes(families, tmp_path):
     from sharur.cli import app
 
