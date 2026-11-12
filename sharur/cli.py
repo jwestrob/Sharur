@@ -1361,6 +1361,10 @@ from sharur.stats_cli import stats_app  # noqa: E402
 app.add_typer(sql_app, name="sql")
 app.add_typer(stats_app, name="stats")
 
+from sharur.protein_families.cli import families_app  # noqa: E402
+
+app.add_typer(families_app, name="families")
+
 
 @stage_app.command(
     "run", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})

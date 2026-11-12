@@ -874,6 +874,46 @@ def _assembly_evidence_check(
         )
 
 
+def _protein_family_check(store: DuckDBStore) -> Capability:
+    """Optional MMseqs2 protein-family layer (``docs/guides/protein-families.md``)."""
+    from sharur.protein_families.store import status  # noqa: PLC0415
+
+    try:
+        info = status(store.conn)
+    except Exception as exc:  # noqa: BLE001 - report, never break the brief
+        return Capability("protein_families", CapabilityState.failed, "The protein-family tables are unreadable.",
+                          evidence={"error": f"{type(exc).__name__}: {exc}"},
+                          remediation="Re-activate the staging file with `sharur families activate`.")
+    if not info["present"]:
+        return Capability(
+            "protein_families", CapabilityState.unavailable,
+            "Annotation-independent protein families are not loaded.",
+            remediation="Run `sharur families run` (or `sharur-ingest --with-families`), then "
+                        "`sharur families activate`.")
+    evidence = {key: info[key] for key in ("default_family_run", "default_subfamily_run", "families",
+                                           "subfamilies", "proteins_with_family", "proteins_without_family",
+                                           "assigned_fraction", "recluster_recommended")}
+    evidence["runs"] = [r["clustering_run"] for r in info["runs"]]
+    if info["default_family_run"] is None:
+        return Capability(
+            "protein_families", CapabilityState.unavailable,
+            f"{len(info['runs'])} clustering run(s) are loaded, none of them a default family run.",
+            evidence=evidence, remediation="Activate a Sharur build or import a run with `--default --level family`.")
+    if info["proteins_without_family"]:
+        return Capability(
+            "protein_families", CapabilityState.stale,
+            f"{info['proteins_without_family']:,} proteins lack a family (genomes added after clustering).",
+            evidence=evidence, remediation="Run `sharur families assign --db DB --publish`.")
+    return Capability(
+        "protein_families", CapabilityState.available,
+        f"{info['families']:,} families and {info['subfamilies']:,} subfamilies "
+        f"(run {info['default_family_run']}) "
+        "cover every protein; per-genome presence in genome_protein_families.",
+        evidence=evidence,
+        remediation=("A full re-cluster is due: over 10% of proteins were placed by assignment."
+                     if info["recluster_recommended"] else None))
+
+
 def _synteny_check(
     db_path: Path,
     *,
@@ -1157,6 +1197,7 @@ def build_capability_brief(
                 )
                 capabilities.append(index_check)
             capabilities.extend(_semantic_checks(store, tables, protein_count, provider))
+            capabilities.append(_protein_family_check(store))
         else:
             for capability_id in (
                 "annotation_sources",
