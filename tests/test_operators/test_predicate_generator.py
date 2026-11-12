@@ -326,8 +326,22 @@ class TestKeggMapping:
     @requires_kegg_map
     def test_local_ko_definition_maps_uncharacterized(self):
         """Uncharacterized KO definitions should become hypothetical."""
-        preds = get_predicates_for_kegg("K07041", "GA")
-        assert "hypothetical" in preds
+        from sharur.predicates.mappings.kegg_map import kegg_dir
+
+        # Which KOs KEGG calls "uncharacterized protein" changes between releases (K07041 is now
+        # FttA), so take them from the KO list of the local build.
+        listing = kegg_dir() / "inputs" / "ko_list.tsv"
+        if not listing.is_file():
+            pytest.skip("local KEGG build keeps no KO list")
+        uncharacterized = [
+            line.split("\t", 1)[0]
+            for line in listing.read_text().splitlines()
+            if line.rstrip().endswith("; uncharacterized protein")
+        ]
+        if not uncharacterized:
+            pytest.skip("this KEGG release lists no uncharacterized protein")
+        for ko in uncharacterized[:5]:
+            assert "hypothetical" in get_predicates_for_kegg(ko, "GA"), ko
 
     @requires_kegg_map
     def test_local_ko_definition_maps_replication(self):

@@ -52,6 +52,10 @@ def test_find_foldseek_binary_skips_broken_pyenv_shim(
     )
     monkeypatch.delenv("FOLDSEEK_BINARY", raising=False)
     monkeypatch.delenv("FOLDSEEK_BIN", raising=False)
+    # An activated conda environment (environment.yml installs Foldseek) and the user's home
+    # directory hold their own candidates; keep the search to this test's files.
+    monkeypatch.delenv("CONDA_PREFIX", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("PATH", str(shim.parent))
     monkeypatch.setenv("PYENV_ROOT", str(pyenv_root))
 
