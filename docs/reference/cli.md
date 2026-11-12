@@ -31,12 +31,17 @@ $ sharur [OPTIONS] COMMAND [ARGS]...
 * `compute-composition-evidence`: Explicitly scan FASTAs for scalar GC/4-mer...
 * `search`: Search proteins by predicates or annotations.
 * `compute-predicates`: Compute and store V2 predicates for proteins.
+* `reconcile-predicates`: Bring predicates current after a...
 * `predicates`: List available predicates for search.
 * `preflight`: Emit one typed dataset/runtime capability...
+* `compact`: Create an exact validated physical copy;...
 * `seal`: Write a portable integrity seal for a...
 * `migrate`: Apply pending schema/index migrations,...
 * `backfill-contig-context`: Record assembly contig lengths and...
 * `contig-name-topology`: Show or record which contig-name suffixes...
+* `load-bgcs`: Load GECCO biosynthetic gene clusters into...
+* `diff-db`: Compare every table of two DuckDB files:...
+* `reverify`: Replay findings' verification triples and...
 * `verify-seal`: Recompute a dataset seal and report...
 * `build-vector-index`: Build mmap-ready FAISS sidecars and a...
 * `doctor`: Verify external tools, reference...
@@ -46,6 +51,8 @@ $ sharur [OPTIONS] COMMAND [ARGS]...
 * `import-coverage`: Import per-sample contig coverage into the...
 * `abundance`: Genome abundance per sample, or the share...
 * `coverage-outliers`: Contigs whose depth departs from their...
+* `import-expression`: Import per-sample gene (CDS) read counts...
+* `expression`: Genome transcript share per RNA sample, a...
 * `browse`: Browse a dataset in a web browser: protein...
 * `describe`: What a dataset holds: annotation sources,...
 * `card`: Summarize one protein: context,...
@@ -54,6 +61,10 @@ $ sharur [OPTIONS] COMMAND [ARGS]...
 * `setup-kegg`: Fetch KEGG data and build the KO ->...
 * `import-quality`: Fill genome completeness and contamination...
 * `cas-type`: Subtype CRISPR-Cas systems with...
+* `stage`: Run a writer against a staged clone of a...
+* `sql`: Sharur's SQL surface: per-connection...
+* `stats`: Pre-register predictions and check...
+* `families`: Annotation-independent protein families...
 
 ### `sharur overview`
 
@@ -332,6 +343,32 @@ $ sharur compute-predicates [OPTIONS]
 * `--review-queue PATH`: Write unresolved-accession review TSV
 * `--help`: Show this message and exit.
 
+### `sharur reconcile-predicates`
+
+Bring predicates current after a KEGG-map-only change, without a full regeneration.
+
+Checks that only the KEGG map (or its rule files) changed since the last full generation and that
+--old-kegg-map is the map that generation recorded (sha256). Regenerates exactly the proteins
+carrying a KO whose predicate set changed, then records a `reconciled` generation, so
+`sharur describe` / `preflight` report the predicates as current. Refuses when anything else changed.
+
+Example:
+    cp data/reference/kegg/kegg_predicates.tsv /tmp/kegg_predicates.before.tsv
+    sharur setup-kegg --rejudge
+    sharur reconcile-predicates --db data/DATASET/sharur.duckdb --old-kegg-map /tmp/kegg_predicates.before.tsv
+
+**Usage**:
+
+```console
+$ sharur reconcile-predicates [OPTIONS]
+```
+
+**Options**:
+
+* `-d, --db TEXT`: Path to DuckDB database  [default: data/sharur.duckdb]
+* `--old-kegg-map PATH`: The kegg_predicates.tsv the database's predicates were generated with (copy it aside before `sharur setup-kegg --rejudge`)  [required]
+* `--help`: Show this message and exit.
+
 ### `sharur predicates`
 
 List available predicates for search.
@@ -384,9 +421,30 @@ $ sharur preflight [OPTIONS]
 * `-d, --db TEXT`: Path to DuckDB database  [default: data/sharur.duckdb]
 * `--assembly-evidence PATH`: Optional non-default assembly-evidence sidecar.
 * `--synteny PATH`: Optional non-default normalized ELSA sidecar.
+* `--semantic-index PATH`: Optional compact semantic index directory to verify against this database.
 * `-f, --format [markdown|json]`: Output format: markdown or json  [default: markdown]
 * `--skip-tools`: Skip slower external binary/version probes.
 * `--strict`: Exit non-zero unless every required dataset capability is available.
+* `--help`: Show this message and exit.
+
+### `sharur compact`
+
+Create an exact validated physical copy; reseal after choosing its final location.
+
+**Usage**:
+
+```console
+$ sharur compact [OPTIONS]
+```
+
+**Options**:
+
+* `-d, --db PATH`: Source DuckDB, opened read-only.  [required]
+* `-o, --output PATH`: Required fresh destination; source and sidecars remain in place.  [required]
+* `--threads INTEGER RANGE`: CPU workers, bounded by available CPUs.  [default: 2; x>=1]
+* `--memory-limit TEXT`: Bounded DuckDB buffer budget; index construction also needs memory.  [default: 8GB]
+* `--storage-version TEXT`: Explicit compatibility target, e.g. v1.0.0; default uses writer format.
+* `--receipt PATH`: Fresh JSON evidence file containing counts and hashes.
 * `--help`: Show this message and exit.
 
 ### `sharur seal`
@@ -472,6 +530,87 @@ $ sharur contig-name-topology [OPTIONS]
 
 * `-d, --db PATH`: Path to a Sharur DuckDB.  [default: data/sharur.duckdb]
 * `--set TEXT`: Record the conventions this dataset's contig IDs follow (comma-separated: srvp, metamdbg, hifiasm), or 'none' to clear. Without --set, only report.
+* `--help`: Show this message and exit.
+
+### `sharur load-bgcs`
+
+Load GECCO biosynthetic gene clusters into an existing database.
+
+Replaces every BGC locus (``loci`` rows with locus_type 'bgc', the ``bgc_loci``
+view) and its member proteins. Writes the canonical database: run in a
+maintenance window, then reseal.
+
+**Usage**:
+
+```console
+$ sharur load-bgcs [OPTIONS]
+```
+
+**Options**:
+
+* `-d, --db PATH`: Path to a writable Sharur DuckDB.  [default: data/sharur.duckdb]
+* `--gecco-dir PATH`: Output root of scripts/run_gecco_bgcs.py (shard dirs with record_map.tsv and *.clusters.tsv).  [required]
+* `--help`: Show this message and exit.
+
+### `sharur diff-db`
+
+Compare every table of two DuckDB files: schema, rows, content, keys.
+
+**Usage**:
+
+```console
+$ sharur diff-db [OPTIONS] BEFORE AFTER
+```
+
+**Arguments**:
+
+* `BEFORE`: Earlier database (e.g. a pre-publish backup).  [required]
+* `AFTER`: Later database (e.g. a staged copy).  [required]
+
+**Options**:
+
+* `-t, --table TEXT`: Limit to these tables (repeatable).
+* `-k, --key TEXT`: TABLE=COL[,COL] key for added/removed/changed counts (default: the table's primary or unique key).
+* `--examples INTEGER`: Show up to N added/removed key values per table.  [default: 0]
+* `--threads INTEGER`: [default: 4]
+* `--memory-limit TEXT`: [default: 8GB]
+* `-f, --format [markdown|json]`: [default: markdown]
+* `--help`: Show this message and exit.
+
+### `sharur reverify`
+
+Replay findings' verification triples and report numbers that no longer hold.
+
+Before publishing a refresh, `--compare -s LIVE=STAGED` shows every recorded number the
+staged copy would change; after one, `--compare -b LIVE=BACKUP` does the same against a
+pre-publish backup. `--reports GLOB` lists the documents that cite each affected finding.
+
+**Usage**:
+
+```console
+$ sharur reverify [OPTIONS] FINDINGS...
+```
+
+**Arguments**:
+
+* `FINDINGS...`: findings.jsonl files or dataset directories (data/DATASET → exploration/findings.jsonl).  [required]
+
+**Options**:
+
+* `-d, --db PATH`: Database for SQL triples without `attach` (default: data/DATASET/sharur.duckdb).
+* `-t, --touching TEXT`: Regex: replay only findings whose queries, or the local scripts they run, match it (e.g. 'defense_systems|defensefinder').
+* `--ids TEXT`: Comma-separated finding IDs to replay.
+* `-s, --substitute TEXT`: OLD=NEW path substitution, repeatable; redirects queries, attach maps, duckdb.connect and ATTACH in helper scripts.
+* `-b, --baseline TEXT`: OLD=NEW substitution for the compare-mode baseline run, repeatable (e.g. LIVE=BACKUP after a publish).
+* `--compare`: Run each triple under the baseline (as recorded unless --baseline) and under --substitute; report every result that changes.
+* `-j, --workers INTEGER`: Parallel replay processes (default: CPUs / --threads); capped so workers x (--memory-limit + 1.5 GiB) fits half of available memory.
+* `--threads INTEGER`: DuckDB threads per replay connection.  [default: 2]
+* `--memory-limit TEXT`: DuckDB memory limit per connection.  [default: 4GB]
+* `--timeout FLOAT`: Seconds per shell triple.  [default: 1800.0]
+* `--reports TEXT`: Glob (relative to the repo root) of documents to scan for citations of failing or changed findings, repeatable; e.g. 'data/srvp_joint/reports/*.md'.
+* `-o, --out PATH`: Write every triple's result as TSV.
+* `-f, --format [markdown|json]`: [default: markdown]
+* `--strict`: Exit 1 on any FAIL/ERROR (or change, with --compare).
 * `--help`: Show this message and exit.
 
 ### `sharur verify-seal`
@@ -666,6 +805,55 @@ $ sharur coverage-outliers [OPTIONS] BIN_ID
 * `-f, --format [markdown|json]`: markdown or json  [default: markdown]
 * `--help`: Show this message and exit.
 
+### `sharur import-expression`
+
+Import per-sample gene (CDS) read counts from metatranscriptomes into the expression sidecar.
+
+**Usage**:
+
+```console
+$ sharur import-expression [OPTIONS] PATHS...
+```
+
+**Arguments**:
+
+* `PATHS...`: Long table (TSV/CSV/Parquet) or featureCounts table(s).  [required]
+
+**Options**:
+
+* `-d, --db PATH`: Core DuckDB (validation and sidecar location).  [default: data/sharur.duckdb]
+* `--format TEXT`: long (sample_id, protein_id, sense|count_s1/count_s2) or featurecounts.  [default: long]
+* `--orientation TEXT`: featureCounts tables: sense or antisense counts.  [default: sense]
+* `--samples PATH`: TSV/CSV with sample_id and metadata columns (optional sense_orientation = s1 or s2).
+* `--sidecar PATH`: Default: expression.duckdb beside --db.
+* `--allow-unknown-proteins`: Keep matching rows when some proteins are absent from the dataset.
+* `--gene-flags FILE`: CDS overlap table (protein_id, overlap_bp, rna_name) marking genes inside structural RNAs; flagged genes leave expression queries.
+* `--min-overlap-bp INTEGER`: Overlap that flags a CDS (--gene-flags).  [default: 60]
+* `--help`: Show this message and exit.
+
+### `sharur expression`
+
+Genome transcript share per RNA sample, a genome's top genes, or the expression of a feature.
+
+**Usage**:
+
+```console
+$ sharur expression [OPTIONS]
+```
+
+**Options**:
+
+* `-d, --db PATH`: Core DuckDB.  [default: data/sharur.duckdb]
+* `--sample TEXT`: RNA sample(s); repeatable (default: all).
+* `-b, --bin TEXT`: Most expressed genes of this genome.
+* `-p, --predicate TEXT`: Expression of genes carrying a predicate.
+* `-a, --annotation TEXT`: Expression of genes carrying this accession or name.
+* `-n, --top INTEGER`: Rows shown per sample (markdown).  [default: 10]
+* `--include-flagged`: Keep genes flagged as overlapping structural RNAs.
+* `--sidecar PATH`: Default: expression.duckdb beside --db.
+* `-f, --format [markdown|json]`: markdown or json  [default: markdown]
+* `--help`: Show this message and exit.
+
 ### `sharur browse`
 
 Browse a dataset in a web browser: protein cards, neighborhoods, evidence, genomes, searches.
@@ -685,6 +873,7 @@ $ sharur browse [OPTIONS]
 * `--notes PATH`: Notes and flags database (default: browser_notes.sqlite beside the dataset).
 * `--assemblies PATH`: Directory of genome FASTAs named BIN_ID.fna (for CRISPR repeats and spacers); repeatable. Dataset folders are searched too.
 * `--summary-cache / --no-summary-cache`: Compute startup summaries once per database version in a worker process and reuse them (keeps the server near 1 GB).  [default: summary-cache]
+* `--semantic-index PATH`: Serve V2 term search and stored term rows from this compact index (its CURRENT generation), verified against the database at startup. Needs pyroaring (sharur[compact]).
 * `--help`: Show this message and exit.
 
 ### `sharur describe`
@@ -787,6 +976,7 @@ $ sharur setup-kegg [OPTIONS]
 * `--inputs PATH`: Build from KEGG files already on disk (list/ko as ko_list.tsv, brite/<id>.json, modules.txt) instead of fetching, e.g. from a licensed KEGG copy.
 * `--kofam-ko-list PATH`: KOfam ko_list (downloaded when absent).  [default: data/reference/ko_list]
 * `--report PATH`: TSV of proposed pairs without evidence.
+* `--rejudge`: Re-apply the current rules to the existing build from its evidence snapshot (no download). Covers rule edits that remove pairs or touch KOs the build already maps.
 * `--help`: Show this message and exit.
 
 ### `sharur import-quality`
@@ -838,6 +1028,448 @@ $ sharur cas-type [OPTIONS]
 * `--dry-run`: Report the calls and leave the dataset unchanged.
 * `--help`: Show this message and exit.
 
+### `sharur stage`
+
+Run a writer against a staged clone of a dataset database, review, publish.
+
+**Usage**:
+
+```console
+$ sharur stage [OPTIONS] COMMAND [ARGS]...
+```
+
+**Options**:
+
+* `--help`: Show this message and exit.
+
+**Commands**:
+
+* `run`: Stage DB, run the command after `--`...
+* `publish`: Replace the canonical database with a...
+* `discard`: Delete a staged copy and its manifest.
+
+#### `sharur stage run`
+
+Stage DB, run the command after `--` against it, diff, reverify findings, optionally publish.
+
+In the command, `{staged}` is replaced by the staged path, also exported as SHARUR_STAGED_DB:
+
+    sharur stage run --db data/ds/sharur.duckdb --label cazy-rerun --findings data/ds -- \
+        python scripts/classify_cazymes.py --db {staged} ...
+
+**Usage**:
+
+```console
+$ sharur stage run [OPTIONS]
+```
+
+**Options**:
+
+* `-d, --db PATH`: Canonical sharur.duckdb.  [required]
+* `-l, --label TEXT`: Short name for this change (backup and staged file names).  [required]
+* `--work-dir PATH`: Directory for the staged clone (default: beside the database; must share its filesystem to publish).
+* `--findings PATH`: findings.jsonl files or dataset dirs to replay against the staged copy (only findings that read what changed).
+* `--reports TEXT`: Globs of documents to scan for citations.
+* `--report-dir PATH`: Where to write diff/reverify reports.
+* `-j, --workers INTEGER`
+* `--publish`: Publish when the writer succeeds.
+* `--help`: Show this message and exit.
+
+#### `sharur stage publish`
+
+Replace the canonical database with a reviewed staged copy (backup kept, reseal).
+
+**Usage**:
+
+```console
+$ sharur stage publish [OPTIONS] STAGED
+```
+
+**Arguments**:
+
+* `STAGED`: The staged file `sharur stage run` printed.  [required]
+
+**Options**:
+
+* `--no-reseal`
+* `--help`: Show this message and exit.
+
+#### `sharur stage discard`
+
+Delete a staged copy and its manifest.
+
+**Usage**:
+
+```console
+$ sharur stage discard [OPTIONS] STAGED
+```
+
+**Arguments**:
+
+* `STAGED`: [required]
+
+**Options**:
+
+* `--help`: Show this message and exit.
+
+### `sharur sql`
+
+Sharur's SQL surface: per-connection macros (neighbors, slot, feature_presence, ...).
+
+**Usage**:
+
+```console
+$ sharur sql [OPTIONS] COMMAND [ARGS]...
+```
+
+**Options**:
+
+* `--help`: Show this message and exit.
+
+**Commands**:
+
+* `prelude`: Print the prelude as one SQL script for a...
+* `objects`: List the SQL objects installed on a...
+* `query`: Run one read-only query with the prelude...
+
+#### `sharur sql prelude`
+
+Print the prelude as one SQL script for a generic DuckDB client.
+
+Run it after `ATTACH 'data/DATASET/sharur.duckdb' AS ds (READ_ONLY); USE ds;`.
+
+**Usage**:
+
+```console
+$ sharur sql prelude [OPTIONS]
+```
+
+**Options**:
+
+* `-o, --out PATH`: Write the script here instead of stdout.
+* `--help`: Show this message and exit.
+
+#### `sharur sql objects`
+
+List the SQL objects installed on a connection to this database, and any that failed.
+
+**Usage**:
+
+```console
+$ sharur sql objects [OPTIONS]
+```
+
+**Options**:
+
+* `-d, --db PATH`: Dataset DuckDB.  [required]
+* `-f, --format [markdown|tsv|json]`: [default: markdown]
+* `--help`: Show this message and exit.
+
+#### `sharur sql query`
+
+Run one read-only query with the prelude installed; results never carry sequences.
+
+Example: sharur sql query "FROM slot_tally('pfam:PF00069', 'pfam:PF00072', split := 'K00001')" -d DB
+
+**Usage**:
+
+```console
+$ sharur sql query [OPTIONS] SQL
+```
+
+**Arguments**:
+
+* `SQL`: SQL to run; '-' reads it from stdin.  [required]
+
+**Options**:
+
+* `-d, --db PATH`: Dataset DuckDB (opened read-only).  [required]
+* `-f, --format [markdown|tsv|json]`: [default: markdown]
+* `-n, --limit INTEGER`: Rows to print (0 = all).  [default: 200]
+* `-o, --out PATH`: Also write every row as TSV here.
+* `--threads INTEGER`: DuckDB threads.  [default: 4]
+* `--memory-limit TEXT`: DuckDB memory limit.  [default: 8GB]
+* `--help`: Show this message and exit.
+
+### `sharur stats`
+
+Pre-register predictions and check statistical claims in findings.
+
+**Usage**:
+
+```console
+$ sharur stats [OPTIONS] COMMAND [ARGS]...
+```
+
+**Options**:
+
+* `--help`: Show this message and exit.
+
+**Commands**:
+
+* `preregister`: Freeze predictions, tests and verdict...
+* `verify-prereg`: Recompute a record's hash and check its...
+* `check`: Check every statistical claim as recorded:...
+
+#### `sharur stats preregister`
+
+Freeze predictions, tests and verdict rules before the analysis runs.
+
+Writes <id>_<UTC time>.prereg.json (read-only, never replaced) and prints its content_sha256,
+which every statistical check implementing it cites.
+
+**Usage**:
+
+```console
+$ sharur stats preregister [OPTIONS] SPEC
+```
+
+**Arguments**:
+
+* `SPEC`: JSON or YAML: id, title, predictions[], correction, design_inputs.  [required]
+
+**Options**:
+
+* `-o, --out-dir PATH`: Directory for the read-only record.  [required]
+* `-d, --db PATH`: Dataset DuckDB; its dataset.seal.json fills `dataset` (read only).
+* `--document PATH`: A longer pre-registration text to bind by SHA-256.
+* `--help`: Show this message and exit.
+
+#### `sharur stats verify-prereg`
+
+Recompute a record's hash and check its document and, with --seal, its dataset.
+
+**Usage**:
+
+```console
+$ sharur stats verify-prereg [OPTIONS] RECORD
+```
+
+**Arguments**:
+
+* `RECORD`: A .prereg.json record.  [required]
+
+**Options**:
+
+* `--seal`: Also check the dataset against its seal (slow, read-only).
+* `-d, --db PATH`: Current database path for --seal.
+* `-f, --format TEXT`: markdown or json  [default: markdown]
+* `--help`: Show this message and exit.
+
+#### `sharur stats check`
+
+Check every statistical claim as recorded: verdict rules, interval, controls, pre-registration,
+dataset seal and input hashes. Replaying the numbers is `sharur reverify`.
+
+**Usage**:
+
+```console
+$ sharur stats check [OPTIONS] FINDINGS...
+```
+
+**Arguments**:
+
+* `FINDINGS...`: findings.jsonl files or dataset directories.  [required]
+
+**Options**:
+
+* `--root PATH`: Base for relative paths (default: repo root).
+* `-f, --format TEXT`: markdown or json  [default: markdown]
+* `--strict`: Exit 1 when any statistical check has issues.
+* `--help`: Show this message and exit.
+
+### `sharur families`
+
+Annotation-independent protein families (MMseqs2): build, import, activate, assign, status.
+
+**Usage**:
+
+```console
+$ sharur families [OPTIONS] COMMAND [ARGS]...
+```
+
+**Options**:
+
+* `--help`: Show this message and exit.
+
+**Commands**:
+
+* `run`: Export proteins, cluster subfamilies and...
+* `export`: Write proteins.faa (protein_id order,...
+* `build`: Build the staging DuckDB from a finished...
+* `load`: Writer: copy the clustering runs of a...
+* `activate`: Stage DB, load the staged clustering runs...
+* `assign`: Give families to proteins that lack one...
+* `import`: Register an externally produced clustering...
+* `status`: Runs, family counts, proteins without a...
+
+#### `sharur families run`
+
+Export proteins, cluster subfamilies and families, write a staging DuckDB (the DB is untouched).
+
+**Usage**:
+
+```console
+$ sharur families run [OPTIONS]
+```
+
+**Options**:
+
+* `-d, --db PATH`: Dataset sharur.duckdb. Opened read-only.  [required]
+* `-o, --out-dir PATH`: Work directory (e.g. DATASET/stage09_families).  [required]
+* `--subfamily-min-seq-id FLOAT`: [default: 0.5]
+* `--family-min-seq-id FLOAT`: [default: 0.3]
+* `--coverage FLOAT`: Coverage of both sequences (-c, cov-mode 0).  [default: 0.8]
+* `-s, --sensitivity FLOAT`: [default: 6.0]
+* `-t, --threads INTEGER`: MMseqs2 threads (default: $SLURM_CPUS_ON_NODE or all CPUs).
+* `--duckdb-threads INTEGER`: Default: --threads.
+* `--memory-limit TEXT`: DuckDB memory limit (default: 25% of the allocation).
+* `--split-memory-limit TEXT`: MMseqs2 memory cap (default: 70% of the allocation).
+* `--keep-fasta`
+* `--mmseqs TEXT`: MMseqs2 executable.
+* `--help`: Show this message and exit.
+
+#### `sharur families export`
+
+Write proteins.faa (protein_id order, trailing '*' removed) and export.json (count, digest).
+
+**Usage**:
+
+```console
+$ sharur families export [OPTIONS]
+```
+
+**Options**:
+
+* `-d, --db PATH`: Dataset sharur.duckdb. Opened read-only.  [required]
+* `-o, --out-dir PATH`: [required]
+* `--duckdb-threads INTEGER`: [default: 4]
+* `--memory-limit TEXT`: [default: 8GB]
+* `--help`: Show this message and exit.
+
+#### `sharur families build`
+
+Build the staging DuckDB from a finished clustering, such as one run on a cluster node.
+
+**Usage**:
+
+```console
+$ sharur families build [OPTIONS]
+```
+
+**Options**:
+
+* `-d, --db PATH`: Dataset sharur.duckdb. Opened read-only.  [required]
+* `-c, --clustering PATH`: Directory with clustering.json, level0/1.tsv.gz and export.json.  [required]
+* `-s, --staging PATH`: Staging DuckDB to write (replaced).  [required]
+* `--duckdb-threads INTEGER`: [default: 4]
+* `--memory-limit TEXT`: [default: 8GB]
+* `--help`: Show this message and exit.
+
+#### `sharur families load`
+
+Writer: copy the clustering runs of a staging file into DB (same-name runs are replaced).
+
+**Usage**:
+
+```console
+$ sharur families load [OPTIONS]
+```
+
+**Options**:
+
+* `-d, --db PATH`: Writable database (a staged clone of a canonical one).  [required]
+* `-s, --staging PATH`: [required]
+* `-r, --run TEXT`: Clustering run to load (repeatable; default: all).
+* `--verify-digest / --no-verify-digest`: [default: verify-digest]
+* `--help`: Show this message and exit.
+
+#### `sharur families activate`
+
+Stage DB, load the staged clustering runs into the clone, diff, and (with --publish) swap it in.
+
+Uses the staged-write protocol of `sharur stage` (docs/guides/staged-writes.md): the
+canonical file changes only at publish, a backup is kept and the dataset is resealed.
+
+**Usage**:
+
+```console
+$ sharur families activate [OPTIONS]
+```
+
+**Options**:
+
+* `-d, --db PATH`: Dataset sharur.duckdb.  [required]
+* `-s, --staging PATH`: Staging DuckDB from `sharur families run/build`.  [required]
+* `-l, --label TEXT`: [default: protein-families]
+* `--work-dir PATH`: Directory for the staged clone (default: beside DB).
+* `-r, --run TEXT`: Clustering run to load (repeatable; default: all).
+* `--publish`: Publish the staged copy when the load succeeds.
+* `--verify-digest / --no-verify-digest`: [default: verify-digest]
+* `--help`: Show this message and exit.
+
+#### `sharur families assign`
+
+Give families to proteins that lack one (newly added genomes) without re-clustering.
+
+**Usage**:
+
+```console
+$ sharur families assign [OPTIONS]
+```
+
+**Options**:
+
+* `-d, --db PATH`: Dataset sharur.duckdb.  [required]
+* `--work-dir PATH`: MMseqs2 scratch (default: beside DB).
+* `-t, --threads INTEGER`
+* `--family-run TEXT`: Family run of the Sharur build to extend (default: the default run).
+* `--in-place`: Write DB directly (a staged clone or scratch copy); default stages it.
+* `-l, --label TEXT`: [default: protein-families-assign]
+* `--publish`
+* `--mmseqs TEXT`
+* `--help`: Show this message and exit.
+
+#### `sharur families import`
+
+Register an externally produced clustering as a run, without re-clustering.
+
+**Usage**:
+
+```console
+$ sharur families import [OPTIONS]
+```
+
+**Options**:
+
+* `-d, --db PATH`: Dataset sharur.duckdb. Opened read-only.  [required]
+* `--tsv PATH`: Two-column representative<TAB>member table (mmseqs createtsv).  [required]
+* `-s, --staging PATH`: Staging DuckDB to add the run to (created when absent).  [required]
+* `-n, --name TEXT`: Clustering run identifier, e.g. a tool and parameter tag.  [required]
+* `--level TEXT`: Level label (family, subfamily or any other label).  [default: imported]
+* `-p, --parameters TEXT`: The clustering command or parameters, stored verbatim.  [required]
+* `--tool TEXT`: [default: mmseqs2]
+* `--tool-version TEXT`
+* `--default`: Make this run the default of its level (per-genome views).
+* `--duckdb-threads INTEGER`: [default: 4]
+* `--memory-limit TEXT`: [default: 8GB]
+* `--help`: Show this message and exit.
+
+#### `sharur families status`
+
+Runs, family counts, proteins without a family, and whether a full re-cluster is due.
+
+**Usage**:
+
+```console
+$ sharur families status [OPTIONS]
+```
+
+**Options**:
+
+* `-d, --db PATH`: Dataset sharur.duckdb. Opened read-only.  [required]
+* `--help`: Show this message and exit.
+
 
 ## `sharur-ingest`
 
@@ -873,8 +1505,12 @@ $ sharur-ingest [OPTIONS]
 * `--skip-crispr / --no-skip-crispr`: Skip standard Stage 05c (CRISPR arrays via minced_crispr.py)  [default: no-skip-crispr]
 * `--skip-embeddings / --no-skip-embeddings`: Skip Stage 06 post-build embeddings (06_esm2_embeddings.py)  [default: no-skip-embeddings]
 * `--reads PATH`: TSV of sample_id, read1[, read2 | interleaved]: adds optional Stage 08 per-sample coverage with CoverM (abundance.duckdb sidecar)
+* `--with-families / --skip-families`: Run optional Stage 09: MMseqs2 protein families and subfamilies into stage09_families/protein_families.duckdb (activate with `sharur families activate`)  [default: skip-families]
+* `--family-min-seq-id FLOAT`: Stage 09 family identity threshold  [default: 0.3]
+* `--subfamily-min-seq-id FLOAT`: Stage 09 subfamily identity threshold  [default: 0.5]
 * `--embedding-model TEXT`: Hugging Face protein encoder for Stage 06 (default: facebook/esm2_t6_8M_UR50D)
 * `--profile TEXT`: Execution profile: auto, local (CPU), mps, or slurm  [default: auto]
+* `--slurm-cpus INTEGER RANGE`: With --profile slurm: CPUs to request for each stage job (--cpus-per-task); stages use every allocated CPU. Default: full-node jobs with no CPU request  [x>=1]
 * `--resume / --no-resume`: Reuse only ledger-verified stages with matching signatures and outputs  [default: resume]
 * `--submit-slurm`: Submit the generated SLURM bundle; otherwise only write it
 * `--run-idempotency-key TEXT`: Optional caller-stable key that deduplicates identical run creation
@@ -1305,8 +1941,9 @@ options:
 
 ```text
 usage: sharur-query [-h] --db DB [--stage-dir STAGE_DIR] [--direct]
-                    [--seal SEAL] [--reserve-gb RESERVE_GB] [--host HOST]
-                    [--port PORT] [--ops-url OPS_URL] [--threads THREADS]
+                    [--seal SEAL] [--semantic-index SEMANTIC_INDEX]
+                    [--reserve-gb RESERVE_GB] [--host HOST] [--port PORT]
+                    [--ops-url OPS_URL] [--threads THREADS]
                     [--memory-limit MEMORY_LIMIT] [--temp-dir TEMP_DIR]
                     [--max-temp-size MAX_TEMP_SIZE]
                     [--capacity-units CAPACITY_UNITS]
@@ -1324,6 +1961,9 @@ options:
                         replica
   --direct              Open the verified immutable source database in place
   --seal SEAL
+  --semantic-index SEMANTIC_INDEX
+                        Compact V2 term index directory for /v1/atoms/proteins
+                        (needs pyroaring).
   --reserve-gb RESERVE_GB
   --host HOST
   --port PORT
