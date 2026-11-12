@@ -49,16 +49,21 @@ Add `--profile slurm --slurm-cpus N` on a cluster ([QUICKSTART.md](../../QUICKST
 
 ## Expected answers
 
-These hold for a correct installation and make quick checks of a finished database:
+A test ingest on 2026-11-12 (default stages without embeddings, then `sharur cas-type`) gave these
+results, each matching the published biology of these strains:
 
-- Every genome carries the universal ribosomal proteins (for example Pfam `Ribosomal_L2_C`,
-  `Ribosomal_S3_C`, `Ribosomal_L5`, `Ribosomal_L14`).
-- MinCED finds CRISPR arrays in N. equitans (two arrays), H. volcanii (one on the main
-  chromosome, two on pHV4), E. coli K-12, S. pyogenes SF370, P. furiosus, M. jannaschii and
-  S. acidocaldarius.
-- `sharur cas-type` calls subtype II-A in S. pyogenes SF370, I-E in E. coli K-12 and I-B on
-  pHV4 in H. volcanii.
+- All 16 genomes carry the universal ribosomal-protein families tested (Pfam `Ribosomal_L2_C`,
+  `Ribosomal_S3_C`, `Ribosomal_L5`, `Ribosomal_L6`, `Ribosomal_S8`, `Ribosomal_L14`,
+  `Ribosomal_S19`, `Ribosomal_L22`).
+- MinCED finds CRISPR arrays in N. equitans (2), H. volcanii (1 on the main chromosome, 2 on pHV4),
+  E. coli K-12 (2), S. pyogenes SF370 (2), P. furiosus (7), M. jannaschii (14) and
+  S. acidocaldarius (4), and none in B. subtilis, Buchnera, M. genitalium, TM7x or V. cholerae.
+- `sharur cas-type` ([CRISPR-Cas subtypes](../../docs/guides/crispr-cas.md)) calls subtype II-A
+  (with I-C) in S. pyogenes SF370, I-E in E. coli K-12 and I-B on pHV4 in H. volcanii, and no
+  `crispr_cas` or `cas` system in B. subtilis, Buchnera or M. genitalium.
+- The defense caller calls the E. coli K-12 type I restriction-modification system EcoKI
+  (`N6_RM_Type_I`: hsdS, hsdM, hsdR).
 - The hydrogenase classifier assigns NiFe group 1 and group 4 enzymes in E. coli, group 3 and
-  group 4 in P. furiosus, and FeFe enzymes in D. vulgaris.
-- Stage 03 calls genes with genetic code 11, so M. genitalium (code 4) shows more and shorter
-  proteins than its GenBank annotation.
+  group 4 in P. furiosus, and FeFe group A plus NiFe group 1 enzymes in D. vulgaris.
+- Stage 03 calls genes with genetic code 11, so M. genitalium (code 4) shows 995 genes with a mean
+  length of 151 aa, against 504 protein-coding genes in its RefSeq annotation.

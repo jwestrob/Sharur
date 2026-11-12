@@ -1,47 +1,58 @@
-# Sharur dependency lockfile — generated 2026-03-30
-# Pinned versions from development environment (macOS, Python 3.12.5)
-# For cluster deployment: conda env create -f environment.yml && pip install -e ".[dev]"
-#
-# NOTE: numpy<2.0 is required by pyTMHMM (Cython ABI). If pyTMHMM is not
-# needed, numpy 2.x works fine with all other dependencies.
+# Sharur dependency versions verified together on 2026-11-12: a clean `conda env create -f
+# environment.yml` on Linux x86-64 (Python 3.12.16), followed by the INSTALL.md quick start, the
+# full test suite and an ingest of examples/complete_genomes.
+# Reference only: install with environment.yml (or `pip install -e ".[all,dev]"`), which resolves
+# current releases within the ranges in pyproject.toml. To reproduce this exact set:
+#   pip install -r requirements-lock.txt
 
 # Core
-duckdb==1.2.1
-faiss-cpu==1.13.2
-pandas==2.2.3
-numpy==2.4.3          # pyproject.toml says <2.0 for pyTMHMM; remove pyTMHMM or pin numpy<2
-pyarrow==19.0.1
-pydantic==2.11.7
-typer==0.21.1
-rich==14.2.0
-requests==2.32.5
-fpdf2==2.8.5
+duckdb==1.5.6          # pyproject.toml: !=1.2.1 (wrong window results), <2 (2.0 unsupported)
+pandas==2.3.3          # environment.yml: <3 (Aksha 0.2.1's KOFAM installer fails on pandas 3)
+numpy==2.5.4
+pyarrow==26.0.1
+pydantic==2.14.3
+PyYAML==6.0.3
+typer==0.29.1
+rich==15.0.0
+requests==2.34.2
 
-# ML / embeddings
-torch==2.10.0
-transformers==4.48.1
-h5py==3.13.0
-scipy==1.17.0
+# HMM search (Stage 04; Linux x86-64 wheels)
+aksha==0.2.1
+aksha-runtime==0.1.1
+MacSyFinder==2.1.4
+
+# Embeddings and vectors
+torch==2.15.0
+transformers==5.22.2
+faiss-cpu==1.16.0
+h5py==3.16.0
+scipy==1.18.1
+
+# Services and browser
+fastapi==0.162.5
+uvicorn==0.54.0
+Jinja2==3.1.6
+python-multipart==0.0.33
 
 # Visualization
-matplotlib==3.10.8
-plotly==6.5.2
-dna-features-viewer==3.1.5
+matplotlib==3.11.2
+plotly==7.1.0
 
 # Structure prediction
-biopython==1.86
-esm==3.2.3
+biopython==1.88
+esm==3.4.3
 
 # Reports
-reportlab==4.4.9
+fpdf2==2.9.0
+reportlab==5.1.0
 
-# Topology (optional — requires numpy<2.0)
+# Topology (optional; pyTMHMM needs numpy<2.0)
 # pyTMHMM==1.3.6
 
 # Dev
-pytest==9.0.2
-pytest-cov==4.1.0
-pytest-asyncio==0.23.8
-black==26.1.0
-ruff==0.14.10
-mypy==1.15.0
+pytest==9.2.0
+pytest-cov==7.1.0
+pytest-asyncio==1.4.1.post1
+black==26.10.1
+ruff==0.17.4
+mypy==2.4.1
