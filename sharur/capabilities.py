@@ -925,6 +925,14 @@ def _remote_homology_check(store: DuckDBStore) -> Capability:
                           evidence={"error": f"{type(exc).__name__}: {exc}"},
                           remediation="Re-activate the staging file with `sharur remote-homology activate`.")
     family, cdd = info.get("family_tier"), info.get("cdd")
+    legacy = info.get("annotation_rows_to_move")
+    if legacy:
+        return Capability(
+            "remote_homology", CapabilityState.stale,
+            f"{legacy:,} CDD rows sit in annotations, where releases before protein_resemblance wrote them; "
+            "the SQL surface reads CDD rows from protein_resemblance only.",
+            evidence={"annotation_rows_to_move": legacy, "family_tier": bool(family), "cdd": cdd},
+            remediation="Move them with `sharur remote-homology migrate --db DB` (a staged write), then publish.")
     if not family and not cdd:
         return Capability(
             "remote_homology", CapabilityState.unavailable,
@@ -941,7 +949,7 @@ def _remote_homology_check(store: DuckDBStore) -> Capability:
     if cdd:
         stored = (f"{cdd['rows']:,} rows stored ({cdd['rows_stored'] or 'all'}) of {cdd['rows_all_hits']:,} hits"
                   if cdd.get("rows_all_hits") is not None else f"{cdd['rows']:,} rows")
-        parts.append(f"CDD hits on {cdd['proteins']:,} proteins, {stored} "
+        parts.append(f"CDD hits (protein_resemblance) on {cdd['proteins']:,} proteins, {stored} "
                      f"({cdd['database'] or 'version unrecorded'}; full table: {cdd.get('full_table') or 'staging file'})")
         evidence["cdd"] = cdd
     return Capability(

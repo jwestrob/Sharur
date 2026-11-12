@@ -155,9 +155,10 @@ def test_hit_rows_threshold_cap_and_unknown_function():
 def test_prelude_lists_the_same_resembles_sources():
     text = (REPO_ROOT / "sharur" / "sql" / "prelude.sql").read_text()
     literal = "(" + ", ".join(f"'{s}'" for s in sorted(RESEMBLES_SOURCES)) + ")"
-    assert text.count(f"NOT IN {literal}") >= 2 and text.count(f"source IN {literal}") >= 4
+    # feature_proteins, protein_summary and neighbor_features leave rows of an earlier layout out of annotations
+    assert text.count(f"source NOT IN {literal}") == 3
     for match in re.finditer(r"IN \(([^()]*'cdd'[^()]*)\)", text):
-        assert {s.strip(" '") for s in match.group(1).split(",")} - {"pfam", "kofam", "kegg"} == RESEMBLES_SOURCES
+        assert {s.strip(" '") for s in match.group(1).split(",")} == RESEMBLES_SOURCES
 
 
 # --------------------------------------------------------------------------- #
@@ -471,11 +472,15 @@ def test_activation_loads_rows_and_the_sql_surface_reads_resembles(staged):
     assert again["cdd"]["rows_removed"] == again["cdd"]["rows_loaded"] == 3 and again["cdd"]["rows_all"] == 4
     db = staged["db"]
     assert _rows(db, "SELECT COUNT(*) FROM family_annotations") == [(64,)]
-    assert _rows(db, "SELECT model_set, model_version FROM annotation_source_versions WHERE source = 'cdd'") == [
-        ("CDD", "9.99")]
+    assert _rows(db, "SELECT source, db_name, db_version, rows_stored, rows_loaded FROM protein_resemblance_runs") == [
+        ("cdd", "CDD", "9.99", "best_per_region", 3)]
     # best model per region by default: s2 keeps SynthA, the shared sequence of fa_g4 and fa_g4b its one hit
-    assert _rows(db, "SELECT COUNT(*), COUNT(DISTINCT protein_id) FROM annotations WHERE source = 'cdd'") == [(3, 3)]
-    assert _rows(db, "SELECT COUNT(DISTINCT annotation_id) FROM annotations") == [(5,)]
+    assert _rows(db, "SELECT COUNT(*), COUNT(DISTINCT protein_id) FROM protein_resemblance") == [(3, 3)]
+    assert _rows(db, "SELECT DISTINCT source, db_name, db_version FROM protein_resemblance") == [("cdd", "CDD", "9.99")]
+    # annotations keeps the curated rows only; the activation creates no annotation_source_versions table
+    assert _rows(db, "SELECT COUNT(*) FROM annotations") == _rows(staged["source_db"], "SELECT COUNT(*) FROM annotations")
+    assert _rows(db, "SELECT COUNT(*) FROM annotations WHERE source = 'cdd'") == [(0,)]
+    assert not _rows(db, "SELECT 1 FROM information_schema.tables WHERE table_name = 'annotation_source_versions'")
     assert status_cdd(db) == {"rows": 3, "rows_stored": "best_per_region", "rows_all_hits": 4, "max_overlap": 0.5}
     status = again["status"]
     assert status["family_tier"]["families_resembling_characterized"] == 2 and status["cdd"]["proteins"] == 3
@@ -552,7 +557,8 @@ def test_activation_refuses_changed_sequences(staged, tmp_path):
             store.load_staging(con, [cdd_only], log=lambda _m: None)
         with pytest.raises(pf.FamilyError, match="changed since clustering"):
             store.load_staging(con, [staged["staging"]], families_staging=staged["families"], log=lambda _m: None)
-        assert con.execute("SELECT COUNT(*) FROM annotations WHERE source = 'cdd'").fetchone()[0] == 0
+        assert con.execute("SELECT COUNT(*) FROM information_schema.tables "
+                           "WHERE table_name = 'protein_resemblance'").fetchone()[0] == 0
     finally:
         con.close()
 
@@ -565,7 +571,7 @@ def test_activate_command_stages_publishes_and_reports(staged):
                                       str(staged["staging"]), "--families-staging", str(staged["families"])])
     assert result.exit_code == 0, result.output
     assert "family_annotations" in result.output and "Publish with" in result.output
-    assert _rows(db, "SELECT COUNT(*) FROM annotations WHERE source = 'cdd'") == [(0,)]  # untouched until publish
+    assert not _rows(db, "SELECT 1 FROM information_schema.tables WHERE table_name = 'protein_resemblance'")
     result = CliRunner().invoke(app, ["remote-homology", "activate", "--db", str(db), "--staging",
                                       str(staged["staging"]), "--families-staging", str(staged["families"]),
                                       "--publish"])
@@ -759,6 +765,21 @@ def test_family_hits_carry_to_the_same_representative_in_another_run(staged, tmp
     tag = staged["tag"]
     assert rows == [(f"fam:{tag2}:fa_g1", f"fam:{tag}:fa_g1", 5, 6), (f"fam:{tag2}:fd_0", f"fam:{tag}:fd_0", 8, 8)]
     assert n_rule == n_source
+    # the stored view holds the same rows for a client without the SQL surface
+    plain = duckdb.connect(str(staged["db"]), read_only=True)
+    try:
+        via_view = plain.execute("FROM family_annotations_carried WHERE clustering_run = 'synthetic-rescued' "
+                                 "ORDER BY ALL").fetchall()
+        runs = plain.execute("SELECT DISTINCT clustering_run, source_run FROM family_annotations_carried").fetchall()
+    finally:
+        plain.close()
+    con = sql_connect(staged["db"])
+    try:
+        via_macro = con.execute("FROM family_annotations_via('synthetic-rescued') ORDER BY ALL").fetchall()
+    finally:
+        con.close()
+    assert via_view == via_macro and len(via_view) == 64
+    assert runs == [("synthetic-rescued", "synthetic-permissive")]
 
 
 def test_runner_searches_pdb_with_hhblits_when_configured(dataset, fake_tools, tmp_path):
@@ -884,3 +905,162 @@ def test_check_names_the_indexes_hhsuite_3_2_needs(tmp_path, monkeypatch):
     monkeypatch.setattr(rh_runner, "versions", lambda _cfg: banner("3.1.0"))
     assert rh_runner.check(cfg)["problems"] == []
     assert rh_runner.hhsuite_version("HHsearch 3.3.0") == (3, 3, 0)
+
+
+# --------------------------------------------------------------------------- #
+# CDD rows written to annotations by earlier releases
+# --------------------------------------------------------------------------- #
+_RESEMBLANCE_COLUMNS = ("protein_id, source, search_run, db_name, db_version, accession, name, description, "
+                        "evalue, score, start_aa, end_aa")
+
+
+def _earlier_layout(db: Path) -> None:
+    """Rewrite an activated database into the earlier layout: CDD rows in annotations, version in source versions."""
+    from sharur.defensefinder.selection import _SOURCE_VERSIONS_SQL
+
+    con = store.connect(db)
+    try:
+        con.execute(_SOURCE_VERSIONS_SQL)
+        base = con.execute("SELECT MAX(annotation_id) FROM annotations").fetchone()[0]
+        con.execute(f"""INSERT INTO annotations (annotation_id, protein_id, source, accession, name, description,
+                                                 evalue, score, start_aa, end_aa)
+                        SELECT {base} + row_number() OVER (ORDER BY protein_id, start_aa, accession), protein_id,
+                               source, accession, name, description, evalue, score, start_aa, end_aa
+                        FROM protein_resemblance""")
+        con.execute("""INSERT INTO annotation_source_versions (source, model_set, model_version, profiles_path,
+                                                               selection_rule, parameters, hits_path, raw_rows,
+                                                               selected_rows, loaded_rows, loaded_at)
+                       SELECT source, db_name, db_version, db_prefix, selection_rule, parameters, staging_path,
+                              protein_rows_all, rows_loaded, rows_loaded, loaded_at FROM protein_resemblance_runs""")
+        con.execute("DROP VIEW family_annotations_carried")
+        con.execute("DROP TABLE protein_resemblance")
+        con.execute("DROP TABLE protein_resemblance_runs")
+    finally:
+        con.close()
+
+
+def test_migrate_moves_cdd_rows_out_of_annotations(staged):
+    from sharur.capabilities import _remote_homology_check
+    from sharur.sql import connect as sql_connect
+    from sharur.storage.duckdb_store import DuckDBStore as Store
+
+    db = staged["db"]
+    curated = _rows(db, "FROM annotations ORDER BY annotation_id")
+    con = store.connect(db)
+    try:
+        store.load_staging(con, [staged["staging"]], families_staging=staged["families"], log=lambda _m: None)
+    finally:
+        con.close()
+    activated = _rows(db, f"SELECT {_RESEMBLANCE_COLUMNS} FROM protein_resemblance ORDER BY ALL")
+    run = _rows(db, "SELECT source, search_run, db_name, db_version, rows_stored, protein_rows_all, rows_loaded, "
+                    "proteins FROM protein_resemblance_runs")
+    _earlier_layout(db)
+    assert _rows(db, "SELECT COUNT(*) FROM annotations WHERE source = 'cdd'") == [(3,)]
+
+    # the earlier layout is reported, and the surface keeps its rows out of the curated columns
+    con = store.connect(db, read_only=True)
+    try:
+        info = store.status(con)
+    finally:
+        con.close()
+    assert info["annotation_rows_to_move"] == 3 and info["cdd"] is None
+    with Store(db, read_only=True) as s:
+        cap = _remote_homology_check(s)
+    assert cap.state.value == "stale" and "migrate" in cap.remediation
+    con = sql_connect(db)
+    try:
+        assert con.execute("FROM protein_summary('s2')").fetchall()[0][5:] == ([], 0, [])
+        assert con.execute("SELECT COUNT(*) FROM feature_proteins('cdd:*')").fetchone()[0] == 0
+        assert con.execute("SELECT COUNT(*) FROM neighbor_features('s1', k := 1, src := 'cdd')").fetchone()[0] == 0
+    finally:
+        con.close()
+
+    con = store.connect(db)
+    try:
+        moved = store.move_resemblance_rows(con, log=lambda _m: None)
+        again = store.move_resemblance_rows(con, log=lambda _m: None)
+    finally:
+        con.close()
+    assert moved["rows_moved"] == 3 and moved["fingerprint_checked"] and moved["db"] == "CDD 9.99"
+    assert set(moved["views"]) == {"family_resemblance", "family_annotations_carried"}
+    assert again["rows_moved"] == 0
+    assert _rows(db, "FROM annotations ORDER BY annotation_id") == curated
+    assert _rows(db, f"SELECT {_RESEMBLANCE_COLUMNS} FROM protein_resemblance ORDER BY ALL") == activated
+    assert _rows(db, "SELECT source, search_run, db_name, db_version, rows_stored, protein_rows_all, rows_loaded, "
+                     "proteins FROM protein_resemblance_runs") == run
+    assert _rows(db, "SELECT COUNT(*) FROM annotation_source_versions WHERE source = 'cdd'") == [(0,)]
+    # unkeyed, so a reload deletes and re-inserts without DuckDB 1.2's COMMIT abort on re-inserted keys
+    assert _rows(db, "SELECT COUNT(*) FROM duckdb_constraints() WHERE table_name LIKE 'protein_resemblance%' "
+                     "AND constraint_type IN ('PRIMARY KEY', 'UNIQUE')") == [(0,)]
+    con = sql_connect(db)
+    try:
+        assert con.execute("SELECT resembles FROM protein_summary('s2')").fetchall() == [(["cdd:cdT0001"],)]
+        assert con.execute("SELECT DISTINCT evidence FROM feature_presence('cdd:cdT0001') "
+                           "WHERE present").fetchall() == [(["resembles"],)]
+        assert con.execute("SELECT \"offset\", feature, n_genomes FROM neighbor_features('s1', k := 1, src := 'cdd')"
+                           ).fetchall() == [(1, "cdd:cdT0001", 1)]
+    finally:
+        con.close()
+    with Store(db, read_only=True) as s:
+        assert _remote_homology_check(s).state.value == "available"
+
+
+def test_migrate_refuses_rows_it_cannot_place(staged):
+    db = staged["db"]
+    con = store.connect(db)
+    try:
+        store.load_staging(con, [staged["staging"]], families_staging=staged["families"], log=lambda _m: None)
+    finally:
+        con.close()
+    _earlier_layout(db)
+    con = store.connect(db)
+    try:
+        con.execute("DELETE FROM annotation_source_versions")
+        with pytest.raises(store.RemoteHomologyError, match="no CDD database name and version"):
+            store.move_resemblance_rows(con, log=lambda _m: None)
+        assert con.execute("SELECT COUNT(*) FROM annotations WHERE source = 'cdd'").fetchone()[0] == 3
+    finally:
+        con.close()
+
+
+def test_activation_replaces_rows_of_the_earlier_layout(staged):
+    db = staged["db"]
+    con = store.connect(db)
+    try:
+        store.load_staging(con, [staged["staging"]], families_staging=staged["families"], log=lambda _m: None)
+    finally:
+        con.close()
+    _earlier_layout(db)
+    con = store.connect(db)
+    try:
+        out = store.load_staging(con, [staged["staging"]], log=lambda _m: None)
+    finally:
+        con.close()
+    assert out["cdd"]["annotation_rows_removed"] == 3 and out["cdd"]["rows_loaded"] == 3
+    assert _rows(db, "SELECT COUNT(*) FROM annotations WHERE source = 'cdd'") == [(0,)]
+    assert _rows(db, "SELECT COUNT(*) FROM annotation_source_versions") == [(0,)]
+
+
+def test_migrate_command_stages_then_publishes(staged):
+    from sharur.cli import app
+
+    db = staged["db"]
+    con = store.connect(db)
+    try:
+        store.load_staging(con, [staged["staging"]], families_staging=staged["families"], log=lambda _m: None)
+    finally:
+        con.close()
+    _earlier_layout(db)
+    result = CliRunner().invoke(app, ["remote-homology", "migrate", "--db", str(db)])
+    assert result.exit_code == 0, result.output
+    assert "protein_resemblance" in result.output and "Publish with" in result.output
+    assert _rows(db, "SELECT COUNT(*) FROM annotations WHERE source = 'cdd'") == [(3,)]  # canonical untouched
+    staged_copy = db.parent / "sharur.duckdb.resemblance-table.staging"
+    assert _rows(staged_copy, "SELECT COUNT(*) FROM protein_resemblance") == [(3,)]
+    result = CliRunner().invoke(app, ["stage", "discard", str(staged_copy)])
+    assert result.exit_code == 0, result.output
+    result = CliRunner().invoke(app, ["remote-homology", "migrate", "--db", str(db), "--publish"])
+    assert result.exit_code == 0 and "Published" in result.output, result.output
+    assert list(db.parent.glob("sharur.duckdb.pre-resemblance-table-*"))
+    assert _rows(db, "SELECT COUNT(*) FROM annotations WHERE source = 'cdd'") == [(0,)]
+    assert _rows(db, "SELECT COUNT(*) FROM protein_resemblance") == [(3,)]

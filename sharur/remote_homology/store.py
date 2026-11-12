@@ -22,10 +22,13 @@ Staging DuckDB (``load-families``, ``load-cdd``)::
 
 Activation copies these into a dataset database through the staged-write protocol: family
 rows into ``family_annotations`` (and the run and status tables), CDD hits expanded from
-sequences to every protein with that sequence into ``annotations`` with ``source = 'cdd'``
-(after checking that the database's unique sequences are the ones searched; with a row in
-``annotation_source_versions``), and
-creates the ``family_resemblance`` view, which applies the "resembles" rule.
+sequences to every protein with that sequence into ``protein_resemblance`` (after checking that
+the database's unique sequences are the ones searched; the search, database name and version in
+``protein_resemblance_runs``), and creates two views: ``family_resemblance``, which applies the
+"resembles" rule, and ``family_annotations_carried``, which carries family hits to the families
+of other clustering runs with the same representative. ``annotations`` keeps the curated
+per-domain hits only; :func:`move_resemblance_rows` moves CDD rows that an earlier release wrote
+there.
 """
 
 from __future__ import annotations
@@ -43,6 +46,7 @@ from sharur.remote_homology import (
     CDD_MAX_EVALUE,
     RULE_MIN_ALIGNED_COLS,
     RULE_MIN_PROBABILITY,
+    RESEMBLES_SOURCES,
     RULE_SOURCES,
     runner,
 )
@@ -54,13 +58,18 @@ HITS = "family_annotations"
 CDD_HITS = "cdd_hits"
 CDD_RUNS = "cdd_runs"
 CDD_MODELS = "cdd_models"
+RESEMBLANCE = "protein_resemblance"
+RESEMBLANCE_RUNS = "protein_resemblance_runs"
 RESEMBLANCE_VIEW = "family_resemblance"
+CARRIED_VIEW = "family_annotations_carried"
 SOURCE_VERSIONS = "annotation_source_versions"
 CDD_SOURCE = "cdd"
 TABLES = (RUNS, STATUS, HITS)
 # Tables an activation can change (diffed before publish).
-ACTIVATION_TABLES = [RUNS, STATUS, HITS, "annotations", SOURCE_VERSIONS, "protein_families", "family_stats",
-                     "protein_family_runs", "protein_family_assignments"]
+ACTIVATION_TABLES = [RUNS, STATUS, HITS, RESEMBLANCE, RESEMBLANCE_RUNS, "annotations", SOURCE_VERSIONS,
+                     "protein_families", "family_stats", "protein_family_runs", "protein_family_assignments"]
+# Tables the move of CDD rows out of annotations changes.
+MOVE_TABLES = ["annotations", SOURCE_VERSIONS, RESEMBLANCE, RESEMBLANCE_RUNS]
 SCHEMA_VERSION = 1
 MAX_SEQUENCES = 250
 MIN_GENOMES = 3
@@ -167,6 +176,37 @@ DDL = {
     source_db VARCHAR,
     details JSON
 )""",
+    # One row per resemblance hit and protein (CDD: the best model of each region, or every hit).
+    RESEMBLANCE: f"""CREATE TABLE IF NOT EXISTS {RESEMBLANCE} (
+    protein_id VARCHAR NOT NULL,
+    source VARCHAR NOT NULL,
+    search_run VARCHAR NOT NULL,
+    db_name VARCHAR NOT NULL,
+    db_version VARCHAR NOT NULL,
+    accession VARCHAR NOT NULL,
+    name VARCHAR,
+    description VARCHAR,
+    evalue FLOAT,
+    score FLOAT,
+    start_aa INTEGER,
+    end_aa INTEGER
+)""",
+    # One row per source: the search whose rows protein_resemblance holds.
+    RESEMBLANCE_RUNS: f"""CREATE TABLE IF NOT EXISTS {RESEMBLANCE_RUNS} (
+    source VARCHAR NOT NULL,
+    search_run VARCHAR NOT NULL,
+    loaded_at TIMESTAMP NOT NULL,
+    db_name VARCHAR NOT NULL,
+    db_version VARCHAR NOT NULL,
+    db_prefix VARCHAR,
+    selection_rule VARCHAR NOT NULL,
+    rows_stored VARCHAR,
+    protein_rows_all BIGINT,
+    rows_loaded BIGINT NOT NULL,
+    proteins BIGINT NOT NULL,
+    staging_path VARCHAR,
+    parameters JSON
+)""",
 }
 
 # family_annotations keeps its primary key only; scans by family or accession take a fraction of a second,
@@ -176,11 +216,12 @@ DROP INDEX IF EXISTS idx_family_annotations_family;
 DROP INDEX IF EXISTS idx_family_annotations_accession;
 """
 STAGING_TABLES = (RUNS, STATUS, HITS, CDD_HITS, CDD_MODELS, CDD_RUNS)
-# The family-tier tables carry no primary key: DuckDB 1.2 aborts at COMMIT when one transaction deletes
-# and re-inserts the same key values of a large keyed table, which is what a reload or refresh does.
-# Uniqueness is checked by query instead (_check_unique), inside the same transaction.
+# The family-tier and resemblance tables carry no primary key: DuckDB 1.2 aborts at COMMIT when one
+# transaction deletes and re-inserts the same key values of a large keyed table, which is what a reload
+# or refresh does. Uniqueness is checked by query instead (_check_unique), inside the same transaction.
 UNIQUE_KEYS = {RUNS: ("search_run",), STATUS: ("clustering_run", "family_id"),
                HITS: ("clustering_run", "family_id", "source", "msa_kind", "hit_rank")}
+RESEMBLANCE_KEYS = {RESEMBLANCE_RUNS: ("source",)}
 
 
 def _drop_keys(con) -> None:
@@ -195,8 +236,8 @@ def _drop_keys(con) -> None:
             con.execute(f"DROP TABLE {table}__keyed")
 
 
-def _check_unique(con) -> None:
-    for table, key in UNIQUE_KEYS.items():
+def _check_unique(con, keys: dict[str, tuple[str, ...]] = UNIQUE_KEYS) -> None:
+    for table, key in keys.items():
         cols = ", ".join(key)
         dup = con.execute(f"SELECT COUNT(*) FROM (SELECT {cols} FROM {table} GROUP BY ALL HAVING COUNT(*) > 1)"
                           ).fetchone()[0]
@@ -216,6 +257,36 @@ SELECT family_id, clustering_run, search_run, source, db_name, db_version, msa_k
        'resembles' AS evidence
 FROM {HITS}
 WHERE source IN ({sources}) AND probability >= {float(min_probability)} AND aligned_cols >= {int(min_cols)}"""
+
+
+def carried_view_sql() -> str:
+    """The ``family_annotations_carried`` view: family hits carried to other runs' families with the same representative.
+
+    One row per hit and target family: ``family_id`` and ``clustering_run`` name the family of the
+    other run that shares the searched family's representative (``family_stats.rep_protein_id``).
+    The SQL surface's ``family_annotations_via(target_run)`` returns the rows of one target run.
+    """
+    return f"""CREATE OR REPLACE VIEW {CARRIED_VIEW} AS
+SELECT t.family_id, t.clustering_run, h.clustering_run AS source_run, h.family_id AS source_family_id,
+       s.n_members AS source_members, t.n_members AS target_members,
+       h.source, h.db_name, h.db_version, h.msa_kind, h.hit_rank, h.hit_accession, h.hit_name,
+       h.hit_description, h.probability, h.evalue, h.aligned_cols, h.q_start, h.q_end, h.t_start, h.t_end,
+       h.unknown_function, 'resembles' AS evidence
+FROM {HITS} h
+JOIN family_stats s ON s.family_id = h.family_id AND s.clustering_run = h.clustering_run
+JOIN family_stats t ON t.rep_protein_id = s.rep_protein_id AND t.clustering_run <> h.clustering_run"""
+
+
+def _create_views(con) -> list[str]:
+    """(Re)create the family-tier views the database's tables support; return their names."""
+    made = []
+    if _has_tables(con, [HITS]):
+        con.execute(resemblance_view_sql())
+        made.append(RESEMBLANCE_VIEW)
+        if _has_tables(con, ["family_stats"]):
+            con.execute(carried_view_sql())
+            made.append(CARRIED_VIEW)
+    return made
 
 
 # Reserved attachment names (a database file named like an alias would collide with it).
@@ -927,14 +998,13 @@ def load_staging(con: duckdb.DuckDBPyConnection, staging: Sequence[Path | str], 
     ``families_staging``) with the clustering input digest the
     search recorded, and every staged family must exist in it; rows of the same clustering run
     and source are replaced. CDD: every staged protein must exist with the sequence the hit was
-    computed for (MD5); ``annotations`` rows with ``source = 'cdd'`` are replaced and the
-    database name and version are recorded in ``annotation_source_versions``. ``cdd_rows``
-    chooses the CDD rows written: ``best_per_region`` (default; the best model of each region,
+    computed for (MD5); the ``protein_resemblance`` rows of source ``cdd`` are replaced (CDD rows
+    an earlier release wrote to ``annotations`` are removed) and the search, database name and
+    version are recorded in ``protein_resemblance_runs``. ``cdd_rows`` chooses the CDD rows
+    written: ``best_per_region`` (default; the best model of each region,
     ``cdd_hits.best_in_region``) or ``all``. The full per-sequence table stays in the staging
     file either way.
     """
-    from sharur.defensefinder.selection import _SOURCE_VERSIONS_SQL  # noqa: PLC0415
-
     summary: dict[str, Any] = {"family_tier": None, "cdd": None}
     if family_runs not in (FAMILY_RUNS_SEARCHED, FAMILY_RUNS_ALL):
         raise RemoteHomologyError(f"family_runs must be '{FAMILY_RUNS_SEARCHED}' or '{FAMILY_RUNS_ALL}'")
@@ -973,21 +1043,19 @@ def load_staging(con: duckdb.DuckDBPyConnection, staging: Sequence[Path | str], 
                 summary["family_tier"] = _load_family_tier(con, alias, path)
                 log(f"family tier: {summary['family_tier']}")
             if {CDD_HITS, CDD_MODELS, CDD_RUNS} <= tables:
-                summary["cdd"] = _load_cdd_rows(con, alias, path, verify_digest, _SOURCE_VERSIONS_SQL, log,
-                                                cdd_rows=cdd_rows)
+                summary["cdd"] = _load_cdd_rows(con, alias, path, verify_digest, log, cdd_rows=cdd_rows)
                 log(f"cdd: {summary['cdd']}")
             if not ({RUNS, STATUS, HITS} <= tables or {CDD_HITS, CDD_MODELS, CDD_RUNS} <= tables):
                 raise RemoteHomologyError(f"{path} holds no remote-homology tables")
         finally:
             con.execute(f"DETACH {alias}")
-    # the SQL surface's resembles macros read these tables; create them empty when a layer is absent
+    # the SQL surface's resembles macros read the family tier; create it empty when only CDD rows came
     from sharur.protein_families.store import has_families  # noqa: PLC0415
 
-    con.execute(_SOURCE_VERSIONS_SQL)
     if has_families(con) and not _has_tables(con, [HITS]):
         for ddl in (DDL[RUNS], DDL[STATUS], DDL[HITS]):
             con.execute(ddl)
-        con.execute(resemblance_view_sql())
+        _create_views(con)
     summary["status"] = status(con)
     return summary
 
@@ -1018,6 +1086,7 @@ def _load_family_tier(con, alias: str, path: Path) -> dict[str, Any]:
     con.execute("BEGIN TRANSACTION")
     try:
         con.execute(f"DROP VIEW IF EXISTS {RESEMBLANCE_VIEW}")
+        con.execute(f"DROP VIEW IF EXISTS {CARRIED_VIEW}")
         for ddl in (DDL[RUNS], DDL[STATUS], DDL[HITS]):
             con.execute(ddl)
         con.execute(f"""CREATE OR REPLACE TEMP TABLE _rh_keys AS
@@ -1029,7 +1098,7 @@ def _load_family_tier(con, alias: str, path: Path) -> dict[str, Any]:
         for table in (RUNS, STATUS, HITS):
             con.execute(f"INSERT INTO {table} BY NAME SELECT * FROM {alias}.{table}")
         _check_unique(con)
-        con.execute(resemblance_view_sql())
+        _create_views(con)
         con.execute("COMMIT")
     except Exception:
         con.execute("ROLLBACK")
@@ -1039,8 +1108,56 @@ def _load_family_tier(con, alias: str, path: Path) -> dict[str, Any]:
             "hit_rows": n_hits, "families_with_hits": n_fam}
 
 
-def _load_cdd_rows(con, alias: str, path: Path, verify_digest: bool, source_versions_sql: str,
-                   log: Callable[[str], None], *, cdd_rows: str = CDD_ROWS_BEST) -> dict[str, Any]:
+_ROW_COLUMNS = ("protein_id", "source", "search_run", "db_name", "db_version", "accession", "name", "description",
+                "evalue", "score", "start_aa", "end_aa")
+_RUN_COLUMNS = ("source", "search_run", "loaded_at", "db_name", "db_version", "db_prefix", "selection_rule",
+                "rows_stored", "protein_rows_all", "rows_loaded", "proteins", "staging_path", "parameters")
+# Columns a CDD row carried in annotations; the move checks them by content fingerprint.
+_MOVED_COLUMNS = ("protein_id", "source", "accession", "name", "description", "evalue", "score", "start_aa",
+                  "end_aa")
+
+
+def _resembles_literal() -> str:
+    return ", ".join(f"'{s}'" for s in sorted(RESEMBLES_SOURCES))
+
+
+def annotation_rows_to_move(con) -> int:
+    """Rows of resembles-tier sources in ``annotations`` (written there by releases before ``protein_resemblance``)."""
+    if not _has_tables(con, ["annotations"]):
+        return 0
+    return con.execute(f"SELECT COUNT(*) FROM annotations WHERE source IN ({_resembles_literal()})").fetchone()[0]
+
+
+def _drop_annotation_rows(con) -> int:
+    """Delete resembles-tier rows from ``annotations`` and their ``annotation_source_versions`` entries.
+
+    Deletes only: re-inserting deleted key values of the keyed ``annotations`` table in one
+    transaction is what DuckDB 1.2 aborts on at COMMIT.
+    """
+    n = annotation_rows_to_move(con)
+    if n:
+        con.execute(f"DELETE FROM annotations WHERE source IN ({_resembles_literal()})")
+    if _has_tables(con, [SOURCE_VERSIONS]):
+        con.execute(f"DELETE FROM {SOURCE_VERSIONS} WHERE source IN ({_resembles_literal()})")
+    return n
+
+
+def _source_fingerprint(con, table: str, columns: Sequence[str], source: str) -> tuple[int, int]:
+    """Row count and order-free content hash of one source's rows of ``table``."""
+    packed = "struct_pack(" + ", ".join(f'"{c}" := "{c}"' for c in columns) + ")"
+    row = con.execute(f"SELECT COUNT(*), COALESCE(SUM(hash({packed})::HUGEINT), 0) FROM {table} WHERE source = ?",
+                      [source]).fetchone()
+    return int(row[0]), int(row[1])
+
+
+def _insert_run(con, row: dict[str, Any]) -> None:
+    con.execute(f"DELETE FROM {RESEMBLANCE_RUNS} WHERE source = ?", [row["source"]])
+    con.execute(f"INSERT INTO {RESEMBLANCE_RUNS} ({', '.join(_RUN_COLUMNS)}) VALUES "
+                f"({', '.join('?' for _ in _RUN_COLUMNS)})", [row[c] for c in _RUN_COLUMNS])
+
+
+def _load_cdd_rows(con, alias: str, path: Path, verify_digest: bool, log: Callable[[str], None], *,
+                   cdd_rows: str = CDD_ROWS_BEST) -> dict[str, Any]:
     if cdd_rows not in CDD_ROW_CHOICES:
         raise RemoteHomologyError(f"cdd_rows must be one of {', '.join(CDD_ROW_CHOICES)}, not {cdd_rows!r}")
     run = con.execute(f"SELECT * FROM {alias}.{CDD_RUNS}").fetchdf()
@@ -1056,23 +1173,25 @@ def _load_cdd_rows(con, alias: str, path: Path, verify_digest: bool, source_vers
         log(f"unique-sequence digest verified ({n:,} sequences)")
     con.execute("BEGIN TRANSACTION")
     try:
-        con.execute(source_versions_sql)
-        removed = con.execute("SELECT COUNT(*) FROM annotations WHERE source = ?", [CDD_SOURCE]).fetchone()[0]
-        con.execute("DELETE FROM annotations WHERE source = ?", [CDD_SOURCE])
-        base = con.execute("SELECT COALESCE(MAX(annotation_id), 0) FROM annotations").fetchone()[0]
+        for table in (RESEMBLANCE, RESEMBLANCE_RUNS):
+            con.execute(DDL[table])
+        removed = con.execute(f"SELECT COUNT(*) FROM {RESEMBLANCE} WHERE source = ?", [CDD_SOURCE]).fetchone()[0]
+        con.execute(f"DELETE FROM {RESEMBLANCE} WHERE source = ?", [CDD_SOURCE])
+        removed_annotations = _drop_annotation_rows(con)
         con.execute(f"""CREATE OR REPLACE TEMP TABLE _rh_pmd5 AS
             SELECT protein_id, md5(rtrim(sequence, '*')) AS sequence_md5 FROM proteins WHERE {_HAS_SEQ}""")
         all_rows = con.execute(f"""SELECT COALESCE(SUM(h.n), 0) FROM _rh_pmd5 p JOIN
             (SELECT sequence_md5, COUNT(*) AS n FROM {alias}.{CDD_HITS} GROUP BY 1) h USING (sequence_md5)""").fetchone()[0]
         where = "WHERE h.best_in_region" if cdd_rows == CDD_ROWS_BEST else ""
         con.execute(f"""
-            INSERT INTO annotations (annotation_id, protein_id, source, accession, name, description, evalue,
-                                     score, start_aa, end_aa)
-            SELECT ? + row_number() OVER (ORDER BY p.protein_id, h.start_aa, m.accession, h.evalue), p.protein_id,
-                   '{CDD_SOURCE}', m.accession, m.name, m.description, h.evalue, h.score, h.start_aa, h.end_aa
+            INSERT INTO {RESEMBLANCE} ({', '.join(_ROW_COLUMNS)})
+            SELECT p.protein_id, '{CDD_SOURCE}', ?, ?, ?, m.accession, m.name, m.description, h.evalue, h.score,
+                   h.start_aa, h.end_aa
             FROM {alias}.{CDD_HITS} h JOIN {alias}.{CDD_MODELS} m USING (pssm_id) JOIN _rh_pmd5 p USING (sequence_md5)
-            {where}""", [int(base)])
-        loaded, proteins = con.execute("SELECT COUNT(*), COUNT(DISTINCT protein_id) FROM annotations "
+            {where}
+            ORDER BY p.protein_id, h.start_aa, m.accession, h.evalue""",
+                    [run["cdd_run"], run["db_name"], run["db_version"]])
+        loaded, proteins = con.execute(f"SELECT COUNT(*), COUNT(DISTINCT protein_id) FROM {RESEMBLANCE} "
                                        "WHERE source = ?", [CDD_SOURCE]).fetchone()
         rule = (f"rpsblast E <= {float(run['max_evalue']):g}; "
                 + (f"best model per region (max overlap {float(run['max_overlap']):g}); "
@@ -1085,19 +1204,87 @@ def _load_cdd_rows(con, alias: str, path: Path, verify_digest: bool, source_vers
                   "protein_rows_all": int(all_rows), "protein_rows_stored": int(loaded),
                   "proteins_with_hits": int(proteins), "full_table": f"cdd_hits and cdd_models in {path}",
                   "export_digest": run["export_digest"], "evidence": "resembles"}
-        con.execute(f"DELETE FROM {SOURCE_VERSIONS} WHERE source = ?", [CDD_SOURCE])
-        con.execute(f"""INSERT INTO {SOURCE_VERSIONS} (source, model_set, model_version, profiles_path, selection_rule,
-                                    parameters, hits_path, raw_rows, selected_rows, loaded_rows, loaded_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::TIMESTAMP)""",
-                    [CDD_SOURCE, run["db_name"], run["db_version"], run["db_prefix"], rule,
-                     json.dumps(params, sort_keys=True), str(path), int(all_rows), int(loaded), int(loaded), _now()])
+        _insert_run(con, {"source": CDD_SOURCE, "search_run": run["cdd_run"], "loaded_at": _now(),
+                          "db_name": run["db_name"], "db_version": run["db_version"], "db_prefix": run["db_prefix"],
+                          "selection_rule": rule, "rows_stored": cdd_rows, "protein_rows_all": int(all_rows),
+                          "rows_loaded": int(loaded), "proteins": int(proteins), "staging_path": str(path),
+                          "parameters": json.dumps(params, sort_keys=True)})
+        _check_unique(con, RESEMBLANCE_KEYS)
         con.execute("DROP TABLE IF EXISTS _rh_pmd5")
         con.execute("COMMIT")
     except Exception:
         con.execute("ROLLBACK")
         raise
     return {"staging": str(path), "rows_removed": removed, "rows_loaded": loaded, "rows_all": int(all_rows),
-            "rows_stored": cdd_rows, "proteins_with_hits": proteins, "db": f"{run['db_name']} {run['db_version']}"}
+            "rows_stored": cdd_rows, "proteins_with_hits": proteins, "db": f"{run['db_name']} {run['db_version']}",
+            "annotation_rows_removed": removed_annotations}
+
+
+def move_resemblance_rows(con, *, log: Callable[[str], None] = print) -> dict[str, Any]:
+    """Move CDD rows from ``annotations`` into ``protein_resemblance`` (databases activated before the move).
+
+    The database name, version and search come from the source's ``annotation_source_versions``
+    entry, which moves to ``protein_resemblance_runs``. One transaction inserts the rows into the
+    unkeyed ``protein_resemblance``, deletes them from ``annotations`` and deletes the entry, after
+    checking the moved rows against the originals by count and content fingerprint; ``annotations``
+    is only deleted from, which avoids DuckDB 1.2's COMMIT abort on re-inserted keys. The
+    family-tier views are (re)created. A database without such rows is left as it is apart from
+    the views.
+    """
+    n = annotation_rows_to_move(con)
+    if not n:
+        views = _create_views(con) if _has_tables(con, [HITS]) else []
+        log("no CDD rows in annotations; nothing to move")
+        return {"rows_moved": 0, "views": views}
+    if _has_tables(con, [RESEMBLANCE]) and con.execute(
+            f"SELECT COUNT(*) FROM {RESEMBLANCE} WHERE source = ?", [CDD_SOURCE]).fetchone()[0]:
+        raise RemoteHomologyError(f"both annotations and {RESEMBLANCE} hold CDD rows; re-activate the CDD staging "
+                                  "file with `sharur remote-homology activate`, which replaces both")
+    entry = None
+    if _has_tables(con, [SOURCE_VERSIONS]):
+        entry = con.execute(f"""SELECT model_set, model_version, profiles_path, selection_rule, parameters,
+                                       hits_path, raw_rows, loaded_at
+                                FROM {SOURCE_VERSIONS} WHERE source = ?""", [CDD_SOURCE]).fetchone()
+    if entry is None or not entry[0] or not entry[1]:
+        raise RemoteHomologyError(f"annotations holds {n:,} CDD rows but {SOURCE_VERSIONS} records no CDD database "
+                                  "name and version; re-activate the CDD staging file instead")
+    db_name, db_version, prefix, rule, raw_params, hits_path, raw_rows, loaded_at = entry
+    params = json.loads(raw_params or "{}")
+    search_run = params.get("cdd_run") or f"cdd-{db_name}-{db_version}"
+    cols = _MOVED_COLUMNS
+    con.execute("BEGIN TRANSACTION")
+    try:
+        for table in (RESEMBLANCE, RESEMBLANCE_RUNS):
+            con.execute(DDL[table])
+        before = _source_fingerprint(con, "annotations", cols, CDD_SOURCE)
+        con.execute(f"""INSERT INTO {RESEMBLANCE} ({', '.join(_ROW_COLUMNS)})
+                        SELECT protein_id, source, ?, ?, ?, accession, name, description, evalue, score, start_aa,
+                               end_aa
+                        FROM annotations WHERE source = ? ORDER BY annotation_id""",
+                    [search_run, db_name, db_version, CDD_SOURCE])
+        after = _source_fingerprint(con, RESEMBLANCE, cols, CDD_SOURCE)
+        if before != after:
+            raise RemoteHomologyError(f"moved rows differ from the annotations rows ({before} -> {after})")
+        proteins = con.execute(f"SELECT COUNT(DISTINCT protein_id) FROM {RESEMBLANCE} WHERE source = ?",
+                               [CDD_SOURCE]).fetchone()[0]
+        _insert_run(con, {"source": CDD_SOURCE, "search_run": search_run, "loaded_at": loaded_at,
+                          "db_name": db_name, "db_version": db_version, "db_prefix": prefix,
+                          "selection_rule": rule or "", "rows_stored": params.get("rows_stored"),
+                          "protein_rows_all": params.get("protein_rows_all", raw_rows), "rows_loaded": int(n),
+                          "proteins": int(proteins), "staging_path": hits_path,
+                          "parameters": json.dumps(params, sort_keys=True)})
+        _check_unique(con, RESEMBLANCE_KEYS)
+        removed = _drop_annotation_rows(con)
+        if removed != n or annotation_rows_to_move(con):
+            raise RemoteHomologyError(f"removed {removed:,} annotations rows, expected {n:,}")
+        views = _create_views(con) if _has_tables(con, [HITS]) else []
+        con.execute("COMMIT")
+    except Exception:
+        con.execute("ROLLBACK")
+        raise
+    log(f"moved {n:,} CDD rows on {proteins:,} proteins ({db_name} {db_version}) from annotations to {RESEMBLANCE}")
+    return {"rows_moved": int(n), "proteins": int(proteins), "db": f"{db_name} {db_version}",
+            "search_run": search_run, "fingerprint_checked": True, "views": views}
 
 
 def _fingerprint(con, table: str, alias: str | None, columns: Sequence[str]) -> tuple[int, int]:
@@ -1175,21 +1362,25 @@ def status(con) -> dict[str, Any]:
             "families_resembling_unknown_function_only": sum(v["unknown_function_only"] for v in by_run.values()),
             "families_resembling_any": sum(v["characterized"] + v["unknown_function_only"] for v in by_run.values()),
             "by_clustering_run": by_run}
-    if _has_tables(con, ["annotations"]):
-        n, proteins = con.execute("SELECT COUNT(*), COUNT(DISTINCT protein_id) FROM annotations WHERE source = ?",
+    if _has_tables(con, [RESEMBLANCE]):
+        n, proteins = con.execute(f"SELECT COUNT(*), COUNT(DISTINCT protein_id) FROM {RESEMBLANCE} WHERE source = ?",
                                   [CDD_SOURCE]).fetchone()
         if n:
-            version, params = None, {}
-            if _has_tables(con, [SOURCE_VERSIONS]):
-                row = con.execute(f"SELECT model_set, model_version, parameters FROM {SOURCE_VERSIONS} "
-                                  "WHERE source = ?", [CDD_SOURCE]).fetchone()
+            version, params, stored, all_rows = None, {}, None, None
+            if _has_tables(con, [RESEMBLANCE_RUNS]):
+                row = con.execute(f"SELECT db_name, db_version, parameters, rows_stored, protein_rows_all "
+                                  f"FROM {RESEMBLANCE_RUNS} WHERE source = ?", [CDD_SOURCE]).fetchone()
                 if row:
                     version = f"{row[0]} {row[1]}"
-                    params = json.loads(row[2] or "{}")
-            out["cdd"] = {"rows": n, "proteins": proteins, "database": version,
-                          "rows_stored": params.get("rows_stored"), "rows_all_hits": params.get("protein_rows_all"),
+                    params, stored, all_rows = json.loads(row[2] or "{}"), row[3], row[4]
+            out["cdd"] = {"rows": n, "proteins": proteins, "database": version, "table": RESEMBLANCE,
+                          "rows_stored": stored, "rows_all_hits": all_rows,
                           "max_overlap": params.get("max_overlap"), "sequence_hits": params.get("sequence_hits"),
                           "full_table": params.get("full_table")}
+    legacy = annotation_rows_to_move(con)
+    if legacy:  # written by a release before protein_resemblance
+        out["annotation_rows_to_move"] = legacy
+        out["migrate"] = f"sharur remote-homology migrate --db DB  ({legacy:,} CDD rows still in annotations)"
     if _has_tables(con, [CDD_RUNS]):  # a staging file: the CDD search waiting for activation
         row = con.execute(f"""SELECT cdd_run, db_name, db_version, max_evalue, unique_sequences, proteins, hit_rows,
                                      sequences_with_hits, best_rows, max_overlap FROM {CDD_RUNS}""").fetchone()

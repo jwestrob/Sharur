@@ -15,6 +15,8 @@ Typical use (``docs/guides/remote-homology.md``)::
     # into the dataset database (staged write)
     sharur remote-homology activate --db DB --staging RH.duckdb [--families-staging FAMILIES.duckdb] --publish
     sharur remote-homology status --db DB
+    # a database whose CDD rows an earlier release wrote to annotations (staged write)
+    sharur remote-homology migrate --db DB --publish
 """
 
 from __future__ import annotations
@@ -213,8 +215,8 @@ def activate_command(
     do_publish: bool = typer.Option(False, "--publish", help="Publish the staged copy when the load succeeds."),
     verify_digest: bool = typer.Option(True, "--verify-digest/--no-verify-digest"),
     cdd_rows: str = typer.Option("best_per_region", "--cdd-rows",
-                                 help="CDD rows written to annotations: best_per_region (the best model of each "
-                                      "region) or all. The full hit table stays in the staging file."),
+                                 help="CDD rows written to protein_resemblance: best_per_region (the best model of "
+                                      "each region) or all. The full hit table stays in the staging file."),
 ):
     """Stage DB, load the remote-homology rows into the clone, diff, and (with --publish) swap it in.
 
@@ -243,6 +245,33 @@ def activate_command(
             con.close()
 
     _staged(db.expanduser().resolve(), label, work_dir, writer, do_publish, tables=store.ACTIVATION_TABLES)
+
+
+@remote_homology_app.command("migrate")
+def migrate_command(
+    db: Path = typer.Option(..., "--db", "-d", help=_DB_HELP),
+    label: str = typer.Option("resemblance-table", "--label", "-l"),
+    work_dir: Path | None = typer.Option(None, "--work-dir",
+                                            help="Directory for the staged clone (default: beside DB)."),
+    do_publish: bool = typer.Option(False, "--publish", help="Publish the staged copy when the move succeeds."),
+):
+    """Move CDD rows that earlier releases wrote to annotations into protein_resemblance (staged write).
+
+    The rows, their database name and version, and the annotation_source_versions entry move in
+    one transaction on a staged clone; the diff covers annotations, annotation_source_versions and
+    the protein_resemblance tables. The family-tier views are (re)created.
+    """
+    from sharur.protein_families.cli import _staged  # noqa: PLC0415
+    from sharur.remote_homology import store  # noqa: PLC0415
+
+    def writer(path: Path) -> dict:
+        con = store.connect(path)
+        try:
+            return store.move_resemblance_rows(con, log=lambda m: typer.echo(m, err=True))
+        finally:
+            con.close()
+
+    _staged(db.expanduser().resolve(), label, work_dir, writer, do_publish, tables=store.MOVE_TABLES)
 
 
 @remote_homology_app.command("status")

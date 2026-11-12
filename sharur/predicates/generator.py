@@ -48,7 +48,8 @@ def without_resembles(annotations: list[AnnotationRecord]) -> list[AnnotationRec
 
     Those rows record that a protein resembles a profile at a permissive threshold; they
     carry no predicate and leave annotation status (``unannotated`` and the rest) as the
-    curated sources set it.
+    curated sources set it. They live in ``protein_resemblance``; this guard covers rows that
+    earlier releases wrote to ``annotations`` (``sharur remote-homology migrate`` moves them).
     """
     if not any(a.source.lower() in RESEMBLES_SOURCES for a in annotations):
         return annotations

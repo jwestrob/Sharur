@@ -4,7 +4,8 @@ Two optional layers record *observed similarity* to characterized families, read
 "resembles":
 
 - **CDD per protein** (``runner.py cdd``): RPS-BLAST of every unique protein sequence
-  against CDD; hits at E <= 0.01 are stored in ``annotations`` with ``source = 'cdd'``.
+  against CDD; hits at E <= 0.01 are stored per protein in ``protein_resemblance``
+  (``source = 'cdd'``, with the database name and version), apart from ``annotations``.
 - **Family tier** (``runner.py families``): for each selected protein family, an alignment
   of up to 250 unique members (representative first), optional HHblits enrichment against
   UniRef30, and HHsearch against Pfam and PDB profile databases. Hits are stored per family
@@ -37,9 +38,11 @@ from sharur.remote_homology.hhr import (
 )
 
 
-# Annotation sources whose rows are observed similarities ("resembles"), never annotations
-# at curated thresholds. Predicate generation skips them, and the SQL surface labels them.
-# sharur/sql/prelude.sql repeats this list; tests/test_remote_homology.py keeps both equal.
+# Sources whose rows are observed similarities ("resembles"), never annotations at curated
+# thresholds. Their rows live in protein_resemblance; rows an earlier release wrote to
+# annotations are left out by predicate generation and the SQL surface until
+# `sharur remote-homology migrate` moves them. sharur/sql/prelude.sql repeats this list;
+# tests/test_remote_homology.py keeps both equal.
 RESEMBLES_SOURCES: frozenset[str] = frozenset({"cdd"})
 
 # The default "resembles" rule for family-tier hits (probability in percent).

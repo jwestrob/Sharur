@@ -7,7 +7,7 @@ Reads every protein of the Stage 07 database (read-only), writes each unique seq
 allocated CPU (workers of four threads), and expands hits at E <= ``--max-evalue`` (default
 0.01) to every protein carrying that sequence. The staging file keeps every hit and marks the
 best model of each region (``--max-overlap``); activation writes those best rows to
-``annotations`` by default (``--cdd-rows all`` writes every hit).
+``protein_resemblance`` by default (``--cdd-rows all`` writes every hit).
 
 Outputs in ``stage10_cdd/``:
 
@@ -17,10 +17,11 @@ Outputs in ``stage10_cdd/``:
 - ``cdd/export.json``, ``cdd/compact/`` and ``cdd/out/chunk_*.tsv`` (raw RPS-BLAST tables);
 - ``processing_manifest.json``.
 
-The dataset database stays unchanged. Load the rows (``annotations`` with ``source =
+The dataset database stays unchanged. Load the rows (``protein_resemblance``, ``source =
 'cdd'``) with ``sharur remote-homology activate --db DB --staging
-stage10_cdd/remote_homology_cdd.duckdb --publish``. CDD rows are observed similarities: the
-SQL surface labels them ``resembles`` and predicate generation leaves them out.
+stage10_cdd/remote_homology_cdd.duckdb --publish``. CDD rows are observed similarities in their
+own table: the SQL surface labels them ``resembles``, and ``annotations`` and the predicates
+built from it keep the curated sources alone.
 """
 
 from __future__ import annotations

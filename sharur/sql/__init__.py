@@ -19,7 +19,12 @@ File format. Header lines::
 
 then one statement per ``-- @object NAME KIND: DOC`` marker. The installer runs each
 statement on its own and records what installed; when a ``@requires`` table is missing from
-the default database, nothing is installed and the report says why.
+the default database, nothing is installed and the report says why. An object over an optional
+table can have a stand-in: a statement of the same name marked ``-- @if-absent: TABLE`` on the
+line after its ``@object`` line, written before the regular statement. The installer and
+:func:`prelude_text` pick the stand-in when TABLE is absent and the regular statement when it
+is present, so the macros built on that object work on either database (DuckDB 1.3 and later
+bind a table macro's tables when it is created; 1.2 binds them on use).
 
 Sequences stay out of query results by construction: ``genes()`` is the protein table
 without its sequence column, no macro returns a sequence, and :func:`write_fasta` (also
@@ -47,6 +52,7 @@ REGISTRY_MACRO = "sharur_sql"
 
 _OBJECT = re.compile(r"^--\s*@object\s+([A-Za-z_][\w]*)\s+([\w]+)\s*:\s*(.*)$")
 _HEADER = re.compile(r"^--\s*@(sharur-sql-version|requires)\s*:\s*(.*)$")
+_IF_ABSENT = re.compile(r"^--\s*@if-absent\s*:\s*([A-Za-z_]\w*)\s*$")
 _SIGNATURE = re.compile(r"\bMACRO\s+(?:[\w.]+\.)?([A-Za-z_]\w*)\s*\(([^)]*)\)", re.I)
 
 
@@ -62,6 +68,8 @@ class SqlObject:
     doc: str
     signature: str
     statement: str
+    # Stand-in statement: installed instead of the regular one when this table is absent.
+    if_absent: str | None = None
 
 
 @dataclass(frozen=True)
@@ -87,18 +95,25 @@ def _parse_cached(path: str, mtime_ns: int) -> SqlFile:
     current: tuple[str, str, str] | None = None
     body: list[str] = []
 
+    if_absent: str | None = None
+
     def flush() -> None:
         statement = "\n".join(body).strip()
         if current is not None and statement:
             name, kind, doc = current
             objects.append(SqlObject(name=name, kind=kind, doc=doc.strip(),
-                                     signature=_signature(name, statement), statement=statement))
+                                     signature=_signature(name, statement), statement=statement,
+                                     if_absent=if_absent))
 
     for line in Path(path).read_text().splitlines():
         m = _OBJECT.match(line.strip())
         if m:
             flush()
-            current, body = (m.group(1), m.group(2), m.group(3)), []
+            current, body, if_absent = (m.group(1), m.group(2), m.group(3)), [], None
+            continue
+        a = _IF_ABSENT.match(line.strip())
+        if current is not None and a and not body:
+            if_absent = a.group(1)
             continue
         if current is None:
             h = _HEADER.match(line.strip())
@@ -175,6 +190,19 @@ def object_layers(objects: Sequence[SqlObject]) -> dict[str, set[str]]:
     return layers
 
 
+def select_objects(objects: Sequence[SqlObject], tables: set[str] | None) -> list[SqlObject]:
+    """One statement per object for a database with ``tables``: stand-ins where their table is absent.
+
+    ``tables=None`` (database unknown) keeps both statements, stand-in first, so a script run as a
+    whole ends with the regular statement wherever it installs.
+    """
+    standins = {o.name: o.if_absent for o in objects if o.if_absent}
+    if tables is None:
+        return list(objects)
+    return [o for o in objects
+            if o.name not in standins or (o.if_absent is not None) == (standins[o.name] not in tables)]
+
+
 def available_tables(con: Any) -> set[str]:
     """Tables and views of the connection's default database."""
     rows = con.execute(
@@ -186,7 +214,7 @@ def available_tables(con: Any) -> set[str]:
 def registry_statement(objects: Sequence[SqlObject], udfs: Sequence[str] = (),
                        version: str | None = None) -> str:
     """``sharur_sql()``: one row per object of the surface (name, kind, signature, doc, version)."""
-    rows = [(o.name, o.kind, o.signature, o.doc) for o in objects]
+    rows = list({o.name: (o.name, o.kind, o.signature, o.doc) for o in objects}.values())
     if "write_fasta" in udfs:
         rows.append(("write_fasta", "python_function", "write_fasta(path, ids)",
                      "write the sequences of ids (a list) to a FASTA file; returns {path, n_sequences, "
@@ -210,7 +238,8 @@ def install_prelude(con: Any, *, udfs: bool = True, strict: bool = False) -> Pre
     """
     sql_file = parse_prelude()
     report = PreludeReport(version=sql_file.version)
-    missing = [t for t in sql_file.requires if t not in available_tables(con)]
+    tables = available_tables(con)
+    missing = [t for t in sql_file.requires if t not in tables]
     if missing:
         report.skipped = f"missing tables: {', '.join(missing)}"
         if strict:
@@ -218,7 +247,7 @@ def install_prelude(con: Any, *, udfs: bool = True, strict: bool = False) -> Pre
         return report
     installed: list[SqlObject] = []
     unavailable: dict[str, str] = {}
-    for obj in sql_file.objects:
+    for obj in select_objects(sql_file.objects, tables):
         try:
             con.execute(obj.statement)
         except Exception as exc:
@@ -277,7 +306,7 @@ def prelude_text(tables: set[str] | None = None) -> str:
     sql_file = parse_prelude()
     layers = object_layers(sql_file.objects)
     absent = {layer for table, layer in LAYER_TABLES.items() if tables is not None and table not in tables}
-    objects = [o for o in sql_file.objects if not layers.get(o.name, set()) & absent]
+    objects = [o for o in select_objects(sql_file.objects, tables) if not layers.get(o.name, set()) & absent]
     parts = [f"-- Sharur SQL surface v{sql_file.version}, generated by `sharur sql prelude`. Run after:",
              "--   ATTACH 'PATH/sharur.duckdb' AS ds (READ_ONLY); USE ds;",
              f"-- Needs tables: {', '.join(sql_file.requires)}"]
@@ -286,6 +315,8 @@ def prelude_text(tables: set[str] | None = None) -> str:
     parts.append("")
     for obj in objects:
         parts.append(f"-- @object {obj.name} {obj.kind}: {obj.doc}")
+        if obj.if_absent and tables is None:
+            parts.append(f"-- @if-absent: {obj.if_absent}")
         parts.append(obj.statement.rstrip().rstrip(";") + ";")
         parts.append("")
     parts.append(registry_statement(objects, version=sql_file.version) + ";")
@@ -432,6 +463,7 @@ __all__ = [
     "looks_like_sequence",
     "parse_prelude",
     "prelude_enabled",
+    "select_objects",
     "prelude_text",
     "object_layers",
     "register_udfs",

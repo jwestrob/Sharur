@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import duckdb
@@ -362,3 +363,46 @@ def test_layer_macros_wait_for_their_layers_and_core_macros_keep_resembles(db):
             assert all(not row[[d[0] for d in cur.description].index("resembles")] for row in cur.fetchall())
     finally:
         plain.close()
+
+
+def test_resemblance_rows_have_a_stand_in_for_databases_without_the_table(db, tmp_path):
+    from sharur.sql import select_objects
+
+    objects = parse_prelude().objects
+    variants = [o for o in objects if o.name == "protein_resemblance_rows"]
+    assert [o.if_absent for o in variants] == ["protein_resemblance", None]  # stand-in first
+    without = {o.name: o for o in select_objects(objects, {"proteins", "annotations", "bins"})}
+    with_table = {o.name: o for o in select_objects(objects, {"proteins", "annotations", "bins",
+                                                              "protein_resemblance"})}
+    assert without["protein_resemblance_rows"].if_absent == "protein_resemblance"
+    assert with_table["protein_resemblance_rows"].if_absent is None
+    assert prelude_text().count("MACRO protein_resemblance_rows") == 2
+    assert prelude_text({"proteins"}).count("MACRO protein_resemblance_rows") == 1
+
+    plain = duckdb.connect(str(db), read_only=True)
+    try:
+        report = install_prelude(plain)
+        assert report.ok and "protein_resemblance_rows" in report.installed
+        assert plain.execute("SELECT COUNT(*) FROM protein_resemblance_rows()").fetchone()[0] == 0
+        assert plain.execute("SELECT COUNT(*) FROM sharur_sql() WHERE name = 'protein_resemblance_rows'"
+                             ).fetchone()[0] == 1
+    finally:
+        plain.close()
+
+    copy = tmp_path / "with_rows.duckdb"
+    shutil.copyfile(db, copy)
+    con = duckdb.connect(str(copy))
+    try:
+        con.execute("""CREATE TABLE protein_resemblance AS
+                       SELECT 'p2' AS protein_id, 'cdd' AS source, 'cdd-run' AS search_run, 'CDD' AS db_name,
+                              '9.99' AS db_version, 'cd90001' AS accession, 'SynthZ' AS name,
+                              'synthetic' AS description, 1e-20::FLOAT AS evalue, 80.0::FLOAT AS score,
+                              1 AS start_aa, 50 AS end_aa""")
+        assert install_prelude(con).ok
+        assert con.execute("SELECT resembles, n_annotations FROM protein_summary('p2')").fetchall()[0][0] == [
+            "cdd:cd90001"]
+        assert con.execute("SELECT DISTINCT evidence FROM feature_proteins('cdd:cd90001')").fetchall() == [
+            ("resembles",)]
+        assert con.execute("SELECT COUNT(*) FROM feature_proteins('SynthZ')").fetchone()[0] == 0
+    finally:
+        con.close()
