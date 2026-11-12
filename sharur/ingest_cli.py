@@ -21,6 +21,7 @@ minced_crispr.py, 07_build_knowledge_base.py, and 06_esm2_embeddings.py.
 from __future__ import annotations
 
 import contextlib
+import os
 import shlex
 import subprocess
 import sys
@@ -1018,6 +1019,13 @@ def run(
         raise typer.BadParameter("mode must be 'tools' or 'fast'")
 
     planned = [node.command for node in dag.ordered()]
+    if resource_profile.name == "slurm" and "06" in dag.nodes and not os.environ.get("SHARUR_SLURM_GPU_PARTITION"):
+        console.print(
+            "[yellow]Stage 06 (embeddings) requests one GPU, and SHARUR_SLURM_GPU_PARTITION is unset, "
+            "so its job would go to the default partition. Set SHARUR_SLURM_GPU_PARTITION to a GPU "
+            "partition, or pass --skip-embeddings on a cluster without GPUs (QUICKSTART.md, "
+            "'Without a GPU').[/yellow]"
+        )
     if dry_run:
         console.print(f"[cyan]Dry run DAG ({resource_profile.name} profile):[/cyan]")
         for node in dag.ordered():

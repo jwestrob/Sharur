@@ -191,3 +191,19 @@ def test_contig_name_topology_reaches_stage07(tmp_path):
                                 terminal_width=400)
     assert result.exit_code == 2
     assert "Unknown contig-name topology convention" in result.output
+
+
+def test_slurm_plan_with_embeddings_names_the_gpu_partition_or_skip(tmp_path, monkeypatch):
+    base = ["--input-dir", "dummy_dataset", "--data-dir", str(tmp_path / "d"), "--mode", "tools",
+            "--dry-run", "--profile", "slurm", "--slurm-cpus", "24"]
+    monkeypatch.delenv("SHARUR_SLURM_GPU_PARTITION", raising=False)
+    result = CliRunner().invoke(app, base, terminal_width=400)
+    assert result.exit_code == 0, result.output
+    assert "SHARUR_SLURM_GPU_PARTITION is unset" in result.output
+    assert "--skip-embeddings" in result.output
+
+    result = CliRunner().invoke(app, [*base, "--skip-embeddings"], terminal_width=400)
+    assert "SHARUR_SLURM_GPU_PARTITION" not in result.output
+    monkeypatch.setenv("SHARUR_SLURM_GPU_PARTITION", "gpu")
+    result = CliRunner().invoke(app, base, terminal_width=400)
+    assert "SHARUR_SLURM_GPU_PARTITION" not in result.output
