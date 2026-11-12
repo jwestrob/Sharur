@@ -12,6 +12,19 @@ aksha initialize --hmms CCTyper
 
 Sharur finds it through Aksha's install record. `--cctyper-db DIR` or `SHARUR_CCTYPER_DB` points at another copy. Repeat typing also needs `xgboost`.
 
+Aksha 0.2.1, the release on PyPI, does not list CCTyper yet. The database is CRISPRCasTyper's own
+data files, so it can be assembled directly:
+
+```bash
+mkdir -p ~/.sharur/cctyper && cd ~/.sharur/cctyper
+base=https://raw.githubusercontent.com/Russel88/CRISPRCasTyper/v1.9.0/cctyper/data
+for f in cctyper_profiles.hmm.zst CasScoring.csv cutoffs.tab interference.json adaptation.json \
+         type_dict.tab xgb_repeats.json; do curl -fsSLO "$base/$f"; done
+pip install zstandard xgboost
+python -c "import zstandard; zstandard.ZstdDecompressor().copy_stream(open('cctyper_profiles.hmm.zst', 'rb'), open('cctyper_profiles.hmm', 'wb'))"
+sharur cas-type --db data/my_dataset/sharur.duckdb --cctyper-db ~/.sharur/cctyper
+```
+
 ## Running
 
 ```bash
