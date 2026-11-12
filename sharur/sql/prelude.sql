@@ -24,7 +24,10 @@
 --     crispr:I-B                a crispr_cas_systems call with status crispr_cas or cas
 --     a protein ID              (anchor arguments only) that protein itself
 -- Results carry an `evidence` column: observed (per-domain hits), caller (curated system
--- calls and their annotation projections) or predicate. Name a system only from `caller` rows.
+-- calls and their annotation projections), predicate, or resembles (remote-homology rows:
+-- CDD per protein, family-tier HHsearch hits; an observed similarity, never a name). Name a
+-- system only from `caller` rows. Resembles-tier sources (`cdd`) match only when named
+-- (`cdd:cd00009`, `cdd:*`); an unqualified spec matches the other sources.
 --
 -- Sequences stay out of every result here: `genes()` is the protein table without its
 -- sequence column, and FASTA leaves the database only as a file (`write_fasta`, installed by
@@ -101,6 +104,7 @@ CREATE OR REPLACE TEMP MACRO feature_proteins(features) AS TABLE
     ann_hits AS (
         SELECT s.feature, a.protein_id, a.source, a.accession, a.name
         FROM ann a JOIN spec s ON s.ns IS NULL AND (a.accession = s.key OR a.name = s.key)
+        WHERE a.source NOT IN ('cdd')  -- resembles-tier sources match only when named
         UNION ALL
         SELECT s.feature, a.protein_id, a.source, a.accession, a.name
         FROM ann a JOIN spec_src s
@@ -127,7 +131,8 @@ CREATE OR REPLACE TEMP MACRO feature_proteins(features) AS TABLE
         JOIN system_proteins sp ON sp.system_id = y.system_id
     ),
     hits AS (
-        SELECT *, CASE WHEN source IN (SELECT system_source FROM projection) THEN 'caller' ELSE 'observed' END AS evidence
+        SELECT *, CASE WHEN source IN (SELECT system_source FROM projection) THEN 'caller'
+                       WHEN source IN ('cdd') THEN 'resembles' ELSE 'observed' END AS evidence
         FROM ann_hits
         UNION ALL
         SELECT *, 'predicate' FROM pred_hits
@@ -174,7 +179,7 @@ CREATE OR REPLACE TEMP MACRO anchor_proteins(anchor) AS TABLE
     GROUP BY h.protein_id;
 
 
--- @object protein_summary table_macro: per protein (a list or comma-separated IDs): pfam names in domain order, KO accessions, KO names, curated system calls, other observed hits, n_annotations
+-- @object protein_summary table_macro: per protein (a list or comma-separated IDs): pfam names in domain order, KO accessions, KO names, curated system calls, other observed hits, n_annotations (resembles-tier rows excluded), resembles (CDD hits, source:accession)
 CREATE OR REPLACE TEMP MACRO protein_summary(ids) AS TABLE
     WITH want AS MATERIALIZED (SELECT DISTINCT unnest(id_list(ids)) AS protein_id),
     projection AS MATERIALIZED (SELECT DISTINCT system_source FROM system_proteins),
@@ -187,9 +192,11 @@ CREATE OR REPLACE TEMP MACRO protein_summary(ids) AS TABLE
                list(DISTINCT accession ORDER BY accession) FILTER (WHERE source IN ('kofam', 'kegg')) AS ko,
                min(CASE WHEN source = 'kegg' THEN name END) AS ko_name,
                list(DISTINCT source || ':' || accession ORDER BY source || ':' || accession)
-                   FILTER (WHERE source NOT IN ('pfam', 'kofam', 'kegg')
+                   FILTER (WHERE source NOT IN ('pfam', 'kofam', 'kegg', 'cdd')
                              AND source NOT IN (SELECT system_source FROM projection)) AS other,
-               count(*) AS n_annotations
+               count(*) FILTER (WHERE source NOT IN ('cdd')) AS n_annotations,
+               list(DISTINCT source || ':' || accession ORDER BY source || ':' || accession)
+                   FILTER (WHERE source IN ('cdd')) AS resembles
         FROM ann GROUP BY protein_id
     ),
     systems AS (
@@ -211,7 +218,8 @@ CREATE OR REPLACE TEMP MACRO protein_summary(ids) AS TABLE
            a.ko_name,
            coalesce(s.systems, []::VARCHAR[]) AS systems,
            coalesce(a.other, []::VARCHAR[]) AS other,
-           coalesce(a.n_annotations, 0) AS n_annotations
+           coalesce(a.n_annotations, 0) AS n_annotations,
+           coalesce(a.resembles, []::VARCHAR[]) AS resembles
     FROM want w
     LEFT JOIN a_sum a USING (protein_id)
     LEFT JOIN s_sum s USING (protein_id);
@@ -251,7 +259,7 @@ CREATE OR REPLACE TEMP MACRO neighbors(anchor, k := 5) AS TABLE
            nb."offset", nb.protein_id, nb.gene_index, nb.start, nb.end_coord, nb.strand,
            strand_sign(nb.strand) = nb.a_sign AS same_strand,
            nb.sequence_length AS length_aa,
-           s.pfam, s.ko, s.ko_name, s.systems, s.other, s.n_annotations
+           s.pfam, s.ko, s.ko_name, s.systems, s.other, s.n_annotations, s.resembles
     FROM nb LEFT JOIN summ s USING (protein_id)
     ORDER BY nb.bin_id, nb.contig_id, nb.anchor_id, nb."offset";
 
@@ -365,7 +373,7 @@ CREATE OR REPLACE TEMP MACRO slot(anchor, side := 'upstream', partner := NULL, m
            strand_sign(o.strand) = s.a_sign AS occupant_same_strand,
            o.sequence_length AS occupant_length_aa,
            s.at_contig_edge,
-           sm.pfam, sm.ko, sm.ko_name, sm.systems, sm.other, sm.n_annotations,
+           sm.pfam, sm.ko, sm.ko_name, sm.systems, sm.other, sm.n_annotations, sm.resembles,
            g.completeness, g.contamination, g.taxonomy,
            g.domain, g.phylum, g.class, g."order", g.family, g.genus, g.species
     FROM s
@@ -452,3 +460,77 @@ CREATE OR REPLACE TEMP MACRO families_of(ids) AS TABLE
     LEFT JOIN family_stats s ON s.clustering_run = f.clustering_run AND s.family_id = f.family_id
     WHERE f.protein_id IN (SELECT unnest(id_list(ids)))
     ORDER BY f.protein_id, r.level, f.clustering_run;
+
+
+-- @object resembles_of table_macro: per protein (a list or comma-separated IDs), what it resembles: hits of its families in every clustering run that meet the rule (Pfam or PDB, probability >= min_probability over >= min_cols aligned columns; tier 'family') and its own CDD hits (tier 'protein'), with db_name, db_version, msa_kind, probability, evalue, aligned columns, query range, unknown_function, hit_class (characterized or unknown_function) and evidence 'resembles'; needs the remote-homology layer (docs/guides/remote-homology.md)
+CREATE OR REPLACE TEMP MACRO resembles_of(ids, min_probability := 90, min_cols := 30) AS TABLE
+    WITH want AS MATERIALIZED (SELECT DISTINCT unnest(id_list(ids)) AS protein_id),
+    fam AS (
+        SELECT f.protein_id, 'family' AS tier, h.clustering_run, h.family_id, h.source, h.db_name, h.db_version,
+               h.msa_kind, h.hit_accession, h.hit_name, h.hit_description, h.probability, h.evalue,
+               h.aligned_cols, h.q_start, h.q_end, h.unknown_function
+        FROM protein_families f
+        JOIN family_annotations h ON h.family_id = f.family_id AND h.clustering_run = f.clustering_run
+        WHERE f.protein_id IN (SELECT protein_id FROM want)
+          AND h.source IN ('hhsearch_pfam', 'hhsearch_pdb')
+          AND h.probability >= min_probability AND h.aligned_cols >= min_cols
+    ),
+    cdd AS (
+        SELECT a.protein_id, 'protein' AS tier, NULL::VARCHAR AS clustering_run, NULL::VARCHAR AS family_id,
+               a.source, v.model_set AS db_name, v.model_version AS db_version, NULL::VARCHAR AS msa_kind,
+               a.accession AS hit_accession, a.name AS hit_name, CAST(a.description AS VARCHAR) AS hit_description,
+               NULL::DOUBLE AS probability, CAST(a.evalue AS DOUBLE) AS evalue, NULL::INTEGER AS aligned_cols,
+               a.start_aa AS q_start, a.end_aa AS q_end,
+               regexp_matches(coalesce(a.name, '') || ' ' || coalesce(CAST(a.description AS VARCHAR), ''),
+                              '(?i)DUF\d|UPF\d|unknown function|uncharacteri|hypothetical|function unknown|unknown protein')
+                   AS unknown_function
+        FROM annotations a LEFT JOIN annotation_source_versions v ON v.source = a.source
+        WHERE a.protein_id IN (SELECT protein_id FROM want) AND a.source IN ('cdd')
+    )
+    SELECT x.*, CASE WHEN x.unknown_function THEN 'unknown_function' ELSE 'characterized' END AS hit_class,
+           'resembles' AS evidence
+    FROM (SELECT * FROM fam UNION ALL SELECT * FROM cdd) x
+    ORDER BY x.protein_id, x.tier, x.probability DESC NULLS LAST, x.evalue;
+
+
+-- @object resembles_proteins table_macro: proteins that resemble any of the targets (Pfam or PDB accessions or names reached through their family's hits at the rule, or CDD accessions or names of their own hits) in the feature_proteins shape, evidence 'resembles'; needs the remote-homology layer
+CREATE OR REPLACE TEMP MACRO resembles_proteins(targets, min_probability := 90, min_cols := 30) AS TABLE
+    WITH spec AS MATERIALIZED (SELECT DISTINCT unnest(id_list(targets)) AS key),
+    fam AS (
+        SELECT s.key AS feature, f.protein_id, h.source, h.hit_accession AS accession, h.hit_name AS name
+        FROM spec s
+        JOIN family_annotations h ON h.hit_accession = s.key OR h.hit_name = s.key
+        JOIN protein_families f ON f.family_id = h.family_id AND f.clustering_run = h.clustering_run
+        WHERE h.source IN ('hhsearch_pfam', 'hhsearch_pdb')
+          AND h.probability >= min_probability AND h.aligned_cols >= min_cols
+    ),
+    cdd AS (
+        SELECT s.key AS feature, a.protein_id, a.source, a.accession, a.name
+        FROM spec s JOIN annotations a ON a.source IN ('cdd') AND (a.accession = s.key OR a.name = s.key)
+    )
+    SELECT DISTINCT h.feature, h.protein_id, p.bin_id, p.contig_id, p.gene_index, p.strand,
+           h.source, h.accession, h.name, 'resembles' AS evidence
+    FROM (SELECT * FROM fam UNION ALL SELECT * FROM cdd) h JOIN proteins p USING (protein_id);
+
+
+-- @object resembles_presence table_macro: every genome x target in the feature_presence shape (present, n_proteins, sources, evidence, completeness, contamination, GTDB ranks) from resembles_proteins; needs the remote-homology layer
+CREATE OR REPLACE TEMP MACRO resembles_presence(targets, min_probability := 90, min_cols := 30,
+                                                min_completeness := 0, max_contamination := 100) AS TABLE
+    WITH hit AS MATERIALIZED (
+        SELECT feature, bin_id, count(DISTINCT protein_id) AS n_proteins,
+               list(DISTINCT source ORDER BY source) AS sources,
+               list(DISTINCT evidence ORDER BY evidence) AS evidence
+        FROM resembles_proteins(targets, min_probability := min_probability, min_cols := min_cols)
+        GROUP BY feature, bin_id
+    ),
+    g AS MATERIALIZED (
+        SELECT * FROM genomes()
+        WHERE coalesce(completeness, 0) >= min_completeness
+          AND coalesce(contamination, 0) <= max_contamination
+    ),
+    f AS (SELECT DISTINCT unnest(id_list(targets)) AS feature)
+    SELECT g.bin_id, f.feature, h.bin_id IS NOT NULL AS present, coalesce(h.n_proteins, 0) AS n_proteins,
+           h.sources, h.evidence, g.completeness, g.contamination, g.n_contigs,
+           g.domain, g.phylum, g.class, g."order", g.family, g.genus, g.species
+    FROM g CROSS JOIN f
+    LEFT JOIN hit h ON h.bin_id = g.bin_id AND h.feature = f.feature;
