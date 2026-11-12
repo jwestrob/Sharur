@@ -184,6 +184,7 @@ If all three find nothing AND genome is high-quality (<50 contigs), absence is p
 |----------|---------------------|
 | Sequence annotation | "annotated as", "contains domain" |
 | Structural homology | "structural similarity suggests" |
+| Remote homology (CDD, HHsearch per family; `evidence = 'resembles'`) | "resembles", "distantly similar to" (with probability or E-value and aligned columns) |
 | Genomic context | "co-located with", "may indicate" |
 | Literature | "similar to", "consistent with" |
 | Experimental | "demonstrates", "confirms" (OK!) |

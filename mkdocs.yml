@@ -69,6 +69,7 @@ nav:
       - Domain-architecture search: guides/architecture-search.md
       - SQL surface: guides/sql-surface.md
       - Protein families: guides/protein-families.md
+      - Remote homology: guides/remote-homology.md
       - Abundance across samples: guides/abundance.md
       - Expression from metatranscriptomes: guides/expression.md
       - CRISPR-Cas subtypes: guides/crispr-cas.md

@@ -35,6 +35,7 @@ Detailed guides live in `docs/` and `.claude/skills/`. **Read the relevant doc b
 | Writing to a canonical database (stage, diff, reverify, publish) | `docs/guides/staged-writes.md` |
 | Inspecting cases, comparing ORF context, or adding assembly evidence | `docs/cases_and_evidence.md` |
 | Using or building annotation-independent protein families (MMseqs2) | `docs/guides/protein-families.md` |
+| Reading or building remote-homology rows (CDD per protein, HHsearch per family) | `docs/guides/remote-homology.md` |
 
 **Other key docs:**
 
@@ -220,6 +221,12 @@ report/draft files remain independently writable.
   validated system-caller rows. **CRITICAL: NEVER report raw system-profile HMM hits as
   systems.** Only purpose-built caller output such as the current `defense_systems`
   table (materialized by `sharur/colocation.py`) supports a named system claim.
+- **Remote homology (`evidence = 'resembles'`):** CDD rows (`annotations.source = 'cdd'`)
+  and family-tier HHsearch hits (`family_annotations`, `family_resemblance`) are observed
+  similarity. Cite them as "resembles X (source, database and version, probability or E-value,
+  aligned columns)", keep `hit_class = 'unknown_function'` hits separate from characterized
+  ones, and tag any function drawn from them UNVERIFIED. They never name a system, pathway or
+  function, and they leave `unannotated` unchanged (`docs/guides/remote-homology.md`).
 - **CAZy:** `carbohydrate_active` → check `cazy:GH5`, `cazy:GT2`, etc. GH families reveal substrate specificity.
 
 ---

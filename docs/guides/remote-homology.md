@@ -1,0 +1,224 @@
+# Remote homology
+
+Pfam at gathering thresholds, KOfam and the system callers leave many proteins without an
+annotation. Many of them still resemble a characterized family when a profile of the protein's
+family is compared with profiles of known families. Sharur records that similarity in two
+optional layers:
+
+| Layer | Unit | Search | Stored in |
+|---|---|---|---|
+| CDD per protein | every unique protein sequence | RPS-BLAST against CDD, hits at E ≤ 0.01 | `annotations` with `source = 'cdd'` |
+| Family tier | one profile per protein family | MAFFT alignment of up to 250 unique members (representative first), optional HHblits enrichment against UniRef30, HHsearch against Pfam and PDB profile databases | `family_annotations` |
+
+Both layers are **observed similarity**. A row says that a protein, or the family it belongs
+to, resembles a profile; it names no system, pathway or function. The SQL surface labels these
+rows `evidence = 'resembles'`, they stay out of the curated system tables, and predicate
+generation leaves CDD rows out, so `unannotated` keeps meaning "no hit in the curated
+sources".
+
+## The "resembles" rule
+
+Every family-tier hit with probability ≥ 50% is stored, so the threshold can change later. The
+default rule, applied by the `family_resemblance` view and the SQL macros below:
+
+- **resembles a characterized family**: a Pfam or PDB hit with probability ≥ 90% over ≥ 30
+  aligned columns whose name and description carry no unknown-function marker;
+- **resembles a family of unknown function**: the same, for hits to DUF or UPF families,
+  "uncharacterized", "hypothetical" or "unknown function" proteins and structures
+  (`unknown_function = true`, `hit_class = 'unknown_function'`).
+
+UniRef30 hits (`source = 'hhblits_uniref'`, the first 20 at probability ≥ 50%) are kept as
+context: they show whether homologs exist outside the dataset, and their names are automatic.
+
+## Configuration
+
+Database paths are site-specific and live in a JSON configuration, never in code. Every
+database carries a name and a version, and every stored row carries both, so a refresh with
+newer databases is a rerun:
+
+```json
+{
+  "hhsuite_bin": "/path/to/hhsuite/bin",
+  "mafft": "mafft",
+  "rpsblast": "rpsblast",
+  "databases": {
+    "pfam":   {"prefix": "/path/to/pfam_hh/pfam", "name": "Pfam", "version": "39.0", "kind": "pfam"},
+    "pdb":    {"prefix": "/path/to/pdb100/pdb100", "name": "PDB100", "version": "YYYY-MM-DD", "kind": "pdb",
+               "titles": "/path/to/pdb_titles.tsv"},
+    "uniref": {"prefix": "/path/to/UniRef30_YYYY_MM", "name": "UniRef30", "version": "YYYY_MM", "kind": "uniref"},
+    "cdd":    {"prefix": "/path/to/cdd/Cdd", "name": "CDD", "version": "3.xx"}
+  },
+  "family_targets": ["pfam", "pdb"],
+  "msa_kinds": ["family_only"],
+  "search": {"hhblits_iterations": 2, "hhblits_evalue": 0.001, "max_hits": 100,
+             "min_probability": 50, "uniref_max_hits": 20, "cdd_evalue": 0.01}
+}
+```
+
+`config/remote_homology.example.json` holds the same template. `sharur remote-homology check
+--config CONFIG` reports missing tools or databases and the tool versions.
+
+- **`msa_kinds`.** `family_only` searches the family alignment itself (the cheap mode).
+  `enriched` first runs HHblits against UniRef30 (`-n 2 -e 0.001`) and searches the enriched
+  alignment; it finds more distant relatives and costs several times more. List both to keep
+  both sets of hits (`family_annotations.msa_kind`).
+- **PDB titles.** HH-suite PDB databases often name templates by chain only (`1abc_A`). A
+  two-column `pdb code<TAB>title` file (`titles`) supplies entry titles, which the
+  unknown-function flag reads. Build it once from a local PDB mirror (the `_struct.title` of
+  each mmCIF) or from a database's header file.
+- **Pfam as an HH-suite database.** HH-suite 3.1 `hhsearch` cannot read Pfam's HMMER3 models.
+  Build the database from the seed alignments of the same Pfam release: one alignment per
+  family (`.` replaced by `-`, upper case), `hhmake -i fam.fa -o fam.hhm -name "<ACC> <ID>; <DE>"
+  -M 50` (most seed alignments mark no insert columns, so `-M a2m` fails), then `ffindex_build
+  -s -f list PREFIX_hhm.ffdata PREFIX_hhm.ffindex`. HH-suite 3.2 and later also read
+  `PREFIX_a3m` and `PREFIX_cs219` (`cstranslate -I a3m` with HH-suite's `cs219.lib` and
+  `context_data.lib`); hit names then come from the first record of each A3M, so give it the
+  `"<ACC> <ID>; <DE>"` name. Self-test the result: a seed sequence of a family should rank its
+  own family first.
+
+## Family tier
+
+The family tier needs a protein-family clustering ([Protein families](protein-families.md)):
+a Sharur build, or an external clustering registered with `sharur families import`. Several
+clusterings can sit side by side; every family-tier row carries its `clustering_run`.
+
+**Scope.** By default, families found in three or more genomes whose members carry no Pfam
+hit (`family_stats.n_genomes >= 3 AND family_stats.pfam_dark`). `--min-genomes` and
+`--include-pfam-annotated` change the rule; `--family-id` (repeatable) selects named families.
+
+```bash
+sharur remote-homology export --db data/DS/sharur.duckdb \
+  --families data/DS/stage09_families/protein_families.duckdb --run RUN --out-dir work/
+sharur remote-homology search families --work work/ --config rh.json          # this host
+sharur remote-homology load-families --work work/ --config rh.json --staging work/remote_homology.duckdb
+```
+
+`export` reads the database and the family tables only. Each selected family gets one FASTA:
+the representative's sequence first, then up to 249 further unique member sequences in MD5
+order of their sequence (a fixed, content-defined sample). Identical member sequences are written
+once.
+
+Per family the runner writes `out/<bucket>/<family>/`: the `.hhr` files (gzipped once
+parsed), `hits.tsv` and `done.json` with each step's time. The query length of every result is
+checked against the representative's length. A family with `done.json` for the current
+configuration is skipped, so a rerun continues where a job stopped; a configuration change
+(new database version, other MSA kinds) reruns what it affects. `load-families` refuses a
+partial run unless `--allow-partial` (pending and failed families then get
+`family_annotation_status` rows).
+
+**On a Slurm cluster.** `runner.py` needs only Python 3, HH-suite, MAFFT and BLAST+, so the
+searches run on any node that sees the work directory and the databases:
+
+```bash
+scripts/submit_remote_homology_shards.sh families -n 40 -m 10 -w work/ -c rh.json \
+  -s "-A ACCOUNT -p PARTITION --qos QOS -c 24 --exclude NODES"
+```
+
+Each array task searches every 40th family (largest families first) with all of its CPUs:
+`$SLURM_CPUS_ON_NODE // 4` workers of four threads. Resubmitting the same command continues an
+interrupted run. Measure the cost first with a pilot: `-- --limit 100` runs the first 100
+families of each shard (or `--only FILE` a list of family keys), and `done.json` records each
+step's time. HHblits against UniRef30 and HHsearch against a full PDB profile database take most
+of the time; Pfam searches are fast.
+
+## CDD per protein
+
+```bash
+sharur remote-homology export-cdd --db data/DS/sharur.duckdb --out-dir work/
+sharur remote-homology search cdd --work work/ --config rh.json        # or: submit_remote_homology_shards.sh cdd ...
+sharur remote-homology load-cdd --work work/ --config rh.json --db data/DS/sharur.duckdb \
+  --staging work/remote_homology.duckdb
+```
+
+Each unique sequence is searched once (named by its MD5) and its hits are expanded to every
+protein with that sequence. CDD bundles models from several collections (NCBI-curated `cd`
+models, Pfam, SMART, COG, PRK, TIGRFAMs and others), so one domain often hits several models;
+every hit at E ≤ 0.01 is stored, each with its query range (`start_aa`, `end_aa`).
+
+## During ingest
+
+`sharur-ingest` runs the layers as optional stages:
+
+```bash
+sharur-ingest ... --with-families --with-cdd --with-family-homology --remote-homology-config rh.json
+```
+
+Stage 10 (`stage10_cdd/remote_homology_cdd.duckdb`) needs only Stage 07; Stage 11
+(`stage11_family_homology/remote_homology_families.duckdb`) searches Stage 09's families
+(`--family-homology-run RUN` picks a run other than the default family run). The dataset
+database stays unchanged until activation.
+
+## Activating
+
+```bash
+sharur remote-homology activate --db data/DS/sharur.duckdb \
+  --staging work/remote_homology.duckdb \
+  --families-staging data/DS/stage09_families/protein_families.duckdb --publish
+```
+
+This follows the staged-write protocol ([Staged writes](staged-writes.md)), as `sharur families
+activate` does: the database is cloned, the rows are loaded into the clone, the changed tables
+are diffed, and `--publish` swaps the clone in, keeps the previous file as
+`sharur.duckdb.pre-remote-homology-*` and reseals the dataset. Without `--publish` the staged
+copy waits for `sharur stage publish` or `sharur stage discard`.
+
+- `--staging` is repeatable (for example Stage 10 and Stage 11 files).
+- `--families-staging` loads the clustering runs that were searched before the family rows; a
+  database that already holds those runs needs no family file. Every searched run must exist with
+  the clustering input digest the search recorded, and every searched family must exist in it.
+- Family rows of the same clustering run and source are replaced; other runs stay.
+- CDD rows replace every `annotations` row with `source = 'cdd'` after a check that each
+  protein still has the sequence that was searched (MD5). `annotation_source_versions` records
+  the database name and version, the E-value cutoff and the counts.
+
+`sharur remote-homology status --db ...` and `sharur preflight` (the `remote_homology`
+capability) report the searches, how many families meet the rule, and CDD coverage.
+
+## Tables
+
+| Table / view | One row per | Columns |
+|---|---|---|
+| `family_annotations` | family, source, MSA kind and hit | `family_id`, `clustering_run`, `search_run`, `source` (`hhsearch_pfam`, `hhsearch_pdb`, `hhblits_uniref`), `db_name`, `db_version`, `msa_kind` (`enriched`, `family_only`), `hit_rank`, `hit_accession`, `hit_name`, `hit_description`, `probability` (%), `evalue`, `score`, `aligned_cols`, `identities`, `q_start`, `q_end`, `q_length` (representative length), `t_start`, `t_end`, `t_length`, `unknown_function`, `hit_label` |
+| `family_annotation_status` | searched family | `status` (`ok`, `error`, `pending`), member, genome and sequence counts, representative, `n_hits`, `verified` (query length matched), `seconds`, `steps` |
+| `family_annotation_runs` | search | `search_run`, `clustering_run`, selection rule, `msa_kinds`, `targets`, `databases` (names, versions, paths), parameters, tool versions, family counts, export and configuration digests |
+| `family_resemblance` (view) | hit meeting the rule | the hit columns plus `hit_class` (`characterized`, `unknown_function`) and `evidence` = `resembles` |
+| `annotations` (`source = 'cdd'`) | CDD hit | `accession` (model, e.g. `cd00009`), `name`, `description`, `evalue`, `score` (bits), `start_aa`, `end_aa` |
+
+Query coordinates (`q_start`, `q_end`) refer to the family representative's sequence, which
+leads every family alignment.
+
+## Querying
+
+Each SQL-surface macro below needs the remote-homology tables ([SQL surface](sql-surface.md)):
+
+```sql
+-- what one protein resembles: hits of its families in every clustering run, and its own CDD hits
+FROM resembles_of('PROTEIN_ID');                               -- min_probability := 90, min_cols := 30
+-- proteins resembling a target, in the feature_proteins shape (evidence = 'resembles')
+FROM resembles_proteins('PF00004');
+-- genome x target grid in the feature_presence shape
+FROM resembles_presence('PF00004', min_completeness := 90);
+-- CDD rows through the general feature specs: name the source
+FROM feature_proteins('cdd:cd00009');
+```
+
+An unqualified spec (`PF00004`, `AAA`) matches the curated sources only; CDD rows appear when
+the spec names `cdd:`. `protein_summary`, `neighbors` and `slot` list CDD hits in their own
+`resembles` column, outside `other` and `n_annotations`.
+
+Families of unknown function stay distinguishable:
+
+```sql
+SELECT clustering_run, hit_class, COUNT(DISTINCT family_id) AS families
+FROM family_resemblance GROUP BY ALL ORDER BY ALL;
+```
+
+## Reading the rows
+
+A resemblance is evidence of homology to a family, at the strength the probability and the
+aligned length give. It supports wording such as "the family resembles Pfam family X (HHsearch
+probability P% over N aligned columns)" and a hypothesis tagged UNVERIFIED. A named function,
+system or pathway still needs a curated caller's call; domains compatible with a name remain a
+hypothesis. A family profile summarizes its members: in a permissive clustering a few members
+can carry an extra domain, so a hit covers the region given by `q_start`–`q_end` of the
+representative, and a family whose members differ in architecture can mix them.

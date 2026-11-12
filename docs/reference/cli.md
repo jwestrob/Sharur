@@ -65,6 +65,7 @@ $ sharur [OPTIONS] COMMAND [ARGS]...
 * `sql`: Sharur's SQL surface: per-connection...
 * `stats`: Pre-register predictions and check...
 * `families`: Annotation-independent protein families...
+* `remote-homology`: Remote-homology annotation: CDD per...
 
 ### `sharur overview`
 
@@ -1470,6 +1471,192 @@ $ sharur families status [OPTIONS]
 * `-d, --db PATH`: Dataset sharur.duckdb. Opened read-only.  [required]
 * `--help`: Show this message and exit.
 
+### `sharur remote-homology`
+
+Remote-homology annotation: CDD per protein and HHsearch per protein family ("resembles" rows).
+
+**Usage**:
+
+```console
+$ sharur remote-homology [OPTIONS] COMMAND [ARGS]...
+```
+
+**Options**:
+
+* `--help`: Show this message and exit.
+
+**Commands**:
+
+* `check`: Check that the configured tools and...
+* `export`: Select families (default: Pfam-dark, >= 3...
+* `export-cdd`: Write every unique protein sequence (named...
+* `search`: Run the searches on this host (the Slurm...
+* `load-families`: Parse the family-tier results into...
+* `load-cdd`: Expand the CDD hits of unique sequences to...
+* `activate`: Stage DB, load the remote-homology rows...
+* `status`: Searches loaded, families resembling...
+
+#### `sharur remote-homology check`
+
+Check that the configured tools and databases are present; print tool versions.
+
+**Usage**:
+
+```console
+$ sharur remote-homology check [OPTIONS]
+```
+
+**Options**:
+
+* `-c, --config PATH`: Runner configuration (JSON).  [required]
+* `--help`: Show this message and exit.
+
+#### `sharur remote-homology export`
+
+Select families (default: Pfam-dark, >= 3 genomes) and write one FASTA per family.
+
+**Usage**:
+
+```console
+$ sharur remote-homology export [OPTIONS]
+```
+
+**Options**:
+
+* `-d, --db PATH`: Dataset sharur.duckdb. Opened read-only.  [required]
+* `-o, --out-dir PATH`: Work directory for the family tier.  [required]
+* `-f, --families PATH`: Staging file with the clustering run (default: the dataset).
+* `-r, --run TEXT`: Clustering run (default: the default family run).
+* `--min-genomes INTEGER`: Families found in at least this many genomes.  [default: 3]
+* `--include-pfam-annotated`: Also select families whose members carry Pfam hits.
+* `--max-sequences INTEGER`: Unique sequences per family alignment.  [default: 250]
+* `--family-id TEXT`: Export these families only (repeatable).
+* `--duckdb-threads INTEGER`: [default: 4]
+* `--memory-limit TEXT`: [default: 8GB]
+* `--help`: Show this message and exit.
+
+#### `sharur remote-homology export-cdd`
+
+Write every unique protein sequence (named by MD5) in chunks for RPS-BLAST.
+
+**Usage**:
+
+```console
+$ sharur remote-homology export-cdd [OPTIONS]
+```
+
+**Options**:
+
+* `-d, --db PATH`: Dataset sharur.duckdb. Opened read-only.  [required]
+* `-o, --out-dir PATH`: Work directory (cdd/ is created inside).  [required]
+* `--chunk-size INTEGER`: Unique sequences per RPS-BLAST chunk.  [default: 2000]
+* `--duckdb-threads INTEGER`: [default: 4]
+* `--memory-limit TEXT`: [default: 8GB]
+* `--help`: Show this message and exit.
+
+#### `sharur remote-homology search`
+
+Run the searches on this host (the Slurm wrapper runs the same code per shard).
+
+**Usage**:
+
+```console
+$ sharur remote-homology search [OPTIONS] STAGE
+```
+
+**Arguments**:
+
+* `STAGE`: families or cdd  [required]
+
+**Options**:
+
+* `-w, --work PATH`: [required]
+* `-c, --config PATH`: [required]
+* `-t, --threads INTEGER`: Default: $SLURM_CPUS_ON_NODE or all CPUs.
+* `--threads-per-worker INTEGER`: [default: 4]
+* `--shard INTEGER`: [default: 0]
+* `--n-shards INTEGER`: [default: 1]
+* `--limit INTEGER`
+* `--help`: Show this message and exit.
+
+#### `sharur remote-homology load-families`
+
+Parse the family-tier results into family_annotations (staging file).
+
+**Usage**:
+
+```console
+$ sharur remote-homology load-families [OPTIONS]
+```
+
+**Options**:
+
+* `-w, --work PATH`: [required]
+* `-c, --config PATH`: [required]
+* `-s, --staging PATH`: Staging DuckDB (created when absent).  [required]
+* `--allow-partial`: Load although some families are pending or failed.
+* `--help`: Show this message and exit.
+
+#### `sharur remote-homology load-cdd`
+
+Expand the CDD hits of unique sequences to proteins (staging file).
+
+**Usage**:
+
+```console
+$ sharur remote-homology load-cdd [OPTIONS]
+```
+
+**Options**:
+
+* `-w, --work PATH`: [required]
+* `-c, --config PATH`: [required]
+* `-d, --db PATH`: Dataset sharur.duckdb. Opened read-only (MD5 -> protein ids).  [required]
+* `-s, --staging PATH`: Staging DuckDB (created when absent).  [required]
+* `--max-evalue FLOAT`: [default: 0.01]
+* `--allow-partial`
+* `--help`: Show this message and exit.
+
+#### `sharur remote-homology activate`
+
+Stage DB, load the remote-homology rows into the clone, diff, and (with --publish) swap it in.
+
+Follows the staged-write protocol (docs/guides/staged-writes.md), as `sharur families
+activate` does: the canonical file changes only at publish, a backup is kept and the
+dataset is resealed.
+
+**Usage**:
+
+```console
+$ sharur remote-homology activate [OPTIONS]
+```
+
+**Options**:
+
+* `-d, --db PATH`: Dataset sharur.duckdb.  [required]
+* `-s, --staging PATH`: Remote-homology staging file(s) (repeatable).  [required]
+* `--families-staging PATH`: Protein-family staging file whose searched runs are loaded first.
+* `-l, --label TEXT`: [default: remote-homology]
+* `--work-dir PATH`: Directory for the staged clone (default: beside DB).
+* `--publish`: Publish the staged copy when the load succeeds.
+* `--verify-digest / --no-verify-digest`: [default: verify-digest]
+* `--help`: Show this message and exit.
+
+#### `sharur remote-homology status`
+
+Searches loaded, families resembling characterized families, CDD coverage.
+
+**Usage**:
+
+```console
+$ sharur remote-homology status [OPTIONS]
+```
+
+**Options**:
+
+* `-d, --db PATH`: Dataset sharur.duckdb. Opened read-only.  [required]
+* `--help`: Show this message and exit.
+
 
 ## `sharur-ingest`
 
@@ -1507,6 +1694,10 @@ $ sharur-ingest [OPTIONS]
 * `--reads PATH`: TSV of sample_id, read1[, read2 | interleaved]: adds optional Stage 08 per-sample coverage with CoverM (abundance.duckdb sidecar)
 * `--with-families / --skip-families`: Run optional Stage 09: MMseqs2 protein families and subfamilies into stage09_families/protein_families.duckdb (activate with `sharur families activate`)  [default: skip-families]
 * `--family-min-seq-id FLOAT`: Stage 09 family identity threshold  [default: 0.3]
+* `--with-cdd / --skip-cdd`: Run optional Stage 10: RPS-BLAST of every unique protein against CDD into stage10_cdd/remote_homology_cdd.duckdb (needs --remote-homology-config)  [default: skip-cdd]
+* `--with-family-homology / --skip-family-homology`: Run optional Stage 11: HHsearch of Pfam-dark families (>= 3 genomes) against Pfam and PDB into stage11_family_homology/ (needs --with-families and --remote-homology-config)  [default: skip-family-homology]
+* `--remote-homology-config PATH`: Stages 10/11 configuration: tools and databases (JSON)
+* `--family-homology-run TEXT`: Stage 11 clustering run (default: the default family run)
 * `--subfamily-min-seq-id FLOAT`: Stage 09 subfamily identity threshold  [default: 0.5]
 * `--embedding-model TEXT`: Hugging Face protein encoder for Stage 06 (default: facebook/esm2_t6_8M_UR50D)
 * `--profile TEXT`: Execution profile: auto, local (CPU), mps, or slurm  [default: auto]

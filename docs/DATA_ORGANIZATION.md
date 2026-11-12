@@ -28,6 +28,8 @@ data/
 │   ├── stage05a_gecco/                # Optional BGC stage outputs
 │   ├── stage06_embeddings/            # Legacy embedding location (if present)
 │   ├── stage09_families/              # Optional MMseqs2 protein families (staging DuckDB)
+│   ├── stage10_cdd/                   # Optional CDD per protein (RPS-BLAST; staging DuckDB)
+│   ├── stage11_family_homology/       # Optional HHsearch per family (staging DuckDB, .hhr files)
 │   │
 │   ├── annotations/                   # Consolidated/derived annotation exports
 │   │
