@@ -67,7 +67,7 @@ MIN_GENOMES = 3
 
 DDL = {
     RUNS: f"""CREATE TABLE IF NOT EXISTS {RUNS} (
-    search_run VARCHAR PRIMARY KEY,
+    search_run VARCHAR NOT NULL,
     clustering_run VARCHAR NOT NULL,
     created_at TIMESTAMP NOT NULL,
     selection JSON NOT NULL,
@@ -101,8 +101,7 @@ DDL = {
     verified BOOLEAN,
     seconds DOUBLE,
     steps JSON,
-    error VARCHAR,
-    PRIMARY KEY (clustering_run, family_id)
+    error VARCHAR
 )""",
     HITS: f"""CREATE TABLE IF NOT EXISTS {HITS} (
     family_id VARCHAR NOT NULL,
@@ -128,8 +127,7 @@ DDL = {
     t_end INTEGER,
     t_length INTEGER,
     unknown_function BOOLEAN NOT NULL,
-    hit_label VARCHAR,
-    PRIMARY KEY (clustering_run, family_id, source, msa_kind, hit_rank)
+    hit_label VARCHAR
 )""",
     CDD_HITS: f"""CREATE TABLE IF NOT EXISTS {CDD_HITS} (
     hit_id BIGINT NOT NULL,
@@ -178,6 +176,32 @@ DROP INDEX IF EXISTS idx_family_annotations_family;
 DROP INDEX IF EXISTS idx_family_annotations_accession;
 """
 STAGING_TABLES = (RUNS, STATUS, HITS, CDD_HITS, CDD_MODELS, CDD_RUNS)
+# The family-tier tables carry no primary key: DuckDB 1.2 aborts at COMMIT when one transaction deletes
+# and re-inserts the same key values of a large keyed table, which is what a reload or refresh does.
+# Uniqueness is checked by query instead (_check_unique), inside the same transaction.
+UNIQUE_KEYS = {RUNS: ("search_run",), STATUS: ("clustering_run", "family_id"),
+               HITS: ("clustering_run", "family_id", "source", "msa_kind", "hit_rank")}
+
+
+def _drop_keys(con) -> None:
+    """Rewrite family-tier tables written with a primary key (older files) into the unkeyed layout."""
+    for table in UNIQUE_KEYS:
+        keyed = con.execute("SELECT COUNT(*) FROM duckdb_constraints() WHERE database_name = current_database() "
+                            "AND table_name = ? AND constraint_type = 'PRIMARY KEY'", [table]).fetchone()[0]
+        if keyed:
+            con.execute(f"ALTER TABLE {table} RENAME TO {table}__keyed")
+            con.execute(DDL[table])
+            con.execute(f"INSERT INTO {table} BY NAME SELECT * FROM {table}__keyed")
+            con.execute(f"DROP TABLE {table}__keyed")
+
+
+def _check_unique(con) -> None:
+    for table, key in UNIQUE_KEYS.items():
+        cols = ", ".join(key)
+        dup = con.execute(f"SELECT COUNT(*) FROM (SELECT {cols} FROM {table} GROUP BY ALL HAVING COUNT(*) > 1)"
+                          ).fetchone()[0]
+        if dup:
+            raise RemoteHomologyError(f"{table}: {dup:,} duplicate keys ({cols})")
 
 
 def resemblance_view_sql(min_probability: float = RULE_MIN_PROBABILITY,
@@ -568,6 +592,8 @@ def load_families(
     staging.parent.mkdir(parents=True, exist_ok=True)
     con = connect(staging, threads=threads, memory_limit=memory_limit)
     try:
+        con.execute(INDEXES)  # legacy secondary indexes
+        _drop_keys(con)
         con.execute("BEGIN TRANSACTION")
         for ddl in (DDL[RUNS], DDL[STATUS], DDL[HITS]):
             con.execute(ddl)
@@ -614,8 +640,8 @@ def load_families(
                                  "families_db": manifest.get("families_db"), "work_dir": str(work),
                                  "config_path": cfg["_path"], "sequences": manifest.get("sequences"),
                                  "member_proteins": manifest.get("member_proteins")})])
-        con.execute(INDEXES)
         con.execute(resemblance_view_sql())
+        _check_unique(con)
         con.execute("COMMIT")
     except Exception:
         con.execute("ROLLBACK")
@@ -986,6 +1012,9 @@ def _load_family_tier(con, alias: str, path: Path) -> dict[str, Any]:
                                                       AND f.clustering_run = s.clustering_run""").fetchone()[0]
     if unknown:
         raise RemoteHomologyError(f"{unknown:,} searched families are absent from family_stats")
+    if _has_tables(con, [HITS]):
+        con.execute(INDEXES)  # legacy secondary indexes
+        _drop_keys(con)
     con.execute("BEGIN TRANSACTION")
     try:
         con.execute(f"DROP VIEW IF EXISTS {RESEMBLANCE_VIEW}")
@@ -998,8 +1027,8 @@ def _load_family_tier(con, alias: str, path: Path) -> dict[str, Any]:
         con.execute(f"DELETE FROM {STATUS} WHERE list_contains(?::VARCHAR[], clustering_run)", [staged_runs])
         con.execute(f"DELETE FROM {RUNS} WHERE list_contains(?::VARCHAR[], clustering_run)", [staged_runs])
         for table in (RUNS, STATUS, HITS):
-            con.execute(f"INSERT INTO {table} SELECT * FROM {alias}.{table}")
-        con.execute(INDEXES)
+            con.execute(f"INSERT INTO {table} BY NAME SELECT * FROM {alias}.{table}")
+        _check_unique(con)
         con.execute(resemblance_view_sql())
         con.execute("COMMIT")
     except Exception:

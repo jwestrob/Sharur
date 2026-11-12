@@ -826,3 +826,31 @@ def test_compact_staging_file_keeps_every_row(staged):
     assert _rows(staged["staging"], "SELECT COUNT(*) FROM family_resemblance")[0][0] > 0
     assert _rows(staged["staging"], "SELECT COUNT(*) FROM duckdb_indexes() WHERE table_name = 'family_annotations'"
                  ) == [(0,)]
+
+
+def test_family_tables_are_unkeyed_and_checked(staged, tmp_path):
+    """Older files with primary keys are migrated to the unkeyed layout; duplicates are refused."""
+    s = staged["staging"]
+    con = duckdb.connect(str(s))
+    try:  # rebuild the status table the way older versions wrote it, with a primary key
+        con.execute("CREATE TABLE keyed AS SELECT * FROM family_annotation_status")
+        con.execute("DROP TABLE family_annotation_status")
+        con.execute(store.DDL[store.STATUS].replace("    error VARCHAR\n)",
+                                                    "    error VARCHAR,\n    PRIMARY KEY (clustering_run, family_id)\n)"))
+        con.execute("INSERT INTO family_annotation_status SELECT * FROM keyed")
+        con.execute("DROP TABLE keyed")
+        assert con.execute("SELECT COUNT(*) FROM duckdb_constraints() WHERE table_name = 'family_annotation_status' "
+                           "AND constraint_type = 'PRIMARY KEY'").fetchone()[0] == 1
+    finally:
+        con.close()
+    con = store.connect(s)
+    try:
+        store._drop_keys(con)
+        assert con.execute("SELECT COUNT(*) FROM duckdb_constraints() WHERE table_name LIKE 'family_annotation%' "
+                           "AND constraint_type = 'PRIMARY KEY'").fetchone()[0] == 0
+        store._check_unique(con)
+        con.execute("INSERT INTO family_annotation_status SELECT * FROM family_annotation_status LIMIT 1")
+        with pytest.raises(store.RemoteHomologyError, match="duplicate keys"):
+            store._check_unique(con)
+    finally:
+        con.close()
