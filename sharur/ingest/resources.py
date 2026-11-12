@@ -97,6 +97,7 @@ _STAGES = (
     "06",
     "06i",
     "08",
+    "09",
 )
 
 
@@ -163,6 +164,7 @@ def _local_profile(*, mps: bool = False) -> ResourceProfile:
                 walltime="24:00:00",
             ),
             "08": ResourceRequest(workers, 32, "48:00:00"),
+            "09": ResourceRequest(workers, 32, "24:00:00"),
         }
     )
     return ResourceProfile(
@@ -190,7 +192,7 @@ def _slurm_profile(cpus: int | None = None) -> ResourceProfile:
         # Stage 00 audits inputs serially; MinCED is single-threaded. Both run inline.
         "00": ResourceRequest(1, 4, "", executor="local"),
         "05c": ResourceRequest(1, 8, "", executor="local"),
-        **{stage: node() for stage in ("01", "02", "03", "04", "05a", "05b", "07", "06i", "08")},
+        **{stage: node() for stage in ("01", "02", "03", "04", "05a", "05b", "07", "06i", "08", "09")},
         "06": node(accelerator="cuda", gpus=1, exclusive_accelerator=True),
     }
     return ResourceProfile(

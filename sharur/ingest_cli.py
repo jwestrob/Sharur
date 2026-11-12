@@ -40,6 +40,7 @@ from sharur.ingest.dag import (
 from sharur.ingest.resources import ResourceProfile, resolve_resource_profile
 from sharur.ingest.stage_runner import execute_stage
 from sharur.ops.ledger import RunLedger
+from sharur.protein_families.mmseqs import FAMILY_MIN_SEQ_ID, SUBFAMILY_MIN_SEQ_ID
 
 
 console = Console()
@@ -115,6 +116,7 @@ def _build_tools_dag(
     enable_cazymes: bool,
     pipeline_depth: int = 2,
     contig_name_topology: str | None = None,
+    families: tuple[float, float] | None = None,
 ) -> IngestDAG:
     """Build the selected stage graph and its concrete resource-tuned commands."""
     stage_dir = _stage_script_dir()
@@ -388,6 +390,33 @@ def _build_tools_dag(
             dependencies=("07",),
             outputs=(data_dir / "stage08_coverage" / "processing_manifest.json",),
             inputs=(reads,),
+        )
+
+    if families is not None:
+        # Optional Stage 09: MMseqs2 protein families into a staging DuckDB beside the
+        # dataset; the dataset database stays untouched (activation is a separate write).
+        subfamily_min_seq_id, family_min_seq_id = families
+        request = profile.request("09")
+        stage09 = data_dir / "stage09_families"
+        add(
+            "09",
+            "Protein families (MMseqs2)",
+            [
+                str(stage_dir / "09_protein_families.py"),
+                "--db",
+                str(output),
+                "--out-dir",
+                str(stage09),
+                "--threads",
+                profile.threads(request.cpus),
+                "--subfamily-min-seq-id",
+                f"{subfamily_min_seq_id:g}",
+                "--family-min-seq-id",
+                f"{family_min_seq_id:g}",
+                "--force",
+            ],
+            dependencies=("07",),
+            outputs=(stage09 / "processing_manifest.json", stage09 / "protein_families.duckdb"),
         )
 
     dag = IngestDAG(nodes)
@@ -756,6 +785,22 @@ def run(
                  "per-sample coverage with CoverM (abundance.duckdb sidecar)",
         ),
     ] = None,
+    with_families: Annotated[
+        bool,
+        typer.Option(
+            "--with-families/--skip-families",
+            help="Run optional Stage 09: MMseqs2 protein families and subfamilies into "
+                 "stage09_families/protein_families.duckdb (activate with `sharur families activate`)",
+        ),
+    ] = False,
+    family_min_seq_id: Annotated[
+        float,
+        typer.Option("--family-min-seq-id", help="Stage 09 family identity threshold"),
+    ] = FAMILY_MIN_SEQ_ID,
+    subfamily_min_seq_id: Annotated[
+        float,
+        typer.Option("--subfamily-min-seq-id", help="Stage 09 subfamily identity threshold"),
+    ] = SUBFAMILY_MIN_SEQ_ID,
     embedding_model: Annotated[
         str | None,
         typer.Option(
@@ -819,6 +864,8 @@ def run(
         raise typer.BadParameter(str(exc)) from exc
     if submit_slurm and resource_profile.name != "slurm":
         raise typer.BadParameter("--submit-slurm requires --profile slurm")
+    if with_families and not 0 < family_min_seq_id < subfamily_min_seq_id <= 1:
+        raise typer.BadParameter("Stage 09 needs 0 < --family-min-seq-id < --subfamily-min-seq-id <= 1")
     if contig_name_topology is not None:
         from sharur.contig_context import parse_name_conventions  # noqa: PLC0415
 
@@ -901,6 +948,7 @@ def run(
             enable_cazymes=enable_cazymes,
             pipeline_depth=pipeline_depth,
             contig_name_topology=contig_name_topology,
+            families=(subfamily_min_seq_id, family_min_seq_id) if with_families else None,
         )
     else:
         raise typer.BadParameter("mode must be 'tools' or 'fast'")

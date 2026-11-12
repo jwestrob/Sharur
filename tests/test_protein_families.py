@@ -19,6 +19,8 @@ from sharur.protein_families import store
 from sharur.storage.duckdb_store import DuckDBStore
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+STAGE09 = REPO_ROOT / "src" / "ingest" / "09_protein_families.py"
+DUMMY = Path(os.environ.get("SHARUR_DUMMY_DATASET", REPO_ROOT / "dummy_dataset"))
 
 requires_mmseqs = pytest.mark.skipif(shutil.which("mmseqs") is None, reason="MMseqs2 is not installed")
 
@@ -414,3 +416,93 @@ def test_assign_places_new_genomes_without_reclustering(families, tmp_path):
     store.load_staging(target, db, log=lambda _m: None)
     assert store.status(target)["proteins_without_family"] == 0
     target.close()
+
+
+@requires_mmseqs
+def test_stage09_script_writes_manifest_and_staging(tmp_path):
+    db = build_db(tmp_path / "sharur.duckdb", include_g4=True)
+    out = tmp_path / "stage09_families"
+    env = dict(os.environ, PYTHONPATH=str(REPO_ROOT))
+    proc = subprocess.run([sys.executable, str(STAGE09), "--db", str(db), "--out-dir", str(out), "--threads", "2",
+                           "--memory-limit", "1GB", "--split-memory-limit", "4G"],
+                          capture_output=True, text=True, env=env)
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    manifest = json.loads((out / "processing_manifest.json").read_text())
+    assert manifest["stage"] == "stage09_families" and manifest["proteins"] == 18
+    assert (out / "protein_families.duckdb").is_file() and (out / "clustering" / "level1.tsv.gz").is_file()
+    assert not (out / "proteins.faa").exists()
+    proc = subprocess.run([sys.executable, str(STAGE09), "--db", str(db), "--out-dir", str(out)],
+                          capture_output=True, text=True, env=env)
+    assert proc.returncode != 0 and "--force" in proc.stderr
+
+
+def test_ingest_plan_adds_stage09_only_on_request(tmp_path):
+    from scripts import ingest
+
+    def plan(**options):
+        return ingest.run(input_dir=Path("dummy_dataset"), data_dir=tmp_path / "d", output=tmp_path / "d" / "x.duckdb",
+                          mode="tools", dry_run=True, skip_embeddings=True, **options)
+
+    assert not any(c[0].endswith("09_protein_families.py") for c in plan())
+    commands = plan(with_families=True, subfamily_min_seq_id=0.6)
+    names = [c[0].rsplit("/", 1)[-1] for c in commands]
+    assert names.index("09_protein_families.py") > names.index("07_build_knowledge_base.py")
+    stage09 = commands[names.index("09_protein_families.py")]
+    assert stage09[stage09.index("--subfamily-min-seq-id") + 1] == "0.6"
+    assert stage09[stage09.index("--family-min-seq-id") + 1] == "0.3"
+    assert stage09[stage09.index("--out-dir") + 1] == str(tmp_path / "d" / "stage09_families")
+    from sharur.ingest_cli import app
+
+    result = CliRunner().invoke(app, ["--input-dir", "dummy_dataset", "--data-dir", str(tmp_path / "e"),
+                                      "--dry-run", "--with-families", "--subfamily-min-seq-id", "0.2"])
+    assert result.exit_code != 0
+
+
+@requires_mmseqs
+@pytest.mark.slow
+@pytest.mark.skipif(not DUMMY.is_dir() or shutil.which("prodigal") is None,
+                    reason="dummy_dataset or Prodigal unavailable (set SHARUR_DUMMY_DATASET)")
+def test_stage09_and_import_on_the_dummy_dataset(tmp_path):
+    """Stages 00, 03 and 07, then Stage 09, on the repo's four-genome test dataset; then an external
+    clustering with permissive parameters imported as a further run, and everything activated."""
+    env = dict(os.environ, PYTHONPATH=str(REPO_ROOT))
+    data = tmp_path / "dummy"
+    steps = [
+        [REPO_ROOT / "src/ingest/00_prepare_inputs.py", "-i", DUMMY, "-o", data / "stage00_prepared", "--copy"],
+        [REPO_ROOT / "src/ingest/03_prodigal.py", "-i", data / "stage00_prepared", "-o", data / "stage03_prodigal",
+         "--max-workers", "4"],
+        [REPO_ROOT / "src/ingest/07_build_knowledge_base.py", "-d", data, "-o", data / "sharur.duckdb", "-t", "4"],
+        [STAGE09, "--db", data / "sharur.duckdb", "--out-dir", data / "stage09_families", "--threads", "4",
+         "--memory-limit", "2GB", "--split-memory-limit", "4G"],
+    ]
+    for step in steps:
+        proc = subprocess.run([sys.executable, *map(str, step)], capture_output=True, text=True, env=env)
+        assert proc.returncode == 0, (step[0], proc.stderr[-2000:])
+    db = data / "sharur.duckdb"
+    n_proteins = _rows(db, "SELECT COUNT(*) FROM proteins")[0][0]
+    staging = data / "stage09_families" / "protein_families.duckdb"
+    counts = _rows(staging, "SELECT COUNT(*), COUNT(DISTINCT family_id), COUNT(DISTINCT subfamily_id) "
+                            "FROM protein_family_levels")[0]
+    assert counts[0] == n_proteins and 0 < counts[1] <= counts[2] <= n_proteins
+    # an externally produced clustering of the same proteins, registered without re-clustering
+    ext = tmp_path / "ext"
+    ext.mkdir()
+    con = store.connect(db, read_only=True)
+    store.export_proteins(con, ext / "p.faa")
+    con.close()
+    mm = shutil.which("mmseqs")
+    for args in (["createdb", ext / "p.faa", ext / "db"],
+                 ["cluster", ext / "db", ext / "clu", ext / "tmp", "-s", "7.5", "-e", "1e-3", "--min-seq-id", "0",
+                  "-c", "0.5", "--cov-mode", "0", "--cluster-mode", "0", "--threads", "4",
+                  "--split-memory-limit", "4G"],
+                 ["createtsv", ext / "db", ext / "db", ext / "clu", ext / "clu.tsv"]):
+        subprocess.run([mm, *map(str, args)], check=True, capture_output=True)
+    n_ext = len({line.split("\t")[0] for line in (ext / "clu.tsv").read_text().splitlines()})
+    imported = store.import_clustering(db, ext / "clu.tsv", staging, name="permissive-e3c50s75",
+                                       level="permissive", parameters=PERMISSIVE, log=lambda _m: None)
+    assert imported["families"] == n_ext and imported["proteins"] == n_proteins
+    con = store.connect(db, threads=4, memory_limit="2GB")
+    status = store.load_staging(con, staging, log=lambda _m: None)
+    con.close()
+    assert status["proteins_without_family"] == 0 and status["families"] == counts[1]
+    assert {r["level"] for r in status["runs"]} == {"family", "subfamily", "permissive"}
