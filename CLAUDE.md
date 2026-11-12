@@ -34,6 +34,7 @@ Detailed guides live in `docs/` and `.claude/skills/`. **Read the relevant doc b
 | Pre-registering predictions; recording a statistical result as a check | `docs/guides/statistical-checks.md` |
 | Writing to a canonical database (stage, diff, reverify, publish) | `docs/guides/staged-writes.md` |
 | Inspecting cases, comparing ORF context, or adding assembly evidence | `docs/cases_and_evidence.md` |
+| Using or building annotation-independent protein families (MMseqs2) | `docs/guides/protein-families.md` |
 
 **Other key docs:**
 

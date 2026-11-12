@@ -16,9 +16,9 @@ sharur-ingest \
 If `sharur-ingest` is missing, refresh the editable install with
 `pip install -e ".[embeddings]"`.
 
-The default plan runs the core stages and skips optional QUAST, DFAST, GECCO, and the
-deprecated legacy dbCAN helper. Opt in with `--with-quast`, `--with-dfast`,
-`--with-gecco`, or `--with-legacy-dbcan`. The separate Stage 07 dbCAN three-tool
+The default plan runs the core stages and skips optional QUAST, DFAST, GECCO, protein families
+and the deprecated legacy dbCAN helper. Opt in with `--with-quast`, `--with-dfast`,
+`--with-gecco`, `--with-families` or `--with-legacy-dbcan`. The separate Stage 07 dbCAN three-tool
 consensus classifier is opt-in with `--enable-cazymes`. For assemblies whose contig names
 mark topology (for example the SR-VP PacBio sets' `_C`/`_RC`/`_L` suffixes), pass
 `--contig-name-topology srvp` (or `metamdbg`, `hifiasm`); Stage 07 records it in the
@@ -151,7 +151,7 @@ Stage 06i Persistent index        (CPU FAISS + stable protein-ID map)
 **Primary CLI path:** `sharur-ingest`
 **Standard pipeline stages:** 00, 03, 04, 05c, 07, 06, 06i
 **Post-pipeline (standard):** 06 (embeddings) then 06i (persistent similarity index)
-**Optional/deprecated:** 01 (QUAST QC), 02 (DFAST QC), 05a (GECCO BGC), 05b (dbCAN legacy)
+**Optional/deprecated:** 01 (QUAST QC), 02 (DFAST QC), 05a (GECCO BGC), 05b (dbCAN legacy), 08 (read coverage), 09 (protein families)
 
 ---
 
@@ -170,6 +170,8 @@ Stage 06i Persistent index        (CPU FAISS + stable protein-ID map)
 | 06 | `06_esm2_embeddings.py` | **Standard** | Protein vector embeddings (ELSA input) |
 | 06i | `vector_index_runner.py` | **Internal** | Persistent FAISS/ID sidecars in a Torch-free process |
 | 07 | `07_build_knowledge_base.py` | **Standard** | Build DuckDB knowledge base |
+| 08 | `08_coverage.py` | Optional | Per-sample read coverage (`--reads`) |
+| 09 | `09_protein_families.py` | Optional | MMseqs2 protein families and subfamilies (`--with-families`) |
 
 Stages 01, 02, 05a, and 05b exist as scripts but are not required for a standard pipeline run. Stage 07 gracefully handles their absence.
 
@@ -503,6 +505,29 @@ Biosynthetic gene cluster detection using GECCO. Stage 07 loads results from `st
 
 **Deprecated.** For new datasets, use Stage 04 dbCAN annotations or opt into Stage 07's
 three-tool consensus with `--enable-cazymes`; do not run this helper separately.
+
+### Stage 09: Protein families (`09_protein_families.py`)
+
+Annotation-independent protein families, opt-in with `--with-families`. After Stage 07 it exports
+every protein of the database (read-only) and clusters it with MMseqs2 in two nested levels:
+subfamilies at `--subfamily-min-seq-id` (default 0.5) over all proteins, then families at
+`--family-min-seq-id` (default 0.3) over the subfamily representatives. Both levels require 80%
+coverage of both sequences, sensitivity 6 and `--cluster-reassign`. MMseqs2 and DuckDB use every
+allocated CPU.
+
+Outputs land in `stage09_families/`: the staging DuckDB `protein_families.duckdb`, the clustering
+tables (`clustering/level0.tsv.gz`, `level1.tsv.gz`) and `processing_manifest.json`. The dataset
+database stays unchanged, which keeps the Stage 07 ledger snapshot valid; load the families with
+
+```bash
+sharur families activate --db data/DATASET/sharur.duckdb \
+    --staging data/DATASET/stage09_families/protein_families.duckdb --publish
+```
+
+On a Slurm cluster, give the job the CPUs MMseqs2 scales to and exclude nodes whose CPUs lack the
+instruction sets the MMseqs2 binary needs, for example
+`SHARUR_SLURM_QOS=QOS SHARUR_SLURM_EXCLUDE=NODES sharur-ingest ... --profile slurm --slurm-cpus 64 --with-families`.
+Schema, identifiers, incremental assignment and the threshold evidence: `docs/guides/protein-families.md`.
 
 ### Stage 06: ESM2 Embeddings (`06_esm2_embeddings.py`)
 

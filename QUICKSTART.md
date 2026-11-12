@@ -99,8 +99,10 @@ Execution profiles are explicit:
 The default plan skips optional QUAST, DFAST, GECCO, and the deprecated legacy dbCAN
 helper. Enable them deliberately with `--with-quast`, `--with-dfast`, `--with-gecco`,
 or `--with-legacy-dbcan`. The distinct Stage 07 dbCAN three-tool consensus classifier is
-opt-in with `--enable-cazymes`. Use `--dry-run` to inspect stage order and paths
-without creating the dataset directory.
+opt-in with `--enable-cazymes`. `--with-families` adds Stage 09, MMseqs2 protein families and
+subfamilies written to a staging DuckDB (`stage09_families/protein_families.duckdb`); load them
+with `sharur families activate` (`docs/guides/protein-families.md`). Use `--dry-run` to inspect
+stage order and paths without creating the dataset directory.
 
 `--pipeline-depth 2` is the bounded Stage 07 default. It keeps two ordered V2
 transform chunks in flight while the sole DuckDB writer commits the preceding

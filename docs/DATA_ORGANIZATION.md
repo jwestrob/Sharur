@@ -27,6 +27,7 @@ data/
 │   ├── stage05c_crispr/               # CRISPR array stage outputs
 │   ├── stage05a_gecco/                # Optional BGC stage outputs
 │   ├── stage06_embeddings/            # Legacy embedding location (if present)
+│   ├── stage09_families/              # Optional MMseqs2 protein families (staging DuckDB)
 │   │
 │   ├── annotations/                   # Consolidated/derived annotation exports
 │   │

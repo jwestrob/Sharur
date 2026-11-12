@@ -75,6 +75,7 @@ calls and their annotation projections, `predicate` for predicates. A named syst
 | `slot(anchor, side := 'upstream', partner := NULL, max_span := 10, min_completeness := 0, max_contamination := 100)` | per anchor protein: the gene beside it (`side` = `upstream` or `downstream`), or every gene between it and its nearest `partner` within `max_span` genes (`side` = `upstream`, `downstream` or `either`); occupant strand, length, annotations, `at_contig_edge`, genome completeness and ranks |
 | `slot_tally(anchor, occupant, side, partner, rank := 'order', split := NULL, max_span, min_completeness, max_contamination)` | per taxon (and per `split` feature presence): genomes with an anchor, with an `occupant` match on the same strand or either strand, with an occupant lacking any Pfam hit, at a contig edge, without a partner in range |
 | `protein_summary(ids)`, `anchor_proteins(anchor)` | the building blocks above |
+| `family_proteins(families)`, `family_presence(families, min_completeness := 0, max_contamination := 100)`, `families_of(ids)` | protein families in the `feature_proteins` / `feature_presence` shapes, and each protein's family in every clustering run; need the family layer ([Protein families](protein-families.md)) |
 | `strand_sign(s)`, `id_list(x)`, `rank_of(taxonomy, rank)` | scalar helpers |
 | `write_fasta(path, ids)` | Python connections only: writes FASTA, returns `{path, n_sequences, n_requested, n_missing}` |
 

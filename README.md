@@ -61,7 +61,7 @@ sharur-ingest \
   --profile auto
 ```
 
-`sharur-ingest` runs a ledger-backed, resumable stage DAG and builds DuckDB before launching embeddings. Optional stages are opt-in (`--with-quast`, `--with-dfast`, `--with-gecco`; the dbCAN three-tool consensus with `--enable-cazymes`). Choose `--profile local`, `mps`, or `slurm` when `auto` does not fit, and inspect the plan with `--dry-run`. See [`QUICKSTART.md`](QUICKSTART.md) and [`src/ingest/README.md`](src/ingest/README.md).
+`sharur-ingest` runs a ledger-backed, resumable stage DAG and builds DuckDB before launching embeddings. Optional stages are opt-in (`--with-quast`, `--with-dfast`, `--with-gecco`, MMseqs2 protein families with `--with-families`; the dbCAN three-tool consensus with `--enable-cazymes`). Choose `--profile local`, `mps`, or `slurm` when `auto` does not fit, and inspect the plan with `--dry-run`. See [`QUICKSTART.md`](QUICKSTART.md) and [`src/ingest/README.md`](src/ingest/README.md).
 
 ### First look
 
