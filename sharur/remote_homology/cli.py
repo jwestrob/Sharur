@@ -179,6 +179,21 @@ def load_cdd_command(
         _fail("load-cdd", exc)
 
 
+@remote_homology_app.command("compact-staging")
+def compact_staging_command(
+    staging: Path = typer.Option(..., "--staging", "-s", help="Remote-homology staging file to rewrite."),
+    duckdb_threads: int = typer.Option(4, "--duckdb-threads"),
+    memory_limit: str = typer.Option("8GB", "--memory-limit"),
+):
+    """Rewrite a staging file without free blocks or legacy indexes (checked copy, atomic replace)."""
+    from sharur.remote_homology import store  # noqa: PLC0415
+
+    try:
+        _echo_json(store.compact_staging_file(staging, threads=duckdb_threads, memory_limit=memory_limit))
+    except store.RemoteHomologyError as exc:
+        _fail("compact-staging", exc)
+
+
 @remote_homology_app.command("activate")
 def activate_command(
     db: Path = typer.Option(..., "--db", "-d", help=_DB_HELP),

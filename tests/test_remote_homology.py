@@ -788,3 +788,31 @@ def test_runner_searches_pdb_with_hhblits_when_configured(dataset, fake_tools, t
     bad.write_text(json.dumps(dict(fake_tools["dict"], search={"pdb_tool": "jackhmmer"})))
     with pytest.raises(runner.ConfigError, match="pdb_tool"):
         runner.load_config(bad)
+
+
+def test_files_named_like_attachment_aliases(staged, dataset, tmp_path):
+    """Databases and staging files named src/fam/rh0 work: attachments use reserved names."""
+    (tmp_path / "a").mkdir()
+    src_db = tmp_path / "a" / "src.duckdb"
+    shutil.copyfile(dataset["db"], src_db)
+    fam_file = tmp_path / "a" / "fam.duckdb"
+    shutil.copyfile(dataset["families"], fam_file)
+    m = store.export_families(src_db, tmp_path / "w", families_db=fam_file, log=lambda _m: None)
+    assert m["families"] == 2
+    rh = tmp_path / "a" / "rh0.duckdb"
+    shutil.copyfile(staged["staging"], rh)
+    con = store.connect(staged["db"])
+    try:
+        out = store.load_staging(con, [rh], families_staging=[fam_file], log=lambda _m: None)
+    finally:
+        con.close()
+    assert out["family_tier"]["hit_rows"] == 64
+
+
+def test_compact_staging_file_keeps_every_row(staged):
+    before = {t: _rows(staged["staging"], f"SELECT COUNT(*) FROM {t}")[0][0] for t in store.STAGING_TABLES}
+    out = store.compact_staging_file(staged["staging"])
+    assert out["rows"] == before and out["bytes_after"] <= out["bytes_before"]
+    assert _rows(staged["staging"], "SELECT COUNT(*) FROM family_resemblance")[0][0] > 0
+    assert _rows(staged["staging"], "SELECT COUNT(*) FROM duckdb_indexes() WHERE table_name = 'family_annotations'"
+                 ) == [(0,)]

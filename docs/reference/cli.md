@@ -1494,6 +1494,7 @@ $ sharur remote-homology [OPTIONS] COMMAND [ARGS]...
 * `load-families`: Parse the family-tier results into...
 * `compact-cdd`: Reduce the raw RPS-BLAST tables to...
 * `load-cdd`: Load the CDD hits (per unique sequence)...
+* `compact-staging`: Rewrite a staging file without free blocks...
 * `activate`: Stage DB, load the remote-homology rows...
 * `status`: Searches loaded, families resembling...
 
@@ -1634,6 +1635,23 @@ $ sharur remote-homology load-cdd [OPTIONS]
 * `--max-evalue FLOAT`: [default: 0.01]
 * `--max-overlap FLOAT`: Best model per region: hits sharing more than this fraction of the shorter range belong to one region (best bit score kept).  [default: 0.5]
 * `--allow-partial`
+* `--help`: Show this message and exit.
+
+#### `sharur remote-homology compact-staging`
+
+Rewrite a staging file without free blocks or legacy indexes (checked copy, atomic replace).
+
+**Usage**:
+
+```console
+$ sharur remote-homology compact-staging [OPTIONS]
+```
+
+**Options**:
+
+* `-s, --staging PATH`: Remote-homology staging file to rewrite.  [required]
+* `--duckdb-threads INTEGER`: [default: 4]
+* `--memory-limit TEXT`: [default: 8GB]
 * `--help`: Show this message and exit.
 
 #### `sharur remote-homology activate`

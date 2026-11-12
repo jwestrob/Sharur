@@ -171,10 +171,13 @@ DDL = {
 )""",
 }
 
+# family_annotations keeps its primary key only; scans by family or accession take a fraction of a second,
+# and secondary indexes would cost about 100 bytes per row. Files written with them lose them here.
 INDEXES = f"""
-CREATE INDEX IF NOT EXISTS idx_family_annotations_family ON {HITS}(family_id);
-CREATE INDEX IF NOT EXISTS idx_family_annotations_accession ON {HITS}(hit_accession);
+DROP INDEX IF EXISTS idx_family_annotations_family;
+DROP INDEX IF EXISTS idx_family_annotations_accession;
 """
+STAGING_TABLES = (RUNS, STATUS, HITS, CDD_HITS, CDD_MODELS, CDD_RUNS)
 
 
 def resemblance_view_sql(min_probability: float = RULE_MIN_PROBABILITY,
@@ -189,6 +192,10 @@ SELECT family_id, clustering_run, search_run, source, db_name, db_version, msa_k
        'resembles' AS evidence
 FROM {HITS}
 WHERE source IN ({sources}) AND probability >= {float(min_probability)} AND aligned_cols >= {int(min_cols)}"""
+
+
+# Reserved attachment names (a database file named like an alias would collide with it).
+_SRC, _FAM, _STG, _PEEK, _FAMFILE, _OLD = "__rh_src", "__rh_fam", "__rh_stg", "__rh_peek", "__rh_famfile", "__rh_old"
 
 
 class RemoteHomologyError(RuntimeError):
@@ -233,14 +240,14 @@ FAMILY_TABLES = ("protein_families", "family_stats", "protein_family_runs")
 def _family_catalog(con, db: Path, families_db: Path | None) -> str:
     """Attach the protein-family tables (from ``families_db`` or the dataset) and return their prefix."""
     if families_db is not None:
-        con.execute(f"ATTACH {_q(Path(families_db).expanduser().resolve())} AS fam (READ_ONLY)")
-        if not _has_tables(con, FAMILY_TABLES, "fam"):
+        con.execute(f"ATTACH {_q(Path(families_db).expanduser().resolve())} AS {_FAM} (READ_ONLY)")
+        if not _has_tables(con, FAMILY_TABLES, _FAM):
             raise RemoteHomologyError(f"{families_db} holds no protein-family tables")
-        return "fam."
-    if not _has_tables(con, FAMILY_TABLES, "src"):
+        return f"{_FAM}."
+    if not _has_tables(con, FAMILY_TABLES, _SRC):
         raise RemoteHomologyError(f"{db} holds no protein-family tables; pass a families staging file "
                                   "(sharur families run/import) with --families")
-    return "src."
+    return f"{_SRC}."
 
 
 def _resolve_run(con, fam: str, run: str | None) -> str:
@@ -318,7 +325,7 @@ def export_families(
     started = time.time()
     con = connect(":memory:", threads=threads, memory_limit=memory_limit)
     try:
-        con.execute(f"ATTACH {_q(db)} AS src (READ_ONLY)")
+        con.execute(f"ATTACH {_q(db)} AS {_SRC} (READ_ONLY)")
         fam = _family_catalog(con, db, Path(families_db) if families_db else None)
         run = _resolve_run(con, fam, run)
         select_families(con, fam, run, min_genomes=min_genomes, require_pfam_dark=require_pfam_dark,
@@ -330,7 +337,7 @@ def export_families(
             WITH m AS (
                 SELECT s.family_index, f.protein_id, f.is_representative, rtrim(p.sequence, '*') AS seq
                 FROM _rh_sel s JOIN {fam}protein_families f ON f.family_id = s.family_id AND f.clustering_run = ?
-                JOIN src.proteins p ON p.protein_id = f.protein_id
+                JOIN {_SRC}.proteins p ON p.protein_id = f.protein_id
                 WHERE rtrim(COALESCE(p.sequence, ''), '*') <> ''),
             u AS (
                 SELECT family_index, seq, bool_or(is_representative) AS has_rep,
@@ -869,14 +876,14 @@ FAMILY_RUNS_ALL = "all"
 
 
 def _family_runs_in(con, path: Path) -> list[str]:
-    con.execute(f"ATTACH {_q(path)} AS _rh_famfile (READ_ONLY)")
+    con.execute(f"ATTACH {_q(path)} AS {_FAMFILE} (READ_ONLY)")
     try:
-        if not _has_tables(con, ["protein_family_runs"], "_rh_famfile"):
+        if not _has_tables(con, ["protein_family_runs"], _FAMFILE):
             raise RemoteHomologyError(f"{path} holds no protein-family tables")
-        return [r[0] for r in con.execute("SELECT clustering_run FROM _rh_famfile.protein_family_runs ORDER BY 1"
+        return [r[0] for r in con.execute(f"SELECT clustering_run FROM {_FAMFILE}.protein_family_runs ORDER BY 1"
                                           ).fetchall()]
     finally:
-        con.execute("DETACH _rh_famfile")
+        con.execute(f"DETACH {_FAMFILE}")
 
 
 def load_staging(con: duckdb.DuckDBPyConnection, staging: Sequence[Path | str], *,
@@ -913,12 +920,12 @@ def load_staging(con: duckdb.DuckDBPyConnection, staging: Sequence[Path | str], 
 
         needed: set[str] = set()
         for path in staging:
-            con.execute(f"ATTACH {_q(Path(path).expanduser().resolve())} AS _rh_peek (READ_ONLY)")
+            con.execute(f"ATTACH {_q(Path(path).expanduser().resolve())} AS {_PEEK} (READ_ONLY)")
             try:
-                if _has_tables(con, [RUNS], "_rh_peek"):
-                    needed |= {r[0] for r in con.execute(f"SELECT clustering_run FROM _rh_peek.{RUNS}").fetchall()}
+                if _has_tables(con, [RUNS], _PEEK):
+                    needed |= {r[0] for r in con.execute(f"SELECT clustering_run FROM {_PEEK}.{RUNS}").fetchall()}
             finally:
-                con.execute("DETACH _rh_peek")
+                con.execute(f"DETACH {_PEEK}")
         loaded: list[dict[str, Any]] = []
         for fam_file in families_staging:
             available = _family_runs_in(con, fam_file)
@@ -933,7 +940,7 @@ def load_staging(con: duckdb.DuckDBPyConnection, staging: Sequence[Path | str], 
         summary["families_loaded"] = loaded
     for i, path in enumerate(staging):
         path = Path(path).expanduser().resolve()
-        alias = f"rh{i}"
+        alias = f"{_STG}{i}"
         tables = _attach_staging(con, path, alias)
         try:
             if {RUNS, STATUS, HITS} <= tables:
@@ -1062,6 +1069,56 @@ def _load_cdd_rows(con, alias: str, path: Path, verify_digest: bool, source_vers
         raise
     return {"staging": str(path), "rows_removed": removed, "rows_loaded": loaded, "rows_all": int(all_rows),
             "rows_stored": cdd_rows, "proteins_with_hits": proteins, "db": f"{run['db_name']} {run['db_version']}"}
+
+
+def _fingerprint(con, table: str, alias: str | None, columns: Sequence[str]) -> tuple[int, int]:
+    name = f"{alias}.{table}" if alias else table
+    packed = "struct_pack(" + ", ".join(f'"{c}" := t."{c}"' for c in columns) + ")"
+    return con.execute(f"SELECT COUNT(*), COALESCE(SUM(hash({packed})::HUGEINT), 0) FROM {name} t").fetchone()
+
+
+def compact_staging_file(path: Path | str, *, threads: int = 4, memory_limit: str = "8GB") -> dict[str, Any]:
+    """Rewrite a remote-homology staging file without free blocks or legacy indexes; replace it atomically.
+
+    Every remote-homology table is copied whole (columns matched by name) and checked by row count
+    and a content fingerprint; the original is replaced with one rename.
+    """
+    import os  # noqa: PLC0415
+
+    path = Path(path).expanduser().resolve()
+    tmp = path.with_name(path.name + ".compact.tmp")
+    for stale in (tmp, Path(str(tmp) + ".wal")):
+        stale.unlink(missing_ok=True)
+    before = path.stat().st_size
+    con = connect(tmp, threads=threads, memory_limit=memory_limit)
+    try:
+        con.execute(f"ATTACH {_q(path)} AS {_OLD} (READ_ONLY)")
+        present = [t for t in STAGING_TABLES if _has_tables(con, [t], _OLD)]
+        if not present:
+            raise RemoteHomologyError(f"{path} holds no remote-homology tables")
+        rows = {}
+        for table in present:
+            con.execute(DDL[table])
+            con.execute(f"INSERT INTO {table} BY NAME SELECT * FROM {_OLD}.{table}")
+            cols = [r[0] for r in con.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_catalog = current_database() "
+                "AND table_name = ? ORDER BY ordinal_position", [table]).fetchall()]
+            new, old = _fingerprint(con, table, None, cols), _fingerprint(con, table, _OLD, cols)
+            if new != old:
+                raise RemoteHomologyError(f"{table}: copy differs from the original ({old} -> {new})")
+            rows[table] = int(new[0])
+        if HITS in present:
+            con.execute(resemblance_view_sql())
+        con.execute(f"DETACH {_OLD}")
+        con.execute("CHECKPOINT")
+    except Exception:
+        con.close()
+        tmp.unlink(missing_ok=True)
+        Path(str(tmp) + ".wal").unlink(missing_ok=True)
+        raise
+    con.close()
+    os.replace(tmp, path)
+    return {"rows": rows, "bytes_before": before, "bytes_after": path.stat().st_size}
 
 
 def status(con) -> dict[str, Any]:

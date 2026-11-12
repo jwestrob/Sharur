@@ -218,6 +218,10 @@ copy waits for `sharur stage publish` or `sharur stage discard`.
   region rule, the rows stored and the protein-level count of every hit, and the staging file
   that holds the full table.
 
+A staging file that was loaded more than once keeps free blocks; `sharur remote-homology
+compact-staging --staging FILE` rewrites it whole (every table checked by row count and content
+fingerprint, then one atomic rename) before it is copied or activated.
+
 `sharur remote-homology status --db ...` and `sharur preflight` (the `remote_homology`
 capability) report the searches, how many families meet the rule, and CDD coverage: the rows
 stored in `annotations` and the protein-level count of every hit in the staging file.
