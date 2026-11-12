@@ -1148,6 +1148,7 @@ $ sharur sql prelude [OPTIONS]
 **Options**:
 
 * `-o, --out PATH`: Write the script here instead of stdout.
+* `-d, --db PATH`: Dataset DuckDB the script is for: leaves out macros of optional layers it lacks (needed with DuckDB 1.3 and later, which stop the script at the first such macro).
 * `--help`: Show this message and exit.
 
 #### `sharur sql objects`

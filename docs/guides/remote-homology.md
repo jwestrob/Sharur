@@ -79,8 +79,8 @@ newer databases is a rerun:
   3.2 and later (bioconda installs 3.3) need `PREFIX_a3m` and `PREFIX_cs219` as well
   (`cstranslate -I a3m` with HH-suite's `cs219.lib` and `context_data.lib`), and `sharur
   remote-homology check` names any that are missing. Hit names then come from the first record of
-  each A3M, so give it the `"<ACC> <ID>; <DE>"` name. Self-test the result: a seed sequence of a family should rank its
-  own family first.
+  each A3M, so give it the `"<ACC> <ID>; <DE>"` name. Self-test the result: a seed sequence of a
+  family should rank its own family first.
 
 ## Family tier
 

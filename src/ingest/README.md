@@ -645,8 +645,8 @@ pip install -e .
 ```
 
 ### DuckDB version mismatch
-Sharur runs on DuckDB 1.x; DuckDB 2.0 stops Stage 07 at "Load proteins/contigs" with
-`ResourceInUseException`.
+Sharur runs on DuckDB 1.x; DuckDB 2.0 stops Stage 07 in its first loading steps with
+`ResourceInUseException: connection has an unfinished result`.
 ```bash
 pip install -U "duckdb<2"
 ```
