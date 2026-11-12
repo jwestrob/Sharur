@@ -151,6 +151,10 @@ A family is a sequence-similarity cluster. `dominant_pfam_architecture` and `dom
 what annotations its members carry; they describe the members. A function name for a family needs
 the same curated evidence as for a single protein.
 
+Pfam-dark families can be compared with Pfam and PDB profiles as a whole (HHsearch of the family
+alignment); those hits are stored per family and clustering run as "resembles" rows
+([Remote homology](remote-homology.md)).
+
 ## Several runs and imported clusterings
 
 A clustering made elsewhere (for example a permissive one used as tokens by another tool) can be
