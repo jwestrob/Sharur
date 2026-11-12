@@ -809,6 +809,16 @@ def test_files_named_like_attachment_aliases(staged, dataset, tmp_path):
     assert out["family_tier"]["hit_rows"] == 64
 
 
+def test_status_of_a_staging_file_reports_the_staged_cdd_search(staged):
+    con = store.connect(staged["staging"], read_only=True)
+    try:
+        info = store.status(con)
+    finally:
+        con.close()
+    assert info["cdd"] is None and info["cdd_staged"]["sequence_hits"] == 3
+    assert info["cdd_staged"]["sequence_best_hits"] == 2 and info["family_tier"]["families_resembling_any"] == 2
+
+
 def test_compact_staging_file_keeps_every_row(staged):
     before = {t: _rows(staged["staging"], f"SELECT COUNT(*) FROM {t}")[0][0] for t in store.STAGING_TABLES}
     out = store.compact_staging_file(staged["staging"])

@@ -1161,4 +1161,11 @@ def status(con) -> dict[str, Any]:
                           "rows_stored": params.get("rows_stored"), "rows_all_hits": params.get("protein_rows_all"),
                           "max_overlap": params.get("max_overlap"), "sequence_hits": params.get("sequence_hits"),
                           "full_table": params.get("full_table")}
+    if _has_tables(con, [CDD_RUNS]):  # a staging file: the CDD search waiting for activation
+        row = con.execute(f"""SELECT cdd_run, db_name, db_version, max_evalue, unique_sequences, proteins, hit_rows,
+                                     sequences_with_hits, best_rows, max_overlap FROM {CDD_RUNS}""").fetchone()
+        if row:
+            out["cdd_staged"] = dict(zip(("cdd_run", "db_name", "db_version", "max_evalue", "unique_sequences",
+                                          "proteins", "sequence_hits", "sequences_with_hits", "sequence_best_hits",
+                                          "max_overlap"), row))
     return out
