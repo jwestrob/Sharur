@@ -67,6 +67,10 @@ TOOLS: tuple[ToolSpec, ...] = (
     ToolSpec("run_dbcan", ("run_dbcan",), ("--version",), False, "CAZyme annotation"),
     ToolSpec("foldseek", ("foldseek",), ("version",), False, "structural homology search"),
     ToolSpec("coverm", ("coverm",), ("--version",), False, "per-sample read coverage (stage 08)"),
+    ToolSpec("rpsblast", ("rpsblast",), ("-version",), False, "CDD per protein (remote homology, stage 10)"),
+    ToolSpec("hhsearch", ("hhsearch",), ("-h",), False, "HHsearch per family (remote homology, stage 11)"),
+    ToolSpec("hhblits", ("hhblits",), ("-h",), False, "HHblits enrichment (remote homology, stage 11)"),
+    ToolSpec("mafft", ("mafft",), ("--version",), False, "family alignments (remote homology, stage 11)"),
     ToolSpec(
         "defense-finder",
         ("defense-finder", "defense_finder"),
