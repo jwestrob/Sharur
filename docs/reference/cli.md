@@ -1301,6 +1301,7 @@ $ sharur families [OPTIONS] COMMAND [ARGS]...
 * `activate`: Stage DB, load the staged clustering runs...
 * `assign`: Give families to proteins that lack one...
 * `import`: Register an externally produced clustering...
+* `rescue`: Place truncated singletons into existing...
 * `status`: Runs, family counts, proteins without a...
 
 #### `sharur families run`
@@ -1327,6 +1328,11 @@ $ sharur families run [OPTIONS]
 * `--split-memory-limit TEXT`: MMseqs2 memory cap (default: 70% of the allocation).
 * `--keep-fasta`
 * `--mmseqs TEXT`: MMseqs2 executable.
+* `--rescue / --no-rescue`: Add the truncated-gene rescue layer (default: on when store.RESCUE_BY_DEFAULT).
+* `--rescue-min-query-coverage FLOAT`: [default: 0.8]
+* `--rescue-min-seq-id FLOAT`: Default: the family identity floor.
+* `--rescue-min-family-size INTEGER`: [default: 2]
+* `--rescue-include / --rescue-exclude`: Make the rescued runs the defaults (default: store.RESCUE_BY_DEFAULT).
 * `--help`: Show this message and exit.
 
 #### `sharur families export`
@@ -1455,6 +1461,35 @@ $ sharur families import [OPTIONS]
 * `--memory-limit TEXT`: [default: 8GB]
 * `--help`: Show this message and exit.
 
+#### `sharur families rescue`
+
+Place truncated singletons into existing families as a separate, removable layer.
+
+**Usage**:
+
+```console
+$ sharur families rescue [OPTIONS]
+```
+
+**Options**:
+
+* `-d, --db PATH`: Dataset sharur.duckdb. The source of proteins; written only without --staging.  [required]
+* `-s, --staging PATH`: Work on this staging file (replaced atomically); DB is read-only.
+* `--min-query-coverage FLOAT`: Share of the truncated protein the alignment must cover.  [default: 0.8]
+* `--min-seq-id FLOAT`: Default: the family identity floor.
+* `--min-family-size INTEGER`: Members of the hit's family.  [default: 2]
+* `--include / --exclude`: Make the rescued runs the defaults, so the views include rescued members (default: store.RESCUE_BY_DEFAULT).
+* `--drop`: Remove the rescue layer instead.
+* `--export-inputs PATH`: Write candidates.faa and targets.faa here and stop.
+* `--hits PATH`: Search results of `mmseqs.py search --cov-mode 2 --top N` over the --export-inputs files.
+* `--tool-version TEXT`: MMseqs2 version behind --hits.
+* `--in-place`: Without --staging: write DB directly.
+* `-l, --label TEXT`: [default: protein-families-rescue]
+* `--publish`
+* `-t, --threads INTEGER`
+* `--mmseqs TEXT`
+* `--help`: Show this message and exit.
+
 #### `sharur families status`
 
 Runs, family counts, proteins without a family, and whether a full re-cluster is due.
@@ -1508,6 +1543,7 @@ $ sharur-ingest [OPTIONS]
 * `--with-families / --skip-families`: Run optional Stage 09: MMseqs2 protein families and subfamilies into stage09_families/protein_families.duckdb (activate with `sharur families activate`)  [default: skip-families]
 * `--family-min-seq-id FLOAT`: Stage 09 family identity threshold  [default: 0.3]
 * `--subfamily-min-seq-id FLOAT`: Stage 09 subfamily identity threshold  [default: 0.5]
+* `--family-rescue / --no-family-rescue`: Stage 09: place truncated gene calls into existing families as a separate layer (default follows the validated setting, docs/guides/protein-families.md)
 * `--embedding-model TEXT`: Hugging Face protein encoder for Stage 06 (default: facebook/esm2_t6_8M_UR50D)
 * `--profile TEXT`: Execution profile: auto, local (CPU), mps, or slurm  [default: auto]
 * `--slurm-cpus INTEGER RANGE`: With --profile slurm: CPUs to request for each stage job (--cpus-per-task); stages use every allocated CPU. Default: full-node jobs with no CPU request  [x>=1]

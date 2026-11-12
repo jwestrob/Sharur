@@ -516,8 +516,10 @@ coverage of both sequences, sensitivity 6 and `--cluster-reassign`. MMseqs2 and 
 allocated CPU.
 
 Outputs land in `stage09_families/`: the staging DuckDB `protein_families.duckdb`, the clustering
-tables (`clustering/level0.tsv.gz`, `level1.tsv.gz`) and `processing_manifest.json`. The dataset
-database stays unchanged, which keeps the Stage 07 ledger snapshot valid; load the families with
+tables (`clustering/level0.tsv.gz`, `level1.tsv.gz`) and `processing_manifest.json`.
+`--family-rescue` also adds the optional truncated-gene rescue layer (off by default; see the guide).
+The dataset database stays unchanged, which keeps the Stage 07 ledger snapshot valid; load the
+families with
 
 ```bash
 sharur families activate --db data/DATASET/sharur.duckdb \

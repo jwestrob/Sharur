@@ -79,22 +79,27 @@ of the same name is replaced. `--run NAME` (repeatable) copies selected runs.
 
 Several clusterings of the same proteins live side by side, each a **clustering run**. A Sharur
 build records two runs: `<build_id>-family` and `<build_id>-subfamily`, the second naming the first
-as its `parent_run`.
+as its `parent_run`. The optional truncated-gene rescue adds two derived runs on top,
+`<build_id>-family-rescued` and `<build_id>-subfamily-rescued` (see below).
 
 | Table / view | One row per | Columns |
 |---|---|---|
-| `protein_families` | protein and run | `protein_id`, `family_id`, `is_representative`, `clustering_run`, `bin_id`, `assignment` (`cluster`, `import`, or for later additions `search`, `new_subfamily`, `new_family`), `batch_id` |
-| `family_stats` | family and run | `family_id`, `clustering_run`, `n_members`, `n_genomes`, `rep_protein_id`, `rep_length`, `parent_family_id` (subfamily runs), `n_subfamilies` (family runs of a build), `n_orders` (GTDB orders in `bins.taxonomy`), `median_length`, `pfam_fraction` (members with any Pfam hit), `dominant_pfam_architecture` and `dominant_pfam_architecture_fraction` (share of all members), `ko_fraction`, `dominant_ko` and `dominant_ko_fraction`, `pfam_dark` (no member has a Pfam hit) |
-| `protein_family_runs` | run | `clustering_run`, `level`, `parent_run`, `build_id`, `origin` (`sharur` or `import`), `is_default`, `tool`, `tool_version`, `parameters`, `input_proteins`, `input_digest`, `families`, `source_db`, `details` |
+| `protein_families` | protein and run | `protein_id`, `family_id`, `is_representative`, `clustering_run`, `bin_id`, `assignment` (`cluster`, `import`, for later additions `search`, `new_subfamily`, `new_family`, and `rescue` in rescued runs), `batch_id` |
+| `family_stats` | family and run | `family_id`, `clustering_run`, `n_members`, `n_genomes`, `rep_protein_id`, `rep_length`, `parent_family_id` (subfamily runs), `n_subfamilies` (family runs of a build), `n_orders` (GTDB orders in `bins.taxonomy`), `median_length`, `pfam_fraction` (members with any Pfam hit), `dominant_pfam_architecture` and `dominant_pfam_architecture_fraction` (share of all members), `ko_fraction`, `dominant_ko` and `dominant_ko_fraction`, `pfam_dark` (no member has a Pfam hit), `n_rescued` (members placed by the rescue) |
+| `protein_family_runs` | run | `clustering_run`, `level`, `parent_run`, `build_id`, `origin` (`sharur`, `import` or `rescue`), `is_default`, `tool`, `tool_version`, `parameters`, `input_proteins`, `input_digest`, `families`, `source_db`, `details` |
 | `protein_family_assignments` | assignment batch | `batch_id`, `build_id`, `family_run`, `subfamily_run`, parameters, protein count and digest |
-| `genome_protein_families` (view) | genome and family of the default family run | `genome_id`, `feature_id`, `n_proteins` |
-| `genome_protein_subfamilies` (view) | genome and subfamily of the default subfamily run | `genome_id`, `feature_id`, `n_proteins` |
-| `genome_family_presence` (view) | run, genome and family | `clustering_run`, `genome_id`, `feature_id`, `n_proteins` |
-| `protein_family_levels` (view) | protein in the default build | `protein_id`, `bin_id`, `family_id`, `subfamily_id`, `family_run`, `subfamily_run` |
+| `protein_family_rescues` | rescued protein | `rescue_id`, `family_run`, `subfamily_run`, `base_family_run`, `protein_id`, `bin_id`, `partial`, `original_family_id`, `original_subfamily_id`, `family_id`, `subfamily_id`, `joined_subfamily`, `hit_protein_id`, `identity`, `query_coverage`, `target_coverage`, `bits`, `evalue`, `query_length`, `target_length` |
+| `genome_protein_families` (view) | genome and family of the default family run | `genome_id`, `feature_id`, `n_proteins`, `n_rescued` |
+| `genome_protein_subfamilies` (view) | genome and subfamily of the default subfamily run | `genome_id`, `feature_id`, `n_proteins`, `n_rescued` |
+| `genome_protein_families_clustered`, `genome_protein_subfamilies_clustered` (views) | the same over the clustering partition (rescued members left out) | `genome_id`, `feature_id`, `n_proteins` |
+| `genome_family_presence` (view) | run, genome and family | `clustering_run`, `genome_id`, `feature_id`, `n_proteins`, `n_rescued` |
+| `protein_family_levels` (view) | protein in the default build | `protein_id`, `bin_id`, `family_id`, `subfamily_id`, `family_run`, `subfamily_run`, `rescued` |
 
 Dominant architectures follow the rules of `sharur architecture` (Pfam hits, overlaps resolved,
 N- to C-terminal order). KOs come from the `kofam` and `kegg` sources; a protein carrying two KOs
-counts toward both.
+counts toward both. The tables carry their primary keys only: DuckDB scans `protein_families`
+for one protein or family in a fraction of a second, and secondary ART indexes cost about 110 bytes
+per row each on disk (files from before 2026-11-12 lose theirs at the next activation or rescue).
 
 ### Identifiers
 
@@ -247,3 +252,69 @@ FROM protein_family_levels l JOIN proteins p USING (protein_id)
 JOIN family_stats s ON s.family_id = l.family_id AND s.clustering_run = l.family_run
 WHERE p.partial IS NOT NULL GROUP BY 1;
 ```
+
+### The rescue layer (optional, off by default)
+
+The rescue places such fragments into existing families as a separate, labeled layer. Gene calls
+are never modified, and the clustering partition and build id stay as they were.
+
+- **Candidates:** proteins whose Prodigal partial flag marks a contig-edge truncation (`10`, `01`,
+  `11`) and whose family in the build has one member.
+- **Targets:** every protein of a family with at least `--min-family-size` members (default 2).
+- **Search:** MMseqs2 with the build's alignment settings; the best hit by bit score is accepted when
+  the alignment covers at least `--min-query-coverage` of the candidate (default 0.8; coverage of
+  the candidate only, `--cov-mode 2`) at identity of at least `--min-seq-id` (default: the family
+  floor, 0.3).
+- **Result:** the candidate joins the hit's family, and the hit's subfamily when identity also
+  reaches the subfamily floor. Derived runs `<build_id>-family-rescued` and
+  `<build_id>-subfamily-rescued` hold the build's membership with these proteins moved
+  (`assignment = 'rescue'`); `protein_family_rescues` records each one with its original family, the
+  hit, identity and coverages. `family_stats` has rows for both the base and the rescued runs.
+
+```bash
+sharur-ingest ... --with-families --family-rescue            # Stage 09 adds the layer
+sharur families run ... --rescue                             # the same for an existing dataset
+sharur families rescue --db data/my_dataset/sharur.duckdb \
+  --staging data/my_dataset/stage09_families/protein_families.duckdb             # add to a staging file
+sharur families rescue --db data/my_dataset/sharur.duckdb --include --publish   # add to a dataset, as default
+sharur families rescue ... --drop                                               # remove the layer
+```
+
+On a staging file the layer is written into a copy-on-write clone, the build's base runs are
+checked unchanged by fingerprint, the clone replaces the file with one rename, and the result is
+rewritten without free blocks. For a large dataset the search can run elsewhere:
+`--export-inputs DIR` writes `candidates.faa` and `targets.faa`,
+`python3 mmseqs.py search --query candidates.faa --target targets.faa --cov-mode 2 --top 5 ...`
+runs on a cluster node, and `--hits hits.tsv --tool-version VERSION` applies the result. `sharur
+families assign` recomputes an existing layer with its stored parameters, so newly assigned
+fragments are covered too.
+
+**Including or excluding rescued members.** By default an added layer is excluded: it is stored,
+and the defaults stay on the base runs. With `--include` (`--rescue-include` for Stage 09 and
+`sharur families run`) the rescued runs become the defaults: `genome_protein_families`,
+`genome_protein_subfamilies` and `protein_family_levels` then include rescued members, flagged by
+`n_rescued` and `rescued`. `genome_protein_families_clustered` and
+`genome_protein_subfamilies_clustered` always give the clustering partition, and
+`genome_family_presence` and `family_stats` carry the base and the rescued runs side by side. The
+SQL macros read the rescued runs wherever a layer exists unless given `include_rescued := false`,
+and mark rescued members with `evidence = 'rescued'`.
+
+**Why it is off by default.** The rescue was validated against acceptance criteria written before
+the runs, on a dataset of 3.6 million archaeal proteins:
+
+1. **Simulated truncation:** complete proteins from multi-member families, stratified by family
+   size and length, cut as a contig end would cut them (an N- or C-terminal piece, kept fraction
+   uniform between 0.15 and 0.95), with the intact original removed from the targets. Criterion:
+   at most 1% of fragments join a family other than their own.
+2. **Negative control:** the same for complete proteins that are family singletons. Criterion: at
+   most 2% join any family.
+3. **Real truncated genes:** among rescued genes carrying a Pfam hit, every domain of the gene in the
+   dominant Pfam architecture of the family it joined. Criterion: at least 95%.
+
+The rule met none of the three. Most simulated fragments returned to their own family, but joins to
+another family ran at several percent in every kept-fraction and length bin, and fragments of
+genuine singletons joined a family often. Coverage of the candidate alone cannot separate a gene cut
+by a contig end from a protein that shares a domain or a stretch with another family. The layer
+therefore stays opt-in: use it where more complete families matter more than a few percent of
+misplaced fragments, and read `rescue` rows as observed homology to a family, a weaker statement
+than membership from clustering.
