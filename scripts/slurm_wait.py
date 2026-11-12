@@ -5,8 +5,8 @@ An agent harness that notifies on background-process exit (Claude Code's
 ``run_in_background``) turns this into a completion watcher: start it right
 after ``sbatch`` and the session hears back when the jobs end, fail, or wedge.
 
-    python scripts/slurm_wait.py 21001 21002_[0-15] --host jwestrob@biotite.berkeley.edu \
-        --log '/groups/.../logs/cazy_%j.out'
+    python scripts/slurm_wait.py 21001 21002_[0-15] --host user@cluster.example.edu \
+        --log '/path/to/logs/cazy_%j.out'
 
 It polls ``sacct`` (over SSH when ``--host`` is given) every ``--interval``
 seconds. Array jobs are tracked task by task. A pending job whose reason is

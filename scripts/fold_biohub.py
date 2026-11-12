@@ -2,7 +2,7 @@
 """Fold proteins with ESMFold2 through the Biohub batch API, optionally with an MSA and ligands.
 
 No GPU and no third-party packages: the script only talks HTTP (stdlib urllib), so it
-runs on the Mac or the biotite login node without loading either.
+runs on a workstation or a cluster login node without loading either.
 
 Usage:
     # plain fold (fast model, endpoint "fold")
@@ -34,11 +34,10 @@ Options:
 
 MSA handling: lowercase A3M insertions are dropped; the row whose ungapped sequence equals the
 query (else the first row) becomes the anchor; columns where the anchor has a gap are removed, so
-every row has the query's length. Build MSAs on biotite (mafft on a protein family, or
+every row has the query's length. Build MSAs on a compute host (mafft on a protein family, or
 colabfold_search); this script only reads them.
 
-Auth: BIOHUB_API_KEY, or ESM_API_KEY (the same key works). On Jacob's Mac ESM_API_KEY is set in
-the shell environment; on biotite it is not set (as of 2026-11-03).
+Auth: BIOHUB_API_KEY, or ESM_API_KEY (the same key works), set in the shell environment.
 
 Output per sequence: <name>.pdb (protein ATOM records plus ligand HETATM records on chains B, C, ...;
 pLDDT x 100 in the B-factor column), <name>.json (model, pTM, ipTM, pLDDT, PAE if requested), and

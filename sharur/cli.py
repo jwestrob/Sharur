@@ -1512,7 +1512,7 @@ def reverify_command(
     timeout: float = typer.Option(1800.0, "--timeout", help="Seconds per shell triple."),
     reports: list[str] = typer.Option(
         [], "--reports", help="Glob (relative to the repo root) of documents to scan for citations of "
-                              "failing or changed findings, repeatable; e.g. 'data/srvp_joint/reports/*.md'."),
+                              "failing or changed findings, repeatable; e.g. 'data/joint_dataset/reports/*.md'."),
     out: Optional[Path] = typer.Option(None, "--out", "-o", help="Write every triple's result as TSV."),
     output_format: BriefFormat = typer.Option(BriefFormat.markdown, "--format", "-f"),
     strict: bool = typer.Option(False, "--strict", help="Exit 1 on any FAIL/ERROR (or change, with --compare)."),

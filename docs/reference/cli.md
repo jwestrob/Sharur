@@ -608,7 +608,7 @@ $ sharur reverify [OPTIONS] FINDINGS...
 * `--threads INTEGER`: DuckDB threads per replay connection.  [default: 2]
 * `--memory-limit TEXT`: DuckDB memory limit per connection.  [default: 4GB]
 * `--timeout FLOAT`: Seconds per shell triple.  [default: 1800.0]
-* `--reports TEXT`: Glob (relative to the repo root) of documents to scan for citations of failing or changed findings, repeatable; e.g. 'data/srvp_joint/reports/*.md'.
+* `--reports TEXT`: Glob (relative to the repo root) of documents to scan for citations of failing or changed findings, repeatable; e.g. 'data/joint_dataset/reports/*.md'.
 * `-o, --out PATH`: Write every triple's result as TSV.
 * `-f, --format [markdown|json]`: [default: markdown]
 * `--strict`: Exit 1 on any FAIL/ERROR (or change, with --compare).

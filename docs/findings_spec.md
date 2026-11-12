@@ -382,13 +382,13 @@ Write queries in a form it can replay:
 
 ```bash
 # every triple of one dataset
-sharur reverify data/srvp_archaea --out reverify.tsv
+sharur reverify data/my_dataset --out reverify.tsv
 # before publishing a refresh: which recorded numbers would a staged copy change?
-sharur reverify data/srvp_archaea data/srvp_joint --touching 'defense_systems|defensefinder' \
-    --compare -s data/srvp_archaea/sharur.duckdb=/scratch/staged.duckdb \
-    --reports 'data/srvp_joint/reports/*.md'
+sharur reverify data/my_dataset data/joint_dataset --touching 'defense_systems|defensefinder' \
+    --compare -s data/my_dataset/sharur.duckdb=/scratch/staged.duckdb \
+    --reports 'data/joint_dataset/reports/*.md'
 # after publishing: compare against the pre-publish backup
-sharur reverify data/srvp_archaea --compare -b data/srvp_archaea/sharur.duckdb=BACKUP.duckdb
+sharur reverify data/my_dataset --compare -b data/my_dataset/sharur.duckdb=BACKUP.duckdb
 ```
 
 A statistical result is a triple with three more keys: `check: "statistical"`, a per-value

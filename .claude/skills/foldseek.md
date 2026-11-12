@@ -125,10 +125,10 @@ with open(f"structures/{protein_id}.cif", "w") as f:
 
 `scripts/fold_biohub.py` submits FASTA files to the hosted ESMFold2 models, polls until every
 task finishes, and writes one PDB per sequence. It uses only the Python standard library and
-does no local compute, so it runs on the Mac or the biotite login node.
+does no local compute, so it runs on a workstation or a cluster login node.
 
 ```bash
-export ESM_API_KEY=...          # or BIOHUB_API_KEY; set on Jacob's Mac, not on biotite
+export ESM_API_KEY=...          # or BIOHUB_API_KEY
 
 # plain fold (fast model, endpoint "fold")
 python scripts/fold_biohub.py OUT_DIR proteins.faa [more.faa]
@@ -145,11 +145,11 @@ python scripts/fold_biohub.py OUT_DIR p.faa --smiles "CC(=O)O:1"
   - `--msa FILE` covers one input sequence. `--msa-dir DIR` reads `<name>.a3m/.fa/.fasta/.aln` per sequence.
   - `--pae` saves the PAE, and `--model` overrides the default model.
 - **MSA format.** Aligned FASTA (e.g. raw mafft output) or A3M. The script drops lowercase insertions, finds the query row anywhere in the file, and removes columns where the query has a gap.
-- **Building an MSA.** Run it on biotite:
-  - `mafft --auto` on a protein family (e.g. an mmseqs cluster) works well for SR-VP families.
+- **Building an MSA.** Run it on a compute host:
+  - `mafft --auto` on a protein family (e.g. an mmseqs cluster) works well for metagenomic protein families.
   - `colabfold_search` builds a general MSA. Carry the mmseqs bad-node exclude line.
 - **Output.** `<name>.pdb` has the protein on chain A and ligands as HETATM on chains B, C, …, with pLDDT × 100 in the B-factor column. `<name>.json` holds pTM, ipTM, pLDDT and optional PAE. `summary.tsv` has `protein_plddt`, `ptm`, `iptm`, and, with HEC ligands, `hemes_on_cxxch`: the motif His is axial to Fe within 2.6 Å and both Cys SG lie within 2.7 Å of the heme vinyl carbons.
-- **What worked (SR-VP, 2026-11-03).** A Methanoperedens 5-heme cytochrome went from pTM 0.28 / pLDDT 38 (single sequence, no ligand) to pTM 0.68 / pLDDT 76 with a 52-sequence family MSA plus `HEC:auto`. Without covalent-bond constraints, 32 of 34 hemes landed on their CxxCH motifs across five proteins. Adding Ca²⁺ ions made the fold worse.
+- **What worked (2026-11-03).** A Methanoperedens 5-heme cytochrome went from pTM 0.28 / pLDDT 38 (single sequence, no ligand) to pTM 0.68 / pLDDT 76 with a 52-sequence family MSA plus `HEC:auto`. Without covalent-bond constraints, 32 of 34 hemes landed on their CxxCH motifs across five proteins. Adding Ca²⁺ ions made the fold worse.
 - **Non-standard residues.** Use `--mod POS:CCD` (1-based position), for example `--mod 349:PYL` on a K placeholder for pyrrolysine. Writing `O` or `U` in the sequence gives an UNK residue with only the backbone and CB. The modification builds the full side chain (MtbB with Pyl: pTM 0.81).
 - **Gotchas.**
   - Strip the trailing `*` that gene callers write. The script does this; the API otherwise fails each task with `422: Invalid character(s)`.
@@ -157,7 +157,7 @@ python scripts/fold_biohub.py OUT_DIR p.faa --smiles "CC(=O)O:1"
   - Each complex can have at most 36 chains (1 protein + 35 ligands); the script stops early on larger requests.
   - Batch items are sometimes rejected with `422 … exceeds maximum allowed sequence length (768)` even though batch limits are 4,096 tokens. Resubmitting succeeds, and the script retries these automatically (2026-11-03: 147 of 423 rejected, 145 recovered on retry).
   - The API supports explicit covalent bonds and pocket conditioning, but the script does not expose them yet.
-- **Permission.** Jacob approved sending unpublished SR-VP sequences to this API (2026-11-03). Other external sequence services still need his go-ahead.
+- **Permission.** The project owner approved sending unpublished sequences to this API (2026-11-03). Other external sequence services still need the owner's go-ahead.
 
 ### ESM3 API: quick look (≤ 1,024 aa)
 

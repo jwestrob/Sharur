@@ -245,7 +245,7 @@ runs as a second array.
 single-process ones byte for byte, that a protein-split HMM search changes calls, and that each merge
 check above stops a merge.
 
-Measured on biotite (24 CPUs per job) for the SR-VP archaeal set, 1,976,915 proteins and 38,883
+Measured on a Slurm cluster (24 CPUs per job) for an archaeal metagenome set, 1,976,915 proteins and 38,883
 dbCAN-sub candidates, with all 16 shards running at once:
 
 | Stage | 16 shards | Single process |
