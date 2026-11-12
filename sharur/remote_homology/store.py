@@ -539,7 +539,15 @@ def load_families(
             con.execute(ddl)
         for table in (HITS, STATUS, RUNS):
             con.execute(f"DELETE FROM {table} WHERE clustering_run = ?", [run])
-        con.executemany(f"INSERT INTO {STATUS} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", status_rows)
+        import pandas as pd  # noqa: PLC0415
+
+        status_df = pd.DataFrame(status_rows, columns=[
+            "search_run", "clustering_run", "family_id", "status", "n_members", "n_genomes", "n_unique",
+            "n_sequences", "rep_protein_id", "rep_length", "n_hits", "verified", "seconds", "steps", "error"])
+        status_df = status_df.astype({"n_hits": "Int64", "verified": "boolean", "seconds": "Float64"})
+        con.register("_rh_status_df", status_df)
+        con.execute(f"INSERT INTO {STATUS} SELECT * FROM _rh_status_df")
+        con.unregister("_rh_status_df")
         con.execute("CREATE OR REPLACE TEMP TABLE _rh_db AS SELECT * FROM (VALUES "
                     + ", ".join("(?, ?, ?)" for _ in db_cols) + ") t(source, db_name, db_version)",
                     [x for s, (n, v) in db_cols.items() for x in (s, n, v)])
