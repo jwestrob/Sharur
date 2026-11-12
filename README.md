@@ -42,12 +42,18 @@ Rules every agent follows live in `CLAUDE.md`: report domain observations separa
 ```bash
 git clone https://github.com/jwestrob/Sharur.git
 cd Sharur
-pip install -e ".[all,dev]"
-sharur doctor          # which external tools, reference databases and keys are present
+conda env create -f environment.yml    # tools, Sharur, Aksha (Linux x86-64), MacSyFinder
+conda activate sharur
+# HMM databases, DefenseFinder models, HydDB reference: the commands in INSTALL.md's Quick Start
 sharur setup-kegg      # build the KEGG predicate map locally (KEGG REST, academic use)
+sharur doctor --strict # which external tools, reference databases and keys are present
 ```
 
-`pip install -e "."` is the lean core; focused extras include `parquet`, `vectors`, `embeddings`, `ops`, `visualization`, `structure`, `reports`, and `notebooks`. External tools (Prodigal, DIAMOND, HMMER, Aksha, Foldseek, …) and reference databases install separately; see [`INSTALL.md`](INSTALL.md).
+The full ingest runs on Linux x86-64 (Aksha's runtime); see [`INSTALL.md`](INSTALL.md) for disk
+needs, macOS and pip-only installs. `pip install -e "."` is the lean core; focused extras include
+`parquet`, `vectors`, `embeddings`, `ops`, `visualization`, `structure`, `reports`, and
+`notebooks`. [`examples/complete_genomes`](examples/complete_genomes/README.md) lists 16 complete
+public genomes, with a download script and expected answers, for a first ingest.
 
 KEGG data is subject to [KEGG's terms](https://www.kegg.jp/kegg/legal.html): `sharur setup-kegg` builds the KO → predicate map on your machine, and non-academic users can build from a licensed KEGG copy with `--inputs`. Sharur ships only its own rules; see [`DATA_LICENSES.md`](DATA_LICENSES.md).
 
@@ -61,7 +67,7 @@ sharur-ingest \
   --profile auto
 ```
 
-`sharur-ingest` runs a ledger-backed, resumable stage DAG and builds DuckDB before launching embeddings. Optional stages are opt-in (`--with-quast`, `--with-dfast`, `--with-gecco`, MMseqs2 protein families with `--with-families`; the dbCAN three-tool consensus with `--enable-cazymes`). Choose `--profile local`, `mps`, or `slurm` when `auto` does not fit, and inspect the plan with `--dry-run`. See [`QUICKSTART.md`](QUICKSTART.md) and [`src/ingest/README.md`](src/ingest/README.md).
+`sharur-ingest` runs a ledger-backed, resumable stage DAG and builds DuckDB before launching embeddings. Without a GPU, add `--skip-embeddings` ([QUICKSTART.md](QUICKSTART.md#without-a-gpu)). Optional stages are opt-in (`--with-quast`, `--with-dfast`, `--with-gecco`, MMseqs2 protein families with `--with-families`; the dbCAN three-tool consensus with `--enable-cazymes`). Choose `--profile local`, `mps`, or `slurm` when `auto` does not fit, and inspect the plan with `--dry-run`. See [`QUICKSTART.md`](QUICKSTART.md) and [`src/ingest/README.md`](src/ingest/README.md).
 
 ### First look
 

@@ -18,23 +18,32 @@ If you only have pre-called proteins and no assemblies, see [Alternative: Protei
 ## Prerequisites
 
 ### Software
-- Python 3.10+ with Sharur installed: `pip install -e ".[embeddings]"`
-- Prodigal
-- [Aksha](https://github.com/jwestrob/aksha) (HMM search; see [INSTALL.md](INSTALL.md#aksha-hmm-search))
-- MinCED
-- Optional but recommended GPU access for Stage 06 embeddings
+The conda environment of [INSTALL.md](INSTALL.md) provides all of it; `sharur doctor --strict`
+confirms it.
+- Linux x86-64 for Stage 04: [Aksha](https://github.com/jwestrob/aksha), the HMM search, ships
+  its compiled runtime for Linux x86-64 with Python 3.12
+- Sharur installed: `pip install -e ".[embeddings]"` (the conda environment installs `.[all,dev]`)
+- Prodigal, MinCED and HMMER (bioconda)
+- A GPU for Stage 06 embeddings, or `--skip-embeddings` ([Without a GPU](#without-a-gpu))
 
 If `sharur-ingest` is not available after install, refresh the editable install:
 `pip install -e ".[embeddings]"`
 
 ### HMM databases (`aksha initialize --hmms NAME`)
-- Standard: `PFAM`, `KOFAM`, `HydDB`, `DefenseFinder`, `dbCAN`
-- Optional: `TXSScan`, `VOGdb`, `CANT-HYD`
+- Standard: `PFAM`, `KOFAM`, `HydDB`, `DefenseFinder`, `dbCAN` (Stage 04 searches all five)
+- Optional: `TXSScan`, `VOGdb`, `CANT-HYD`, `CCTyper` (for `sharur cas-type`)
+- DefenseFinder system models for Stage 07's defense caller:
+  `macsydata install --user --org mdmparis defense-finder-models`
+
+Stage 07 takes Pfam accessions, names and descriptions from `pfam_id_desc.tsv` in the reference
+directory when present, otherwise from the `Pfam-A.hmm` that Aksha installed.
 
 ### Reference data built or fetched once per machine
 - `sharur setup-kegg` builds the KO → predicate map and KEGG module definitions locally from KEGG REST
   (academic use; `--inputs` builds from a licensed KEGG copy). KEGG-derived predicates and
   `sharur modules` use it.
+- The HydDB DIAMOND reference (`data/reference/hyddb/HydDB_all.dmnd`) gives Stage 07's
+  hydrogenase subgroup calls; without it Stage 07 skips them.
 - VOGdb's `vog.annotations.tsv` supplies VOG descriptions and functional categories for predicates
   and the browser. See [INSTALL.md](INSTALL.md#reference-databases).
 - Optional: [CoverM](https://github.com/wwood/CoverM) for per-sample read coverage (Stage 08).
@@ -107,6 +116,23 @@ stage order and paths without creating the dataset directory.
 `--pipeline-depth 2` is the bounded Stage 07 default. It keeps two ordered V2
 transform chunks in flight while the sole DuckDB writer commits the preceding
 chunk.
+
+### Without a GPU
+
+Stage 06 computes protein-language-model embeddings and expects a GPU: the `slurm` profile
+requests one CUDA GPU for it on `SHARUR_SLURM_GPU_PARTITION`. On a machine or cluster without
+GPUs, leave it out:
+
+```bash
+sharur-ingest --input-dir /path/to/genome_fastas --data-dir data/my_dataset \
+  --output data/my_dataset/sharur.duckdb --skip-embeddings
+```
+
+Every other layer is complete without embeddings: annotations, predicates, curated callers,
+CRISPR arrays, the SQL surface, protein families and remote homology. Embedding similarity
+(`find_similar`), the persistent FAISS index and ELSA synteny need embeddings; add them later by
+running Stage 06 on a GPU host, or load embeddings computed elsewhere with
+`sharur build-vector-index --embeddings FILE`.
 
 ## Manual Stage-by-Stage Pipeline
 
