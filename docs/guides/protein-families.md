@@ -94,7 +94,11 @@ as its `parent_run`.
 
 Dominant architectures follow the rules of `sharur architecture` (Pfam hits, overlaps resolved,
 N- to C-terminal order). KOs come from the `kofam` and `kegg` sources; a protein carrying two KOs
-counts toward both.
+counts toward both. The tables carry their primary keys only: DuckDB scans `protein_families` for
+one protein or family in a fraction of a second, while secondary ART indexes on `protein_id` and
+`family_id` together cost about 100 bytes per row on disk. Files written before 2026-11-12 carry those
+two indexes; loading, importing or `compact_family_file` (which also rewrites a staging file without free
+blocks) drops them.
 
 ### Identifiers
 

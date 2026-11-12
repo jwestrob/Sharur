@@ -81,6 +81,11 @@ VIEWS = (PRESENCE, GENOME_FAMILIES, GENOME_SUBFAMILIES, LEVELS_VIEW)
 SCHEMA_VERSION = 2
 # A build whose share of assigned proteins exceeds this is due for a full re-cluster.
 RECLUSTER_ASSIGNED_FRACTION = 0.10
+# Catalog prefix of the dataset database attached as the source of proteins (staging-file work). DuckDB names a
+# file's own catalog after the file, so attachments use names a dataset or staging file cannot take.
+SRC = "__pf_src."
+_STG = "__pf_stg"
+_OLD = "__pf_old"
 _RUN_NAME = re.compile(r"[A-Za-z0-9][\w.-]*")
 
 DDL = {
@@ -147,10 +152,11 @@ DDL = {
 }
 SCHEMA = ";\n".join(DDL.values()) + ";"
 
-INDEXES = f"""
-CREATE INDEX IF NOT EXISTS idx_protein_families_protein ON {MEMBERS}(protein_id);
-CREATE INDEX IF NOT EXISTS idx_protein_families_family ON {MEMBERS}(family_id);
-"""
+# The two secondary ART indexes on protein_families cost about 100 bytes per row together on disk (about
+# 70 for protein_id, 30 for family_id; 730 MB at 7.2 million rows) and buy little: DuckDB scans the columns
+# of one run for a protein or a family in a fraction of a second. Files written before 2026-11-12 carry
+# them; `_finalize` drops them.
+LEGACY_INDEXES = ("idx_protein_families_protein", "idx_protein_families_family")
 
 VIEW_SQL = f"""
 CREATE OR REPLACE VIEW {PRESENCE} AS
@@ -211,7 +217,8 @@ def representative_of(feature_id: str) -> str:
 def has_families(con: duckdb.DuckDBPyConnection, catalog: str | None = None) -> bool:
     rows = con.execute(
         "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' "
-        + ("AND table_catalog = ? " if catalog else "") + "AND table_name IN (?, ?, ?)",
+        + ("AND table_catalog = ? " if catalog else "AND table_catalog = current_database() ")
+        + "AND table_name IN (?, ?, ?)",
         [*([catalog] if catalog else []), MEMBERS, RUNS, STATS]).fetchall()
     return len(rows) == 3
 
@@ -407,8 +414,80 @@ def build_stats(con, runs: Sequence[str], *, prefix: str = "") -> dict[str, int]
 
 
 def _finalize(con) -> None:
-    con.execute(INDEXES)
+    for view in VIEWS:
+        con.execute(f"DROP VIEW IF EXISTS {view}")
+    for index in LEGACY_INDEXES:
+        con.execute(f"DROP INDEX IF EXISTS {index}")
     con.execute(VIEW_SQL)
+
+
+def _columns(con, table: str, catalog: str | None = None) -> list[str]:
+    """Columns of ``table`` in ``catalog`` (default: the connection's own database), in order."""
+    return [r[0] for r in con.execute(
+        "SELECT column_name FROM information_schema.columns WHERE table_schema = 'main' AND table_name = ? "
+        + ("AND table_catalog = ? " if catalog else "AND table_catalog = current_database() ")
+        + "ORDER BY ordinal_position", [table, *([catalog] if catalog else [])]).fetchall()]
+
+
+def _copy_rows(con, table: str, source: str, where: str) -> None:
+    """INSERT the rows of ``source``.``table`` matching ``where``, matching columns by name.
+
+    Files written by other versions may lack a column (it stays NULL) or carry one this
+    version does not know (it is left out).
+    """
+    available = set(_columns(con, table, source))
+    cols = ", ".join(f'"{c}"' for c in _columns(con, table) if c in available)
+    con.execute(f"INSERT INTO {table} ({cols}) SELECT {cols} FROM {source}.{table} t WHERE {where}")
+
+
+def _table_fingerprint(con, table: str, catalog: str | None = None,
+                       columns: Sequence[str] | None = None) -> tuple[int, int]:
+    """(rows, summed row hashes) of a table: equal for the same rows in any order."""
+    cols = list(columns or _columns(con, table, catalog))
+    packed = "struct_pack(" + ", ".join(f'"{c}" := t."{c}"' for c in cols) + ")"
+    source = f"{catalog}.{table}" if catalog else table
+    n, h = con.execute(f"SELECT COUNT(*), COALESCE(SUM(hash({packed})::HUGEINT), 0) FROM {source} t").fetchone()
+    return int(n), int(h)
+
+
+def compact_family_file(path: Path | str, *, threads: int = 4, memory_limit: str = "8GB") -> dict[str, Any]:
+    """Rewrite a staging file without free blocks or legacy indexes; replace it atomically.
+
+    Every family table is copied whole (columns matched by name) and checked by row
+    count and by a content fingerprint over the columns both files share; the original
+    is replaced with one rename, so readers see the old or the new file whole.
+    """
+    import os  # noqa: PLC0415
+
+    path = Path(path).expanduser().resolve()
+    tmp = path.with_name(path.name + ".compact.tmp")
+    for stale in (tmp, Path(str(tmp) + ".wal")):
+        stale.unlink(missing_ok=True)
+    before = path.stat().st_size
+    con = connect(tmp, threads=threads, memory_limit=memory_limit)
+    try:
+        con.execute(f"ATTACH {_q(path)} AS {_OLD} (READ_ONLY)")
+        present = [t for t in TABLES if _columns(con, t, _OLD)]
+        con.execute(SCHEMA)
+        rows = {}
+        for table in present:
+            _copy_rows(con, table, _OLD, "true")
+            shared = [c for c in _columns(con, table) if c in set(_columns(con, table, _OLD))]
+            new, old = _table_fingerprint(con, table, columns=shared), _table_fingerprint(con, table, _OLD, shared)
+            if new != old:
+                raise FamilyError(f"{table}: copy differs from the original ({old} -> {new})")
+            rows[table] = new[0]
+        _finalize(con)
+        con.execute(f"DETACH {_OLD}")
+        con.execute("CHECKPOINT")
+    except Exception:
+        con.close()
+        tmp.unlink(missing_ok=True)
+        Path(str(tmp) + ".wal").unlink(missing_ok=True)
+        raise
+    con.close()
+    os.replace(tmp, path)
+    return {"rows": rows, "bytes_before": before, "bytes_after": path.stat().st_size}
 
 
 # --------------------------------------------------------------------------- #
@@ -470,10 +549,10 @@ def build_staging(
     tmp = _staging_tmp(staging)
     con = connect(tmp, threads=threads, memory_limit=memory_limit)
     try:
-        con.execute(f"ATTACH {_q(db)} AS src (READ_ONLY)")
+        con.execute(f"ATTACH {_q(db)} AS {SRC.rstrip('.')} (READ_ONLY)")
         started = time.time()
         if verify_digest:
-            live = export_proteins(con, None, prefix="src.")
+            live = export_proteins(con, None, prefix=SRC)
             if live["digest"] != export_manifest["digest"]:
                 raise FamilyError(
                     f"{db}: protein sequences differ from the clustered export "
@@ -484,10 +563,10 @@ def build_staging(
         _read_tsv(con, "l1", clustering_dir / "level1.tsv.gz")
         _check_partition(con, "l0", "subfamily level")
         _check_partition(con, "l1", "family level")
-        n0, n_sub, n1, reps_unplaced, unknown = con.execute("""
+        n0, n_sub, n1, reps_unplaced, unknown = con.execute(f"""
             SELECT (SELECT COUNT(*) FROM l0), (SELECT COUNT(DISTINCT rep) FROM l0), (SELECT COUNT(*) FROM l1),
                    (SELECT COUNT(*) FROM (SELECT DISTINCT rep FROM l0) r ANTI JOIN l1 ON l1.member = r.rep),
-                   (SELECT COUNT(*) FROM l0 ANTI JOIN src.proteins p ON p.protein_id = l0.member)""").fetchone()
+                   (SELECT COUNT(*) FROM l0 ANTI JOIN {SRC}proteins p ON p.protein_id = l0.member)""").fetchone()
         if n0 != export_manifest["proteins"]:
             raise FamilyError(f"clustering holds {n0:,} proteins, the export {export_manifest['proteins']:,}")
         if n_sub != n1 or reps_unplaced:
@@ -518,15 +597,15 @@ def build_staging(
         con.execute(f"""
             INSERT INTO {MEMBERS}
             SELECT l0.member, 'fam:{tag}:' || l1.rep, l0.member = l1.rep, '{family_run}', p.bin_id, 'cluster', NULL
-            FROM l0 JOIN l1 ON l1.member = l0.rep JOIN src.proteins p ON p.protein_id = l0.member""")
+            FROM l0 JOIN l1 ON l1.member = l0.rep JOIN {SRC}proteins p ON p.protein_id = l0.member""")
         con.execute(f"""
             INSERT INTO {MEMBERS}
             SELECT l0.member, 'sub:{tag}:' || l0.rep, l0.member = l0.rep, '{subfamily_run}', p.bin_id, 'cluster', NULL
-            FROM l0 JOIN src.proteins p ON p.protein_id = l0.member""")
+            FROM l0 JOIN {SRC}proteins p ON p.protein_id = l0.member""")
         log(f"build {build_id}: {n0:,} proteins, {n_sub:,} subfamilies")
-        counts = build_stats(con, [family_run, subfamily_run], prefix="src.")
+        counts = build_stats(con, [family_run, subfamily_run], prefix=SRC)
         _finalize(con)
-        con.execute("DETACH src")
+        con.execute(f"DETACH {SRC.rstrip('.')}")
         con.execute("CHECKPOINT")
     except Exception:
         con.close()
@@ -585,17 +664,17 @@ def import_clustering(
     staging.parent.mkdir(parents=True, exist_ok=True)
     con = connect(staging, threads=threads, memory_limit=memory_limit)
     try:
-        con.execute(f"ATTACH {_q(db)} AS src (READ_ONLY)")
+        con.execute(f"ATTACH {_q(db)} AS {SRC.rstrip('.')} (READ_ONLY)")
         _read_tsv(con, "ext", Path(tsv))
         _check_partition(con, "ext", str(tsv))
-        n, unknown, n_clusters = con.execute("""
-            SELECT COUNT(*), (SELECT COUNT(*) FROM ext ANTI JOIN src.proteins p ON p.protein_id = ext.member),
+        n, unknown, n_clusters = con.execute(f"""
+            SELECT COUNT(*), (SELECT COUNT(*) FROM ext ANTI JOIN {SRC}proteins p ON p.protein_id = ext.member),
                    COUNT(DISTINCT rep) FROM ext""").fetchone()
         if unknown:
             raise FamilyError(f"{unknown:,} of {n:,} clustered proteins are absent from {db}")
-        not_covered = con.execute("SELECT COUNT(*) FROM src.proteins p ANTI JOIN ext ON ext.member = p.protein_id"
+        not_covered = con.execute(f"SELECT COUNT(*) FROM {SRC}proteins p ANTI JOIN ext ON ext.member = p.protein_id"
                                   ).fetchone()[0]
-        digest = _digest_of(con, "SELECT member AS protein_id FROM ext", "src.")
+        digest = _digest_of(con, "SELECT member AS protein_id FROM ext", SRC)
         partition = con.execute("SELECT sha256(string_agg(member || chr(9) || rep, chr(10) ORDER BY member)) "
                                 "FROM ext").fetchone()[0]
         tag = _sha({"name": name, "parameters": parameters, "digest": digest["digest"], "partition": partition})[:10]
@@ -614,14 +693,14 @@ def import_clustering(
             con.execute(f"""
                 INSERT INTO {MEMBERS}
                 SELECT ext.member, 'fam:{tag}:' || ext.rep, ext.member = ext.rep, ?, p.bin_id, 'import', NULL
-                FROM ext JOIN src.proteins p ON p.protein_id = ext.member""", [name])
-            counts = build_stats(con, [name], prefix="src.")
+                FROM ext JOIN {SRC}proteins p ON p.protein_id = ext.member""", [name])
+            counts = build_stats(con, [name], prefix=SRC)
             _finalize(con)
             con.execute("COMMIT")
         except Exception:
             con.execute("ROLLBACK")
             raise
-        con.execute("DETACH src")
+        con.execute(f"DETACH {SRC.rstrip('.')}")
         con.execute("CHECKPOINT")
     finally:
         con.close()
@@ -666,11 +745,11 @@ def load_staging(con: duckdb.DuckDBPyConnection, staging: Path | str, *, runs: S
     sequences of each run's and assignment batch's proteins must match the digest
     recorded when they were clustered, imported or assigned.
     """
-    con.execute(f"ATTACH {_q(Path(staging).expanduser().resolve())} AS stg (READ_ONLY)")
+    con.execute(f"ATTACH {_q(Path(staging).expanduser().resolve())} AS {_STG} (READ_ONLY)")
     try:
-        if not has_families(con, catalog="stg"):
+        if not has_families(con, catalog=_STG):
             raise FamilyError(f"{staging} holds no protein-family tables")
-        staged = [r[0] for r in con.execute(f"SELECT clustering_run FROM stg.{RUNS} ORDER BY 1").fetchall()]
+        staged = [r[0] for r in con.execute(f"SELECT clustering_run FROM {_STG}.{RUNS} ORDER BY 1").fetchall()]
         selected = list(runs) if runs else staged
         unknown = sorted(set(selected) - set(staged))
         if unknown:
@@ -680,13 +759,13 @@ def load_staging(con: duckdb.DuckDBPyConnection, staging: Path | str, *, runs: S
         missing, moved = con.execute(f"""
             SELECT COUNT(*) FILTER (WHERE p.protein_id IS NULL),
                    COUNT(*) FILTER (WHERE p.protein_id IS NOT NULL AND p.bin_id IS DISTINCT FROM f.bin_id)
-            FROM stg.{MEMBERS} f JOIN _pf_load USING (clustering_run)
+            FROM {_STG}.{MEMBERS} f JOIN _pf_load USING (clustering_run)
             LEFT JOIN proteins p USING (protein_id)""").fetchone()
         if missing or moved:
             raise FamilyError(f"{missing:,} staged proteins are absent from the database and {moved:,} sit in "
                               "another genome; the staging file belongs to another protein set")
         if verify_digest:
-            _check_digests(con, "stg", selected)
+            _check_digests(con, _STG, selected)
             log("sequence digests verified")
         con.execute("BEGIN TRANSACTION")
         try:
@@ -694,17 +773,18 @@ def load_staging(con: duckdb.DuckDBPyConnection, staging: Path | str, *, runs: S
                 con.execute(f"DROP VIEW IF EXISTS {view}")
             con.execute(SCHEMA)
             defaults = [r[0] for r in con.execute(
-                f"SELECT DISTINCT level FROM stg.{RUNS} JOIN _pf_load USING (clustering_run) WHERE is_default"
+                f"SELECT DISTINCT level FROM {_STG}.{RUNS} JOIN _pf_load USING (clustering_run) WHERE is_default"
             ).fetchall()]
             if defaults:
                 con.execute(f"UPDATE {RUNS} SET is_default = false WHERE list_contains(?::VARCHAR[], level)",
                             [defaults])
+            loaded = "(SELECT clustering_run FROM _pf_load)"
             for table in (MEMBERS, STATS, RUNS):
-                con.execute(f"DELETE FROM {table} WHERE clustering_run IN (SELECT clustering_run FROM _pf_load)")
-                con.execute(f"INSERT INTO {table} SELECT t.* FROM stg.{table} t JOIN _pf_load USING (clustering_run)")
-            con.execute(f"DELETE FROM {BATCHES} WHERE family_run IN (SELECT clustering_run FROM _pf_load)")
-            con.execute(f"INSERT INTO {BATCHES} SELECT b.* FROM stg.{BATCHES} b "
-                        "JOIN _pf_load l ON l.clustering_run = b.family_run")
+                con.execute(f"DELETE FROM {table} WHERE clustering_run IN {loaded}")
+                _copy_rows(con, table, _STG, f"t.clustering_run IN {loaded}")
+            con.execute(f"DELETE FROM {BATCHES} WHERE family_run IN {loaded}")
+            if _columns(con, BATCHES, _STG):
+                _copy_rows(con, BATCHES, _STG, f"t.family_run IN {loaded}")
             _finalize(con)
             con.execute("COMMIT")
         except Exception:
@@ -712,13 +792,13 @@ def load_staging(con: duckdb.DuckDBPyConnection, staging: Path | str, *, runs: S
             raise
         con.execute("DROP TABLE IF EXISTS _pf_load")
     finally:
-        con.execute("DETACH stg")
+        con.execute(f"DETACH {_STG}")
     return status(con)
 
 
 def _table_exists(con, name: str) -> bool:
-    return bool(con.execute("SELECT 1 FROM information_schema.tables WHERE table_schema = 'main' AND table_name = ?",
-                            [name]).fetchone())
+    return bool(con.execute("SELECT 1 FROM information_schema.tables WHERE table_schema = 'main' AND table_name = ? "
+                            "AND table_catalog = current_database()", [name]).fetchone())
 
 
 def default_runs(con) -> tuple[str | None, str | None]:

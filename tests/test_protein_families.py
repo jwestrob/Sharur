@@ -445,6 +445,112 @@ def test_assign_places_new_genomes_without_reclustering(families, tmp_path):
     target.close()
 
 
+def _with_legacy_layout(path: Path, *, extra: bool = False) -> None:
+    """Give a staging file the layout of older or other versions: the two secondary indexes, an extra
+    view over protein_families, and with ``extra`` a column and a table this version does not know."""
+    con = duckdb.connect(str(path))
+    for view in store.VIEWS:
+        con.execute(f"DROP VIEW IF EXISTS {view}")
+    con.execute("CREATE INDEX idx_protein_families_protein ON protein_families(protein_id)")
+    con.execute("CREATE INDEX idx_protein_families_family ON protein_families(family_id)")
+    con.execute(store.VIEW_SQL)
+    con.execute("CREATE VIEW other_layer_view AS SELECT family_id, COUNT(*) AS n FROM protein_families GROUP BY 1")
+    if extra:
+        con.execute("ALTER TABLE family_stats ADD COLUMN other_version_column BIGINT")
+        con.execute("UPDATE family_stats SET other_version_column = 7")
+        con.execute("CREATE TABLE other_version_table (k INTEGER)")
+    con.close()
+
+
+def _legacy_indexes(path: Path) -> int:
+    return _rows(path, "SELECT COUNT(*) FROM duckdb_indexes() WHERE index_name IN "
+                       "('idx_protein_families_protein', 'idx_protein_families_family')")[0][0]
+
+
+@requires_mmseqs
+def test_compact_family_file_keeps_rows_and_drops_legacy_indexes(families, tmp_path):
+    path = tmp_path / "s.duckdb"
+    shutil.copyfile(families["staging"], path)
+    _with_legacy_layout(path)
+    assert _legacy_indexes(path) == 2
+    sql = {t: f"SELECT * FROM {t} ORDER BY ALL" for t in store.TABLES}
+    before = {t: _rows(path, q) for t, q in sql.items()}
+    out = store.compact_family_file(path, threads=2, memory_limit="1GB")
+    assert out["rows"] == {t: len(rows) for t, rows in before.items()}
+    assert {t: _rows(path, q) for t, q in sql.items()} == before
+    assert _legacy_indexes(path) == 0
+    assert out["bytes_after"] == path.stat().st_size
+    assert _rows(path, "SELECT COUNT(*) FROM genome_protein_families") == \
+        _rows(families["staging"], "SELECT COUNT(*) FROM genome_protein_families")
+    assert not list(tmp_path.glob("s.duckdb.compact.tmp*"))
+
+
+@requires_mmseqs
+def test_files_from_other_versions_load_and_lose_legacy_indexes(families, tmp_path):
+    staging = tmp_path / "older.duckdb"
+    shutil.copyfile(families["staging"], staging)
+    _with_legacy_layout(staging, extra=True)
+    db = tmp_path / "db.duckdb"
+    shutil.copyfile(families["full"], db)
+    con = store.connect(db, threads=2, memory_limit="1GB")
+    status = store.load_staging(con, staging, log=lambda _m: None)
+    assert status["proteins_with_family"] == 13
+    assert "other_version_column" not in [r[0] for r in con.execute(
+        "SELECT column_name FROM information_schema.columns WHERE table_name = 'family_stats'").fetchall()]
+    con.close()
+    # a database that already carries the old indexes loses them at the next load
+    con = duckdb.connect(str(db))
+    for view in store.VIEWS:
+        con.execute(f"DROP VIEW IF EXISTS {view}")
+    con.execute("CREATE INDEX idx_protein_families_family ON protein_families(family_id)")
+    con.close()
+    con = store.connect(db, threads=2, memory_limit="1GB")
+    store.load_staging(con, families["staging"], log=lambda _m: None)
+    con.close()
+    assert _legacy_indexes(db) == 0
+    # the compacted older file keeps the columns both versions share
+    store.compact_family_file(staging, threads=2, memory_limit="1GB")
+    assert _rows(staging, "SELECT COUNT(*) FROM family_stats") == \
+        _rows(families["staging"], "SELECT COUNT(*) FROM family_stats")
+
+
+@requires_mmseqs
+def test_files_named_like_attachment_aliases(families, tmp_path):
+    """DuckDB names a file's catalog after its name up to the first dot, so a staging file called src.duckdb
+    or a database called stg.duckdb would collide with a plain attachment alias; the reserved aliases keep
+    build, import, load and compaction working."""
+    for name in ("a", "b", "c"):
+        (tmp_path / name).mkdir()
+    staging = tmp_path / "a" / "src.duckdb"
+    result = store.build_staging(families["small"], families["root"] / "stage09" / "clustering", staging,
+                                 threads=2, memory_limit="1GB", log=lambda _m: None)
+    assert result["build_id"] == families["result"]["build_id"]
+    tsv = _write_tsv(tmp_path / "clu.tsv", [[pid] for pid, b, _ in _proteins() if b != "g4"])
+    store.import_clustering(families["small"], tsv, staging, name="singletons", parameters="none",
+                            log=lambda _m: None)
+    target = tmp_path / "b" / "stg.duckdb"
+    shutil.copyfile(families["full"], target)
+    con = store.connect(target, threads=2, memory_limit="1GB")
+    status = store.load_staging(con, staging, log=lambda _m: None)
+    assert {r["clustering_run"] for r in status["runs"]} == {result["family_run"], result["subfamily_run"],
+                                                            "singletons"}
+    con.close()
+    old = tmp_path / "c" / "old.duckdb"
+    shutil.copyfile(staging, old)
+    assert store.compact_family_file(old, threads=2, memory_limit="1GB")["rows"]["protein_family_runs"] == 3
+
+
+@requires_mmseqs
+def test_family_checks_read_the_connections_own_database(families, tmp_path):
+    db = tmp_path / "plain.duckdb"
+    shutil.copyfile(families["full"], db)
+    con = store.connect(db, threads=2, memory_limit="1GB")
+    con.execute(f"ATTACH '{families['staging']}' AS attached_layer (READ_ONLY)")
+    assert not store.has_families(con) and store.has_families(con, catalog="attached_layer")
+    assert store.status(con) == {"present": False}
+    con.close()
+
+
 @requires_mmseqs
 def test_stage09_script_writes_manifest_and_staging(tmp_path):
     db = build_db(tmp_path / "sharur.duckdb", include_g4=True)
