@@ -284,21 +284,40 @@ def _count_index_entries(prefix: Path) -> int:
         return sum(1 for _ in handle)
 
 
-def search_best(
+@dataclass(frozen=True)
+class Hit:
+    """One alignment of a query to a target (identity over the alignment; coverages as fractions)."""
+
+    target: str
+    fident: float
+    qcov: float
+    tcov: float
+    bits: float
+    evalue: float
+    qlen: int
+    tlen: int
+
+
+def _rank(hit: Hit) -> tuple:
+    return (-hit.bits, -hit.fident, hit.target)
+
+
+def search_hits(
     query_fasta: Path,
     target_fasta: Path,
     out_dir: Path,
     level: LevelParams,
     *,
+    top: int = 1,
     threads: int | None = None,
     binary: str | None = None,
     max_seqs: int = SEARCH_MAX_SEQS,
     split_memory_limit: str | None = None,
-) -> dict[str, tuple[str, float, float, float, float]]:
-    """Best target per query among hits that meet ``level``'s identity and coverage.
+) -> dict[str, list[Hit]]:
+    """Up to ``top`` best targets per query among hits that meet ``level``'s identity and coverage.
 
-    Returns ``{query: (target, fident, qcov, tcov, bits)}``; the best hit has the
-    highest bit score (ties: higher identity, then target ID).
+    Coverage follows ``level.cov_mode`` (0 both sequences, 1 the target, 2 the query).
+    Hits are ranked by bit score, then identity, then target ID.
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -318,22 +337,37 @@ def search_best(
     run(*args)
     tsv = out_dir / "hits.tsv"
     run("convertalis", str(qdb), str(tdb), str(res), str(tsv),
-        "--format-output", "query,target,fident,qcov,tcov,bits", "--threads", str(threads))
-    best: dict[str, tuple[str, float, float, float, float]] = {}
+        "--format-output", "query,target,fident,qcov,tcov,bits,evalue,qlen,tlen", "--threads", str(threads))
+    kept: dict[str, list[Hit]] = {}
     with open(tsv) as handle:
         for line in handle:
-            query, target, fident, qcov, tcov, bits = line.rstrip("\n").split("\t")
-            hit = (target, float(fident), float(qcov), float(tcov), float(bits))
-            if hit[1] < level.min_seq_id or _covered(level, hit[2], hit[3]) < level.coverage:
+            query, target, fident, qcov, tcov, bits, evalue, qlen, tlen = line.rstrip("\n").split("\t")
+            hit = Hit(target, float(fident), float(qcov), float(tcov), float(bits), float(evalue),
+                      int(qlen), int(tlen))
+            if hit.fident < level.min_seq_id or _covered(level, hit.qcov, hit.tcov) < level.coverage:
                 continue
-            kept = best.get(query)
-            if kept is None or (hit[4], hit[1], kept[0]) > (kept[4], kept[1], hit[0]):
-                best[query] = hit
+            hits = kept.setdefault(query, [])
+            hits.append(hit)
+            if len(hits) > 4 * top + 16:
+                hits.sort(key=_rank)
+                del hits[top:]
     for db in (qdb, tdb, res):
         _remove_db(db)
     shutil.rmtree(tmp, ignore_errors=True)
     tsv.unlink(missing_ok=True)
-    return best
+    return {q: sorted(h, key=_rank)[:top] for q, h in kept.items()}
+
+
+def search_best(
+    query_fasta: Path,
+    target_fasta: Path,
+    out_dir: Path,
+    level: LevelParams,
+    **kwargs,
+) -> dict[str, tuple[str, float, float, float, float]]:
+    """Best target per query: ``{query: (target, fident, qcov, tcov, bits)}`` (see :func:`search_hits`)."""
+    hits = search_hits(query_fasta, target_fasta, out_dir, level, top=1, **kwargs)
+    return {q: (h[0].target, h[0].fident, h[0].qcov, h[0].tcov, h[0].bits) for q, h in hits.items()}
 
 
 def _covered(level: LevelParams, qcov: float, tcov: float) -> float:
@@ -341,12 +375,29 @@ def _covered(level: LevelParams, qcov: float, tcov: float) -> float:
     return {0: min(qcov, tcov), 1: tcov, 2: qcov}.get(level.cov_mode, min(qcov, tcov))
 
 
-def write_hits(best: dict[str, tuple[str, float, float, float, float]], path: Path) -> None:
+def write_hits(hits: dict[str, list[Hit]], path: Path) -> None:
+    """TSV with one row per kept hit, best first within each query."""
     with open(path, "w") as out:
-        out.write("query\ttarget\tfident\tqcov\ttcov\tbits\n")
-        for query in sorted(best):
-            target, fident, qcov, tcov, bits = best[query]
-            out.write(f"{query}\t{target}\t{fident:g}\t{qcov:g}\t{tcov:g}\t{bits:g}\n")
+        out.write("query\trank\ttarget\tfident\tqcov\ttcov\tbits\tevalue\tqlen\ttlen\n")
+        for query in sorted(hits):
+            for rank, h in enumerate(hits[query], start=1):
+                out.write(f"{query}\t{rank}\t{h.target}\t{h.fident:g}\t{h.qcov:g}\t{h.tcov:g}\t{h.bits:g}\t"
+                          f"{h.evalue:g}\t{h.qlen}\t{h.tlen}\n")
+
+
+def read_hits(path: Path) -> dict[str, list[Hit]]:
+    """Hits written by :func:`write_hits` (``search --top N``), best first per query."""
+    out: dict[str, list[Hit]] = {}
+    opener = gzip.open if str(path).endswith(".gz") else open
+    with opener(path, "rt") as handle:
+        header = handle.readline().rstrip("\n").split("\t")
+        col = {name: i for i, name in enumerate(header)}
+        for line in handle:
+            f = line.rstrip("\n").split("\t")
+            out.setdefault(f[col["query"]], []).append(Hit(
+                f[col["target"]], float(f[col["fident"]]), float(f[col["qcov"]]), float(f[col["tcov"]]),
+                float(f[col["bits"]]), float(f[col["evalue"]]), int(f[col["qlen"]]), int(f[col["tlen"]])))
+    return out
 
 
 def read_level(path: Path):
@@ -403,6 +454,7 @@ def main(argv: list[str] | None = None) -> int:
     se.add_argument("--cov-mode", type=int, default=COV_MODE, help="0 both sequences, 1 target, 2 query.")
     se.add_argument("--sensitivity", type=float, default=SENSITIVITY)
     se.add_argument("--max-seqs", type=int, default=SEARCH_MAX_SEQS)
+    se.add_argument("--top", type=int, default=1, help="Hits kept per query (best first).")
     se.add_argument("--threads", type=int, default=None)
     se.add_argument("--split-memory-limit", default=None)
     se.add_argument("--mmseqs", default=None)
@@ -411,11 +463,11 @@ def main(argv: list[str] | None = None) -> int:
         level = LevelParams(min_seq_id=args.min_seq_id, coverage=args.coverage, cov_mode=args.cov_mode,
                             sensitivity=args.sensitivity)
         work = args.work_dir or args.out.with_name(args.out.name + ".work")
-        best = search_best(args.query, args.target, work, level, threads=args.threads, binary=args.mmseqs,
-                           max_seqs=args.max_seqs, split_memory_limit=args.split_memory_limit)
-        write_hits(best, args.out)
+        hits = search_hits(args.query, args.target, work, level, top=args.top, threads=args.threads,
+                           binary=args.mmseqs, max_seqs=args.max_seqs, split_memory_limit=args.split_memory_limit)
+        write_hits(hits, args.out)
         shutil.rmtree(work, ignore_errors=True)
-        print(f"{len(best):,} queries with a hit -> {args.out}")
+        print(f"{len(hits):,} queries with a hit -> {args.out}")
     if args.command == "cluster":
         levels = [LevelParams(min_seq_id=v, coverage=args.coverage, cov_mode=args.cov_mode,
                               sensitivity=args.sensitivity, max_seqs=args.max_seqs,

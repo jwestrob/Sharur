@@ -57,15 +57,31 @@ def run_command(
                                                      help="MMseqs2 memory cap (default: 70% of the allocation)."),
     keep_fasta: bool = typer.Option(False, "--keep-fasta"),
     mmseqs_binary: Optional[str] = typer.Option(None, "--mmseqs", help="MMseqs2 executable."),
+    do_rescue: Optional[bool] = typer.Option(None, "--rescue/--no-rescue",
+                                             help="Add the truncated-gene rescue layer (default: on when "
+                                                  "store.RESCUE_BY_DEFAULT)."),
+    rescue_min_query_coverage: float = typer.Option(0.8, "--rescue-min-query-coverage"),
+    rescue_min_seq_id: Optional[float] = typer.Option(None, "--rescue-min-seq-id",
+                                                      help="Default: the family identity floor."),
+    rescue_min_family_size: int = typer.Option(2, "--rescue-min-family-size"),
+    rescue_include: Optional[bool] = typer.Option(None, "--rescue-include/--rescue-exclude",
+                                                  help="Make the rescued runs the defaults (default: "
+                                                       "store.RESCUE_BY_DEFAULT)."),
 ):
     """Export proteins, cluster subfamilies and families, write a staging DuckDB (the DB is untouched)."""
     from sharur.protein_families import store  # noqa: PLC0415
 
+    rescue_params = None
+    if store.RESCUE_BY_DEFAULT if do_rescue is None else do_rescue:
+        rescue_params = store.RescueParams(min_query_coverage=rescue_min_query_coverage,
+                                           min_seq_id=rescue_min_seq_id, min_family_size=rescue_min_family_size)
     try:
         result = store.run_pipeline(
             db, out_dir, levels=_levels(subfamily_min_seq_id, family_min_seq_id, coverage, sensitivity),
             threads=threads, duckdb_threads=duckdb_threads, memory_limit=memory_limit,
             split_memory_limit=split_memory_limit, keep_fasta=keep_fasta, binary=mmseqs_binary,
+            rescue_params=rescue_params,
+            rescue_include=store.RESCUE_BY_DEFAULT if rescue_include is None else rescue_include,
             log=lambda m: typer.echo(m, err=True))
     except store.FamilyError as exc:
         typer.echo(f"run: {exc}", err=True)
@@ -266,6 +282,88 @@ def import_command(
         typer.echo(f"import: {exc}", err=True)
         raise typer.Exit(1) from exc
     _echo_json(result)
+
+
+@families_app.command("rescue")
+def rescue_command(
+    db: Path = typer.Option(..., "--db", "-d", help=_DB_HELP + " The source of proteins; written only "
+                                                               "without --staging."),
+    staging: Optional[Path] = typer.Option(None, "--staging", "-s",
+                                           help="Work on this staging file (replaced atomically); DB is read-only."),
+    min_query_coverage: float = typer.Option(0.8, "--min-query-coverage",
+                                             help="Share of the truncated protein the alignment must cover."),
+    min_seq_id: Optional[float] = typer.Option(None, "--min-seq-id", help="Default: the family identity floor."),
+    min_family_size: int = typer.Option(2, "--min-family-size", help="Members of the hit's family."),
+    set_default: Optional[bool] = typer.Option(None, "--include/--exclude",
+                                               help="Make the rescued runs the defaults, so the views include "
+                                                    "rescued members (default: store.RESCUE_BY_DEFAULT)."),
+    drop: bool = typer.Option(False, "--drop", help="Remove the rescue layer instead."),
+    export_inputs: Optional[Path] = typer.Option(None, "--export-inputs",
+                                                 help="Write candidates.faa and targets.faa here and stop."),
+    hits: Optional[Path] = typer.Option(None, "--hits",
+                                        help="Search results of `mmseqs.py search --cov-mode 2 --top N` over the "
+                                             "--export-inputs files."),
+    tool_version: Optional[str] = typer.Option(None, "--tool-version", help="MMseqs2 version behind --hits."),
+    in_place: bool = typer.Option(False, "--in-place", help="Without --staging: write DB directly."),
+    label: str = typer.Option("protein-families-rescue", "--label", "-l"),
+    do_publish: bool = typer.Option(False, "--publish"),
+    threads: Optional[int] = typer.Option(None, "--threads", "-t"),
+    mmseqs_binary: Optional[str] = typer.Option(None, "--mmseqs"),
+):
+    """Place truncated singletons into existing families as a separate, removable layer."""
+    from sharur.protein_families import store  # noqa: PLC0415
+
+    params = store.RescueParams(min_query_coverage=min_query_coverage, min_seq_id=min_seq_id,
+                                min_family_size=min_family_size)
+    set_default = store.RESCUE_BY_DEFAULT if set_default is None else set_default
+    db = db.expanduser().resolve()
+    loaded = mmseqs.read_hits(hits) if hits else None
+
+    def log(message: str) -> None:
+        typer.echo(message, err=True)
+
+    try:
+        if export_inputs:
+            con = store.connect(staging or db, read_only=True)
+            try:
+                if staging:
+                    con.execute(f"ATTACH '{db}' AS {store.SRC.rstrip('.')} (READ_ONLY)")
+                _echo_json(store.rescue_inputs(con, export_inputs, prefix=store.SRC if staging else "",
+                                               params=params))
+            finally:
+                con.close()
+            return
+        if staging:
+            _echo_json(store.rescue_staging(db, staging, params=params, set_default=set_default, drop=drop,
+                                            hits=loaded, tool_version=tool_version, mmseqs_threads=threads,
+                                            binary=mmseqs_binary, log=log))
+            return
+    except store.FamilyError as exc:
+        typer.echo(f"rescue: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    scratch = db.parent / f".{db.name}.families-rescue"
+
+    def writer(path: Path) -> dict:
+        con = store.connect(path)
+        try:
+            if drop:
+                return {"dropped": store.drop_rescue(con), "status": store.status(con)}
+            result = store.rescue(con, scratch, params=params, set_default=set_default, hits=loaded,
+                                  tool_version=tool_version, threads=threads, binary=mmseqs_binary,
+                                  log=log).to_dict()
+            result["status"] = store.status(con)
+            return result
+        finally:
+            con.close()
+
+    if in_place:
+        try:
+            _echo_json(writer(db))
+        except store.FamilyError as exc:
+            typer.echo(f"rescue: {exc}", err=True)
+            raise typer.Exit(1) from exc
+        return
+    _staged(db, label, None, writer, do_publish)
 
 
 @families_app.command("status")

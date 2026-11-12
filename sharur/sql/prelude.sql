@@ -410,23 +410,35 @@ CREATE OR REPLACE TEMP MACRO slot_tally(anchor, occupant, side := 'upstream', pa
     ORDER BY phylum NULLS FIRST, genomes_with_anchor DESC, taxon, genome_has_split;
 
 
--- @object family_proteins table_macro: members of protein families or subfamilies (family_id values of any clustering run) in the feature_proteins shape: feature, protein_id, bin_id, contig_id, gene_index, strand, source (the clustering run), accession (the family id), name (the run's level), evidence; needs the protein-family layer (docs/guides/protein-families.md)
-CREATE OR REPLACE TEMP MACRO family_proteins(families) AS TABLE
+-- @object family_runs table_macro: the clustering runs the family macros read: every run, where a build has a truncated-gene rescue layer its rescued runs stand in for the base runs (include_rescued := true) or are left out (false); needs the protein-family layer (docs/guides/protein-families.md)
+CREATE OR REPLACE TEMP MACRO family_runs(include_rescued := true) AS TABLE
+    SELECT r.*
+    FROM protein_family_runs r
+    WHERE CASE WHEN include_rescued
+               THEN r.clustering_run NOT IN (SELECT json_extract_string(d.details, '$.base_run')
+                                             FROM protein_family_runs d WHERE d.origin = 'rescue')
+               ELSE r.origin <> 'rescue' END;
+
+
+-- @object family_proteins table_macro: members of protein families or subfamilies (family_id values) in the feature_proteins shape: feature, protein_id, bin_id, contig_id, gene_index, strand, source (the clustering run), accession (the family id), name (the run's level), evidence (observed, or rescued for truncated genes placed by the rescue layer; include_rescued := false leaves them out); needs the protein-family layer
+CREATE OR REPLACE TEMP MACRO family_proteins(families, include_rescued := true) AS TABLE
     SELECT f.family_id AS feature, f.protein_id, p.bin_id, p.contig_id, p.gene_index, p.strand,
-           f.clustering_run AS source, f.family_id AS accession, r.level AS name, 'observed' AS evidence
+           f.clustering_run AS source, f.family_id AS accession, r.level AS name,
+           CASE WHEN f.assignment = 'rescue' THEN 'rescued' ELSE 'observed' END AS evidence
     FROM protein_families f
-    JOIN protein_family_runs r USING (clustering_run)
+    JOIN family_runs(include_rescued := include_rescued) r USING (clustering_run)
     JOIN proteins p USING (protein_id)
     WHERE f.family_id IN (SELECT unnest(id_list(families)));
 
 
--- @object family_presence table_macro: every genome x family (or subfamily) in the feature_presence shape: present, n_proteins, sources, evidence, completeness, contamination and GTDB ranks; needs the protein-family layer
-CREATE OR REPLACE TEMP MACRO family_presence(families, min_completeness := 0, max_contamination := 100) AS TABLE
+-- @object family_presence table_macro: every genome x family (or subfamily) in the feature_presence shape: present, n_proteins, sources, evidence (rescued marks members placed by the rescue layer), completeness, contamination and GTDB ranks; needs the protein-family layer
+CREATE OR REPLACE TEMP MACRO family_presence(families, include_rescued := true, min_completeness := 0,
+                                             max_contamination := 100) AS TABLE
     WITH hit AS MATERIALIZED (
         SELECT feature, bin_id, count(DISTINCT protein_id) AS n_proteins,
                list(DISTINCT source ORDER BY source) AS sources,
                list(DISTINCT evidence ORDER BY evidence) AS evidence
-        FROM family_proteins(families)
+        FROM family_proteins(families, include_rescued := include_rescued)
         GROUP BY feature, bin_id
     ),
     g AS MATERIALIZED (
@@ -442,13 +454,13 @@ CREATE OR REPLACE TEMP MACRO family_presence(families, min_completeness := 0, ma
     LEFT JOIN hit h ON h.bin_id = g.bin_id AND h.feature = f.feature;
 
 
--- @object families_of table_macro: per protein (a list or comma-separated IDs), its family in every clustering run: clustering_run, level, is_default, family_id, is_representative, parent_family_id, n_members, n_genomes, n_orders, pfam_dark, dominant_pfam_architecture, dominant_ko; needs the protein-family layer
-CREATE OR REPLACE TEMP MACRO families_of(ids) AS TABLE
+-- @object families_of table_macro: per protein (a list or comma-separated IDs), its family in every clustering run: clustering_run, level, is_default, family_id, is_representative, assignment, parent_family_id, n_members, n_genomes, n_orders, pfam_dark, dominant_pfam_architecture, dominant_ko; needs the protein-family layer
+CREATE OR REPLACE TEMP MACRO families_of(ids, include_rescued := true) AS TABLE
     SELECT f.protein_id, f.clustering_run, r.level, r.is_default, f.family_id, f.is_representative,
-           s.parent_family_id, s.n_members, s.n_genomes, s.n_orders, s.pfam_dark,
+           f.assignment, s.parent_family_id, s.n_members, s.n_genomes, s.n_orders, s.pfam_dark,
            s.dominant_pfam_architecture, s.dominant_ko
     FROM protein_families f
-    JOIN protein_family_runs r USING (clustering_run)
+    JOIN family_runs(include_rescued := include_rescued) r USING (clustering_run)
     LEFT JOIN family_stats s ON s.clustering_run = f.clustering_run AND s.family_id = f.family_id
     WHERE f.protein_id IN (SELECT unnest(id_list(ids)))
     ORDER BY f.protein_id, r.level, f.clustering_run;

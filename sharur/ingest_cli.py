@@ -41,6 +41,7 @@ from sharur.ingest.resources import ResourceProfile, resolve_resource_profile
 from sharur.ingest.stage_runner import execute_stage
 from sharur.ops.ledger import RunLedger
 from sharur.protein_families.mmseqs import FAMILY_MIN_SEQ_ID, SUBFAMILY_MIN_SEQ_ID
+from sharur.protein_families.store import RESCUE_BY_DEFAULT
 
 
 console = Console()
@@ -117,6 +118,7 @@ def _build_tools_dag(
     pipeline_depth: int = 2,
     contig_name_topology: str | None = None,
     families: tuple[float, float] | None = None,
+    family_rescue: bool | None = None,
 ) -> IngestDAG:
     """Build the selected stage graph and its concrete resource-tuned commands."""
     stage_dir = _stage_script_dir()
@@ -413,6 +415,7 @@ def _build_tools_dag(
                 f"{subfamily_min_seq_id:g}",
                 "--family-min-seq-id",
                 f"{family_min_seq_id:g}",
+                "--rescue" if (RESCUE_BY_DEFAULT if family_rescue is None else family_rescue) else "--no-rescue",
                 "--force",
             ],
             dependencies=("07",),
@@ -801,6 +804,14 @@ def run(
         float,
         typer.Option("--subfamily-min-seq-id", help="Stage 09 subfamily identity threshold"),
     ] = SUBFAMILY_MIN_SEQ_ID,
+    family_rescue: Annotated[
+        bool | None,
+        typer.Option(
+            "--family-rescue/--no-family-rescue",
+            help="Stage 09: place truncated gene calls into existing families as a separate layer "
+                 "(default follows the validated setting, docs/guides/protein-families.md)",
+        ),
+    ] = None,
     embedding_model: Annotated[
         str | None,
         typer.Option(
@@ -949,6 +960,7 @@ def run(
             pipeline_depth=pipeline_depth,
             contig_name_topology=contig_name_topology,
             families=(subfamily_min_seq_id, family_min_seq_id) if with_families else None,
+            family_rescue=family_rescue,
         )
     else:
         raise typer.BadParameter("mode must be 'tools' or 'fast'")

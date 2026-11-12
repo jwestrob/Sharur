@@ -17,6 +17,12 @@ Outputs in ``stage09_families/``:
   ``clustering.json``, ``export.json``) for provenance;
 - ``processing_manifest.json``.
 
+With ``--rescue`` (the default follows ``store.RESCUE_BY_DEFAULT``) the staging file also
+gets the truncated-gene rescue layer: gene calls that run off a contig end and ended up
+family singletons are placed into existing families when an alignment covers at least
+``--rescue-min-query-coverage`` of them at ``--rescue-min-seq-id`` identity. The clustering
+runs stay unchanged; the layer is a pair of derived runs (``docs/guides/protein-families.md``).
+
 The dataset database is left unchanged, which keeps the ingest ledger's Stage 07
 snapshot valid. Activate the families with
 ``sharur families activate --db DB --staging stage09_families/protein_families.duckdb --publish``.
@@ -33,7 +39,7 @@ import sys
 from pathlib import Path
 
 from sharur.protein_families import mmseqs
-from sharur.protein_families.store import FamilyError, run_pipeline
+from sharur.protein_families.store import RESCUE_BY_DEFAULT, FamilyError, RescueParams, run_pipeline
 
 
 def main() -> int:
@@ -50,6 +56,14 @@ def main() -> int:
     parser.add_argument("--split-memory-limit", default=None, help="MMseqs2 --split-memory-limit")
     parser.add_argument("--mmseqs", default=None, help="MMseqs2 executable (default: $SHARUR_MMSEQS or mmseqs)")
     parser.add_argument("--force", action="store_true", help="Replace an existing stage directory")
+    parser.add_argument("--rescue", action=argparse.BooleanOptionalAction, default=RESCUE_BY_DEFAULT,
+                        help="Add the truncated-gene rescue layer")
+    parser.add_argument("--rescue-min-query-coverage", type=float, default=RescueParams.min_query_coverage)
+    parser.add_argument("--rescue-min-seq-id", type=float, default=None,
+                        help="Default: the family identity floor")
+    parser.add_argument("--rescue-min-family-size", type=int, default=RescueParams.min_family_size)
+    parser.add_argument("--rescue-include", action=argparse.BooleanOptionalAction, default=RESCUE_BY_DEFAULT,
+                        help="Make the rescued runs the defaults (views include rescued members)")
     args = parser.parse_args()
 
     if not args.db.is_file():
@@ -62,9 +76,12 @@ def main() -> int:
     try:
         levels = mmseqs.default_levels(args.subfamily_min_seq_id, args.family_min_seq_id,
                                        coverage=args.coverage, sensitivity=args.sensitivity)
+        rescue = (RescueParams(min_query_coverage=args.rescue_min_query_coverage,
+                               min_seq_id=args.rescue_min_seq_id, min_family_size=args.rescue_min_family_size)
+                  if args.rescue else None)
         result = run_pipeline(args.db, args.out_dir, levels=levels, threads=args.threads,
                               memory_limit=args.memory_limit, split_memory_limit=args.split_memory_limit,
-                              binary=args.mmseqs)
+                              binary=args.mmseqs, rescue_params=rescue, rescue_include=args.rescue_include)
     except (FamilyError, ValueError, FileNotFoundError) as exc:
         print(f"Stage 09 failed: {exc}", file=sys.stderr)
         return 1

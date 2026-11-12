@@ -217,7 +217,7 @@ def test_stage_builds_nested_families_and_stats(families):
     for view in ("genome_protein_families", "genome_protein_subfamilies"):
         columns = [r[0] for r in _rows(staging, "SELECT column_name FROM information_schema.columns "
                                                 f"WHERE table_name = '{view}' ORDER BY ordinal_position")]
-        assert columns == ["genome_id", "feature_id", "n_proteins"]
+        assert columns == ["genome_id", "feature_id", "n_proteins", "n_rescued"]
     assert _rows(staging, "SELECT COUNT(DISTINCT clustering_run) FROM genome_family_presence") == [(2,)]
     params = json.loads(_rows(staging, f"SELECT parameters FROM protein_family_runs "
                                        f"WHERE clustering_run = '{result['family_run']}'")[0][0])

@@ -72,15 +72,21 @@ RUNS = "protein_family_runs"
 MEMBERS = "protein_families"
 STATS = "family_stats"
 BATCHES = "protein_family_assignments"
+RESCUES = "protein_family_rescues"
 PRESENCE = "genome_family_presence"
 GENOME_FAMILIES = "genome_protein_families"
 GENOME_SUBFAMILIES = "genome_protein_subfamilies"
 LEVELS_VIEW = "protein_family_levels"
-TABLES = (RUNS, MEMBERS, STATS, BATCHES)
-VIEWS = (PRESENCE, GENOME_FAMILIES, GENOME_SUBFAMILIES, LEVELS_VIEW)
-SCHEMA_VERSION = 2
+GENOME_FAMILIES_CLUSTERED = "genome_protein_families_clustered"
+GENOME_SUBFAMILIES_CLUSTERED = "genome_protein_subfamilies_clustered"
+TABLES = (RUNS, MEMBERS, STATS, BATCHES, RESCUES)
+VIEWS = (PRESENCE, GENOME_FAMILIES, GENOME_SUBFAMILIES, LEVELS_VIEW, GENOME_FAMILIES_CLUSTERED,
+         GENOME_SUBFAMILIES_CLUSTERED)
+SCHEMA_VERSION = 3
 # A build whose share of assigned proteins exceeds this is due for a full re-cluster.
 RECLUSTER_ASSIGNED_FRACTION = 0.10
+# Catalog prefix of the dataset database attached as the source of proteins (staging-file work).
+SRC = "__pf_src."
 _RUN_NAME = re.compile(r"[A-Za-z0-9][\w.-]*")
 
 DDL = {
@@ -130,6 +136,7 @@ DDL = {
     dominant_ko VARCHAR,
     dominant_ko_fraction DOUBLE,
     pfam_dark BOOLEAN NOT NULL,
+    n_rescued BIGINT,
     PRIMARY KEY (clustering_run, family_id)
 )""",
     BATCHES: f"""CREATE TABLE IF NOT EXISTS {BATCHES} (
@@ -144,29 +151,71 @@ DDL = {
     input_digest VARCHAR NOT NULL,
     details JSON
 )""",
+    RESCUES: f"""CREATE TABLE IF NOT EXISTS {RESCUES} (
+    rescue_id VARCHAR NOT NULL,
+    family_run VARCHAR NOT NULL,
+    subfamily_run VARCHAR,
+    base_family_run VARCHAR NOT NULL,
+    protein_id VARCHAR NOT NULL,
+    bin_id VARCHAR NOT NULL,
+    partial VARCHAR,
+    original_family_id VARCHAR NOT NULL,
+    original_subfamily_id VARCHAR,
+    family_id VARCHAR NOT NULL,
+    subfamily_id VARCHAR,
+    joined_subfamily BOOLEAN NOT NULL,
+    hit_protein_id VARCHAR NOT NULL,
+    identity DOUBLE NOT NULL,
+    query_coverage DOUBLE NOT NULL,
+    target_coverage DOUBLE,
+    bits DOUBLE,
+    evalue DOUBLE,
+    query_length INTEGER,
+    target_length INTEGER,
+    PRIMARY KEY (family_run, protein_id)
+)""",
 }
+# Columns added after a table first shipped; `ensure_schema` adds them to older files.
+ADDED_COLUMNS = {STATS: [("n_rescued", "BIGINT")]}
 SCHEMA = ";\n".join(DDL.values()) + ";"
 
-INDEXES = f"""
-CREATE INDEX IF NOT EXISTS idx_protein_families_protein ON {MEMBERS}(protein_id);
-CREATE INDEX IF NOT EXISTS idx_protein_families_family ON {MEMBERS}(family_id);
-"""
+# Secondary ART indexes on protein_families cost about 110 bytes per row each on disk (over 1.6 GB for two
+# runs of 3.6 million proteins) and buy little: DuckDB scans the columns in a fraction of a second. Files
+# written before 2026-11-12 carry two; `_finalize` drops them.
+LEGACY_INDEXES = ("idx_protein_families_protein", "idx_protein_families_family")
+
+_BASE_RUN = "CASE WHEN r.origin = 'rescue' THEN json_extract_string(r.details, '$.base_run') ELSE r.clustering_run END"
 
 VIEW_SQL = f"""
 CREATE OR REPLACE VIEW {PRESENCE} AS
-SELECT clustering_run, bin_id AS genome_id, family_id AS feature_id, COUNT(*) AS n_proteins
+SELECT clustering_run, bin_id AS genome_id, family_id AS feature_id, COUNT(*) AS n_proteins,
+       COUNT(*) FILTER (WHERE assignment = 'rescue') AS n_rescued
 FROM {MEMBERS} GROUP BY clustering_run, bin_id, family_id;
 CREATE OR REPLACE VIEW {GENOME_FAMILIES} AS
-SELECT f.bin_id AS genome_id, f.family_id AS feature_id, COUNT(*) AS n_proteins
+SELECT f.bin_id AS genome_id, f.family_id AS feature_id, COUNT(*) AS n_proteins,
+       COUNT(*) FILTER (WHERE f.assignment = 'rescue') AS n_rescued
 FROM {MEMBERS} f JOIN {RUNS} r USING (clustering_run)
 WHERE r.level = 'family' AND r.is_default GROUP BY f.bin_id, f.family_id;
 CREATE OR REPLACE VIEW {GENOME_SUBFAMILIES} AS
-SELECT f.bin_id AS genome_id, f.family_id AS feature_id, COUNT(*) AS n_proteins
+SELECT f.bin_id AS genome_id, f.family_id AS feature_id, COUNT(*) AS n_proteins,
+       COUNT(*) FILTER (WHERE f.assignment = 'rescue') AS n_rescued
 FROM {MEMBERS} f JOIN {RUNS} r USING (clustering_run)
 WHERE r.level = 'subfamily' AND r.is_default GROUP BY f.bin_id, f.family_id;
+CREATE OR REPLACE VIEW {GENOME_FAMILIES_CLUSTERED} AS
+SELECT f.bin_id AS genome_id, f.family_id AS feature_id, COUNT(*) AS n_proteins
+FROM {MEMBERS} f
+JOIN (SELECT {_BASE_RUN} AS clustering_run FROM {RUNS} r WHERE r.level = 'family' AND r.is_default) b
+  USING (clustering_run)
+GROUP BY f.bin_id, f.family_id;
+CREATE OR REPLACE VIEW {GENOME_SUBFAMILIES_CLUSTERED} AS
+SELECT f.bin_id AS genome_id, f.family_id AS feature_id, COUNT(*) AS n_proteins
+FROM {MEMBERS} f
+JOIN (SELECT {_BASE_RUN} AS clustering_run FROM {RUNS} r WHERE r.level = 'subfamily' AND r.is_default) b
+  USING (clustering_run)
+GROUP BY f.bin_id, f.family_id;
 CREATE OR REPLACE VIEW {LEVELS_VIEW} AS
 SELECT f.protein_id, f.bin_id, f.family_id, s.family_id AS subfamily_id,
-       f.clustering_run AS family_run, s.clustering_run AS subfamily_run
+       f.clustering_run AS family_run, s.clustering_run AS subfamily_run, f.assignment = 'rescue' AS rescued
 FROM {MEMBERS} f
 JOIN {RUNS} rf ON rf.clustering_run = f.clustering_run AND rf.level = 'family' AND rf.is_default
 LEFT JOIN {RUNS} rs ON rs.parent_run = rf.clustering_run
@@ -211,7 +260,8 @@ def representative_of(feature_id: str) -> str:
 def has_families(con: duckdb.DuckDBPyConnection, catalog: str | None = None) -> bool:
     rows = con.execute(
         "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' "
-        + ("AND table_catalog = ? " if catalog else "") + "AND table_name IN (?, ?, ?)",
+        + ("AND table_catalog = ? " if catalog else "AND table_catalog = current_database() ")
+        + "AND table_name IN (?, ?, ?)",
         [*([catalog] if catalog else []), MEMBERS, RUNS, STATS]).fetchall()
     return len(rows) == 3
 
@@ -330,6 +380,7 @@ def build_stats(con, runs: Sequence[str], *, prefix: str = "") -> dict[str, int]
     if not runs:
         return {}
     con.execute(DDL[STATS])
+    ensure_schema(con)
     con.execute("CREATE OR REPLACE TEMP TABLE _pf_runs AS SELECT unnest(?::VARCHAR[]) AS clustering_run", [runs])
     con.execute(f"""CREATE OR REPLACE TEMP TABLE _pf_scope AS
                     SELECT DISTINCT protein_id FROM {MEMBERS} JOIN _pf_runs USING (clustering_run)""")
@@ -353,7 +404,8 @@ def build_stats(con, runs: Sequence[str], *, prefix: str = "") -> dict[str, int]
         parent, child = info.get(run, (None, None))
         con.execute(f"DELETE FROM {STATS} WHERE clustering_run = ?", [run])
         con.execute(f"""CREATE OR REPLACE TEMP TABLE _pf_facts AS
-            SELECT f.protein_id, f.family_id, f.bin_id, f.is_representative, p.sequence_length, p.order_name
+            SELECT f.protein_id, f.family_id, f.bin_id, f.is_representative, f.assignment, p.sequence_length,
+                   p.order_name
             FROM {MEMBERS} f JOIN _pf_prot p USING (protein_id) WHERE f.clustering_run = ?""", [run])
         child_sql = (f"""(SELECT f.family_id, COUNT(DISTINCT c.family_id) AS n FROM _pf_facts f
                           JOIN {MEMBERS} c ON c.protein_id = f.protein_id AND c.clustering_run = '{child}'
@@ -363,11 +415,15 @@ def build_stats(con, runs: Sequence[str], *, prefix: str = "") -> dict[str, int]
                            WHERE f.is_representative)""" if parent
                       else "(SELECT NULL::VARCHAR AS family_id, NULL::VARCHAR AS parent_family_id WHERE false)")
         con.execute(f"""
-            INSERT INTO {STATS}
+            INSERT INTO {STATS} (family_id, clustering_run, n_members, n_genomes, rep_protein_id, rep_length,
+                                 parent_family_id, n_subfamilies, n_orders, median_length, pfam_fraction,
+                                 dominant_pfam_architecture, dominant_pfam_architecture_fraction, ko_fraction,
+                                 dominant_ko, dominant_ko_fraction, pfam_dark, n_rescued)
             WITH base AS (
                 SELECT f.family_id, COUNT(*) AS n, COUNT(DISTINCT f.bin_id) AS n_genomes,
                        COUNT(DISTINCT f.order_name) AS n_orders, median(f.sequence_length) AS median_length,
                        COUNT(a.protein_id) AS n_pfam,
+                       COUNT(*) FILTER (WHERE f.assignment = 'rescue') AS n_rescued,
                        min(f.protein_id) FILTER (WHERE f.is_representative) AS rep,
                        min(f.sequence_length) FILTER (WHERE f.is_representative) AS rep_length
                 FROM _pf_facts f LEFT JOIN _pf_arch a USING (protein_id) GROUP BY f.family_id),
@@ -391,7 +447,7 @@ def build_stats(con, runs: Sequence[str], *, prefix: str = "") -> dict[str, int]
             parent AS {parent_sql}
             SELECT b.family_id, ?, b.n, b.n_genomes, b.rep, b.rep_length, parent.parent_family_id, child.n,
                    b.n_orders, b.median_length, b.n_pfam / b.n, arch.architecture, arch.cnt / b.n,
-                   COALESCE(ko_any.n_ko, 0) / b.n, ko.ko, ko.cnt / b.n, b.n_pfam = 0
+                   COALESCE(ko_any.n_ko, 0) / b.n, ko.ko, ko.cnt / b.n, b.n_pfam = 0, b.n_rescued
             FROM base b LEFT JOIN arch USING (family_id) LEFT JOIN ko_any USING (family_id)
             LEFT JOIN ko USING (family_id) LEFT JOIN child USING (family_id) LEFT JOIN parent USING (family_id)""",
                     [run])
@@ -406,9 +462,82 @@ def build_stats(con, runs: Sequence[str], *, prefix: str = "") -> dict[str, int]
     return counts
 
 
+def ensure_schema(con, catalog: str | None = None) -> None:
+    """Add columns introduced after a table first shipped (files written by older versions)."""
+    prefix = f"{catalog}." if catalog else ""
+    for table, columns in ADDED_COLUMNS.items():
+        if _columns(con, table, catalog):
+            for name, kind in columns:
+                con.execute(f"ALTER TABLE {prefix}{table} ADD COLUMN IF NOT EXISTS {name} {kind}")
+
+
+def _columns(con, table: str, catalog: str | None = None) -> list[str]:
+    return [r[0] for r in con.execute(
+        "SELECT column_name FROM information_schema.columns WHERE table_schema = 'main' AND table_name = ? "
+        + ("AND table_catalog = ? " if catalog else "AND table_catalog = current_database() ")
+        + "ORDER BY ordinal_position", [table, *([catalog] if catalog else [])]).fetchall()]
+
+
+def _copy_rows(con, table: str, source: str, where: str) -> None:
+    """INSERT the rows of ``source``.``table`` matching ``where`` by column name (older files lack new columns)."""
+    target = _columns(con, table)
+    available = set(_columns(con, table, source))
+    cols = ", ".join(c for c in target if c in available)
+    con.execute(f"INSERT INTO {table} ({cols}) SELECT {cols} FROM {source}.{table} t WHERE {where}")
+
+
 def _finalize(con) -> None:
-    con.execute(INDEXES)
+    for view in VIEWS:
+        con.execute(f"DROP VIEW IF EXISTS {view}")
+    for index in LEGACY_INDEXES:
+        con.execute(f"DROP INDEX IF EXISTS {index}")
     con.execute(VIEW_SQL)
+
+
+def _table_fingerprint(con, table: str, catalog: str | None = None) -> tuple[int, int]:
+    cols = _columns(con, table, catalog)
+    packed = "struct_pack(" + ", ".join(f'"{c}" := t."{c}"' for c in cols) + ")"
+    source = f"{catalog}.{table}" if catalog else table
+    n, h = con.execute(f"SELECT COUNT(*), COALESCE(SUM(hash({packed})::HUGEINT), 0) FROM {source} t").fetchone()
+    return int(n), int(h)
+
+
+def compact_family_file(path: Path | str, *, threads: int = 4, memory_limit: str = "8GB") -> dict[str, Any]:
+    """Rewrite a staging file without free blocks or legacy indexes; replace it atomically.
+
+    Every family table is copied whole and checked by row count and content fingerprint.
+    """
+    import os  # noqa: PLC0415
+
+    path = Path(path).expanduser().resolve()
+    tmp = path.with_name(path.name + ".compact.tmp")
+    for stale in (tmp, Path(str(tmp) + ".wal")):
+        stale.unlink(missing_ok=True)
+    before = path.stat().st_size
+    con = connect(tmp, threads=threads, memory_limit=memory_limit)
+    try:
+        con.execute(f"ATTACH {_q(path)} AS __pf_old (READ_ONLY)")
+        present = [t for t in TABLES if _columns(con, t, "__pf_old")]
+        con.execute(SCHEMA)
+        checks = {}
+        for table in present:
+            _copy_rows(con, table, "__pf_old", "true")
+            same_cols = set(_columns(con, table)) == set(_columns(con, table, "__pf_old"))
+            new, old = _table_fingerprint(con, table), _table_fingerprint(con, table, "__pf_old")
+            if new[0] != old[0] or (same_cols and new != old):
+                raise FamilyError(f"{table}: copy differs from the original ({old} -> {new})")
+            checks[table] = new[0]
+        _finalize(con)
+        con.execute("DETACH __pf_old")
+        con.execute("CHECKPOINT")
+    except Exception:
+        con.close()
+        tmp.unlink(missing_ok=True)
+        Path(str(tmp) + ".wal").unlink(missing_ok=True)
+        raise
+    con.close()
+    os.replace(tmp, path)
+    return {"rows": checks, "bytes_before": before, "bytes_after": path.stat().st_size}
 
 
 # --------------------------------------------------------------------------- #
@@ -470,10 +599,10 @@ def build_staging(
     tmp = _staging_tmp(staging)
     con = connect(tmp, threads=threads, memory_limit=memory_limit)
     try:
-        con.execute(f"ATTACH {_q(db)} AS src (READ_ONLY)")
+        con.execute(f"ATTACH {_q(db)} AS __pf_src (READ_ONLY)")
         started = time.time()
         if verify_digest:
-            live = export_proteins(con, None, prefix="src.")
+            live = export_proteins(con, None, prefix=SRC)
             if live["digest"] != export_manifest["digest"]:
                 raise FamilyError(
                     f"{db}: protein sequences differ from the clustered export "
@@ -487,7 +616,7 @@ def build_staging(
         n0, n_sub, n1, reps_unplaced, unknown = con.execute("""
             SELECT (SELECT COUNT(*) FROM l0), (SELECT COUNT(DISTINCT rep) FROM l0), (SELECT COUNT(*) FROM l1),
                    (SELECT COUNT(*) FROM (SELECT DISTINCT rep FROM l0) r ANTI JOIN l1 ON l1.member = r.rep),
-                   (SELECT COUNT(*) FROM l0 ANTI JOIN src.proteins p ON p.protein_id = l0.member)""").fetchone()
+                   (SELECT COUNT(*) FROM l0 ANTI JOIN __pf_src.proteins p ON p.protein_id = l0.member)""").fetchone()
         if n0 != export_manifest["proteins"]:
             raise FamilyError(f"clustering holds {n0:,} proteins, the export {export_manifest['proteins']:,}")
         if n_sub != n1 or reps_unplaced:
@@ -518,15 +647,15 @@ def build_staging(
         con.execute(f"""
             INSERT INTO {MEMBERS}
             SELECT l0.member, 'fam:{tag}:' || l1.rep, l0.member = l1.rep, '{family_run}', p.bin_id, 'cluster', NULL
-            FROM l0 JOIN l1 ON l1.member = l0.rep JOIN src.proteins p ON p.protein_id = l0.member""")
+            FROM l0 JOIN l1 ON l1.member = l0.rep JOIN __pf_src.proteins p ON p.protein_id = l0.member""")
         con.execute(f"""
             INSERT INTO {MEMBERS}
             SELECT l0.member, 'sub:{tag}:' || l0.rep, l0.member = l0.rep, '{subfamily_run}', p.bin_id, 'cluster', NULL
-            FROM l0 JOIN src.proteins p ON p.protein_id = l0.member""")
+            FROM l0 JOIN __pf_src.proteins p ON p.protein_id = l0.member""")
         log(f"build {build_id}: {n0:,} proteins, {n_sub:,} subfamilies")
-        counts = build_stats(con, [family_run, subfamily_run], prefix="src.")
+        counts = build_stats(con, [family_run, subfamily_run], prefix=SRC)
         _finalize(con)
-        con.execute("DETACH src")
+        con.execute("DETACH __pf_src")
         con.execute("CHECKPOINT")
     except Exception:
         con.close()
@@ -585,17 +714,17 @@ def import_clustering(
     staging.parent.mkdir(parents=True, exist_ok=True)
     con = connect(staging, threads=threads, memory_limit=memory_limit)
     try:
-        con.execute(f"ATTACH {_q(db)} AS src (READ_ONLY)")
+        con.execute(f"ATTACH {_q(db)} AS __pf_src (READ_ONLY)")
         _read_tsv(con, "ext", Path(tsv))
         _check_partition(con, "ext", str(tsv))
         n, unknown, n_clusters = con.execute("""
-            SELECT COUNT(*), (SELECT COUNT(*) FROM ext ANTI JOIN src.proteins p ON p.protein_id = ext.member),
+            SELECT COUNT(*), (SELECT COUNT(*) FROM ext ANTI JOIN __pf_src.proteins p ON p.protein_id = ext.member),
                    COUNT(DISTINCT rep) FROM ext""").fetchone()
         if unknown:
             raise FamilyError(f"{unknown:,} of {n:,} clustered proteins are absent from {db}")
-        not_covered = con.execute("SELECT COUNT(*) FROM src.proteins p ANTI JOIN ext ON ext.member = p.protein_id"
+        not_covered = con.execute("SELECT COUNT(*) FROM __pf_src.proteins p ANTI JOIN ext ON ext.member = p.protein_id"
                                   ).fetchone()[0]
-        digest = _digest_of(con, "SELECT member AS protein_id FROM ext", "src.")
+        digest = _digest_of(con, "SELECT member AS protein_id FROM ext", SRC)
         partition = con.execute("SELECT sha256(string_agg(member || chr(9) || rep, chr(10) ORDER BY member)) "
                                 "FROM ext").fetchone()[0]
         tag = _sha({"name": name, "parameters": parameters, "digest": digest["digest"], "partition": partition})[:10]
@@ -614,14 +743,14 @@ def import_clustering(
             con.execute(f"""
                 INSERT INTO {MEMBERS}
                 SELECT ext.member, 'fam:{tag}:' || ext.rep, ext.member = ext.rep, ?, p.bin_id, 'import', NULL
-                FROM ext JOIN src.proteins p ON p.protein_id = ext.member""", [name])
-            counts = build_stats(con, [name], prefix="src.")
+                FROM ext JOIN __pf_src.proteins p ON p.protein_id = ext.member""", [name])
+            counts = build_stats(con, [name], prefix=SRC)
             _finalize(con)
             con.execute("COMMIT")
         except Exception:
             con.execute("ROLLBACK")
             raise
-        con.execute("DETACH src")
+        con.execute("DETACH __pf_src")
         con.execute("CHECKPOINT")
     finally:
         con.close()
@@ -644,7 +773,7 @@ def _check_digests(con, alias: str, runs: list[str]) -> None:
             continue
         verified.add((build, recorded))
         live = _digest_of(con, f"SELECT protein_id FROM {alias}.{MEMBERS} WHERE clustering_run = '{run}' "
-                               "AND assignment IN ('cluster', 'import')", "")
+                               "AND batch_id IS NULL", "")
         if live["digest"] != recorded or live["proteins"] != n:
             raise FamilyError(f"run {run}: sequences of its {n:,} proteins changed since clustering; re-cluster")
     for batch, n, recorded, family_run in con.execute(
@@ -666,11 +795,11 @@ def load_staging(con: duckdb.DuckDBPyConnection, staging: Path | str, *, runs: S
     sequences of each run's and assignment batch's proteins must match the digest
     recorded when they were clustered, imported or assigned.
     """
-    con.execute(f"ATTACH {_q(Path(staging).expanduser().resolve())} AS stg (READ_ONLY)")
+    con.execute(f"ATTACH {_q(Path(staging).expanduser().resolve())} AS __pf_stg (READ_ONLY)")
     try:
-        if not has_families(con, catalog="stg"):
+        if not has_families(con, catalog="__pf_stg"):
             raise FamilyError(f"{staging} holds no protein-family tables")
-        staged = [r[0] for r in con.execute(f"SELECT clustering_run FROM stg.{RUNS} ORDER BY 1").fetchall()]
+        staged = [r[0] for r in con.execute(f"SELECT clustering_run FROM __pf_stg.{RUNS} ORDER BY 1").fetchall()]
         selected = list(runs) if runs else staged
         unknown = sorted(set(selected) - set(staged))
         if unknown:
@@ -680,31 +809,34 @@ def load_staging(con: duckdb.DuckDBPyConnection, staging: Path | str, *, runs: S
         missing, moved = con.execute(f"""
             SELECT COUNT(*) FILTER (WHERE p.protein_id IS NULL),
                    COUNT(*) FILTER (WHERE p.protein_id IS NOT NULL AND p.bin_id IS DISTINCT FROM f.bin_id)
-            FROM stg.{MEMBERS} f JOIN _pf_load USING (clustering_run)
+            FROM __pf_stg.{MEMBERS} f JOIN _pf_load USING (clustering_run)
             LEFT JOIN proteins p USING (protein_id)""").fetchone()
         if missing or moved:
             raise FamilyError(f"{missing:,} staged proteins are absent from the database and {moved:,} sit in "
                               "another genome; the staging file belongs to another protein set")
         if verify_digest:
-            _check_digests(con, "stg", selected)
+            _check_digests(con, "__pf_stg", selected)
             log("sequence digests verified")
         con.execute("BEGIN TRANSACTION")
         try:
             for view in VIEWS:
                 con.execute(f"DROP VIEW IF EXISTS {view}")
             con.execute(SCHEMA)
+            ensure_schema(con)
             defaults = [r[0] for r in con.execute(
-                f"SELECT DISTINCT level FROM stg.{RUNS} JOIN _pf_load USING (clustering_run) WHERE is_default"
+                f"SELECT DISTINCT level FROM __pf_stg.{RUNS} JOIN _pf_load USING (clustering_run) WHERE is_default"
             ).fetchall()]
             if defaults:
                 con.execute(f"UPDATE {RUNS} SET is_default = false WHERE list_contains(?::VARCHAR[], level)",
                             [defaults])
+            loaded = "(SELECT clustering_run FROM _pf_load)"
             for table in (MEMBERS, STATS, RUNS):
-                con.execute(f"DELETE FROM {table} WHERE clustering_run IN (SELECT clustering_run FROM _pf_load)")
-                con.execute(f"INSERT INTO {table} SELECT t.* FROM stg.{table} t JOIN _pf_load USING (clustering_run)")
-            con.execute(f"DELETE FROM {BATCHES} WHERE family_run IN (SELECT clustering_run FROM _pf_load)")
-            con.execute(f"INSERT INTO {BATCHES} SELECT b.* FROM stg.{BATCHES} b "
-                        "JOIN _pf_load l ON l.clustering_run = b.family_run")
+                con.execute(f"DELETE FROM {table} WHERE clustering_run IN {loaded}")
+                _copy_rows(con, table, "__pf_stg", f"t.clustering_run IN {loaded}")
+            for table in (BATCHES, RESCUES):
+                con.execute(f"DELETE FROM {table} WHERE family_run IN {loaded}")
+                if _columns(con, table, "__pf_stg"):
+                    _copy_rows(con, table, "__pf_stg", f"t.family_run IN {loaded}")
             _finalize(con)
             con.execute("COMMIT")
         except Exception:
@@ -712,13 +844,28 @@ def load_staging(con: duckdb.DuckDBPyConnection, staging: Path | str, *, runs: S
             raise
         con.execute("DROP TABLE IF EXISTS _pf_load")
     finally:
-        con.execute("DETACH stg")
+        con.execute("DETACH __pf_stg")
     return status(con)
 
 
 def _table_exists(con, name: str) -> bool:
-    return bool(con.execute("SELECT 1 FROM information_schema.tables WHERE table_schema = 'main' AND table_name = ?",
-                            [name]).fetchone())
+    return bool(con.execute("SELECT 1 FROM information_schema.tables WHERE table_schema = 'main' AND table_name = ? "
+                            "AND table_catalog = current_database()", [name]).fetchone())
+
+
+def base_run_of(con, run: str) -> str:
+    """The clustering run a rescue run was derived from (the run itself otherwise)."""
+    origin, details = con.execute(f"SELECT origin, details FROM {RUNS} WHERE clustering_run = ?", [run]).fetchone()
+    return json.loads(details)["base_run"] if origin == "rescue" else run
+
+
+def rescue_runs_of(con, family_run: str) -> tuple[str | None, str | None]:
+    """The rescue runs (family, subfamily) derived from a base family run, if any."""
+    family = con.execute(f"SELECT min(clustering_run) FROM {RUNS} WHERE origin = 'rescue' AND "
+                         "json_extract_string(details, '$.base_run') = ?", [family_run]).fetchone()[0]
+    sub = (con.execute(f"SELECT min(clustering_run) FROM {RUNS} WHERE parent_run = ?", [family]).fetchone()[0]
+           if family else None)
+    return family, sub
 
 
 def default_runs(con) -> tuple[str | None, str | None]:
@@ -756,7 +903,7 @@ def status(con) -> dict[str, Any]:
     by_assignment = dict(con.execute(f"SELECT assignment, COUNT(*) FROM {MEMBERS} WHERE clustering_run = ? "
                                      "GROUP BY 1 ORDER BY 1", [family_run]).fetchall())
     total = sum(by_assignment.values())
-    assigned = total - by_assignment.get("cluster", 0) - by_assignment.get("import", 0)
+    assigned = total - sum(by_assignment.get(k, 0) for k in ("cluster", "import", "rescue"))
     out.update({
         "proteins_with_family": total,
         "proteins_without_family": (con.execute(
@@ -768,6 +915,14 @@ def status(con) -> dict[str, Any]:
         "assigned_fraction": assigned / total if total else 0.0,
     })
     out["recluster_recommended"] = out["assigned_fraction"] > RECLUSTER_ASSIGNED_FRACTION
+    base = base_run_of(con, family_run)
+    rescue_family, _ = rescue_runs_of(con, base)
+    if rescue_family:
+        details = json.loads(con.execute(f"SELECT details FROM {RUNS} WHERE clustering_run = ?",
+                                         [rescue_family]).fetchone()[0])
+        out["rescue"] = {"family_run": rescue_family, "base_family_run": base,
+                         "included_by_default": rescue_family == family_run,
+                         **{k: details.get(k) for k in ("rescue_id", "candidates", "rescued", "joined_subfamily")}}
     return out
 
 
@@ -783,6 +938,7 @@ class AssignResult:
     by_assignment: dict[str, int] = field(default_factory=dict)
     new_subfamilies: int = 0
     new_families: int = 0
+    rescue: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return self.__dict__.copy()
@@ -824,11 +980,12 @@ def assign(con: duckdb.DuckDBPyConnection, work_dir: Path | str, *, family_run: 
     """
     if not has_families(con):
         raise FamilyError("the database holds no protein-family tables; activate a staging file first")
+    family_run = family_run or default_runs(con)[0]
     if family_run is None:
-        family_run, subfamily_run = default_runs(con)
-    else:
-        subfamily_run = con.execute(f"SELECT min(clustering_run) FROM {RUNS} WHERE parent_run = ?",
-                                    [family_run]).fetchone()[0]
+        raise FamilyError("no default family run; name one with family_run")
+    family_run = base_run_of(con, family_run)
+    subfamily_run = con.execute(f"SELECT min(clustering_run) FROM {RUNS} WHERE parent_run = ?",
+                                [family_run]).fetchone()[0]
     rows = {r[0]: r[1:] for r in con.execute(
         f"SELECT clustering_run, origin, build_id, parameters FROM {RUNS} "
         "WHERE list_contains(?::VARCHAR[], clustering_run)", [[family_run, subfamily_run]]).fetchall()}
@@ -942,7 +1099,379 @@ def assign(con: duckdb.DuckDBPyConnection, work_dir: Path | str, *, family_run: 
         raise
     con.execute("DROP TABLE IF EXISTS _pf_new")
     shutil.rmtree(work, ignore_errors=True)
-    return AssignResult(batch_id, len(new), by_assignment, new_sub, new_fam)
+    result = AssignResult(batch_id, len(new), by_assignment, new_sub, new_fam)
+    rescue_family, _ = rescue_runs_of(con, family_run)
+    if rescue_family:  # the rescue layer covers the build's proteins: recompute it with its own parameters
+        row = con.execute(f"SELECT parameters, is_default FROM {RUNS} WHERE clustering_run = ?",
+                          [rescue_family]).fetchone()
+        params = RescueParams(**json.loads(row[0])["rescue"]["params"])
+        result.rescue = rescue(con, work / "rescue", params=params, family_run=family_run, set_default=row[1],
+                               threads=threads, binary=binary, log=log).to_dict()
+        shutil.rmtree(work, ignore_errors=True)
+    return result
+
+
+# --------------------------------------------------------------------------- #
+# Rescue of truncated gene calls (a layer of derived runs over a build)
+# --------------------------------------------------------------------------- #
+
+TRUNCATED_FLAGS = ("10", "01", "11")
+# Whether Stage 09 and `sharur families run` add the rescue layer, and whether an added layer becomes the
+# default (views include rescued members), unless asked otherwise. False: the layer failed its pre-set
+# validation criteria (docs/guides/protein-families.md), so it is opt-in and, when added, excluded.
+RESCUE_BY_DEFAULT = False
+
+
+@dataclass(frozen=True)
+class RescueParams:
+    """Acceptance rule for placing a truncated singleton into an existing family."""
+
+    min_query_coverage: float = 0.8   # share of the CANDIDATE the alignment must cover
+    min_seq_id: float | None = None   # None: the family run's identity floor
+    min_family_size: int = 2          # members of the hit's family (the candidate excluded)
+    sensitivity: float = mmseqs.SENSITIVITY
+    evalue: float = mmseqs.EVALUE
+    max_seqs: int = mmseqs.SEARCH_MAX_SEQS
+
+    def __post_init__(self) -> None:
+        if not 0 < self.min_query_coverage <= 1:
+            raise ValueError(f"min_query_coverage must be in (0, 1], got {self.min_query_coverage}")
+        if self.min_seq_id is not None and not 0 <= self.min_seq_id <= 1:
+            raise ValueError(f"min_seq_id must be in [0, 1], got {self.min_seq_id}")
+        if self.min_family_size < 2:
+            raise ValueError(f"min_family_size must be at least 2, got {self.min_family_size}")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {k: getattr(self, k) for k in self.__dataclass_fields__}
+
+
+@dataclass
+class RescueResult:
+    rescue_id: str | None
+    family_run: str | None
+    subfamily_run: str | None
+    candidates: int
+    rescued: int
+    joined_subfamily: int
+    included_by_default: bool
+
+    def to_dict(self) -> dict[str, Any]:
+        return self.__dict__.copy()
+
+
+def _rescue_scope(con, family_run: str, subfamily_run: str, prefix: str, min_family_size: int) -> int:
+    """Temp tables ``_pf_cand`` (truncated singletons) and ``_pf_targ`` (members of families of
+    >= ``min_family_size``) for one base build; returns the candidate count."""
+    flags = "', '".join(TRUNCATED_FLAGS)
+    has_partial = "partial" in _columns(con, "proteins", prefix.rstrip(".") or None)
+    partial = "p.partial" if has_partial else "NULL"
+    con.execute(f"""
+        CREATE OR REPLACE TEMP TABLE _pf_cand AS
+        SELECT f.protein_id, f.bin_id, {partial} AS partial, f.family_id AS original_family_id,
+               s.family_id AS original_subfamily_id
+        FROM {MEMBERS} f
+        JOIN {STATS} st ON st.clustering_run = f.clustering_run AND st.family_id = f.family_id
+        JOIN {prefix}proteins p USING (protein_id)
+        LEFT JOIN {MEMBERS} s ON s.clustering_run = ? AND s.protein_id = f.protein_id
+        WHERE f.clustering_run = ? AND st.n_members = 1 AND {partial} IN ('{flags}')
+          AND rtrim(COALESCE(p.sequence, ''), '*') <> ''""", [subfamily_run, family_run])
+    con.execute(f"""
+        CREATE OR REPLACE TEMP TABLE _pf_targ AS
+        SELECT f.protein_id, f.family_id, s.family_id AS subfamily_id, st.n_members
+        FROM {MEMBERS} f
+        JOIN {STATS} st ON st.clustering_run = f.clustering_run AND st.family_id = f.family_id
+        LEFT JOIN {MEMBERS} s ON s.clustering_run = ? AND s.protein_id = f.protein_id
+        WHERE f.clustering_run = ? AND st.n_members >= ?""", [subfamily_run, family_run, min_family_size])
+    return con.execute("SELECT COUNT(*) FROM _pf_cand").fetchone()[0]
+
+
+def rescue_inputs(con, out_dir: Path | str, *, prefix: str = "", family_run: str | None = None,
+                  params: RescueParams | None = None) -> dict[str, Any]:
+    """Write ``candidates.faa`` and ``targets.faa`` for a rescue search run elsewhere (e.g. a cluster node)."""
+    params = params or RescueParams()
+    family_run, subfamily_run, _ = _base_build(con, family_run)
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    n = _rescue_scope(con, family_run, subfamily_run, prefix, params.min_family_size)
+    cand = export_proteins(con, out_dir / "candidates.faa", prefix=prefix, ids_table="_pf_cand")
+    con.execute("CREATE OR REPLACE TEMP TABLE _pf_targ_ids AS SELECT protein_id FROM _pf_targ")
+    targ = export_proteins(con, out_dir / "targets.faa", prefix=prefix, ids_table="_pf_targ_ids")
+    con.execute("DROP TABLE IF EXISTS _pf_targ_ids")
+    return {"family_run": family_run, "candidates": n, "candidate_digest": cand["digest"],
+            "targets": targ["proteins"], "target_digest": targ["digest"]}
+
+
+def _base_build(con, family_run: str | None) -> tuple[str, str, str]:
+    family_run = family_run or default_runs(con)[0]
+    if family_run is None:
+        raise FamilyError("no default family run")
+    family_run = base_run_of(con, family_run)
+    origin, build_id = con.execute(f"SELECT origin, build_id FROM {RUNS} WHERE clustering_run = ?",
+                                   [family_run]).fetchone()
+    subfamily_run = con.execute(f"SELECT min(clustering_run) FROM {RUNS} WHERE parent_run = ?",
+                                [family_run]).fetchone()[0]
+    if origin != "sharur" or subfamily_run is None:
+        raise FamilyError("the rescue needs a Sharur build (a family run with its subfamily run)")
+    return family_run, subfamily_run, build_id
+
+
+def drop_rescue(con, *, family_run: str | None = None) -> list[str]:
+    """Remove the rescue layer of a build; its base runs become the defaults again if the layer was."""
+    base = base_run_of(con, family_run or default_runs(con)[0])
+    rescue_family, rescue_sub = rescue_runs_of(con, base)
+    runs = [r for r in (rescue_family, rescue_sub) if r]
+    if not runs:
+        return []
+    was_default = con.execute(f"SELECT is_default FROM {RUNS} WHERE clustering_run = ?", [rescue_family]).fetchone()[0]
+    base_sub = con.execute(f"SELECT min(clustering_run) FROM {RUNS} WHERE parent_run = ?", [base]).fetchone()[0]
+    con.execute("BEGIN TRANSACTION")
+    try:
+        for table in (MEMBERS, STATS, RUNS):
+            con.execute(f"DELETE FROM {table} WHERE list_contains(?::VARCHAR[], clustering_run)", [runs])
+        if _columns(con, RESCUES):
+            con.execute(f"DELETE FROM {RESCUES} WHERE family_run = ?", [rescue_family])
+        if was_default:
+            con.execute(f"UPDATE {RUNS} SET is_default = true WHERE list_contains(?::VARCHAR[], clustering_run)",
+                        [[base, base_sub]])
+        _finalize(con)
+        con.execute("COMMIT")
+    except Exception:
+        con.execute("ROLLBACK")
+        raise
+    return runs
+
+
+def rescue(
+    con: duckdb.DuckDBPyConnection,
+    work_dir: Path | str,
+    *,
+    prefix: str = "",
+    params: RescueParams | None = None,
+    family_run: str | None = None,
+    set_default: bool = RESCUE_BY_DEFAULT,
+    hits: dict[str, list[mmseqs.Hit]] | None = None,
+    tool_version: str | None = None,
+    threads: int | None = None,
+    binary: str | None = None,
+    log: Callable[[str], None] = print,
+) -> RescueResult:
+    """Place truncated singletons into existing families as a separate layer over a Sharur build.
+
+    Candidates are proteins whose gene call runs off a contig end (Prodigal partial
+    flag ``10``, ``01`` or ``11``) and whose family in the build has one member. Each is
+    searched against every member of families with at least ``min_family_size``
+    members; the best hit by bit score is accepted when the alignment covers at least
+    ``min_query_coverage`` of the candidate and identity reaches ``min_seq_id`` (the
+    family run's floor by default). An accepted candidate joins the hit's family, and
+    the hit's subfamily when identity also reaches the subfamily floor.
+
+    The build's runs stay unchanged. The layer is a pair of derived runs,
+    ``<run>-rescued``, holding the build's membership with the rescued proteins moved
+    (``assignment = 'rescue'``), plus one ``protein_family_rescues`` row per rescued
+    protein with the hit, identity and coverages. With ``set_default`` the derived runs
+    become the defaults, so the per-level views include rescued members (counted in
+    ``n_rescued``). An earlier layer of the same build is replaced. ``prefix`` names the
+    catalog holding ``proteins`` (``SRC`` for a staging file); ``hits`` passes search
+    results computed elsewhere (:func:`sharur.protein_families.mmseqs.read_hits` over the
+    files of :func:`rescue_inputs`), with ``tool_version`` naming the MMseqs2 that made them.
+    """
+    import pandas as pd  # noqa: PLC0415
+
+    params = params or RescueParams()
+    ensure_schema(con)
+    con.execute(DDL[RESCUES])
+    family_run, subfamily_run, build_id = _base_build(con, family_run)
+    run_params = {r[0]: json.loads(r[1]) for r in con.execute(
+        f"SELECT clustering_run, parameters FROM {RUNS} WHERE list_contains(?::VARCHAR[], clustering_run)",
+        [[family_run, subfamily_run]]).fetchall()}
+    min_id = params.min_seq_id if params.min_seq_id is not None else run_params[family_run]["min_seq_id"]
+    sub_floor = run_params[subfamily_run]["min_seq_id"]
+    n_cand = _rescue_scope(con, family_run, subfamily_run, prefix, params.min_family_size)
+    log(f"{n_cand:,} truncated singletons in {family_run}")
+    n_targ = con.execute("SELECT COUNT(*) FROM _pf_targ").fetchone()[0]
+    searched = hits is None and n_cand > 0 and n_targ > 0
+    if searched:
+        work = Path(work_dir)
+        work.mkdir(parents=True, exist_ok=True)
+        export_proteins(con, work / "candidates.faa", prefix=prefix, ids_table="_pf_cand")
+        con.execute("CREATE OR REPLACE TEMP TABLE _pf_targ_ids AS SELECT protein_id FROM _pf_targ")
+        export_proteins(con, work / "targets.faa", prefix=prefix, ids_table="_pf_targ_ids")
+        con.execute("DROP TABLE IF EXISTS _pf_targ_ids")
+        level = LevelParams(min_seq_id=min_id, coverage=params.min_query_coverage, cov_mode=2,
+                            sensitivity=params.sensitivity, evalue=params.evalue)
+        hits = mmseqs.search_hits(work / "candidates.faa", work / "targets.faa", work / "search", level, top=5,
+                                  threads=threads, binary=binary, max_seqs=params.max_seqs)
+        shutil.rmtree(work, ignore_errors=True)
+    hits = hits or {}
+    candidates = {r[0] for r in con.execute("SELECT protein_id FROM _pf_cand").fetchall()}
+    targets = {r[0]: (r[1], r[2]) for r in con.execute(
+        "SELECT t.protein_id, t.family_id, t.subfamily_id FROM _pf_targ t "
+        "JOIN (SELECT DISTINCT target FROM (SELECT unnest(?::VARCHAR[]) AS target)) h ON h.target = t.protein_id",
+        [sorted({h.target for hs in hits.values() for h in hs})]).fetchall()}
+    rows = []
+    for query in sorted(candidates & set(hits)):
+        best = next((h for h in sorted(hits[query], key=mmseqs._rank)
+                     if h.target in targets and h.target != query and h.fident >= min_id
+                     and h.qcov >= params.min_query_coverage), None)
+        if best is None:
+            continue
+        fam, sub = targets[best.target]
+        joined_sub = best.fident >= sub_floor and sub is not None
+        rows.append((query, fam, sub if joined_sub else None, joined_sub, best.target, best.fident, best.qcov,
+                     best.tcov, best.bits, best.evalue, best.qlen, best.tlen))
+    accepted = pd.DataFrame(rows, columns=["protein_id", "family_id", "subfamily_id", "joined_subfamily",
+                                           "hit_protein_id", "identity", "query_coverage", "target_coverage",
+                                           "bits", "evalue", "query_length", "target_length"])
+    con.execute("""CREATE OR REPLACE TEMP TABLE _pf_acc_raw (
+        protein_id VARCHAR, family_id VARCHAR, subfamily_id VARCHAR, joined_subfamily BOOLEAN,
+        hit_protein_id VARCHAR, identity DOUBLE, query_coverage DOUBLE, target_coverage DOUBLE, bits DOUBLE,
+        evalue DOUBLE, query_length INTEGER, target_length INTEGER)""")
+    if len(accepted):
+        con.register("_pf_acc_df", accepted)
+        con.execute("INSERT INTO _pf_acc_raw SELECT * FROM _pf_acc_df")
+        con.unregister("_pf_acc_df")
+    con.execute("CREATE OR REPLACE TEMP TABLE _pf_acc AS SELECT a.*, c.bin_id, c.partial, c.original_family_id, "
+                "c.original_subfamily_id FROM _pf_acc_raw a JOIN _pf_cand c USING (protein_id)")
+    con.execute("DROP TABLE _pf_acc_raw")
+    rescue_id = "pfx-" + _sha({"base": family_run, "params": params.to_dict(), "min_seq_id": min_id,
+                               "rows": accepted.sort_values("protein_id")[["protein_id", "family_id",
+                                                                           "hit_protein_id"]].to_csv(index=False)
+                               if len(accepted) else ""})[:10]
+    rescue_family, rescue_sub = f"{family_run}-rescued", f"{subfamily_run}-rescued"
+    drop_rescue(con, family_run=family_run)
+    con.execute("BEGIN TRANSACTION")
+    try:
+        con.execute(f"""
+            INSERT INTO {MEMBERS} (protein_id, family_id, is_representative, clustering_run, bin_id, assignment, batch_id)
+            SELECT f.protein_id, COALESCE(a.family_id, f.family_id),
+                   CASE WHEN a.protein_id IS NULL THEN f.is_representative ELSE false END, ?, f.bin_id,
+                   CASE WHEN a.protein_id IS NULL THEN f.assignment ELSE 'rescue' END, f.batch_id
+            FROM {MEMBERS} f LEFT JOIN _pf_acc a USING (protein_id) WHERE f.clustering_run = ?""",
+                    [rescue_family, family_run])
+        con.execute(f"""
+            INSERT INTO {MEMBERS} (protein_id, family_id, is_representative, clustering_run, bin_id, assignment, batch_id)
+            SELECT f.protein_id, CASE WHEN a.joined_subfamily THEN a.subfamily_id ELSE f.family_id END,
+                   CASE WHEN a.joined_subfamily THEN false ELSE f.is_representative END, ?, f.bin_id,
+                   CASE WHEN a.protein_id IS NULL THEN f.assignment ELSE 'rescue' END, f.batch_id
+            FROM {MEMBERS} f LEFT JOIN _pf_acc a USING (protein_id) WHERE f.clustering_run = ?""",
+                    [rescue_sub, subfamily_run])
+        con.execute(f"""
+            INSERT INTO {RESCUES} (rescue_id, family_run, subfamily_run, base_family_run, protein_id, bin_id, partial,
+                                   original_family_id, original_subfamily_id, family_id, subfamily_id,
+                                   joined_subfamily, hit_protein_id, identity, query_coverage, target_coverage,
+                                   bits, evalue, query_length, target_length)
+            SELECT ?, ?, ?, ?, protein_id, bin_id, partial, original_family_id, original_subfamily_id, family_id,
+                   subfamily_id, joined_subfamily, hit_protein_id, identity, query_coverage, target_coverage,
+                   bits, evalue, query_length, target_length
+            FROM _pf_acc""", [rescue_id, rescue_family, rescue_sub, family_run])
+        digest = _digest_of(con, f"SELECT protein_id FROM {MEMBERS} WHERE clustering_run = '{rescue_family}' "
+                                 "AND batch_id IS NULL", prefix)
+        n_sub = int(accepted["joined_subfamily"].sum()) if len(accepted) else 0
+        details = {"rescue_id": rescue_id, "candidates": n_cand, "rescued": len(accepted),
+                   "joined_subfamily": n_sub}
+        if tool_version is None and searched:
+            tool_version = mmseqs.mmseqs_version(mmseqs.resolve_binary(binary))
+        rescue_meta = {"params": params.to_dict(), "min_seq_id_applied": min_id, "subfamily_floor": sub_floor,
+                       "candidates": "Prodigal partial " + "/".join(TRUNCATED_FLAGS) + ", family singleton"}
+        if set_default:
+            con.execute(f"UPDATE {RUNS} SET is_default = false WHERE level IN ('family', 'subfamily')")
+        for run, base, level, parent in ((rescue_family, family_run, "family", None),
+                                         (rescue_sub, subfamily_run, "subfamily", rescue_family)):
+            _insert_run(con, clustering_run=run, level=level, parent_run=parent, build_id=build_id,
+                        origin="rescue", is_default=set_default, tool="mmseqs2", tool_version=tool_version,
+                        parameters={**run_params[base], "rescue": rescue_meta},
+                        input_proteins=digest["proteins"], input_digest=digest["digest"], source_db=None,
+                        details={**details, "base_run": base})
+        build_stats(con, [rescue_family, rescue_sub], prefix=prefix)
+        _finalize(con)
+        con.execute("COMMIT")
+    except Exception:
+        con.execute("ROLLBACK")
+        raise
+    for temp in ("_pf_cand", "_pf_targ", "_pf_acc"):
+        con.execute(f"DROP TABLE IF EXISTS {temp}")
+    log(f"rescued {len(accepted):,} of {n_cand:,} truncated singletons ({n_sub:,} also joined a subfamily)")
+    return RescueResult(rescue_id, rescue_family, rescue_sub, n_cand, len(accepted), n_sub, set_default)
+
+
+def base_fingerprint(con, family_run: str | None = None) -> dict[str, list[int]]:
+    """Order-free fingerprint (rows, summed row hashes) of a build's base runs, excluding the default flag.
+
+    A rescue layer leaves it unchanged; :func:`rescue_staging` checks that.
+    """
+    family_run = base_run_of(con, family_run or default_runs(con)[0])
+    sub = con.execute(f"SELECT min(clustering_run) FROM {RUNS} WHERE parent_run = ?", [family_run]).fetchone()[0]
+    runs = [family_run, sub]
+    out = {}
+    # columns a rescue may add (ADDED_COLUMNS) or flip (is_default) stay out of the fingerprint
+    for table, exclude in ((MEMBERS, ()), (STATS, ("n_rescued",)), (RUNS, ("is_default",))):
+        cols = [c for c in _columns(con, table) if c not in exclude]
+        packed = "struct_pack(" + ", ".join(f'"{c}" := t."{c}"' for c in cols) + ")"
+        n, h = con.execute(f"SELECT COUNT(*), COALESCE(SUM(hash({packed})::HUGEINT), 0) FROM {table} t "
+                           "WHERE list_contains(?::VARCHAR[], t.clustering_run)", [runs]).fetchone()
+        out[table] = [int(n), int(h)]
+    return out
+
+
+def rescue_staging(
+    db: Path | str,
+    staging: Path | str,
+    *,
+    params: RescueParams | None = None,
+    set_default: bool = RESCUE_BY_DEFAULT,
+    drop: bool = False,
+    hits: dict[str, list[mmseqs.Hit]] | None = None,
+    tool_version: str | None = None,
+    threads: int = 4,
+    memory_limit: str = "8GB",
+    mmseqs_threads: int | None = None,
+    binary: str | None = None,
+    compact: bool = True,
+    log: Callable[[str], None] = print,
+) -> dict[str, Any]:
+    """Add (or with ``drop`` remove) the rescue layer of a staging file, replacing the file atomically.
+
+    The layer is written into a copy-on-write clone of ``staging`` (proteins read from
+    ``db``, read-only), the build's base runs are checked unchanged by fingerprint, and
+    the clone replaces ``staging`` with one rename, so readers see the old or the new
+    file whole. With ``compact`` the result is then rewritten without free blocks
+    (:func:`compact_family_file`), also replaced atomically.
+    """
+    import os  # noqa: PLC0415
+
+    from sharur.staging import clone_file  # noqa: PLC0415
+
+    staging = Path(staging).expanduser().resolve()
+    tmp = staging.with_name(staging.name + ".rescue.tmp")
+    for stale in (tmp, Path(str(tmp) + ".wal")):
+        stale.unlink(missing_ok=True)
+    method = clone_file(staging, tmp)
+    con = connect(tmp, threads=threads, memory_limit=memory_limit)
+    try:
+        con.execute(f"ATTACH {_q(Path(db).expanduser().resolve())} AS __pf_src (READ_ONLY)")
+        before = base_fingerprint(con)
+        if drop:
+            out: dict[str, Any] = {"dropped": drop_rescue(con)}
+        else:
+            out = rescue(con, staging.parent / (staging.name + ".rescue-work"), prefix=SRC, params=params,
+                         set_default=set_default, hits=hits, tool_version=tool_version, threads=mmseqs_threads,
+                         binary=binary, log=log).to_dict()
+        after = base_fingerprint(con)
+        if before != after:
+            raise FamilyError(f"the build's base runs changed during the rescue: {before} -> {after}")
+        con.execute("DETACH __pf_src")
+        con.execute("CHECKPOINT")
+    except Exception:
+        con.close()
+        tmp.unlink(missing_ok=True)
+        Path(str(tmp) + ".wal").unlink(missing_ok=True)
+        raise
+    con.close()
+    os.replace(tmp, staging)
+    out.update({"staging": str(staging), "clone": method, "base_fingerprint": before})
+    if compact:
+        out["compact"] = compact_family_file(staging, threads=threads, memory_limit=memory_limit)
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -990,9 +1519,14 @@ def run_pipeline(
     split_memory_limit: str | None = None,
     keep_fasta: bool = False,
     binary: str | None = None,
+    rescue_params: RescueParams | None = None,
+    rescue_include: bool = RESCUE_BY_DEFAULT,
     log: Callable[[str], None] = print,
 ) -> dict[str, Any]:
     """Export the proteins of ``db``, cluster both levels, and write ``out_dir/protein_families.duckdb``.
+
+    With ``rescue_params`` the truncated-gene rescue layer is added (:func:`rescue`), and made
+    the default when ``rescue_include``.
 
     ``db`` is only read. ``out_dir`` receives ``export.json``, ``clustering/``
     (``level0.tsv.gz`` subfamilies, ``level1.tsv.gz`` families, ``clustering.json``)
@@ -1019,6 +1553,10 @@ def run_pipeline(
                            threads=duckdb_threads, memory_limit=memory_limit, log=log)
     if not keep_fasta:
         (out_dir / "proteins.faa").unlink(missing_ok=True)
+    if rescue_params is not None:
+        result["rescue"] = rescue_staging(db, out_dir / "protein_families.duckdb", params=rescue_params,
+                                          set_default=rescue_include, threads=duckdb_threads, memory_limit=memory_limit,
+                                          mmseqs_threads=threads, binary=binary, log=log)
     result.update({"seconds": round(time.time() - started, 1), "clustering_seconds": manifest["seconds"],
                    "mmseqs_version": manifest["tool_version"], "threads": threads,
                    "levels": [lv.to_dict() for lv in levels]})
