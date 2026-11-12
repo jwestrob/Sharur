@@ -8,8 +8,8 @@
   Stage 04 HMM search, ships its compiled runtime for Linux x86-64 with Python 3.12. On macOS
   (Apple Silicon or Intel) the same environment installs everything else, which covers querying,
   browsing and analyzing a dataset built on Linux.
-- **Disk:** about 13 GB for the environment (18 GB while package caches fill) and 15 GB for the
-  Stage 04 HMM databases, PFAM and KOFAM most of it. Aksha stores
+- **Disk:** about 14 GB for the environment (19 GB while package caches fill) and 23 GB for the
+  Stage 04 HMM databases (KOFAM 15 GB, PFAM 7.3 GB). Aksha stores
   databases under `~/.config/Astra`; on a machine with a small home quota, point Aksha's `db_path`
   elsewhere before installing them (see Aksha's
   [database setup guide](https://github.com/jwestrob/aksha/blob/main/docs/database-setup.md)).
@@ -127,7 +127,8 @@ aksha initialize --hmms dbCAN
 ```
 
 Database files are stored at `~/.config/Astra/` (the `db_path` Aksha inherits from Astra); the
-five standard databases take about 15 GB there, PFAM and KOFAM most of it.
+five standard databases take about 23 GB there (KOFAM 15 GB, PFAM 7.3 GB). Installing them
+downloads about 2.4 GB and took 1.5 h in a test, most of it KOFAM's 1.6 GB from genome.jp.
 Aksha's registry of installed databases lives in its own config directory
 (`~/.config/Aksha/hmm_databases.json` on Linux). The standard pipeline (Stage 04) defaults to
 PFAM, KOFAM, HydDB, DefenseFinder, and dbCAN.
