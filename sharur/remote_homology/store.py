@@ -868,12 +868,20 @@ def status(con) -> dict[str, Any]:
             searches.append(dict(zip(["search_run", "clustering_run", "created_at", "msa_kinds", "targets",
                                       "databases", "families_selected", "families_ok", "families_error",
                                       "families_pending"], [*row[:5], json.loads(row[5]), *row[6:]])))
-        rule = con.execute(f"""
-            SELECT COUNT(DISTINCT family_id) FILTER (WHERE NOT unknown_function),
-                   COUNT(DISTINCT family_id) FROM {RESEMBLANCE_VIEW}""").fetchone() if _has_tables(
-            con, [RESEMBLANCE_VIEW]) else (None, None)
-        out["family_tier"] = {"searches": searches, "families_resembling_characterized": rule[0],
-                              "families_resembling_any": rule[1]}
+        by_run: dict[str, dict[str, int]] = {}
+        if _has_tables(con, [RESEMBLANCE_VIEW]):
+            for run, characterized, unknown_only in con.execute(f"""
+                    SELECT clustering_run, COUNT(*) FILTER (WHERE has_char),
+                           COUNT(*) FILTER (WHERE NOT has_char)
+                    FROM (SELECT clustering_run, family_id, bool_or(NOT unknown_function) AS has_char
+                          FROM {RESEMBLANCE_VIEW} GROUP BY ALL) GROUP BY 1 ORDER BY 1""").fetchall():
+                by_run[run] = {"characterized": characterized, "unknown_function_only": unknown_only}
+        out["family_tier"] = {
+            "searches": searches,
+            "families_resembling_characterized": sum(v["characterized"] for v in by_run.values()),
+            "families_resembling_unknown_function_only": sum(v["unknown_function_only"] for v in by_run.values()),
+            "families_resembling_any": sum(v["characterized"] + v["unknown_function_only"] for v in by_run.values()),
+            "by_clustering_run": by_run}
     if _has_tables(con, ["annotations"]):
         n, proteins = con.execute("SELECT COUNT(*), COUNT(DISTINCT protein_id) FROM annotations WHERE source = ?",
                                   [CDD_SOURCE]).fetchone()

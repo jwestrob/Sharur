@@ -451,6 +451,8 @@ def test_activation_loads_rows_and_the_sql_surface_reads_resembles(staged):
     assert _rows(db, "SELECT COUNT(DISTINCT annotation_id) FROM annotations") == [(6,)]
     status = again["status"]
     assert status["family_tier"]["families_resembling_characterized"] == 2 and status["cdd"]["proteins"] == 3
+    assert status["family_tier"]["families_resembling_unknown_function_only"] == 0
+    assert set(status["family_tier"]["by_clustering_run"]) == {"synthetic-permissive"}
 
     from sharur.sql import connect as sql_connect
 
