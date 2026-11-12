@@ -854,3 +854,33 @@ def test_family_tables_are_unkeyed_and_checked(staged, tmp_path):
             store._check_unique(con)
     finally:
         con.close()
+
+
+def test_check_names_the_indexes_hhsuite_3_2_needs(tmp_path, monkeypatch):
+    from sharur.remote_homology import runner as rh_runner
+
+    for part in ("hhm",):
+        (tmp_path / f"pfam_{part}.ffindex").write_text("")
+    for part in ("hhm", "a3m", "cs219"):
+        (tmp_path / f"pdb_{part}.ffindex").write_text("")
+    cfg = {"hhsuite_bin": "", "mafft": "mafft", "rpsblast": "rpsblast",
+           "databases": {"pfam": {"prefix": str(tmp_path / "pfam"), "name": "Pfam", "version": "39.0"},
+                         "pdb": {"prefix": str(tmp_path / "pdb"), "name": "PDB100", "version": "x"}},
+           "family_targets": ["pfam", "pdb"], "msa_kinds": ["family_only"],
+           "search": {"hhblits_iterations": 2, "hhblits_evalue": 0.001, "max_hits": 100,
+                      "min_probability": 50, "uniref_max_hits": 20, "cdd_evalue": 0.01}}
+    monkeypatch.setattr(rh_runner.shutil, "which", lambda exe: f"/bin/{exe}")
+
+    def banner(version):
+        return {"hhblits": f"HHblits {version}:", "hhsearch": f"HHsearch {version}",
+                "mafft": "v7.526", "rpsblast": "rpsblast: 2.16.0+"}
+
+    monkeypatch.setattr(rh_runner, "versions", lambda _cfg: banner("3.3.0"))
+    with pytest.raises(rh_runner.ConfigError) as error:
+        rh_runner.check(cfg)
+    assert "pfam_a3m.ffindex" in str(error.value) and "pfam_cs219.ffindex" in str(error.value)
+    assert "database pdb" not in str(error.value)
+
+    monkeypatch.setattr(rh_runner, "versions", lambda _cfg: banner("3.1.0"))
+    assert rh_runner.check(cfg)["problems"] == []
+    assert rh_runner.hhsuite_version("HHsearch 3.3.0") == (3, 3, 0)

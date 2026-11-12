@@ -61,6 +61,7 @@ import gzip
 import hashlib
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -188,6 +189,12 @@ def versions(cfg: dict) -> dict:
             "rpsblast": tool_version([tool(cfg, "rpsblast"), "-version"])}
 
 
+def hhsuite_version(text: str | None) -> tuple[int, ...] | None:
+    """``(3, 3, 0)`` from an HH-suite banner such as ``HHsearch 3.3.0``."""
+    match = re.search(r"HH\w+ (\d+)\.(\d+)(?:\.(\d+))?", text or "")
+    return tuple(int(g) for g in match.groups() if g is not None) if match else None
+
+
 def check(cfg: dict) -> dict:
     """Tools on PATH and database files present; raises ConfigError on a missing piece."""
     problems = []
@@ -195,13 +202,24 @@ def check(cfg: dict) -> dict:
         exe = tool(cfg, name)
         if shutil.which(exe) is None:
             problems.append(f"{name}: {exe} not found")
+    found = versions(cfg)
+    hh_version = hhsuite_version(found["hhsearch"])
+    searched = {*cfg.get("family_targets", ()), *(["uniref"] if hhr.MSA_ENRICHED in cfg.get("msa_kinds", ()) else [])}
     for key, db in cfg["databases"].items():
         prefix = db.get("prefix", "")
         if not _db_present(key, prefix):
             problems.append(f"database {key}: nothing found at prefix {prefix}")
+        elif key in searched and hh_version is not None and hh_version >= (3, 2):
+            # HH-suite 3.2 and later open a database through its a3m and cs219 indexes as well.
+            missing = [part for part in ("hhm", "a3m", "cs219") if not Path(f"{prefix}_{part}.ffindex").exists()]
+            if missing:
+                problems.append(
+                    f"database {key}: HH-suite {'.'.join(map(str, hh_version))} needs "
+                    f"{', '.join(f'{prefix}_{part}.ffindex' for part in missing)} "
+                    "(build them as the remote-homology guide describes, or use an HH-suite 3.1 hhsuite_bin)")
         if db.get("titles") and not Path(db["titles"]).exists():
             problems.append(f"database {key}: titles file {db['titles']} missing")
-    report = {"versions": versions(cfg), "problems": problems, "family_digest": family_digest(cfg)}
+    report = {"versions": found, "problems": problems, "family_digest": family_digest(cfg)}
     if problems:
         raise ConfigError("; ".join(problems))
     return report

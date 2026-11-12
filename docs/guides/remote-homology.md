@@ -75,10 +75,11 @@ newer databases is a rerun:
   Build the database from the seed alignments of the same Pfam release: one alignment per
   family (`.` replaced by `-`, upper case), `hhmake -i fam.fa -o fam.hhm -name "<ACC> <ID>; <DE>"
   -M 50` (most seed alignments mark no insert columns, so `-M a2m` fails), then `ffindex_build
-  -s -f list PREFIX_hhm.ffdata PREFIX_hhm.ffindex`. HH-suite 3.2 and later also read
-  `PREFIX_a3m` and `PREFIX_cs219` (`cstranslate -I a3m` with HH-suite's `cs219.lib` and
-  `context_data.lib`); hit names then come from the first record of each A3M, so give it the
-  `"<ACC> <ID>; <DE>"` name. Self-test the result: a seed sequence of a family should rank its
+  -s -f list PREFIX_hhm.ffdata PREFIX_hhm.ffindex`. That suffices for HH-suite 3.1; HH-suite
+  3.2 and later (bioconda installs 3.3) need `PREFIX_a3m` and `PREFIX_cs219` as well
+  (`cstranslate -I a3m` with HH-suite's `cs219.lib` and `context_data.lib`), and `sharur
+  remote-homology check` names any that are missing. Hit names then come from the first record of
+  each A3M, so give it the `"<ACC> <ID>; <DE>"` name. Self-test the result: a seed sequence of a family should rank its
   own family first.
 
 ## Family tier
