@@ -264,6 +264,7 @@ def check_reference_dbs() -> list[Check]:
         ),
         _check_dir_db("Foldseek DBs", FOLDSEEK_DB_DIR, "structure search databases"),
     ]
+    checks.append(check_hyddb_reference())
     macsy = next((d for d in MACSY_MODEL_DIRS if d.is_dir()), None)
     if macsy is not None:
         checks.append(_check_dir_db("DefenseFinder models", macsy, "MacSyFinder model definitions"))
@@ -278,6 +279,20 @@ def check_reference_dbs() -> list[Check]:
             )
         )
     return checks
+
+
+def check_hyddb_reference() -> Check:
+    """The HydDB DIAMOND reference Stage 07's hydrogenase subgroup classifier reads."""
+    from sharur.hydrogenase.classifier import find_reference
+
+    purpose = "hydrogenase subgroup calls (stage 07)"
+    try:
+        reference = find_reference()
+    except FileNotFoundError:
+        return Check("HydDB reference", WARN,
+                     "HydDB_all.dmnd not found in data/reference/hyddb or ~/.sharur/hyddb; "
+                     "stage 07 skips subgroup calls (INSTALL.md, HydDB DIAMOND database)", False, purpose)
+    return Check("HydDB reference", OK, str(reference.directory / "HydDB_all.dmnd"), False, purpose)
 
 
 def check_kegg_map() -> Check:

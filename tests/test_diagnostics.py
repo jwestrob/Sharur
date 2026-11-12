@@ -61,3 +61,19 @@ def test_minced_is_core_because_stage05c_runs_by_default():
     spec = next(spec for spec in diagnostics.TOOLS if spec.name == "minced")
 
     assert spec.core is True
+
+
+def test_doctor_reports_the_hyddb_reference(tmp_path, monkeypatch):
+    from sharur.hydrogenase import classifier
+
+    def missing(directory=None):
+        raise FileNotFoundError("HydDB reference not found")
+
+    monkeypatch.setattr(classifier, "find_reference", missing)
+    check = diagnostics.check_hyddb_reference()
+    assert check.status == diagnostics.WARN and not check.core
+    assert "HydDB_all.dmnd" in check.detail
+
+    reference = classifier.ReferenceInfo(tmp_path, "unknown", "0" * 64)
+    monkeypatch.setattr(classifier, "find_reference", lambda directory=None: reference)
+    assert diagnostics.check_hyddb_reference().status == diagnostics.OK
