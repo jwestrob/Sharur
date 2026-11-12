@@ -188,9 +188,22 @@ are diffed, and `--publish` swaps the clone in, keeps the previous file as
 copy waits for `sharur stage publish` or `sharur stage discard`.
 
 - `--staging` is repeatable (for example Stage 10 and Stage 11 files).
-- `--families-staging` loads the clustering runs that were searched before the family rows; a
-  database that already holds those runs needs no family file. Every searched run must exist with
-  the clustering input digest the search recorded, and every searched family must exist in it.
+- `--families-staging` (repeatable) loads clustering runs before the family rows, file by file in
+  the order given; a later file's run replaces a same-named one. By default only the searched runs
+  are taken (`--family-runs searched`); `--family-runs all` takes every run of every file, so one
+  staged write can bring in a dataset's own family build, imported clusterings and the
+  remote-homology rows together:
+
+  ```bash
+  sharur remote-homology activate --db data/DS/sharur.duckdb \
+    --families-staging data/DS/stage09_families/protein_families.duckdb \
+    --families-staging work/imported_clusterings.duckdb --family-runs all \
+    --staging work/remote_homology.duckdb --label families-and-remote-homology --publish
+  ```
+
+  A database that already holds the searched runs needs no family file. Every searched run must
+  exist with the clustering input digest the search recorded, and every searched family must
+  exist in it.
 - Family rows of the same clustering run and source are replaced; other runs stay.
 - CDD rows replace every `annotations` row with `source = 'cdd'`: the best model of each
   region by default, every hit with `--cdd-rows all`. Before that, the database's set of unique

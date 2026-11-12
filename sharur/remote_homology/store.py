@@ -864,13 +864,34 @@ def _attach_staging(con, path: Path, alias: str) -> set[str]:
         [alias]).fetchall()}
 
 
+FAMILY_RUNS_SEARCHED = "searched"
+FAMILY_RUNS_ALL = "all"
+
+
+def _family_runs_in(con, path: Path) -> list[str]:
+    con.execute(f"ATTACH {_q(path)} AS _rh_famfile (READ_ONLY)")
+    try:
+        if not _has_tables(con, ["protein_family_runs"], "_rh_famfile"):
+            raise RemoteHomologyError(f"{path} holds no protein-family tables")
+        return [r[0] for r in con.execute("SELECT clustering_run FROM _rh_famfile.protein_family_runs ORDER BY 1"
+                                          ).fetchall()]
+    finally:
+        con.execute("DETACH _rh_famfile")
+
+
 def load_staging(con: duckdb.DuckDBPyConnection, staging: Sequence[Path | str], *,
-                 families_staging: Path | str | None = None, verify_digest: bool = True,
+                 families_staging: Path | str | Sequence[Path | str] | None = None,
+                 family_runs: str = FAMILY_RUNS_SEARCHED, verify_digest: bool = True,
                  cdd_rows: str = CDD_ROWS_BEST, log: Callable[[str], None] = print) -> dict[str, Any]:
     """Copy the remote-homology rows of ``staging`` file(s) into the database open on ``con``.
 
+    Protein-family staging files (``families_staging``, one or several, loaded first in the order
+    given; a later file's run replaces a same-named one) contribute the searched clustering runs
+    (``family_runs = 'searched'``) or every run they hold (``'all'``), so one activation can load
+    a dataset's own build, imported clusterings and the remote-homology rows together.
+
     Family tier: the clustering run of every staged search must exist in the database (or in
-    ``families_staging``, whose runs are loaded first) with the clustering input digest the
+    ``families_staging``) with the clustering input digest the
     search recorded, and every staged family must exist in it; rows of the same clustering run
     and source are replaced. CDD: every staged protein must exist with the sequence the hit was
     computed for (MD5); ``annotations`` rows with ``source = 'cdd'`` are replaced and the
@@ -882,7 +903,12 @@ def load_staging(con: duckdb.DuckDBPyConnection, staging: Sequence[Path | str], 
     from sharur.defensefinder.selection import _SOURCE_VERSIONS_SQL  # noqa: PLC0415
 
     summary: dict[str, Any] = {"family_tier": None, "cdd": None}
-    if families_staging is not None:
+    if family_runs not in (FAMILY_RUNS_SEARCHED, FAMILY_RUNS_ALL):
+        raise RemoteHomologyError(f"family_runs must be '{FAMILY_RUNS_SEARCHED}' or '{FAMILY_RUNS_ALL}'")
+    if isinstance(families_staging, (str, Path)):
+        families_staging = [families_staging]
+    families_staging = [Path(f).expanduser().resolve() for f in (families_staging or [])]
+    if families_staging:
         from sharur.protein_families import store as pf  # noqa: PLC0415
 
         needed: set[str] = set()
@@ -893,8 +919,18 @@ def load_staging(con: duckdb.DuckDBPyConnection, staging: Sequence[Path | str], 
                     needed |= {r[0] for r in con.execute(f"SELECT clustering_run FROM _rh_peek.{RUNS}").fetchall()}
             finally:
                 con.execute("DETACH _rh_peek")
-        pf.load_staging(con, families_staging, runs=sorted(needed) or None, verify_digest=verify_digest, log=log)
-        summary["families_loaded"] = sorted(needed)
+        loaded: list[dict[str, Any]] = []
+        for fam_file in families_staging:
+            available = _family_runs_in(con, fam_file)
+            runs = available if family_runs == FAMILY_RUNS_ALL else sorted(set(available) & needed)
+            if not runs:
+                continue
+            pf.load_staging(con, fam_file, runs=runs, verify_digest=verify_digest, log=log)
+            loaded.append({"file": str(fam_file), "runs": runs})
+        found = {r for item in loaded for r in item["runs"]}
+        if family_runs == FAMILY_RUNS_SEARCHED and needed - found:
+            log(f"searched runs taken from the database itself: {', '.join(sorted(needed - found))}")
+        summary["families_loaded"] = loaded
     for i, path in enumerate(staging):
         path = Path(path).expanduser().resolve()
         alias = f"rh{i}"

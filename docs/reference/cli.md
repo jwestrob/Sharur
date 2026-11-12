@@ -1654,7 +1654,8 @@ $ sharur remote-homology activate [OPTIONS]
 
 * `-d, --db PATH`: Dataset sharur.duckdb.  [required]
 * `-s, --staging PATH`: Remote-homology staging file(s) (repeatable).  [required]
-* `--families-staging PATH`: Protein-family staging file whose searched runs are loaded first.
+* `--families-staging PATH`: Protein-family staging file(s), loaded first in the order given (repeatable; a later file's run replaces a same-named one).
+* `--family-runs TEXT`: Clustering runs taken from the families staging files: searched (those the remote-homology rows refer to) or all (every run, e.g. a dataset's own build and imported clusterings).  [default: searched]
 * `-l, --label TEXT`: [default: remote-homology]
 * `--work-dir PATH`: Directory for the staged clone (default: beside DB).
 * `--publish`: Publish the staged copy when the load succeeds.

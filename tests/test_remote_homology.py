@@ -734,11 +734,16 @@ def test_family_hits_carry_to_the_same_representative_in_another_run(staged, tmp
     tag2 = pf.import_clustering(staged["source_db"], tsv, second, name="synthetic-rescued", level="permissive",
                                 parameters="synthetic", log=lambda _m: None)["tag"]
     con = store.connect(staged["db"])
-    try:
-        store.load_staging(con, [staged["staging"]], families_staging=staged["families"], log=lambda _m: None)
-        pf.load_staging(con, second, log=lambda _m: None)
+    try:  # one activation: both clustering files (every run), then the remote-homology rows
+        out = store.load_staging(con, [staged["staging"]], families_staging=[staged["families"], second],
+                                 family_runs="all", log=lambda _m: None)
+        with pytest.raises(store.RemoteHomologyError, match="family_runs must be"):
+            store.load_staging(con, [staged["staging"]], family_runs="some", log=lambda _m: None)
     finally:
         con.close()
+    assert [item["runs"] for item in out["families_loaded"]] == [["synthetic-permissive"], ["synthetic-rescued"]]
+    assert _rows(staged["db"], "SELECT clustering_run FROM protein_family_runs ORDER BY 1") == [
+        ("synthetic-permissive",), ("synthetic-rescued",)]
     from sharur.sql import connect as sql_connect
 
     con = sql_connect(staged["db"])

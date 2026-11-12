@@ -184,8 +184,14 @@ def activate_command(
     db: Path = typer.Option(..., "--db", "-d", help=_DB_HELP),
     staging: list[Path] = typer.Option(..., "--staging", "-s",
                                        help="Remote-homology staging file(s) (repeatable)."),
-    families_staging: Path | None = typer.Option(
-        None, "--families-staging", help="Protein-family staging file whose searched runs are loaded first."),
+    families_staging: list[Path] = typer.Option(
+        [], "--families-staging",
+        help="Protein-family staging file(s), loaded first in the order given (repeatable; a later file's "
+             "run replaces a same-named one)."),
+    family_runs: str = typer.Option(
+        "searched", "--family-runs",
+        help="Clustering runs taken from the families staging files: searched (those the remote-homology "
+             "rows refer to) or all (every run, e.g. a dataset's own build and imported clusterings)."),
     label: str = typer.Option("remote-homology", "--label", "-l"),
     work_dir: Path | None = typer.Option(None, "--work-dir",
                                             help="Directory for the staged clone (default: beside DB)."),
@@ -207,14 +213,17 @@ def activate_command(
     if cdd_rows not in store.CDD_ROW_CHOICES:
         raise typer.BadParameter(f"--cdd-rows must be one of {', '.join(store.CDD_ROW_CHOICES)}")
 
+    if family_runs not in (store.FAMILY_RUNS_SEARCHED, store.FAMILY_RUNS_ALL):
+        raise typer.BadParameter("--family-runs must be 'searched' or 'all'")
     paths = [p.expanduser().resolve() for p in staging]
-    fam = families_staging.expanduser().resolve() if families_staging else None
+    fam = [f.expanduser().resolve() for f in families_staging]
 
     def writer(path: Path) -> dict:
         con = store.connect(path)
         try:
-            return store.load_staging(con, paths, families_staging=fam, verify_digest=verify_digest,
-                                      cdd_rows=cdd_rows, log=lambda m: typer.echo(m, err=True))
+            return store.load_staging(con, paths, families_staging=fam, family_runs=family_runs,
+                                      verify_digest=verify_digest, cdd_rows=cdd_rows,
+                                      log=lambda m: typer.echo(m, err=True))
         finally:
             con.close()
 
