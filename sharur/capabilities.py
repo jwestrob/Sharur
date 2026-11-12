@@ -914,6 +914,39 @@ def _protein_family_check(store: DuckDBStore) -> Capability:
                      if info["recluster_recommended"] else None))
 
 
+def _remote_homology_check(store: DuckDBStore) -> Capability:
+    """Optional remote-homology layer: CDD per protein and family-tier HHsearch (``docs/guides/remote-homology.md``)."""
+    from sharur.remote_homology.store import status  # noqa: PLC0415
+
+    try:
+        info = status(store.conn)
+    except Exception as exc:  # noqa: BLE001 - report, never break the brief
+        return Capability("remote_homology", CapabilityState.failed, "The remote-homology tables are unreadable.",
+                          evidence={"error": f"{type(exc).__name__}: {exc}"},
+                          remediation="Re-activate the staging file with `sharur remote-homology activate`.")
+    family, cdd = info.get("family_tier"), info.get("cdd")
+    if not family and not cdd:
+        return Capability(
+            "remote_homology", CapabilityState.unavailable,
+            "No remote-homology rows (CDD per protein, HHsearch per family) are loaded.",
+            remediation="Run `sharur remote-homology export/search/load-*`, then `sharur remote-homology activate`.")
+    parts, evidence = [], {}
+    if family and family["searches"]:
+        searched = sum(s["families_ok"] for s in family["searches"])
+        parts.append(f"{searched:,} families searched; {family['families_resembling_characterized'] or 0:,} "
+                     "resemble a characterized family at the rule")
+        evidence["family_searches"] = [{k: s[k] for k in ("search_run", "clustering_run", "families_ok",
+                                                           "families_error", "families_pending")}
+                                       for s in family["searches"]]
+    if cdd:
+        parts.append(f"CDD hits on {cdd['proteins']:,} proteins ({cdd['database'] or 'version unrecorded'})")
+        evidence["cdd"] = cdd
+    return Capability(
+        "remote_homology", CapabilityState.available,
+        "; ".join(parts) + ". These rows read as 'resembles' (evidence label), never as a name.",
+        evidence=evidence)
+
+
 def _synteny_check(
     db_path: Path,
     *,
@@ -1198,6 +1231,7 @@ def build_capability_brief(
                 capabilities.append(index_check)
             capabilities.extend(_semantic_checks(store, tables, protein_count, provider))
             capabilities.append(_protein_family_check(store))
+            capabilities.append(_remote_homology_check(store))
         else:
             for capability_id in (
                 "annotation_sources",

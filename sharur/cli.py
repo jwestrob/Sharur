@@ -1365,6 +1365,10 @@ from sharur.protein_families.cli import families_app  # noqa: E402
 
 app.add_typer(families_app, name="families")
 
+from sharur.remote_homology.cli import remote_homology_app  # noqa: E402
+
+app.add_typer(remote_homology_app, name="remote-homology")
+
 
 @stage_app.command(
     "run", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})

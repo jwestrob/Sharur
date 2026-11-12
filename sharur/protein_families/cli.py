@@ -132,8 +132,9 @@ def load_command(
     _echo_json(result)
 
 
-def _staged(db: Path, label: str, work_dir: Optional[Path], writer, do_publish: bool) -> None:
-    """Run ``writer(path)`` on a staged clone of ``db``, diff the family tables, optionally publish."""
+def _staged(db: Path, label: str, work_dir: Optional[Path], writer, do_publish: bool,
+            tables: Optional[list[str]] = None) -> None:
+    """Run ``writer(path)`` on a staged clone of ``db``, diff ``tables`` (default: the family tables), optionally publish."""
     from sharur.protein_families import store  # noqa: PLC0415
     from sharur.staging import StagingError, diff_databases, discard, publish, stage  # noqa: PLC0415
 
@@ -149,7 +150,7 @@ def _staged(db: Path, label: str, work_dir: Optional[Path], writer, do_publish: 
         discard(st)
         typer.echo(f"{label}: {exc}; staged copy discarded, {st.source} unchanged", err=True)
         raise typer.Exit(1) from exc
-    diff = diff_databases(st.source, st.staged, tables=list(store.TABLES), examples=3)
+    diff = diff_databases(st.source, st.staged, tables=list(tables or store.TABLES), examples=3)
     typer.echo(diff.to_markdown())
     _echo_json(result)
     if not do_publish:

@@ -26,6 +26,7 @@ from sharur.predicates.mappings.kegg_map import get_predicates_for_kegg
 from sharur.predicates.mappings.cazy_map import get_predicates_for_cazy
 from sharur.predicates.mappings.vog_map import get_vog_predicates
 from sharur.predicates.vocabulary import component_level, get_hierarchy
+from sharur.remote_homology import RESEMBLES_SOURCES
 
 if TYPE_CHECKING:
     from sharur.storage.duckdb_store import DuckDBStore
@@ -40,6 +41,18 @@ class AnnotationRecord:
     description: Optional[str] = None
     evalue: Optional[float] = None
     score: Optional[float] = None
+
+
+def without_resembles(annotations: list[AnnotationRecord]) -> list[AnnotationRecord]:
+    """Drop rows of resembles-tier sources (remote-homology similarity, e.g. CDD).
+
+    Those rows record that a protein resembles a profile at a permissive threshold; they
+    carry no predicate and leave annotation status (``unannotated`` and the rest) as the
+    curated sources set it.
+    """
+    if not any(a.source.lower() in RESEMBLES_SOURCES for a in annotations):
+        return annotations
+    return [a for a in annotations if a.source.lower() not in RESEMBLES_SOURCES]
 
 
 @dataclass
@@ -237,6 +250,7 @@ class PredicateGenerator:
             Sorted list of unique predicate IDs
         """
         predicates = set()
+        annotations = without_resembles(annotations)
 
         # Annotation-derived predicates
         for ann in annotations:

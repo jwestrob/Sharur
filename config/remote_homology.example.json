@@ -1,0 +1,17 @@
+{
+  "hhsuite_bin": "/path/to/hhsuite/bin",
+  "mafft": "mafft",
+  "rpsblast": "rpsblast",
+  "databases": {
+    "pfam": {"prefix": "/path/to/pfam_hh/pfam", "name": "Pfam", "version": "39.0", "kind": "pfam",
+             "built_from": "Pfam-A.seed of the same release, hhmake -M 50, ffindex_build"},
+    "pdb": {"prefix": "/path/to/pdb100/pdb100", "name": "PDB100", "version": "YYYY-MM-DD", "kind": "pdb",
+            "titles": "/path/to/pdb_titles.tsv"},
+    "uniref": {"prefix": "/path/to/UniRef30_YYYY_MM", "name": "UniRef30", "version": "YYYY_MM", "kind": "uniref"},
+    "cdd": {"prefix": "/path/to/cdd/Cdd", "name": "CDD", "version": "3.xx"}
+  },
+  "family_targets": ["pfam", "pdb"],
+  "msa_kinds": ["family_only"],
+  "search": {"hhblits_iterations": 2, "hhblits_evalue": 0.001, "max_hits": 100,
+             "min_probability": 50, "uniref_max_hits": 20, "cdd_evalue": 0.01}
+}

@@ -14,6 +14,7 @@ from sharur.predicates.generator import (
     AnnotationRecord,
     PredicateGenerator,
     ProteinRecord,
+    without_resembles,
 )
 from sharur.predicates.pfam_identity import (
     COMPLEX1,
@@ -84,6 +85,9 @@ class AtomGenerator:
             List of SemanticAtom objects.
         """
         atoms: list[SemanticAtom] = []
+        # Resembles-tier rows (remote-homology similarity) carry no atoms and leave
+        # annotation status unchanged.
+        annotations = without_resembles(annotations)
 
         # Track which accessions produced predicates
         accessions_that_mapped: set[str] = set()
