@@ -225,8 +225,9 @@ report/draft files remain independently writable.
   and family-tier HHsearch hits (`family_annotations`, `family_resemblance`) are observed
   similarity. Cite them as "resembles X (source, database and version, probability or E-value,
   aligned columns)", keep `hit_class = 'unknown_function'` hits separate from characterized
-  ones, and tag any function drawn from them UNVERIFIED. They never name a system, pathway or
-  function, and they leave `unannotated` unchanged (`docs/guides/remote-homology.md`).
+  ones, and tag any function drawn from them UNVERIFIED. A system, pathway or function name
+  still rests on a curated caller's call; `unannotated` keeps its curated-source meaning
+  (`docs/guides/remote-homology.md`).
 - **CAZy:** `carbohydrate_active` → check `cazy:GH5`, `cazy:GT2`, etc. GH families reveal substrate specificity.
 
 ---
