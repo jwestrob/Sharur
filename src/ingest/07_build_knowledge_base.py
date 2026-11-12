@@ -35,6 +35,7 @@ from sharur.contig_context import (
     recorded_name_conventions,
 )
 from sharur.defensefinder import selection as df_selection
+from sharur.hmm_search import installed_hmm_file, pfam_names_from_hmm
 from sharur.kofam import SCORE_BASIS_FULL, kofam_scores, record_ko_score_basis
 from sharur.storage.migrations import run_migrations
 from sharur.storage.schema import SCHEMA
@@ -261,6 +262,41 @@ class KnowledgeBaseBuilder:
         self.ko_list_path: Optional[Path] = None
         self._load_reference_maps()
 
+    @staticmethod
+    def _installed_pfam_hmm() -> Optional[Path]:
+        """Pfam-A.hmm of the PFAM database registered with Aksha (or legacy Astra), if any."""
+        for cli in ("aksha", "astra"):
+            path = installed_hmm_file("PFAM", cli)
+            if path is not None:
+                return path
+        return None
+
+    def _ensure_pfam_names(self) -> None:
+        """Fill the Pfam maps from the installed Pfam HMM file when no pfam_id_desc.tsv was found.
+
+        The HMM file is the one Stage 04 searched, so hits get PF accessions, names and
+        descriptions of the same Pfam release. Runs once.
+        """
+        missing = getattr(self, "_pfam_reference_missing", None)
+        if missing is None or self.pfam_acc_to_name:
+            return
+        self._pfam_reference_missing = None
+        pfam_hmm = self._installed_pfam_hmm()
+        if pfam_hmm is None:
+            logger.warning(
+                f"PFAM reference not found ({missing}) and no installed Pfam HMM file; Pfam "
+                "annotations will store profile names in the accession column. Put "
+                "pfam_id_desc.tsv (accession, name, description) in data/reference or "
+                "install PFAM with `aksha initialize --hmms PFAM`."
+            )
+            return
+        t0 = time.time()
+        rows = pfam_names_from_hmm(pfam_hmm)
+        self.pfam_id_to_acc = {name: acc for acc, name, _ in rows}
+        self.pfam_acc_to_name = {acc: name for acc, name, _ in rows}
+        self.pfam_acc_to_desc = {acc: desc for acc, _, desc in rows}
+        console.print(f"    Pfam names: {len(rows):,} profiles from {pfam_hmm} ({time.time() - t0:.1f}s)")
+
     def _load_reference_maps(self) -> None:
         # PFAM mapping: id -> accession, accession -> name/description
         pfam_path = find_reference(self.ref_dirs, "pfam_id_desc.tsv") or self.ref_dir / "pfam_id_desc.tsv"
@@ -273,10 +309,9 @@ class KnowledgeBaseBuilder:
             except Exception as exc:
                 logger.warning(f"Failed to load PFAM reference ({pfam_path}): {exc}")
         else:
-            logger.warning(
-                f"PFAM reference not found ({pfam_path}); Pfam annotations will store "
-                "profile names in the accession column"
-            )
+            # Without pfam_id_desc.tsv the names come from the installed Pfam HMM file, read
+            # when the first Pfam hits load (_ensure_pfam_names).
+            self._pfam_reference_missing = pfam_path
         # KEGG KOFAM mapping
         ko_path = (find_reference(self.ref_dirs, "ko_list")
                    or find_reference([Path.home() / ".config" / "Astra"], "ko_list")
@@ -846,6 +881,7 @@ class KnowledgeBaseBuilder:
                 )
                 # Map names/descriptions from reference
                 if source == "pfam" and original_name is not None:
+                    self._ensure_pfam_names()
                     df["accession"] = df["accession"].map(self.pfam_id_to_acc).fillna(df["accession"])
                     unmapped = df.loc[~df["accession"].astype(str).str.match(r"PF\d{5}"), "accession"]
                     if not unmapped.empty:

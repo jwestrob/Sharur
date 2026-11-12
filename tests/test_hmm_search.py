@@ -152,3 +152,21 @@ def test_doctor_accepts_legacy_astra_with_a_warning(tmp_path, registries, monkey
 
     assert [c.status for c in checks] == [diagnostics.WARN, diagnostics.OK]
     assert not diagnostics.has_core_failure(checks)
+
+
+def test_pfam_names_come_from_the_installed_hmm_file(tmp_path, registries):
+    aksha, _ = registries
+    pfam = tmp_path / "PFAM"
+    pfam.mkdir()
+    (pfam / "Pfam-A.hmm").write_text(
+        "HMMER3/f [3.1b2 | February 2015]\nNAME  Pkinase\nACC   PF00069.29\n"
+        "DESC  Protein kinase domain\nLENG  264\n//\n"
+        "HMMER3/f [3.1b2 | February 2015]\nNAME  ABC_tran\nACC   PF00005.31\nLENG  137\n//\n")
+    _registry(aksha, {"PFAM": str(pfam), "KOFAM": None})
+
+    path = hmm_search.installed_hmm_file("PFAM")
+
+    assert path == pfam / "Pfam-A.hmm"
+    assert hmm_search.pfam_names_from_hmm(path) == [
+        ("PF00069", "Pkinase", "Protein kinase domain"), ("PF00005", "ABC_tran", "")]
+    assert hmm_search.installed_hmm_file("KOFAM") is None

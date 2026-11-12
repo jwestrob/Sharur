@@ -65,6 +65,21 @@ def test_stage07_finds_reference_maps_beside_the_dataset(tmp_path, monkeypatch):
     assert module.reference_dirs(tmp_path / "data" / "my_dataset")[0] == override
 
 
+def test_stage07_reads_pfam_names_from_the_installed_hmm_without_a_tsv(tmp_path, monkeypatch):
+    module = SourceFileLoader("kb_pfam_names", str(REPO / "src/ingest/07_build_knowledge_base.py")).load_module()
+    hmm = tmp_path / "Pfam-A.hmm"
+    hmm.write_text("HMMER3/f\nNAME  Pkinase\nACC   PF00069.29\nDESC  Protein kinase domain\nLENG  264\n//\n")
+    monkeypatch.setattr(module, "installed_hmm_file", lambda database, cli="aksha": hmm if cli == "aksha" else None)
+    builder = object.__new__(module.KnowledgeBaseBuilder)
+    builder.pfam_id_to_acc, builder.pfam_acc_to_name, builder.pfam_acc_to_desc = {}, {}, {}
+    builder._pfam_reference_missing = tmp_path / "pfam_id_desc.tsv"
+
+    builder._ensure_pfam_names()
+
+    assert builder.pfam_id_to_acc == {"Pkinase": "PF00069"}
+    assert builder.pfam_acc_to_desc == {"PF00069": "Protein kinase domain"}
+
+
 def test_the_all_extra_covers_every_runtime_extra():
     # environment.yml installs ".[all,dev]"; a requirement only in a focused extra breaks that install.
     extras = PYPROJECT["project"]["optional-dependencies"]

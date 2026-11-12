@@ -66,6 +66,45 @@ def installed_databases(path: Path) -> dict[str, str] | None:
     }
 
 
+def installed_hmm_file(database: str, cli: str = "aksha") -> Path | None:
+    """The ``.hmm`` file of an installed database (for PFAM, ``Pfam-A.hmm``), or None."""
+    installed = installed_databases(registry_path(cli)) or {}
+    directory = installed.get(database)
+    if not directory:
+        return None
+    directory = Path(os.path.expandvars(directory)).expanduser()
+    if not directory.is_dir():
+        return None
+    preferred = directory / "Pfam-A.hmm"
+    if database.upper() == "PFAM" and preferred.is_file():
+        return preferred
+    candidates = sorted(directory.glob("*.hmm"))
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def pfam_names_from_hmm(path: Path) -> list[tuple[str, str, str]]:
+    """``(accession, name, description)`` per profile from a Pfam HMMER3 file's header lines.
+
+    The rows of ``pfam_id_desc.tsv``, with the accession version removed (``PF00069.29`` ->
+    ``PF00069``), read from the same file the Stage 04 search used.
+    """
+    rows: list[tuple[str, str, str]] = []
+    name = accession = description = ""
+    with open(path, "rb") as handle:
+        for raw in handle:
+            if raw.startswith(b"NAME "):
+                name, accession, description = raw[5:].strip().decode(), "", ""
+            elif raw.startswith(b"ACC "):
+                accession = raw[4:].strip().decode().split(".")[0]
+            elif raw.startswith(b"DESC "):
+                description = raw[5:].strip().decode(errors="replace")
+            elif raw.startswith(b"//"):
+                if name and accession:
+                    rows.append((accession, name, description))
+                name = accession = description = ""
+    return rows
+
+
 def resolve_cli(
     which: Callable[[str], str | None] = shutil.which,
     env: dict[str, str] | None = None,
