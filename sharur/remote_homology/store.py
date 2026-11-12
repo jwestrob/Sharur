@@ -7,7 +7,8 @@ Work directory (``export``)::
     WORK/fasta/<bucket>/<key>.faa    up to ``max_sequences`` unique member sequences, representative first
     WORK/out/<bucket>/<key>/         runner.py output: .hhr(.gz) files, hits.tsv, done.json
     WORK/cdd/chunks/chunk_N.faa      unique sequences of every protein, named by MD5 (``export-cdd``)
-    WORK/cdd/out/chunk_N.tsv         runner.py cdd output
+    WORK/cdd/out/chunk_N.tsv         runner.py cdd output (raw RPS-BLAST tables; stay on the cluster)
+    WORK/cdd/compact/                hits.parquet, models.parquet, compact.json (``compact-cdd``)
 
 Staging DuckDB (``load-families``, ``load-cdd``)::
 
@@ -15,12 +16,15 @@ Staging DuckDB (``load-families``, ``load-cdd``)::
                                databases with names and versions, parameters, tool versions, counts
     family_annotation_status   one row per selected family: ok / error / pending, timings
     family_annotations         one row per hit at probability >= 50% (the first 20 for UniRef30)
-    cdd_hits                   CDD hits in the ``annotations`` shape plus ``sequence_md5``
+    cdd_hits                   CDD hits per unique sequence (MD5): model id, E-value, bits, ranges
+    cdd_models                 the CDD models hit: accession, short name, description, length
     cdd_runs                   the CDD search: database name and version, E-value, counts
 
 Activation copies these into a dataset database through the staged-write protocol: family
-rows into ``family_annotations`` (and the run and status tables), CDD rows into
-``annotations`` with ``source = 'cdd'`` (with a row in ``annotation_source_versions``), and
+rows into ``family_annotations`` (and the run and status tables), CDD hits expanded from
+sequences to every protein with that sequence into ``annotations`` with ``source = 'cdd'``
+(after checking that the database's unique sequences are the ones searched; with a row in
+``annotation_source_versions``), and
 creates the ``family_resemblance`` view, which applies the "resembles" rule.
 """
 
@@ -29,7 +33,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +53,7 @@ STATUS = "family_annotation_status"
 HITS = "family_annotations"
 CDD_HITS = "cdd_hits"
 CDD_RUNS = "cdd_runs"
+CDD_MODELS = "cdd_models"
 RESEMBLANCE_VIEW = "family_resemblance"
 SOURCE_VERSIONS = "annotation_source_versions"
 CDD_SOURCE = "cdd"
@@ -127,20 +132,21 @@ DDL = {
     PRIMARY KEY (clustering_run, family_id, source, msa_kind, hit_rank)
 )""",
     CDD_HITS: f"""CREATE TABLE IF NOT EXISTS {CDD_HITS} (
-    protein_id VARCHAR NOT NULL,
-    source VARCHAR NOT NULL,
-    accession VARCHAR NOT NULL,
-    name VARCHAR,
-    description TEXT,
-    evalue DOUBLE,
-    score DOUBLE,
+    sequence_md5 VARCHAR NOT NULL,
+    pssm_id INTEGER NOT NULL,
+    evalue FLOAT NOT NULL,
+    score FLOAT,
     start_aa INTEGER,
     end_aa INTEGER,
-    sequence_md5 VARCHAR NOT NULL,
-    pssm_id VARCHAR,
-    model_length INTEGER,
     model_start INTEGER,
     model_end INTEGER
+)""",
+    CDD_MODELS: f"""CREATE TABLE IF NOT EXISTS {CDD_MODELS} (
+    pssm_id INTEGER PRIMARY KEY,
+    accession VARCHAR NOT NULL,
+    name VARCHAR,
+    description VARCHAR,
+    model_length INTEGER
 )""",
     CDD_RUNS: f"""CREATE TABLE IF NOT EXISTS {CDD_RUNS} (
     cdd_run VARCHAR PRIMARY KEY,
@@ -153,7 +159,7 @@ DDL = {
     unique_sequences BIGINT NOT NULL,
     proteins BIGINT NOT NULL,
     hit_rows BIGINT NOT NULL,
-    proteins_with_hits BIGINT NOT NULL,
+    sequences_with_hits BIGINT NOT NULL,
     export_digest VARCHAR NOT NULL,
     source_db VARCHAR,
     details JSON
@@ -391,6 +397,31 @@ def export_families(
 # --------------------------------------------------------------------------- #
 # Export (CDD)
 # --------------------------------------------------------------------------- #
+_HAS_SEQ = "rtrim(COALESCE(sequence, ''), '*') <> ''"
+
+
+def unique_sequences(con, prefix: str = "") -> Iterator[tuple[str, str]]:
+    """``(md5, sequence)`` of every distinct protein sequence (trailing '*' removed), in MD5 order."""
+    cur = con.execute(f"""SELECT md5(seq) AS h, any_value(seq) FROM (
+                              SELECT rtrim(sequence, '*') AS seq FROM {prefix}proteins WHERE {_HAS_SEQ})
+                          GROUP BY h ORDER BY h""")
+    while True:
+        batch = cur.fetchmany(50_000)
+        if not batch:
+            return
+        yield from batch
+
+
+def sequence_set_digest(con, prefix: str = "") -> tuple[int, str]:
+    """Count and SHA-256 of the unique sequences as :func:`export_cdd` writes them (its ``export_digest``)."""
+    digest = hashlib.sha256()
+    n = 0
+    for h, seq in unique_sequences(con, prefix):
+        digest.update(f">{h}\n{seq}\n".encode())
+        n += 1
+    return n, digest.hexdigest()
+
+
 def export_cdd(db: Path | str, out_dir: Path | str, *, chunk_size: int = 2000, threads: int = 4,
                memory_limit: str = "8GB", log: Callable[[str], None] = print) -> dict[str, Any]:
     """Write every unique protein sequence of ``db`` (MD5 headers, MD5 order) in chunks for RPS-BLAST."""
@@ -402,33 +433,24 @@ def export_cdd(db: Path | str, out_dir: Path | str, *, chunk_size: int = 2000, t
         stale.unlink()
     started = time.time()
     con = connect(db, read_only=True, threads=threads, memory_limit=memory_limit)
+    digest = hashlib.sha256()
+    n = n_chunks = 0
+    handle = None
     try:
-        n_proteins = con.execute("SELECT COUNT(*) FROM proteins WHERE rtrim(COALESCE(sequence, ''), '*') <> ''"
-                                 ).fetchone()[0]
-        cur = con.execute("""SELECT md5(seq) AS h, any_value(seq) FROM (
-                                 SELECT rtrim(sequence, '*') AS seq FROM proteins
-                                 WHERE rtrim(COALESCE(sequence, ''), '*') <> '')
-                             GROUP BY h ORDER BY h""")
-        digest = hashlib.sha256()
-        n = n_chunks = 0
-        handle = None
-        while True:
-            batch = cur.fetchmany(50_000)
-            if not batch:
-                break
-            for h, seq in batch:
-                if n % chunk_size == 0:
-                    if handle:
-                        handle.close()
-                    handle = open(chunks / f"chunk_{n_chunks:05d}.faa", "w")
-                    n_chunks += 1
-                text = f">{h}\n{seq}\n"
-                handle.write(text)
-                digest.update(text.encode())
-                n += 1
+        n_proteins = con.execute(f"SELECT COUNT(*) FROM proteins WHERE {_HAS_SEQ}").fetchone()[0]
+        for h, seq in unique_sequences(con):
+            if n % chunk_size == 0:
+                if handle:
+                    handle.close()
+                handle = open(chunks / f"chunk_{n_chunks:05d}.faa", "w")  # noqa: SIM115 - one file per chunk
+                n_chunks += 1
+            text = f">{h}\n{seq}\n"
+            handle.write(text)
+            digest.update(text.encode())
+            n += 1
+    finally:
         if handle:
             handle.close()
-    finally:
         con.close()
     manifest = {"kind": "cdd", "proteins": n_proteins, "unique_sequences": n, "chunks": n_chunks,
                 "chunk_size": chunk_size, "export_digest": digest.hexdigest(), "source_db": str(db),
@@ -595,15 +617,86 @@ def load_families(
     return result
 
 
-_CDD_COLUMNS = ", ".join(f"'{c}': '{t}'" for c, t in zip(
-    runner.CDD_COLUMNS, ("VARCHAR", "VARCHAR", "INTEGER", "INTEGER", "INTEGER", "INTEGER", "INTEGER", "INTEGER",
-                         "DOUBLE", "DOUBLE", "VARCHAR")))
+_CDD_TYPES = ("VARCHAR", "VARCHAR", "INTEGER", "INTEGER", "INTEGER", "INTEGER", "INTEGER", "INTEGER", "DOUBLE",
+              "DOUBLE", "VARCHAR")
+_CDD_COLUMNS = ", ".join(f"'{c}': '{t}'" for c, t in zip(runner.CDD_COLUMNS, _CDD_TYPES, strict=True))
+
+
+def compact_cdd(work: Path | str, *, max_evalue: float = CDD_MAX_EVALUE, allow_partial: bool = False,
+                threads: int = 4, memory_limit: str = "8GB", log: Callable[[str], None] = print) -> dict[str, Any]:
+    """Reduce the raw RPS-BLAST tables of ``work/cdd/out`` to two Parquet files in ``work/cdd/compact``.
+
+    ``hits.parquet``: one row per hit at ``max_evalue`` or below and unique sequence (MD5),
+    sorted by MD5, with the model's numeric id, E-value, bits and both ranges.
+    ``models.parquet``: one row per CDD model hit (id, accession, short name, description,
+    length) from titles ``"cd00009, AAA, description"``. ``compact.json`` records counts and
+    the search's E-value. Run it beside the raw tables (on the cluster); only the compact
+    files travel. Unless ``allow_partial``, every chunk must be done.
+    """
+    work = Path(work).expanduser().resolve()
+    manifest = json.loads((work / "cdd" / "export.json").read_text())
+    out = work / "cdd" / "out"
+    done = sorted(p.with_suffix(".tsv") for p in out.glob("chunk_*.done") if p.with_suffix(".tsv").exists())
+    n_chunks = manifest["chunks"]
+    if len(done) != n_chunks and not allow_partial:
+        raise RemoteHomologyError(f"{len(done):,} of {n_chunks:,} CDD chunks are done; finish the run first")
+    if not done:
+        raise RemoteHomologyError("no finished CDD chunk")
+    records = [json.loads(p.with_suffix(".done").read_text()) for p in done]
+    evalues = {r.get("evalue") for r in records}
+    if None in evalues:
+        raise RemoteHomologyError("CDD chunk records lack the E-value of their search")
+    if min(float(e) for e in evalues) < max_evalue:
+        raise RemoteHomologyError(f"the search kept hits at E <= {min(evalues)}, stricter than {max_evalue}; "
+                                  "rerun it with the configured cdd_evalue")
+    files = [str(p) for p in done if p.stat().st_size > 0]  # a chunk without hits leaves an empty table
+    compact = work / "cdd" / "compact"
+    compact.mkdir(parents=True, exist_ok=True)
+    con = connect(":memory:", threads=threads, memory_limit=memory_limit)
+    try:
+        if files:
+            listing = "[" + ", ".join(_q(f) for f in files) + "]"
+            con.execute(f"""CREATE VIEW raw AS SELECT * FROM read_csv({listing}, delim = '\t', header = false,
+                            quote = '', escape = '', columns = {{{_CDD_COLUMNS}}})""")
+        else:
+            con.execute("CREATE TABLE raw (" + ", ".join(
+                f"{c} {t}" for c, t in zip(runner.CDD_COLUMNS, _CDD_TYPES, strict=True)) + ")")
+        raw_rows = con.execute("SELECT COUNT(*) FROM raw").fetchone()[0]
+        con.execute(f"""COPY (
+            SELECT qseqid AS sequence_md5, CAST(split_part(sseqid, '|', 3) AS INTEGER) AS pssm_id,
+                   CAST(evalue AS FLOAT) AS evalue, CAST(bitscore AS FLOAT) AS score, qstart AS start_aa,
+                   qend AS end_aa, sstart AS model_start, send AS model_end
+            FROM raw WHERE evalue <= {float(max_evalue)}
+            ORDER BY sequence_md5, start_aa, pssm_id)
+            TO {_q(compact / "hits.parquet")} (FORMAT parquet, COMPRESSION zstd)""")
+        con.execute(f"""COPY (
+            SELECT CAST(split_part(sseqid, '|', 3) AS INTEGER) AS pssm_id,
+                   COALESCE(NULLIF(trim(split_part(any_value(stitle), ',', 1)), ''), split_part(sseqid, '|', 3))
+                       AS accession,
+                   NULLIF(trim(split_part(any_value(stitle), ',', 2)), '') AS name,
+                   NULLIF(trim(regexp_extract(any_value(stitle), '^[^,]*,[^,]*,(.*)$', 1)), '') AS description,
+                   any_value(slen) AS model_length
+            FROM raw WHERE evalue <= {float(max_evalue)} GROUP BY sseqid ORDER BY pssm_id)
+            TO {_q(compact / "models.parquet")} (FORMAT parquet, COMPRESSION zstd)""")
+        rows, seqs = con.execute(f"SELECT COUNT(*), COUNT(DISTINCT qseqid) FROM raw WHERE evalue <= {float(max_evalue)}"
+                                 ).fetchone()
+    finally:
+        con.close()
+    versions = sorted({v for v in (json.loads(p.read_text()).get("versions", {}).get("rpsblast")
+                                   for p in (work / "logs").glob("cdd_shard*.json")) if v})
+    info = {"chunks": n_chunks, "chunks_done": len(done), "raw_rows": raw_rows, "rows": rows,
+            "sequences_with_hits": seqs, "max_evalue": max_evalue, "search_evalue": sorted(float(e) for e in evalues),
+            "rpsblast": versions, "export_digest": manifest["export_digest"],
+            "databases": sorted({json.dumps(r.get("database"), sort_keys=True) for r in records}),
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S")}
+    (compact / "compact.json").write_text(json.dumps(info, indent=2) + "\n")
+    log(f"compacted {raw_rows:,} RPS-BLAST rows to {rows:,} hits at E <= {max_evalue:g} on {seqs:,} sequences")
+    return info
 
 
 def load_cdd(
     work: Path | str,
     staging: Path | str,
-    db: Path | str,
     config: Path | str,
     *,
     max_evalue: float = CDD_MAX_EVALUE,
@@ -612,86 +705,52 @@ def load_cdd(
     memory_limit: str = "8GB",
     log: Callable[[str], None] = print,
 ) -> dict[str, Any]:
-    """Load the RPS-BLAST results of ``work/cdd`` into ``staging`` as ``cdd_hits`` (protein level).
+    """Load the CDD hits of ``work/cdd`` into ``staging``: ``cdd_hits`` per unique sequence, ``cdd_models``.
 
-    Hits at ``max_evalue`` or below are expanded from unique sequences (MD5) to every protein of
-    ``db`` (opened read-only) with that sequence. CDD titles ``"cd00009, AAA, description"``
-    give accession, name and description. ``cdd_hits`` in the staging file is replaced.
+    Uses ``work/cdd/compact`` (from :func:`compact_cdd`), compacting the raw tables first when
+    they are present and the compact files are not. Hits stay keyed by sequence MD5; activation
+    expands them to every protein of the target database with that sequence. The CDD tables of
+    the staging file are replaced.
     """
     work = Path(work).expanduser().resolve()
     cfg = runner.load_config(config)
     cdd = runner.database(cfg, "cdd")
     manifest = json.loads((work / "cdd" / "export.json").read_text())
-    chunks = sorted((work / "cdd" / "chunks").glob("chunk_*.faa"))
-    out = work / "cdd" / "out"
-    done = [c for c in chunks if (out / f"{c.stem}.done").exists() and (out / f"{c.stem}.tsv").exists()]
-    if len(done) != len(chunks) and not allow_partial:
-        raise RemoteHomologyError(f"{len(done):,} of {len(chunks):,} CDD chunks are done; finish the run first")
-    if not done:
-        raise RemoteHomologyError("no finished CDD chunk")
-    records = [json.loads((out / f"{c.stem}.done").read_text()) for c in done]
-    evalues = {r.get("evalue") for r in records}
-    if None in evalues:
-        raise RemoteHomologyError("CDD chunk records lack the E-value of their search")
-    if min(float(e) for e in evalues) < max_evalue:
-        raise RemoteHomologyError(f"the search kept hits at E <= {min(evalues)}, stricter than {max_evalue}; "
-                                  "rerun it with the configured cdd_evalue")
-    db = Path(db).expanduser().resolve()
+    compact = work / "cdd" / "compact"
+    if not (compact / "compact.json").exists():
+        compact_cdd(work, max_evalue=max_evalue, allow_partial=allow_partial, threads=threads,
+                    memory_limit=memory_limit, log=log)
+    info = json.loads((compact / "compact.json").read_text())
+    if info["export_digest"] != manifest["export_digest"]:
+        raise RemoteHomologyError("the compact CDD files belong to another export; rerun compact-cdd")
+    if info["chunks_done"] != info["chunks"] and not allow_partial:
+        raise RemoteHomologyError(f"{info['chunks_done']:,} of {info['chunks']:,} CDD chunks were compacted")
+    if float(info["max_evalue"]) != float(max_evalue):
+        raise RemoteHomologyError(f"compact files hold hits at E <= {info['max_evalue']}, not {max_evalue}")
     staging = Path(staging).expanduser().resolve()
     staging.parent.mkdir(parents=True, exist_ok=True)
-    # chunks without a single hit leave empty tables, which the CSV reader cannot sniff
-    files = [str(out / f"{c.stem}.tsv") for c in done if (out / f"{c.stem}.tsv").stat().st_size > 0]
+    cdd_run = "cdd-" + _sha({"db": [cdd["name"], cdd["version"]], "evalue": max_evalue,
+                             "export": manifest["export_digest"]})[:10]
     con = connect(staging, threads=threads, memory_limit=memory_limit)
     try:
-        con.execute(f"ATTACH {_q(db)} AS src (READ_ONLY)")
-        if files:
-            con.execute(f"""CREATE OR REPLACE TEMP TABLE _rh_raw AS
-                SELECT * FROM read_csv(?, delim = '\t', header = false, quote = '', escape = '',
-                                       columns = {{{_CDD_COLUMNS}}})""", [files])
-        else:
-            con.execute("CREATE OR REPLACE TEMP TABLE _rh_raw (" + ", ".join(
-                f"{c} {t}" for c, t in zip(runner.CDD_COLUMNS, ("VARCHAR", "VARCHAR", "INTEGER", "INTEGER", "INTEGER",
-                                                               "INTEGER", "INTEGER", "INTEGER", "DOUBLE", "DOUBLE",
-                                                               "VARCHAR"))) + ")")
-        raw_rows = con.execute("SELECT COUNT(*) FROM _rh_raw").fetchone()[0]
-        con.execute("""CREATE OR REPLACE TEMP TABLE _rh_md5 AS
-            SELECT protein_id, md5(rtrim(sequence, '*')) AS h FROM src.proteins
-            WHERE rtrim(COALESCE(sequence, ''), '*') <> ''""")
-        unknown = con.execute("SELECT COUNT(DISTINCT qseqid) FROM _rh_raw ANTI JOIN _rh_md5 m ON m.h = qseqid"
-                              ).fetchone()[0]
-        if unknown:
-            raise RemoteHomologyError(f"{unknown:,} searched sequences match no protein of {db}; the export "
-                                      "belongs to another protein set")
         con.execute("BEGIN TRANSACTION")
-        con.execute(DDL[CDD_HITS])
-        con.execute(DDL[CDD_RUNS])
-        con.execute(f"DELETE FROM {CDD_HITS}")
-        con.execute(f"DELETE FROM {CDD_RUNS}")
-        con.execute(f"""
-            INSERT INTO {CDD_HITS}
-            SELECT m.protein_id, '{CDD_SOURCE}',
-                   COALESCE(NULLIF(trim(split_part(r.stitle, ',', 1)), ''), split_part(r.sseqid, '|', 3)),
-                   NULLIF(trim(split_part(r.stitle, ',', 2)), ''),
-                   NULLIF(trim(regexp_extract(r.stitle, '^[^,]*,[^,]*,(.*)$', 1)), ''),
-                   r.evalue, r.bitscore, r.qstart, r.qend, r.qseqid, split_part(r.sseqid, '|', 3),
-                   r.slen, r.sstart, r.send
-            FROM _rh_raw r JOIN _rh_md5 m ON m.h = r.qseqid
-            WHERE r.evalue <= ?""", [float(max_evalue)])
-        hit_rows, proteins_with = con.execute(
-            f"SELECT COUNT(*), COUNT(DISTINCT protein_id) FROM {CDD_HITS}").fetchone()
-        n_proteins = con.execute("SELECT COUNT(*) FROM _rh_md5").fetchone()[0]
-        versions = {r.get("rpsblast") for r in
-                    (json.loads(p.read_text()).get("versions", {}) for p in (work / "logs").glob("cdd_shard*.json"))
-                    if r.get("rpsblast")}
-        cdd_run = "cdd-" + _sha({"db": [cdd["name"], cdd["version"]], "evalue": max_evalue,
-                                 "export": manifest["export_digest"]})[:10]
+        for table in (CDD_HITS, CDD_MODELS, CDD_RUNS):
+            con.execute(f"DROP TABLE IF EXISTS {table}")
+            con.execute(DDL[table])
+        con.execute(f"INSERT INTO {CDD_HITS} SELECT * FROM read_parquet({_q(compact / 'hits.parquet')})")
+        con.execute(f"INSERT INTO {CDD_MODELS} SELECT * FROM read_parquet({_q(compact / 'models.parquet')})")
+        rows, seqs = con.execute(f"SELECT COUNT(*), COUNT(DISTINCT sequence_md5) FROM {CDD_HITS}").fetchone()
+        orphans = con.execute(f"SELECT COUNT(*) FROM (SELECT DISTINCT pssm_id FROM {CDD_HITS}) "
+                              f"ANTI JOIN {CDD_MODELS} USING (pssm_id)").fetchone()[0]
+        if rows != info["rows"] or orphans:
+            raise RemoteHomologyError(f"compact files are inconsistent ({rows:,} rows vs {info['rows']:,} recorded, "
+                                      f"{orphans} models missing)")
         con.execute(f"INSERT INTO {CDD_RUNS} VALUES (?, ?::TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     [cdd_run, _now(), cdd["name"], cdd["version"], cdd["prefix"], float(max_evalue),
-                     "; ".join(sorted(versions)) or None, manifest["unique_sequences"], n_proteins, hit_rows,
-                     proteins_with, manifest["export_digest"], str(db),
-                     json.dumps({"chunks": len(chunks), "chunks_done": len(done), "raw_rows": raw_rows,
-                                 "work_dir": str(work), "config_path": cfg["_path"],
-                                 "search_evalue": sorted(e for e in evalues if e is not None)})])
+                     "; ".join(info.get("rpsblast") or []) or None, manifest["unique_sequences"],
+                     manifest["proteins"], rows, seqs, manifest["export_digest"], manifest.get("source_db"),
+                     json.dumps({**{k: info[k] for k in ("chunks", "chunks_done", "raw_rows", "search_evalue")},
+                                 "work_dir": str(work), "config_path": cfg["_path"]})])
         con.execute("COMMIT")
     except Exception:
         try:
@@ -701,10 +760,11 @@ def load_cdd(
         raise
     finally:
         con.close()
-    result = {"cdd_run": cdd_run, "chunks": len(chunks), "chunks_done": len(done), "raw_rows": raw_rows,
-              "hit_rows": hit_rows, "proteins_with_hits": proteins_with, "proteins": n_proteins,
+    result = {"cdd_run": cdd_run, "chunks": info["chunks"], "chunks_done": info["chunks_done"],
+              "raw_rows": info["raw_rows"], "hit_rows": rows, "sequences_with_hits": seqs,
+              "unique_sequences": manifest["unique_sequences"], "proteins": manifest["proteins"],
               "staging": str(staging)}
-    log(f"{cdd_run}: {hit_rows:,} CDD rows on {proteins_with:,} of {n_proteins:,} proteins")
+    log(f"{cdd_run}: {rows:,} CDD hits on {seqs:,} of {manifest['unique_sequences']:,} unique sequences")
     return result
 
 
@@ -754,10 +814,10 @@ def load_staging(con: duckdb.DuckDBPyConnection, staging: Sequence[Path | str], 
             if {RUNS, STATUS, HITS} <= tables:
                 summary["family_tier"] = _load_family_tier(con, alias, path)
                 log(f"family tier: {summary['family_tier']}")
-            if CDD_HITS in tables:
-                summary["cdd"] = _load_cdd_rows(con, alias, path, verify_digest, _SOURCE_VERSIONS_SQL)
+            if {CDD_HITS, CDD_MODELS, CDD_RUNS} <= tables:
+                summary["cdd"] = _load_cdd_rows(con, alias, path, verify_digest, _SOURCE_VERSIONS_SQL, log)
                 log(f"cdd: {summary['cdd']}")
-            if not ({RUNS, STATUS, HITS} <= tables or CDD_HITS in tables):
+            if not ({RUNS, STATUS, HITS} <= tables or {CDD_HITS, CDD_MODELS, CDD_RUNS} <= tables):
                 raise RemoteHomologyError(f"{path} holds no remote-homology tables")
         finally:
             con.execute(f"DETACH {alias}")
@@ -817,21 +877,19 @@ def _load_family_tier(con, alias: str, path: Path) -> dict[str, Any]:
             "hit_rows": n_hits, "families_with_hits": n_fam}
 
 
-def _load_cdd_rows(con, alias: str, path: Path, verify_digest: bool, source_versions_sql: str) -> dict[str, Any]:
+def _load_cdd_rows(con, alias: str, path: Path, verify_digest: bool, source_versions_sql: str,
+                   log: Callable[[str], None]) -> dict[str, Any]:
     run = con.execute(f"SELECT * FROM {alias}.{CDD_RUNS}").fetchdf()
     if len(run) != 1:
         raise RemoteHomologyError(f"{path}: expected one CDD run record, found {len(run)}")
     run = run.iloc[0]
-    missing = con.execute(f"SELECT COUNT(DISTINCT protein_id) FROM {alias}.{CDD_HITS} ANTI JOIN proteins USING (protein_id)"
-                          ).fetchone()[0]
-    if missing:
-        raise RemoteHomologyError(f"{missing:,} proteins with CDD hits are absent from the database")
     if verify_digest:
-        changed = con.execute(f"""
-            SELECT COUNT(*) FROM (SELECT DISTINCT protein_id, sequence_md5 FROM {alias}.{CDD_HITS}) h
-            JOIN proteins p USING (protein_id) WHERE md5(rtrim(p.sequence, '*')) <> h.sequence_md5""").fetchone()[0]
-        if changed:
-            raise RemoteHomologyError(f"{changed:,} proteins changed sequence since the CDD search; rerun it")
+        n, digest = sequence_set_digest(con)
+        if digest != run["export_digest"]:
+            raise RemoteHomologyError(
+                f"the database's {n:,} unique protein sequences differ from the {int(run['unique_sequences']):,} "
+                "that were searched (proteins were added, removed or changed sequence); rerun the CDD search")
+        log(f"unique-sequence digest verified ({n:,} sequences)")
     con.execute("BEGIN TRANSACTION")
     try:
         con.execute(source_versions_sql)
@@ -841,13 +899,18 @@ def _load_cdd_rows(con, alias: str, path: Path, verify_digest: bool, source_vers
         con.execute(f"""
             INSERT INTO annotations (annotation_id, protein_id, source, accession, name, description, evalue,
                                      score, start_aa, end_aa)
-            SELECT ? + row_number() OVER (ORDER BY protein_id, start_aa, accession, evalue), protein_id, source,
-                   accession, name, description, evalue, score, start_aa, end_aa
-            FROM {alias}.{CDD_HITS}""", [int(base)])
-        loaded = con.execute("SELECT COUNT(*) FROM annotations WHERE source = ?", [CDD_SOURCE]).fetchone()[0]
+            WITH p AS (SELECT protein_id, md5(rtrim(sequence, '*')) AS sequence_md5 FROM proteins
+                       WHERE {_HAS_SEQ})
+            SELECT ? + row_number() OVER (ORDER BY p.protein_id, h.start_aa, m.accession, h.evalue), p.protein_id,
+                   '{CDD_SOURCE}', m.accession, m.name, m.description, h.evalue, h.score, h.start_aa, h.end_aa
+            FROM {alias}.{CDD_HITS} h JOIN {alias}.{CDD_MODELS} m USING (pssm_id) JOIN p USING (sequence_md5)""",
+                    [int(base)])
+        loaded, proteins = con.execute("SELECT COUNT(*), COUNT(DISTINCT protein_id) FROM annotations "
+                                       "WHERE source = ?", [CDD_SOURCE]).fetchone()
         params = {"cdd_run": run["cdd_run"], "max_evalue": float(run["max_evalue"]), "db_prefix": run["db_prefix"],
                   "tool_version": run["tool_version"], "unique_sequences": int(run["unique_sequences"]),
-                  "export_digest": run["export_digest"], "evidence": "resembles"}
+                  "sequence_hits": int(run["hit_rows"]), "export_digest": run["export_digest"],
+                  "evidence": "resembles"}
         con.execute(f"DELETE FROM {SOURCE_VERSIONS} WHERE source = ?", [CDD_SOURCE])
         con.execute(f"""INSERT INTO {SOURCE_VERSIONS} (source, model_set, model_version, profiles_path, selection_rule,
                                     parameters, hits_path, raw_rows, selected_rows, loaded_rows, loaded_at)
@@ -861,8 +924,8 @@ def _load_cdd_rows(con, alias: str, path: Path, verify_digest: bool, source_vers
     except Exception:
         con.execute("ROLLBACK")
         raise
-    return {"staging": str(path), "rows_removed": removed, "rows_loaded": loaded,
-            "proteins_with_hits": int(run["proteins_with_hits"]), "db": f"{run['db_name']} {run['db_version']}"}
+    return {"staging": str(path), "rows_removed": removed, "rows_loaded": loaded, "proteins_with_hits": proteins,
+            "db": f"{run['db_name']} {run['db_version']}"}
 
 
 def status(con) -> dict[str, Any]:

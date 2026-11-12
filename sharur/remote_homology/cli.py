@@ -10,7 +10,8 @@ Typical use (``docs/guides/remote-homology.md``)::
     # CDD
     sharur remote-homology export-cdd --db DB --out-dir WORK
     sharur remote-homology search cdd --work WORK --config rh.json
-    sharur remote-homology load-cdd --work WORK --config rh.json --db DB --staging RH.duckdb
+    sharur remote-homology compact-cdd --work WORK                 # beside the raw tables
+    sharur remote-homology load-cdd --work WORK --config rh.json --staging RH.duckdb
     # into the dataset database (staged write)
     sharur remote-homology activate --db DB --staging RH.duckdb [--families-staging FAMILIES.duckdb] --publish
     sharur remote-homology status --db DB
@@ -139,20 +140,37 @@ def load_families_command(
         _fail("load-families", exc)
 
 
+@remote_homology_app.command("compact-cdd")
+def compact_cdd_command(
+    work: Path = typer.Option(..., "--work", "-w"),
+    max_evalue: float = typer.Option(0.01, "--max-evalue"),
+    allow_partial: bool = typer.Option(False, "--allow-partial"),
+    threads: int | None = typer.Option(None, "--threads", "-t", help="Default: $SLURM_CPUS_ON_NODE or 4."),
+):
+    """Reduce the raw RPS-BLAST tables to work/cdd/compact/*.parquet (run beside them, on the cluster)."""
+    from sharur.remote_homology import runner, store  # noqa: PLC0415
+
+    try:
+        _echo_json(store.compact_cdd(work, max_evalue=max_evalue, allow_partial=allow_partial,
+                                     threads=threads or min(runner.allocated_cpus(), 4),
+                                     log=lambda m: typer.echo(m, err=True)))
+    except store.RemoteHomologyError as exc:
+        _fail("compact-cdd", exc)
+
+
 @remote_homology_app.command("load-cdd")
 def load_cdd_command(
     work: Path = typer.Option(..., "--work", "-w"),
     config: Path = typer.Option(..., "--config", "-c"),
-    db: Path = typer.Option(..., "--db", "-d", help=_DB_HELP + " Opened read-only (MD5 -> protein ids)."),
     staging: Path = typer.Option(..., "--staging", "-s", help="Staging DuckDB (created when absent)."),
     max_evalue: float = typer.Option(0.01, "--max-evalue"),
     allow_partial: bool = typer.Option(False, "--allow-partial"),
 ):
-    """Expand the CDD hits of unique sequences to proteins (staging file)."""
+    """Load the CDD hits (per unique sequence) and models into a staging file; compacts first if needed."""
     from sharur.remote_homology import store  # noqa: PLC0415
 
     try:
-        _echo_json(store.load_cdd(work, staging, db, config, max_evalue=max_evalue, allow_partial=allow_partial,
+        _echo_json(store.load_cdd(work, staging, config, max_evalue=max_evalue, allow_partial=allow_partial,
                                   log=lambda m: typer.echo(m, err=True)))
     except store.RemoteHomologyError as exc:
         _fail("load-cdd", exc)

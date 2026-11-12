@@ -9,9 +9,10 @@ allocated CPU (workers of four threads), and expands hits at E <= ``--max-evalue
 
 Outputs in ``stage10_cdd/``:
 
-- ``remote_homology_cdd.duckdb``: staging DuckDB with ``cdd_hits`` (the ``annotations``
-  shape plus the sequence MD5) and ``cdd_runs`` (database name and version, E-value, counts);
-- ``cdd/export.json``, ``cdd/out/chunk_*.tsv`` (raw RPS-BLAST tables) for provenance;
+- ``remote_homology_cdd.duckdb``: staging DuckDB with ``cdd_hits`` (per unique sequence MD5:
+  model id, E-value, bits, ranges), ``cdd_models`` and ``cdd_runs`` (database name and version,
+  E-value, counts); activation expands the hits to every protein with that sequence;
+- ``cdd/export.json``, ``cdd/compact/`` and ``cdd/out/chunk_*.tsv`` (raw RPS-BLAST tables);
 - ``processing_manifest.json``.
 
 The dataset database stays unchanged. Load the rows (``annotations`` with ``source =
@@ -61,8 +62,7 @@ def main() -> int:
             print(f"Stage 10 failed: RPS-BLAST reported errors (see {args.out_dir}/logs)", file=sys.stderr)
             return 1
         staging = args.out_dir / "remote_homology_cdd.duckdb"
-        result = load_cdd(args.out_dir, staging, args.db, args.config, max_evalue=args.max_evalue,
-                          threads=min(threads, 8))
+        result = load_cdd(args.out_dir, staging, args.config, max_evalue=args.max_evalue, threads=min(threads, 8))
     except (RemoteHomologyError, runner.ConfigError, FileNotFoundError) as exc:
         print(f"Stage 10 failed: {exc}", file=sys.stderr)
         return 1
@@ -70,7 +70,8 @@ def main() -> int:
         shutil.rmtree(args.out_dir / "cdd" / "chunks", ignore_errors=True)
     manifest = {"stage": "stage10_cdd", "db": str(args.db.resolve()), "export": export, **result}
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
-    print(f"CDD: {result['hit_rows']:,} hits on {result['proteins_with_hits']:,} of {result['proteins']:,} proteins")
+    print(f"CDD: {result['hit_rows']:,} hits on {result['sequences_with_hits']:,} of {result['unique_sequences']:,} "
+          f"unique sequences ({result['proteins']:,} proteins)")
     print(f"Activate: sharur remote-homology activate --db {args.db} --staging {staging} --publish")
     return 0
 

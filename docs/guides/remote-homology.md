@@ -126,14 +126,19 @@ of the time; Pfam searches are fast.
 ```bash
 sharur remote-homology export-cdd --db data/DS/sharur.duckdb --out-dir work/
 sharur remote-homology search cdd --work work/ --config rh.json        # or: submit_remote_homology_shards.sh cdd ...
-sharur remote-homology load-cdd --work work/ --config rh.json --db data/DS/sharur.duckdb \
-  --staging work/remote_homology.duckdb
+sharur remote-homology compact-cdd --work work/                         # beside the raw RPS-BLAST tables
+sharur remote-homology load-cdd --work work/ --config rh.json --staging work/remote_homology.duckdb
 ```
 
-Each unique sequence is searched once (named by its MD5) and its hits are expanded to every
-protein with that sequence. CDD bundles models from several collections (NCBI-curated `cd`
-models, Pfam, SMART, COG, PRK, TIGRFAMs and others), so one domain often hits several models;
-every hit at E ≤ 0.01 is stored, each with its query range (`start_aa`, `end_aa`).
+Each unique sequence is searched once (named by its MD5). `compact-cdd` reduces the raw
+RPS-BLAST tables to two Parquet files (hits at E ≤ 0.01 per sequence, sorted by MD5, and the
+CDD models hit), so on a cluster only `work/cdd/compact/` needs to travel. The staging file
+keeps hits per sequence (`cdd_hits`, `cdd_models`); activation expands them to every protein
+with that sequence. CDD bundles models from several collections (NCBI-curated `cd` models,
+Pfam, SMART, COG, PRK, TIGRFAMs and others), so one domain often hits several models; every hit
+at E ≤ 0.01 is stored with its query range (`start_aa`, `end_aa`). Expect several hits per
+annotated protein: at the protein level the `annotations` table can grow by a large multiple of
+its Pfam rows.
 
 ## During ingest
 
@@ -167,9 +172,11 @@ copy waits for `sharur stage publish` or `sharur stage discard`.
   database that already holds those runs needs no family file. Every searched run must exist with
   the clustering input digest the search recorded, and every searched family must exist in it.
 - Family rows of the same clustering run and source are replaced; other runs stay.
-- CDD rows replace every `annotations` row with `source = 'cdd'` after a check that each
-  protein still has the sequence that was searched (MD5). `annotation_source_versions` records
-  the database name and version, the E-value cutoff and the counts.
+- CDD rows replace every `annotations` row with `source = 'cdd'`. Before that, the
+  database's set of unique protein sequences must hash to the digest recorded when they were
+  exported for the search; a database with added, removed or changed proteins needs a new CDD
+  run. `annotation_source_versions` records the database name and version, the E-value cutoff
+  and the counts.
 
 `sharur remote-homology status --db ...` and `sharur preflight` (the `remote_homology`
 capability) report the searches, how many families meet the rule, and CDD coverage.
@@ -182,7 +189,8 @@ capability) report the searches, how many families meet the rule, and CDD covera
 | `family_annotation_status` | searched family | `status` (`ok`, `error`, `pending`), member, genome and sequence counts, representative, `n_hits`, `verified` (query length matched), `seconds`, `steps` |
 | `family_annotation_runs` | search | `search_run`, `clustering_run`, selection rule, `msa_kinds`, `targets`, `databases` (names, versions, paths), parameters, tool versions, family counts, export and configuration digests |
 | `family_resemblance` (view) | hit meeting the rule | the hit columns plus `hit_class` (`characterized`, `unknown_function`) and `evidence` = `resembles` |
-| `annotations` (`source = 'cdd'`) | CDD hit | `accession` (model, e.g. `cd00009`), `name`, `description`, `evalue`, `score` (bits), `start_aa`, `end_aa` |
+| `annotations` (`source = 'cdd'`) | CDD hit and protein | `accession` (model, e.g. `cd00009`), `name`, `description`, `evalue`, `score` (bits), `start_aa`, `end_aa` |
+| `cdd_hits`, `cdd_models`, `cdd_runs` (staging file) | hit per unique sequence; model; search | `sequence_md5`, `pssm_id`, E-value, bits, ranges; accession, name, description, length; database name and version, E-value cutoff, counts, export digest |
 
 Query coordinates (`q_start`, `q_end`) refer to the family representative's sequence, which
 leads every family alignment.

@@ -388,7 +388,7 @@ def staged(dataset, searched, tmp_path):
     staging = tmp_path / "remote_homology.duckdb"
     fam_result = store.load_families(searched["work"], staging, searched["config"], log=lambda _m: None)
     _fake_cdd(dataset["db"], tmp_path / "cddwork", config)
-    cdd_result = store.load_cdd(tmp_path / "cddwork", staging, dataset["db"], config, log=lambda _m: None)
+    cdd_result = store.load_cdd(tmp_path / "cddwork", staging, config, log=lambda _m: None)
     db = tmp_path / "dataset" / "sharur.duckdb"
     db.parent.mkdir()
     shutil.copyfile(dataset["db"], db)
@@ -419,9 +419,15 @@ def test_staging_tables_carry_database_names_versions_and_the_rule(staged):
     assert _rows(s, "SELECT DISTINCT hit_description FROM family_annotations WHERE hit_accession = '9xxx_C'") == [
         ("Structure of a synthetic transporter",)]
     # E <= 0.01 kept; fa_g4 and fa_g4b share one sequence, so its hit lands on both
-    assert staged["cdd"]["hit_rows"] == 4 and staged["cdd"]["proteins_with_hits"] == 3
-    assert _rows(s, "SELECT accession, name FROM cdd_hits WHERE protein_id = 's2' ORDER BY 1") == [
+    # staged per unique sequence: s2 (two hits) and the sequence fa_g4 and fa_g4b share (one hit)
+    assert staged["cdd"]["hit_rows"] == 3 and staged["cdd"]["sequences_with_hits"] == 2
+    seqs = {pid: seq for pid, _, seq in _dataset()[0]}
+    assert _rows(s, f"""SELECT m.accession, m.name FROM cdd_hits h JOIN cdd_models m USING (pssm_id)
+                        WHERE h.sequence_md5 = '{_md5(seqs["s2"])}' ORDER BY 1""") == [
         ("cdT0001", "SynthA"), ("cdT0002", "DUF9999")]
+    assert _rows(s, "SELECT pssm_id, model_length FROM cdd_models ORDER BY 1") == [(990001, 120), (990002, 60)]
+    compact = json.loads((staged["cddwork"] / "cdd" / "compact" / "compact.json").read_text())
+    assert (compact["raw_rows"], compact["rows"]) == (4, 3)
 
 
 def test_activation_needs_the_clustering_run(staged):
@@ -486,11 +492,11 @@ def test_activation_loads_rows_and_the_sql_surface_reads_resembles(staged):
 
 def test_activation_refuses_changed_sequences(staged, tmp_path):
     cdd_only = tmp_path / "cdd_only.duckdb"
-    store.load_cdd(staged["cddwork"], cdd_only, staged["source_db"], staged["config"], log=lambda _m: None)
+    store.load_cdd(staged["cddwork"], cdd_only, staged["config"], log=lambda _m: None)
     con = store.connect(staged["db"])
     try:
         con.execute("UPDATE proteins SET sequence = 'MKV' WHERE protein_id = 's2'")
-        with pytest.raises(store.RemoteHomologyError, match="changed sequence"):
+        with pytest.raises(store.RemoteHomologyError, match="differ from the 19"):
             store.load_staging(con, [cdd_only], log=lambda _m: None)
         with pytest.raises(pf.FamilyError, match="changed since clustering"):
             store.load_staging(con, [staged["staging"]], families_staging=staged["families"], log=lambda _m: None)
@@ -655,8 +661,10 @@ def test_cdd_with_rpsblast_finds_the_synthetic_profile(dataset, tmp_path):
     work = tmp_path / "work"
     store.export_cdd(dataset["db"], work, chunk_size=10, log=lambda _m: None)
     assert runner.main(["cdd", "--work", str(work), "--config", str(config), "--threads", "2"]) == 0
-    result = store.load_cdd(work, tmp_path / "s.duckdb", dataset["db"], config, log=lambda _m: None)
-    assert result["proteins_with_hits"] >= 1
-    hits = _rows(tmp_path / "s.duckdb", "SELECT protein_id, accession, name FROM cdd_hits ORDER BY 1")
-    assert ("s2", "cdT0001", "SynthA") in hits
+    result = store.load_cdd(work, tmp_path / "s.duckdb", config, log=lambda _m: None)
+    assert result["sequences_with_hits"] >= 1
+    seqs = {pid: seq for pid, _, seq in _dataset()[0]}
+    hits = _rows(tmp_path / "s.duckdb", "SELECT h.sequence_md5, m.accession, m.name FROM cdd_hits h "
+                                       "JOIN cdd_models m USING (pssm_id) ORDER BY 1")
+    assert (_md5(seqs["s2"]), "cdT0001", "SynthA") in hits
     assert all(r[1] == "cdT0001" for r in hits)
