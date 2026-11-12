@@ -656,6 +656,7 @@ def _run_one(triple: Triple, shim_cfg: str, timeout: float) -> Outcome:
                 if not triple.default_db:
                     raise RuntimeError("SQL without attach and no default database (pass --db)")
                 con = duckdb.connect(sub.path(triple.default_db), read_only=True)
+                _install_sql_prelude(con)  # the SQL surface (neighbors, slot, ...), TEMP macros
             try:
                 observed = normalize_rows(con.execute(query).fetchall())
             finally:
@@ -679,6 +680,14 @@ def _run_one(triple: Triple, shim_cfg: str, timeout: float) -> Outcome:
 
 def _sql_quote(value: str) -> str:
     return value.replace("'", "''")
+
+
+def _install_sql_prelude(con: Any) -> None:
+    """The Sharur SQL surface (TEMP macros, no FASTA function) on a replay connection."""
+    from sharur.sql import install_prelude  # noqa: PLC0415
+
+    with contextlib.suppress(Exception):
+        install_prelude(con, udfs=False)
 
 
 # --------------------------------------------------------------------------- #

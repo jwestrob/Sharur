@@ -1355,6 +1355,10 @@ def diff_db_command(
 stage_app = typer.Typer(help="Run a writer against a staged clone of a dataset database, review, publish.")
 app.add_typer(stage_app, name="stage")
 
+from sharur.sql.cli import sql_app  # noqa: E402
+
+app.add_typer(sql_app, name="sql")
+
 
 @stage_app.command(
     "run", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})

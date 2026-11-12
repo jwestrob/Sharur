@@ -28,6 +28,7 @@ Detailed guides live in `docs/` and `.claude/skills/`. **Read the relevant doc b
 | Coordinating multi-agent runs | `docs/agent_ops_spec.md`, `sharur/ops/` |
 | Running hierarchical candidate review | `docs/review_workflow.md`, `sharur/review/` |
 | Serving one large DuckDB to many agents | `docs/query_service.md`, `sharur/query/` |
+| Querying in SQL: neighbors, slots, feature presence, FASTA to disk (read-only, sequence-free) | `docs/guides/sql-surface.md` |
 | Writing structured findings | `docs/findings_spec.md` |
 | Re-checking findings after a database refresh (`sharur reverify`) | `docs/findings_spec.md` § Replaying verification |
 | Writing to a canonical database (stage, diff, reverify, publish) | `docs/guides/staged-writes.md` |
@@ -174,6 +175,9 @@ b.search_architecture("TPR_* {10,}")           # ordered-domain patterns (docs/g
 b.abundance(); b.feature_abundance(predicate="nife_group1")   # needs coverage (docs/guides/abundance.md)
 b.expression(); b.genome_genes(BIN); b.feature_expression(annotation="K00399")  # needs RNA counts (docs/guides/expression.md)
 # CLI: sharur card PROTEIN --db ...;  sharur why PROTEIN PREDICATE --db ...
+# SQL macros on every connection (docs/guides/sql-surface.md); genes() is the sequence-free protein table:
+b.store.execute_df("FROM neighbors('pfam:PF00069', k := 3)")      # also slot(), slot_tally(), feature_presence()
+# CLI: sharur sql query "FROM slot_tally('pfam:PF00069', 'pfam:PF00072', split := 'K00001')" --db ...
 ```
 
 Open analytical sessions with `Sharur(path, read_only=True)`. Multiple independent

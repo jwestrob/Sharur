@@ -68,11 +68,22 @@ b.store.execute("""
 b.store.execute("""
     SELECT bin_id, COUNT(*) as n_proteins,
            SUM(CASE WHEN 'unannotated' = ANY(pp.predicates) THEN 1 ELSE 0 END) as n_unannotated
-    FROM proteins p
+    FROM genes() p
     JOIN protein_predicates pp ON p.protein_id = pp.protein_id
     GROUP BY bin_id
 """)
 ```
+
+**SQL surface** (`docs/guides/sql-surface.md`; installed on every Sharur connection, read-only):
+```python
+# genes() = proteins without the sequence column; genomes() = bins with GTDB ranks split out
+b.store.execute_df("FROM neighbors('pfam:PF00069', k := 3)")           # oriented offsets, annotations summarized
+b.store.execute_df("FROM slot('K00001', side := 'upstream')")           # the gene beside each anchor
+b.store.execute_df("FROM slot_tally('K00001', 'pfam:PF00072', split := 'K00002', min_completeness := 90)")
+b.store.execute_df("FROM feature_presence('K00001,defense:CBASS') WHERE present")
+b.store.execute("SELECT write_fasta('/abs/out.faa', (SELECT list(protein_id) FROM feature_proteins('K00001')))")
+```
+From the shell: `sharur sql query "FROM slot_tally(...)" --db data/DATASET/sharur.duckdb`.
 
 **Neighborhood lookups:**
 ```python

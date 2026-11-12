@@ -227,6 +227,10 @@ def run_duckdb_verification(
         )
         try:
             connection.execute("SET threads = ?", [threads])
+            # the SQL surface (neighbors, slot, feature_presence, ...): TEMP macros only
+            from sharur.sql import install_prelude  # noqa: PLC0415
+
+            install_prelude(connection, udfs=False)
             cursor = connection.execute(spec.sql, spec.parameters)
             columns = [str(item[0]) for item in cursor.description]
             if any(RAW_SEQUENCE_COLUMN.fullmatch(column) for column in columns):

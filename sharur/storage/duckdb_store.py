@@ -56,14 +56,18 @@ class DuckDBStore:
         threads: int | None = None,
         memory_limit: str | None = None,
         temp_directory: Path | str | None = None,
+        sql_prelude: bool | None = None,
     ):
         """
         Initialize store.
 
-        If db_path is None, uses in-memory database.
+        If db_path is None, uses in-memory database. ``sql_prelude`` installs the Sharur
+        SQL surface (TEMP macros, :mod:`sharur.sql`) on the connection; the default is on
+        unless ``SHARUR_SQL_PRELUDE=0``.
         """
         self.db_path = Path(db_path) if db_path else None
         self.read_only = read_only
+        self.sql_prelude = sql_prelude
         if threads is not None and (
             isinstance(threads, bool) or not isinstance(threads, int) or threads < 1
         ):
@@ -115,7 +119,15 @@ class DuckDBStore:
                     self._conn.close()
                     self._conn = None
                     raise
+            self._install_sql_prelude()
         return self._conn
+
+    def _install_sql_prelude(self) -> None:
+        """Per-connection TEMP macros of the SQL surface; never blocks opening the database."""
+        from sharur.sql import install_prelude_quietly, prelude_enabled  # noqa: PLC0415
+
+        if prelude_enabled(self.sql_prelude):
+            install_prelude_quietly(self._conn)
 
     def _configure_resources(self) -> None:
         """Apply per-process limits before any analytical work begins."""
