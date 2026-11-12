@@ -827,7 +827,7 @@ sharur-query --db data/DATASET/sharur.duckdb --direct --semantic-index INDEX_DIR
 ```
 
 The rows component is optional. A membership-only generation (postings plus
-genome scope, about 121 MB for DPANN) serves term search, and stored rows come
+genome scope, about 121 MB for a dataset of a few million proteins) serves term search, and stored rows come
 from `semantic_terms`, which is stored in `protein_id` order without secondary
 indexes. Keep the rows component where per-protein SQL reads are slow, for
 example when protein IDs share long prefixes and zone maps cannot prune.

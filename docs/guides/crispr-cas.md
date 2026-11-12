@@ -69,7 +69,7 @@ Named subtype claims rest on `crispr_cas` and `cas` rows. Putative rows are cand
 
 ## Agreement with CRISPRCasTyper
 
-On 30 DPANN genomes (20 with MinCED arrays, 10 with Cas-domain hits only), run through CRISPRCasTyper 1.9.0 with the same proteins and gene coordinates, the port reproduces all 527 operons field for field. That covers span, prediction, best subtype, score, completeness and strand.
+On 30 archaeal test genomes (20 with MinCED arrays, 10 with Cas-domain hits only), run through CRISPRCasTyper 1.9.0 with the same proteins and gene coordinates, the port reproduces all 527 operons field for field. That covers span, prediction, best subtype, score, completeness and strand.
 
 For the 32 arrays found by both, repeat subtypes and probabilities are identical. Trust status matches for 31: CRISPRCasTyper estimates repeat identity from a random sample of ten repeats, and the port uses an evenly spaced one.
 

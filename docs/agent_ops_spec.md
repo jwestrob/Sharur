@@ -91,7 +91,7 @@ operator = SharurOps(
     api_token=bootstrap_token,
 )
 registration = operator.register_agent(
-    "dpann-reader-03",
+    "dataset-reader-03",
     role="worker",
     capabilities=["duckdb", "synteny"],
     max_concurrent_tasks=2,

@@ -746,7 +746,7 @@ def verify(
 
     totals = get_dataset_totals(conn)
 
-    # Resolve file paths — support non-standard naming (e.g. BATHYARCHAEIA_MANUSCRIPT.md)
+    # Resolve file paths — support non-standard naming (e.g. MY_MANUSCRIPT.md)
     if claims_file:
         claims_path = dataset_dir / claims_file
     else:

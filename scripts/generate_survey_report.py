@@ -14,7 +14,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--dataset",
-        default="data/altiarchaeota_production",
+        default="data/my_dataset",
         help="Path to the dataset directory.",
     )
     parser.add_argument("--output", help="Optional output PDF path.")

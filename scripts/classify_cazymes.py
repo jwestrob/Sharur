@@ -84,7 +84,7 @@ def _log(msg: str) -> None:
 # ── dbCAN standard thresholds ──────────────────────────────────────────────────
 # run_dbcan and the dbCAN3 server defaults: DIAMOND E < 1e-102; HMMER (dbCAN and
 # dbCAN-sub) E < 1e-15 with HMM coverage > 0.35. A 1e-18 DIAMOND cut passed 11% of
-# the SR-VP archaeal proteome (224,612 / 1,976,915) against 1.35% for dbCAN.hmm.
+# a 2-million-protein archaeal test proteome against 1.35% for dbCAN.hmm.
 # run_dbcan (bcb-unl/run_dbcan, dbcan/annotation/pyhmmer_search.py) searches every input
 # protein with HMMER Z fixed at the HMM file's profile count (875 dbCAN.hmm, 25,618
 # dbCAN-sub in the 2025-09-13 release) and keeps domains with i-evalue < 1e-15 and

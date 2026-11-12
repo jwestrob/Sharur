@@ -147,7 +147,7 @@ class TestPfamMapping:
         assert "dna_binding" in preds
 
     def test_high_volume_residual_pfam_mappings(self):
-        """Common DPANN residual PFAM domains should map directly."""
+        """Common residual PFAM domains should map directly."""
         # Pfam's name, description and GO for SET state no methyltransferase activity;
         # reviewed single-domain SET proteins carry curated methyltransferase ECs.
         preds = get_predicates_for_pfam("PF00856", "SET", "SET domain")
@@ -365,7 +365,7 @@ class TestKeggMapping:
 
     @requires_kegg_map
     def test_high_volume_residual_kofam_mappings(self):
-        """Common DPANN residual KOFAM definitions should map directly."""
+        """Common residual KOFAM definitions should map directly."""
         preds = get_predicates_for_kegg("K14623", "GA")
         assert "dna_repair" in preds
         assert "sos_response" in preds

@@ -22,7 +22,7 @@ def test_forward_block_pairs_equal_positions() -> None:
 
 
 def test_inverted_block_reverses_independently_sorted_target_array() -> None:
-    """Regression for DPANN block 1065691 and its formerly crossed pairs."""
+    """Regression for an inverted block and its formerly crossed pairs."""
 
     block = {
         "anchor_query_gene_ids": (

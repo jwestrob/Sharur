@@ -67,8 +67,8 @@ COMPLEX_I_KOS: dict[str, str] = {
     "K22165": "fpoJ", "K22166": "fpoK", "K22167": "fpoL", "K22168": "fpoM", "K22169": "fpoN", "K22170": "fpoO",
     "K22171": "fqoA", "K22172": "fqoBC", "K22173": "fqoD", "K22175": "fqoH", "K22176": "fqoI", "K22177": "fqoJ",
     "K22178": "fqoK", "K22179": "fqoL", "K22180": "fqoM", "K22181": "fqoN",
-    # mitochondrial core subunits (M00142, M00143). In SR-VP bacteria every NDUFS2/3/7/8 and NDUFV2 hit
-    # sits beside a nuo gene; the accessory NDUFS4/5/6 and NDUFV3 stay out (NDUFS4/6 hits: 0 of 62).
+    # mitochondrial core subunits (M00142, M00143). In bacterial test data every NDUFS2/3/7/8 and NDUFV2
+    # hit sits beside a nuo gene; the accessory NDUFS4/5/6 and NDUFV3 stay out (no NDUFS4/6 hit does).
     "K03878": "ND1", "K03879": "ND2", "K03880": "ND3", "K03881": "ND4", "K03882": "ND4L", "K03883": "ND5",
     "K03884": "ND6", "K03934": "NDUFS1", "K03935": "NDUFS2", "K03936": "NDUFS3", "K03940": "NDUFS7",
     "K03941": "NDUFS8", "K03942": "NDUFV1", "K03943": "NDUFV2",
@@ -104,7 +104,7 @@ COMPLEX_I_LIKE_KOS: dict[str, str] = {
     "K22015": "fdhF",
     # NuoE/F/G-type diaphorase subunits of bidirectional [NiFe] and multimeric [FeFe] hydrogenases
     # (hoxE/F/U carry the NuoE/F/G Pfam families; KEGG gives K05586-K05588 the Complex I EC 7.1.1.2;
-    # in SR-VP bacteria 144 of 147 hndB proteins sit beside nuo genes)
+    # in bacterial test data nearly every hndB protein sits beside nuo genes)
     "K05586": "hoxE", "K05587": "hoxF", "K05588": "hoxU", "K18005": "hoxF", "K18006": "hoxU", "K18330": "hndA",
     "K18331": "hndC", "K17992": "hndB", "K17998": "hydB", "K17999": "hydC", "K06441": "E1.12.7.2G",
 }
@@ -112,8 +112,8 @@ COMPLEX_I_LIKE_KOS: dict[str, str] = {
 # KOs of ``kegg_hyddb_snapshot.tsv`` (KOs KEGG names as hydrogenases) left on neither side, with the reason.
 UNUSED_KOS: dict[str, str] = {
     "K12146": "hyfR: transcriptional activator (KEGG BRITE ko03000)",
-    "K15836": "fhlA: transcriptional activator (KEGG BRITE ko03000); its SR-VP hits are sigma-54 activators",
-    "K07388": "AIRS-family 'hydrogenase expression/formation protein'; 2 of 89 SR-VP archaeal copies sit beside a hyp gene",
+    "K15836": "fhlA: transcriptional activator (KEGG BRITE ko03000); its hits in test data are sigma-54 activators",
+    "K07388": "AIRS-family 'hydrogenase expression/formation protein'; few archaeal copies in test data sit beside a hyp gene",
     "K15833": "absent from the current KEGG snapshot",
     "K15834": "absent from the current KEGG snapshot",
 }

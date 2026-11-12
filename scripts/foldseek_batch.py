@@ -14,8 +14,8 @@ import io
 from pathlib import Path
 import sys
 
-STRUCTURES_DIR = Path("data/thorarchaeota_production/structures")
-FOLDSEEK_DIR = Path("data/thorarchaeota_production/foldseek_results")
+STRUCTURES_DIR = Path("data/my_dataset/structures")
+FOLDSEEK_DIR = Path("data/my_dataset/foldseek_results")
 API = "https://search.foldseek.com/api"
 DELAY_SECONDS = 60  # Delay between queries to avoid rate limit
 

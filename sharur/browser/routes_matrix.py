@@ -534,8 +534,8 @@ def _mask(n: int, genomes: list[Genome]) -> np.ndarray:
 
 
 # Optimal leaf ordering flips dendrogram branches so neighbouring rows are as similar as possible
-# (all DPANN genomes, 40 variable KOs: mean adjacent Jaccard distance 0.272 -> 0.253). Its cost
-# grows quadratically (2.3 s at 3,564 rows), so larger matrices keep the plain leaf order.
+# (a few thousand genomes, 40 variable KOs: mean adjacent Jaccard distance 0.272 -> 0.253). Its cost
+# grows quadratically (2.3 s at about 3,500 rows), so larger matrices keep the plain leaf order.
 OPTIMAL_ORDER_MAX_ROWS = 2000
 
 

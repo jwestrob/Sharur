@@ -214,7 +214,7 @@ generation and writes them to `loci`/`locus_proteins`. A gene set is
 4. all three KOs score at or above their KOfam thresholds (KOfam's `ko_list`);
 5. none of the three genes is partial (Prodigal `partial` flag).
 
-The 6-gene window comes from the SR-VP snapshots: every KO-assigned alpha and
+The 6-gene window comes from archaeal and bacterial test datasets: every KO-assigned alpha and
 beta partner of a nifH sits 1-5 genes downstream on its strand (alpha +1 to +3,
 beta +2 to +5, with nifI1/nifI2 accounting for +2), and none sits upstream or
 on the other strand.
@@ -238,7 +238,7 @@ was observed:
 | `no_fe_protein` | Alpha/beta KO genes with no Fe-protein KO gene within 6 genes upstream |
 
 The 430-aa boundary labels uncalled pairs only: KO-assigned alpha and beta
-partners in the SR-VP snapshots are 439 aa or longer, and the KO-less pairs
+partners in those datasets are 439 aa or longer, and the KO-less pairs
 beside Methanomicrobiales NifH-family proteins are 338-395 aa.
 
 V2 generation turns the rows into context atoms. The Fe protein, alpha, beta

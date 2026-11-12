@@ -55,7 +55,7 @@ profile's embedded threshold (``ko_list``'s value set as GA1 and GA2), so on row
 from those searches the two scores agree about a threshold from the same
 ``ko_list``. Reloading the KO rows replaces the flag with KOfam's own comparison.
 
-The window: in the SR-VP archaeal and bacterial snapshots every KO-assigned
+The window: in archaeal and bacterial test datasets every KO-assigned
 alpha and beta partner of a nifH lies 1-5 genes downstream on its strand (alpha
 +1 to +3, beta +2 to +5; the nifI1/nifI2 pair accounts for +2); none lies
 upstream or on the other strand. ``WINDOW = 6`` keeps one gene of slack, as the

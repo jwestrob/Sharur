@@ -129,7 +129,7 @@ def test_old_provenance_tables_gain_the_reconcile_columns():
 
 def test_reconcile_finds_carriers_under_every_kegg_source_spelling(maps):
     # The generator reads KO calls from 'kegg', 'kofam' and any capitalization of them;
-    # DPANN stores most of its KO calls as 'kofam'.
+    # some datasets store most of their KO calls as 'kofam'.
     old, new, monkeypatch = maps
     store = _store()
     store.conn.execute("""

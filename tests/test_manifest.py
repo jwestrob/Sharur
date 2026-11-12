@@ -10,12 +10,12 @@ from sharur.operators.manifest import AnalysisManifest
 
 
 def test_legacy_manifest_is_normalized_without_crashing(tmp_path):
-    db_path = tmp_path / "dpann" / "sharur.duckdb"
+    db_path = tmp_path / "dataset_a" / "sharur.duckdb"
     db_path.parent.mkdir()
     (db_path.parent / "manifest.json").write_text(
         json.dumps(
             {
-                "dataset": "dpann",
+                "dataset": "dataset_a",
                 "description": "legacy metadata",
                 "stats": {"total_genomes": 10},
                 "sessions": [
@@ -32,7 +32,7 @@ def test_legacy_manifest_is_normalized_without_crashing(tmp_path):
     manifest = AnalysisManifest(db_path)
     summary = manifest.get_status_summary()
 
-    assert "Analysis State: dpann" in summary
+    assert "Analysis State: dataset_a" in summary
     assert "legacy manifest shape" in summary
     assert manifest.data["dataset"]["legacy_metadata"]["stats"] == {"total_genomes": 10}
     assert manifest.data["session_log"][0]["action"] == "setup"

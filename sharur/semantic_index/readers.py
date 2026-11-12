@@ -216,7 +216,7 @@ class ForwardIndex:
                      else np.empty(0, dtype=self.dtype))
         if len(self.offsets) != len(self.proteins) + 1 or int(self.offsets[-1]) != count or len(self.rows) != count:
             raise ArtifactError("Rich forward shape/count mismatch")
-        # Metadata dictionaries (38,578 labels for DPANN) decode once; protein IDs stay mapped.
+        # Metadata dictionaries (tens of thousands of labels on a large dataset) decode once; protein IDs stay mapped.
         caches = []
         for field in FIELDS:
             dictionary = self.dictionaries[field]

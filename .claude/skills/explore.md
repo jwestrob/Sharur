@@ -145,7 +145,7 @@ The report generator (`scripts/generate_exploration_report.py`) reads these file
 - `genome_profiles.tsv` → Per-genome statistics table
 - `genome_comparison.md` → Cross-genome analysis section
 
-Report output: `{DB_DIR}/altiarchaeota_exploration_report.pdf`
+Report output: `{DB_DIR}/exploration_report.pdf`
 
 ---
 
@@ -187,7 +187,7 @@ from sharur.core.analysis_record_io import append_finding_record
 from sharur.operators import Sharur
 
 # Initialize Sharur
-DB_PATH = "data/altiarchaeota_production/sharur.duckdb"  # Adjust as needed
+DB_PATH = "data/my_dataset/sharur.duckdb"  # Adjust as needed
 b = Sharur(DB_PATH, read_only=True)
 
 # Set up persistence directory
@@ -1610,7 +1610,7 @@ if result.returncode != 0:
 - exploration/genome_profiles.tsv (if multi-genome)
 - exploration/genome_comparison.md (if multi-genome)
 
-**PDF Report:** {DB_DIR}/altiarchaeota_exploration_report.pdf
+**PDF Report:** {DB_DIR}/exploration_report.pdf
 
 **Top discoveries:**
 1. [Brief description of most important finding]

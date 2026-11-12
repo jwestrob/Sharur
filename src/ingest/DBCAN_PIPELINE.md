@@ -222,8 +222,8 @@ cut and the reported i-evalues are run_dbcan's. Coverage is (hmm_to - hmm_from +
 also as run_dbcan computes it. The kept raw tables (`cazyme_dbcan_hmm_hits.tsv`,
 `cazyme_dbcan_sub_hits.tsv`) hold Aksha's own values.
 
-On Aksha's raw Z, the SR-VP archaeal `dbCAN.hmm` search (1,976,915 proteins) was 2,259x stricter
-than run_dbcan, and the bacterial one (2,914,401) 3,331x.
+On Aksha's raw Z, a `dbCAN.hmm` search over about 2 million archaeal proteins was 2,259x stricter
+than run_dbcan, and one over about 2.9 million bacterial proteins 3,331x.
 
 **Why no step splits the proteins.** On the raw Z, a search over 1/N of the proteins reports
 i-evalues N times smaller. Each HMM part searches the same targets as the single-process run (every
@@ -234,8 +234,8 @@ profiles over all parts and balances the work. Aksha writes each profile's rows 
 profile order; the merge reduces each part in parallel and breaks ties by profile position and row,
 which reproduces the single-process table and its calls exactly.
 
-DIAMOND chooses its seed-search algorithm from the query size: double-indexed for the 1,976,915
-SR-VP archaeal proteins, query-indexed for a sixteenth of them. The top target (`-k 1`) then
+DIAMOND chooses its seed-search algorithm from the query size: double-indexed for about 2 million
+archaeal proteins, query-indexed for a sixteenth of them. The top target (`-k 1`) then
 differs for 22 of 19,152 proteins, while two runs on the whole set agree byte for byte. DIAMOND
 therefore runs once on every protein, in search task 0; in default mode that takes under 3 minutes
 for 2 million proteins. The candidate subset depends on every search shard, which is why dbCAN-sub
@@ -245,8 +245,8 @@ runs as a second array.
 single-process ones byte for byte, that a protein-split HMM search changes calls, and that each merge
 check above stops a merge.
 
-Measured on a Slurm cluster (24 CPUs per job) for an archaeal metagenome set, 1,976,915 proteins and 38,883
-dbCAN-sub candidates, with all 16 shards running at once:
+Measured on a Slurm cluster (24 CPUs per job) for an archaeal metagenome set of about 2 million proteins and
+39,000 dbCAN-sub candidates, with all 16 shards running at once:
 
 | Stage | 16 shards | Single process |
 |-------|-----------|----------------|

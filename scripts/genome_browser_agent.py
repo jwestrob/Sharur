@@ -22,9 +22,9 @@ from datetime import datetime
 from sharur.core.analysis_record_io import append_finding_record
 from sharur.core.analysis_record_compat import load_findings_file
 
-DB_PATH = "data/thorarchaeota_production/sharur.duckdb"
-FINDINGS_PATH = "data/thorarchaeota_production/genome_browser_findings.jsonl"
-SUMMARY_PATH = "data/thorarchaeota_production/genome_browser_summary.md"
+DB_PATH = "data/my_dataset/sharur.duckdb"
+FINDINGS_PATH = "data/my_dataset/genome_browser_findings.jsonl"
+SUMMARY_PATH = "data/my_dataset/genome_browser_summary.md"
 
 
 def get_quarter_proteins(quarter: int) -> list:

@@ -186,8 +186,8 @@ CREATE TABLE IF NOT EXISTS semantic_terms (
 -- order, so zone maps prune per-protein reads, and term lookups scan the
 -- compressed term_id column as fast as an ART index serves them. Zone maps
 -- compare an 8-byte string prefix: where protein IDs share long prefixes
--- (Omnitrophota: 108 distinct prefixes) a per-protein read scans the table,
--- a few ms (explain() 3.2 -> 7.4 ms median there, while DPANN reads got faster).
+-- (one test dataset: 108 distinct prefixes) a per-protein read scans the table,
+-- a few ms (explain() 3.2 -> 7.4 ms median there, while another dataset's reads got faster).
 
 -- Constraint-free append targets for resumable full refreshes. Completed
 -- generations are promoted into the canonical constrained/indexed tables in

@@ -614,7 +614,7 @@ def sandbox_prefix(paths: Sequence[str]) -> list[str] | None:
 # --------------------------------------------------------------------------- #
 # Resident memory a worker holds beyond its DuckDB limit: the interpreter, pandas and numpy,
 # fetched results, and helper modules a replay imports. Workers with a 4 GB limit reached
-# 1.7-5.5 GB resident replaying the SR-VP defense findings (2026-11-02).
+# 1.7-5.5 GB resident replaying a set of defense findings (2026-11-02).
 WORKER_OVERHEAD_BYTES = 3 << 29  # 1.5 GiB
 # Share of currently available memory the pool may commit.
 MEMORY_FRACTION = 0.5

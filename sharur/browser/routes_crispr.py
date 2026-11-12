@@ -7,8 +7,8 @@ assembly:
 the consensus is matched along the array span (Hamming distance up to about a
 tenth of its length), diverged copies (up to 30%) are then sought at the
 expected spacing inside the span, and spacers are the stretches between
-consecutive repeats. On DPANN (474 arrays), recovered repeats span at least 95%
-of the recorded array in 440 arrays.
+consecutive repeats. On an archaeal test dataset, recovered repeats span at least 95%
+of the recorded array in 93% of arrays.
 Nearby Cas-domain genes come from the evidence-backed labels and from domain
 names; these are observed domains, named here as "Cas-domain genes".
 """

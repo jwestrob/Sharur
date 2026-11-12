@@ -6,7 +6,7 @@ For datasets where proteins are already called (no Prodigal needed).
 Parses Prodigal-style FASTA headers with coordinates.
 
 Example header:
->Complete_Asgard_Heimdall_2022_curated_1|Complete_Asgard_Thorarchaeota_Heimdall_2022_curated|Heimdall_2022 # 59 # 1510 # 1
+>genome1_contig1_1|genome1_contig1|genome1 # 59 # 1510 # 1
 """
 
 from __future__ import annotations

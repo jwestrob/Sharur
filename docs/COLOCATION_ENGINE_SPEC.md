@@ -4,7 +4,7 @@
 This document is retained as the original design rationale; the shipped implementation has
 since evolved beyond it (see **Divergences in implementation** at the end).
 **Date:** 2026-03-08 (design); implemented and in production since 2026-03-08.
-**Motivation:** MacSyFinder is the bottleneck in defense/secretion system validation. On DPANN (3,564 genomes, 3.4M proteins), a single run takes 20-30 minutes even with `--previous-run` (skipping hmmsearch). It also has fragile failure modes: filename mismatches, hit description parsing crashes, opaque error messages. All the data it needs is already in DuckDB. We can do the co-localization in-process in seconds.
+**Motivation:** MacSyFinder is the bottleneck in defense/secretion system validation. On a dataset of several thousand genomes and millions of proteins, a single run takes 20-30 minutes even with `--previous-run` (skipping hmmsearch). It also has fragile failure modes: filename mismatches, hit description parsing crashes, opaque error messages. All the data it needs is already in DuckDB. We can do the co-localization in-process in seconds.
 
 ## What MacSyFinder Actually Does
 
@@ -343,7 +343,7 @@ Replace the MacSyFinder subprocess calls in:
 
 ### Performance Estimate
 
-Current MacSyFinder on DPANN: ~20-30 minutes (8 workers, `--previous-run`).
+Current MacSyFinder on that dataset: ~20-30 minutes (8 workers, `--previous-run`).
 
 In-process DuckDB approach:
 - Phase 2 (load hits): <1s (single indexed query)
@@ -358,7 +358,7 @@ In-process DuckDB approach:
 2. **Cluster tests**: Known hit positions → expected clusters
 3. **Validation tests**: Known clusters + models → expected system hits
 4. **Integration test**: Run on a small curated dataset, compare output to MacSyFinder results
-5. **Regression test**: Run on DPANN, compare system counts to MacSyFinder output
+5. **Regression test**: Run on an ingested dataset, compare system counts to MacSyFinder output
 
 ### Risks / Edge Cases
 

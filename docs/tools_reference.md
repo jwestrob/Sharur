@@ -106,7 +106,7 @@ b.generate_v2(
 
 ### Caller validation
 
-On the full DPANN translated TXSScan hit set, MacSyFinder 2.1.4 / TXSScan 1.1.3 produced
+On the full translated TXSScan hit set of an archaeal test dataset, MacSyFinder 2.1.4 / TXSScan 1.1.3 produced
 904 candidates and selected 687 systems across all 19 installed models. Sharur selected
 exactly the same 687 instances (zero disagreements), with identical output under three
 Python hash seeds.

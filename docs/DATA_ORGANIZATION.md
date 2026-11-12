@@ -87,13 +87,13 @@ data/
 
 ```bash
 # Archive previous analysis if complete
-PREV_ORGANISM="thorarchaeota"
+PREV_ORGANISM="dataset_a"
 ARCHIVE_DATE=$(date +%Y-%m-%d)
 mkdir -p data/archives/${PREV_ORGANISM}_${ARCHIVE_DATE}
 mv data/${PREV_ORGANISM}_production/* data/archives/${PREV_ORGANISM}_${ARCHIVE_DATE}/
 
 # Create new production directory
-NEW_ORGANISM="heimdall_megavirus"  # lowercase, underscores
+NEW_ORGANISM="dataset_b"  # lowercase, underscores
 mkdir -p data/${NEW_ORGANISM}_production/{source,annotations,embeddings,structures,exploration,survey,reports,figures}
 ```
 
@@ -137,9 +137,9 @@ That fallback path does not replace the standard stage pipeline, and it does not
 
 | Item | Convention | Example |
 |------|------------|---------|
-| Production directory | `{organism}_production` | `heimdall_megavirus_production` |
-| Archive directory | `{organism}_{YYYY-MM-DD}` | `thorarchaeota_2026-02-03` |
-| Source file | `source/{sample}.fna` | `source/Heimdall_Megavirus.fna` |
+| Production directory | `{organism}_production` | `dataset_b_production` |
+| Archive directory | `{organism}_{YYYY-MM-DD}` | `dataset_a_2026-02-03` |
+| Source file | `source/{sample}.fna` | `source/sample1.fna` |
 | Stage outputs | `stageXX_*` | `stage04_astra/` |
 | Annotations | `annotations/{db}.tsv` | `annotations/pfam.tsv` |
 | Embeddings | `embeddings/` | Canonical H5 + persistent FAISS/SQLite sidecars |
@@ -219,12 +219,12 @@ git status --porcelain | grep "^?" | head -20
 
 ## Organism-Specific Notes
 
-### Single Genome (e.g., Thorarchaeota)
+### Single Genome
 - No genome profiling phase
 - Focus on locus-by-locus analysis
 - Structure prediction valuable for novel proteins
 
-### Multi-Genome Dataset (e.g., Altiarchaeota)
+### Multi-Genome Dataset
 - Run genome profiling first
 - Identify core vs. variable features
 - Consider ecotype/subclade analysis

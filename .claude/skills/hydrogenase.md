@@ -192,7 +192,7 @@ KEGG symbol, which `tests/test_hydrogenase_neighborhood.py` checks against the l
 
 Pfam Complex I-superfamily families (Oxidored_q6, Complex1_30kDa, Complex1_49kDa, Oxidored_q4,
 Oxidored_q5_N) count on neither side: hydrogenase complexes carry them too, Oxidored_q6 covering
-[NiFe] small subunits. On DPANN, Oxidored_q6 sits beside 699 of 1,258 calls that carry the
+[NiFe] small subunits. In archaeal test data, Oxidored_q6 sits beside about half of the calls that carry the
 catalytic domain.
 
 Verdicts: `supported` (a hydrogenase-specific marker, no Complex I marker), `complex_i_context` (a
