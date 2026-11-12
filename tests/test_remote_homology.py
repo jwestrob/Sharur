@@ -248,9 +248,9 @@ ncols = sum(1 for c in first if c.isalpha() and c.isupper())
 query = open(inp).readline()[1:].split()[0]
 sys.path.insert(0, os.environ["FAKE_TOOL_TESTS"])
 from remote_homology_fixtures import PDB_HITS, PFAM_HITS, UNIREF_HITS, render_hhr
-hits = UNIREF_HITS if name == "hhblits" else PDB_HITS if "pdb" in db else PFAM_HITS
+hits = PDB_HITS if "pdb" in db else UNIREF_HITS if name == "hhblits" else PFAM_HITS
 open(out, "w").write(render_hhr(query, ncols, hits))
-if name == "hhblits":
+if opt("-oa3m"):
     shutil.copyfile(inp, opt("-oa3m"))
 '''
 
@@ -759,3 +759,32 @@ def test_family_hits_carry_to_the_same_representative_in_another_run(staged, tmp
     tag = staged["tag"]
     assert rows == [(f"fam:{tag2}:fa_g1", f"fam:{tag}:fa_g1", 5, 6), (f"fam:{tag2}:fd_0", f"fam:{tag}:fd_0", 8, 8)]
     assert n_rule == n_source
+
+
+def test_runner_searches_pdb_with_hhblits_when_configured(dataset, fake_tools, tmp_path):
+    cfg = dict(fake_tools["dict"], msa_kinds=["family_only"], search={"pdb_tool": "hhblits"})
+    config = tmp_path / "hhblits_pdb.json"
+    config.write_text(json.dumps(cfg))
+    default = tmp_path / "default.json"
+    default.write_text(json.dumps(dict(fake_tools["dict"], msa_kinds=["family_only"])))
+    assert runner.family_digest(runner.load_config(config)) != runner.family_digest(runner.load_config(default))
+    work = tmp_path / "work"
+    store.export_families(dataset["db"], work, families_db=dataset["families"], log=lambda _m: None)
+    assert runner.main(["families", "--work", str(work), "--config", str(config), "--threads", "4"]) == 0
+    calls = fake_tools["calls"].read_text().split()
+    assert calls.count("hhblits") == 2 and calls.count("hhsearch") == 2  # PDB by HHblits, Pfam by HHsearch
+    d = runner.family_dir(work, runner.read_families(work)[0])
+    assert sorted(p.name for p in d.glob("*.hhr.gz")) == ["pdb_hhblits_family_only.hhr.gz",
+                                                          "pfam_family_only.hhr.gz"]
+    assert set(json.loads((d / "done.json").read_text())["steps"]) == {
+        "mafft", "hhblits_pdb_family_only", "hhsearch_pfam_family_only"}
+    staging = tmp_path / "s.duckdb"
+    store.load_families(work, staging, config, log=lambda _m: None)
+    assert set(_rows(staging, "SELECT DISTINCT source, db_name FROM family_annotations")) == {
+        ("hhsearch_pfam", "Pfam"), ("hhblits_pdb", "PDB100")}
+    assert _rows(staging, "SELECT DISTINCT hit_accession FROM family_resemblance WHERE source = 'hhblits_pdb' "
+                          "ORDER BY 1") == [("9yyy_B",), ("9zzz_A",)]
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps(dict(fake_tools["dict"], search={"pdb_tool": "jackhmmer"})))
+    with pytest.raises(runner.ConfigError, match="pdb_tool"):
+        runner.load_config(bad)

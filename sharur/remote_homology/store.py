@@ -468,7 +468,7 @@ def export_cdd(db: Path | str, out_dir: Path | str, *, chunk_size: int = 2000, t
 # --------------------------------------------------------------------------- #
 # Loading search results into a staging DuckDB
 # --------------------------------------------------------------------------- #
-_SOURCE_DB_KEY = {"hhsearch_pfam": "pfam", "hhsearch_pdb": "pdb", "hhblits_uniref": "uniref"}
+_SOURCE_DB_KEY = {"hhsearch_pfam": "pfam", "hhsearch_pdb": "pdb", "hhblits_pdb": "pdb", "hhblits_uniref": "uniref"}
 
 
 def _family_status(work: Path, family: dict, digest: str) -> dict:

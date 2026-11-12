@@ -51,7 +51,7 @@ newer databases is a rerun:
   "family_targets": ["pfam", "pdb"],
   "msa_kinds": ["family_only"],
   "search": {"hhblits_iterations": 2, "hhblits_evalue": 0.001, "max_hits": 100,
-             "min_probability": 50, "uniref_max_hits": 20, "cdd_evalue": 0.01}
+             "min_probability": 50, "uniref_max_hits": 20, "cdd_evalue": 0.01, "pdb_tool": "hhsearch"}
 }
 ```
 
@@ -62,6 +62,11 @@ newer databases is a rerun:
   `enriched` first runs HHblits against UniRef30 (`-n 2 -e 0.001`) and searches the enriched
   alignment; it finds more distant relatives and costs several times more. List both to keep
   both sets of hits (`family_annotations.msa_kind`).
+- **`search.pdb_tool`.** `hhsearch` (default) compares the family profile with every PDB
+  profile; `hhblits` runs one HHblits iteration with its column-state prefilter, which needs the
+  database's `_a3m` and `_cs219` files and is far faster. Rows are labelled `hhsearch_pdb` or
+  `hhblits_pdb`, and both count for the rule. Measure the switch on a pilot before adopting it:
+  compare the families meeting the rule and the time per family under both settings.
 - **PDB titles.** HH-suite PDB databases often name templates by chain only (`1abc_A`). A
   two-column `pdb code<TAB>title` file (`titles`) supplies entry titles, which the
   unknown-function flag reads. Build it once from a local PDB mirror (the `_struct.title` of
@@ -221,7 +226,7 @@ stored in `annotations` and the protein-level count of every hit in the staging 
 
 | Table / view | One row per | Columns |
 |---|---|---|
-| `family_annotations` | family, source, MSA kind and hit | `family_id`, `clustering_run`, `search_run`, `source` (`hhsearch_pfam`, `hhsearch_pdb`, `hhblits_uniref`), `db_name`, `db_version`, `msa_kind` (`enriched`, `family_only`), `hit_rank`, `hit_accession`, `hit_name`, `hit_description`, `probability` (%), `evalue`, `score`, `aligned_cols`, `identities`, `q_start`, `q_end`, `q_length` (representative length), `t_start`, `t_end`, `t_length`, `unknown_function`, `hit_label` |
+| `family_annotations` | family, source, MSA kind and hit | `family_id`, `clustering_run`, `search_run`, `source` (`hhsearch_pfam`, `hhsearch_pdb` or `hhblits_pdb`, `hhblits_uniref`), `db_name`, `db_version`, `msa_kind` (`enriched`, `family_only`), `hit_rank`, `hit_accession`, `hit_name`, `hit_description`, `probability` (%), `evalue`, `score`, `aligned_cols`, `identities`, `q_start`, `q_end`, `q_length` (representative length), `t_start`, `t_end`, `t_length`, `unknown_function`, `hit_label` |
 | `family_annotation_status` | searched family | `status` (`ok`, `error`, `pending`), member, genome and sequence counts, representative, `n_hits`, `verified` (query length matched), `seconds`, `steps` |
 | `family_annotation_runs` | search | `search_run`, `clustering_run`, selection rule, `msa_kinds`, `targets`, `databases` (names, versions, paths), parameters, tool versions, family counts, export and configuration digests |
 | `family_resemblance` (view) | hit meeting the rule | the hit columns plus `hit_class` (`characterized`, `unknown_function`) and `evidence` = `resembles` |

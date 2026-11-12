@@ -13,5 +13,5 @@
   "family_targets": ["pfam", "pdb"],
   "msa_kinds": ["family_only"],
   "search": {"hhblits_iterations": 2, "hhblits_evalue": 0.001, "max_hits": 100,
-             "min_probability": 50, "uniref_max_hits": 20, "cdd_evalue": 0.01}
+             "min_probability": 50, "uniref_max_hits": 20, "cdd_evalue": 0.01, "pdb_tool": "hhsearch"}
 }

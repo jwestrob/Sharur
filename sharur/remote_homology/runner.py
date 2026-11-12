@@ -46,7 +46,12 @@ Configuration (JSON; site paths live here, never in code)::
        "cdd":    {"prefix": "/path/to/cdd/Cdd", "name": "CDD", "version": "3.xx"}},
      "family_targets": ["pfam", "pdb"], "msa_kinds": ["enriched", "family_only"],
      "search": {"hhblits_iterations": 2, "hhblits_evalue": 0.001, "max_hits": 100,
-                "min_probability": 50, "uniref_max_hits": 20, "cdd_evalue": 0.01}}
+                "min_probability": 50, "uniref_max_hits": 20, "cdd_evalue": 0.01,
+                "pdb_tool": "hhsearch"}}
+
+``search.pdb_tool = "hhblits"`` searches PDB with one HHblits iteration (column-state prefilter;
+the database needs ``_a3m`` and ``_cs219`` files) in place of HHsearch; its rows are labelled
+``hhblits_pdb``.
 """
 
 from __future__ import annotations
@@ -78,7 +83,11 @@ SEARCH_DEFAULTS = {
     "min_probability": hhr.STORE_MIN_PROBABILITY,
     "uniref_max_hits": 20,
     "cdd_evalue": 0.01,
+    # PDB step: "hhsearch" (every profile) or "hhblits" (column-state prefilter, one iteration; the
+    # database needs _a3m and _cs219 files); rows are labelled hhsearch_pdb or hhblits_pdb
+    "pdb_tool": "hhsearch",
 }
+SEARCH_TOOLS = ("hhsearch", "hhblits")
 DEFAULT_TARGETS = ("pfam", "pdb")
 DEFAULT_MSA_KINDS = (hhr.MSA_FAMILY_ONLY,)
 TARGET_SOURCE = {"pfam": hhr.SOURCE_PFAM, "pdb": hhr.SOURCE_PDB}
@@ -111,6 +120,8 @@ def load_config(path: str | Path) -> dict:
     for target in cfg["family_targets"]:
         if target not in TARGET_SOURCE:
             raise ConfigError(f"family_targets: unknown target {target!r} (use {', '.join(TARGET_SOURCE)})")
+    if cfg["search"]["pdb_tool"] not in SEARCH_TOOLS:
+        raise ConfigError(f"search.pdb_tool must be one of {', '.join(SEARCH_TOOLS)}")
     cfg["_path"] = str(Path(path).resolve())
     return cfg
 
@@ -119,8 +130,11 @@ def family_digest(cfg: dict) -> str:
     """Digest of everything that changes family-tier results (databases, kinds, search parameters)."""
     dbs = {k: {f: v.get(f) for f in ("prefix", "name", "version", "kind")} for k, v in cfg["databases"].items()
            if k in (*cfg["family_targets"], *(["uniref"] if hhr.MSA_ENRICHED in cfg["msa_kinds"] else []))}
+    # pdb_tool enters the digest only when it differs from the default, so earlier results stay current
+    search = {k: cfg["search"][k] for k in sorted(cfg["search"])
+              if k != "cdd_evalue" and not (k == "pdb_tool" and cfg["search"][k] == "hhsearch")}
     payload = {"databases": dbs, "targets": sorted(cfg["family_targets"]), "msa_kinds": sorted(cfg["msa_kinds"]),
-               "search": {k: cfg["search"][k] for k in sorted(cfg["search"]) if k != "cdd_evalue"}}
+               "search": search}
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
 
 
@@ -308,11 +322,26 @@ def family_dir(work: Path, family: dict) -> Path:
     return work / "out" / f"{family['family_index'] // 1000:03d}" / family["family_key"]
 
 
-def _hhsearch(cfg: dict, inp: Path, db: dict, out: Path, threads: int, *, master_first: bool) -> float:
+def target_tool(cfg: dict, target: str) -> str:
+    """The HH-suite program that searches ``target`` (``hhsearch``, or ``hhblits`` for PDB when configured)."""
+    return cfg["search"]["pdb_tool"] if target == "pdb" else "hhsearch"
+
+
+def target_output(cfg: dict, target: str) -> tuple[str, str]:
+    """``(source label, file stem)`` of the results of ``target``."""
+    if target_tool(cfg, target) == "hhblits":
+        return hhr.SOURCE_PDB_HHBLITS, f"{target}_hhblits"
+    return TARGET_SOURCE[target], target
+
+
+def _hhsearch(cfg: dict, inp: Path, db: dict, out: Path, threads: int, *, master_first: bool,
+              program: str = "hhsearch") -> float:
     s = cfg["search"]
-    command = [tool(cfg, "hhsearch"), "-i", str(inp), *(["-M", "first"] if master_first else []),
+    command = [tool(cfg, program), "-i", str(inp), *(["-M", "first"] if master_first else []),
                "-d", db["prefix"], "-o", str(out) + ".tmp", "-cpu", str(threads), "-v", "0",
                "-Z", str(s["max_hits"]), "-B", str(s["max_hits"])]
+    if program == "hhblits":
+        command += ["-n", "1"]  # one iteration with the column-state prefilter
     seconds = run(command)
     os.replace(str(out) + ".tmp", out)
     return seconds
@@ -352,8 +381,9 @@ def run_family(job: tuple) -> dict:
         outputs: list[tuple[str, str, str, Path]] = []  # (source, msa_kind, kind, hhr path)
         for kind in cfg["msa_kinds"]:
             for target in cfg["family_targets"]:
-                outputs.append((TARGET_SOURCE[target], kind, cfg["databases"][target].get("kind", target),
-                                d / f"{target}_{kind}.hhr"))
+                source, stem = target_output(cfg, target)
+                outputs.append((source, kind, cfg["databases"][target].get("kind", target),
+                                d / f"{stem}_{kind}.hhr"))
         if hhr.MSA_ENRICHED in cfg["msa_kinds"]:
             outputs.append((hhr.SOURCE_UNIREF, hhr.MSA_ENRICHED, "uniref", d / "uniref.hhr"))
         need_aln = any(not hhr_present(p) for *_, p in outputs)
@@ -383,10 +413,13 @@ def run_family(job: tuple) -> dict:
                 continue
             target = path.name.split("_", 1)[0]
             db = database(cfg, target)
+            program = target_tool(cfg, target)
             if kind == hhr.MSA_ENRICHED:
-                steps[f"hhsearch_{target}_{kind}"] = _hhsearch(cfg, enr, db, path, threads, master_first=False)
+                steps[f"{program}_{target}_{kind}"] = _hhsearch(cfg, enr, db, path, threads, master_first=False,
+                                                              program=program)
             else:
-                steps[f"hhsearch_{target}_{kind}"] = _hhsearch(cfg, aln, db, path, threads, master_first=True)
+                steps[f"{program}_{target}_{kind}"] = _hhsearch(cfg, aln, db, path, threads, master_first=True,
+                                                              program=program)
         # parse and verify
         s = cfg["search"]
         rows: list[tuple] = []

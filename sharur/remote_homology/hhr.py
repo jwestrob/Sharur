@@ -29,9 +29,10 @@ from pathlib import Path
 # Family-tier sources and MSA kinds (family_annotations.source / .msa_kind).
 SOURCE_PFAM = "hhsearch_pfam"
 SOURCE_PDB = "hhsearch_pdb"
+SOURCE_PDB_HHBLITS = "hhblits_pdb"     # PDB searched with HHblits (prefilter, one iteration)
 SOURCE_UNIREF = "hhblits_uniref"
-FAMILY_SOURCES = (SOURCE_PFAM, SOURCE_PDB, SOURCE_UNIREF)
-RULE_SOURCES = (SOURCE_PFAM, SOURCE_PDB)
+FAMILY_SOURCES = (SOURCE_PFAM, SOURCE_PDB, SOURCE_PDB_HHBLITS, SOURCE_UNIREF)
+RULE_SOURCES = (SOURCE_PFAM, SOURCE_PDB, SOURCE_PDB_HHBLITS)
 MSA_ENRICHED = "enriched"
 MSA_FAMILY_ONLY = "family_only"
 MSA_KINDS = (MSA_ENRICHED, MSA_FAMILY_ONLY)
@@ -244,6 +245,7 @@ __all__ = [
     "MSA_KINDS",
     "RULE_SOURCES",
     "SOURCE_PDB",
+    "SOURCE_PDB_HHBLITS",
     "SOURCE_PFAM",
     "SOURCE_UNIREF",
     "STORE_MIN_PROBABILITY",

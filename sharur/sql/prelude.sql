@@ -462,7 +462,7 @@ CREATE OR REPLACE TEMP MACRO families_of(ids) AS TABLE
     ORDER BY f.protein_id, r.level, f.clustering_run;
 
 
--- @object resembles_of table_macro: per protein (a list or comma-separated IDs), what it resembles: hits of its families in every clustering run that meet the rule (Pfam or PDB, probability >= min_probability over >= min_cols aligned columns; tier 'family') and its own CDD hits (tier 'protein'), with db_name, db_version, msa_kind, probability, evalue, aligned columns, query range, unknown_function, hit_class (characterized or unknown_function) and evidence 'resembles'; needs the remote-homology layer (docs/guides/remote-homology.md)
+-- @object resembles_of table_macro: per protein (a list or comma-separated IDs), what it resembles: hits of its families in every clustering run that meet the rule (Pfam or PDB by HHsearch or HHblits, probability >= min_probability over >= min_cols aligned columns; tier 'family') and its own CDD hits (tier 'protein'), with db_name, db_version, msa_kind, probability, evalue, aligned columns, query range, unknown_function, hit_class (characterized or unknown_function) and evidence 'resembles'; needs the remote-homology layer (docs/guides/remote-homology.md)
 CREATE OR REPLACE TEMP MACRO resembles_of(ids, min_probability := 90, min_cols := 30) AS TABLE
     WITH want AS MATERIALIZED (SELECT DISTINCT unnest(id_list(ids)) AS protein_id),
     fam AS (
@@ -472,7 +472,7 @@ CREATE OR REPLACE TEMP MACRO resembles_of(ids, min_probability := 90, min_cols :
         FROM protein_families f
         JOIN family_annotations h ON h.family_id = f.family_id AND h.clustering_run = f.clustering_run
         WHERE f.protein_id IN (SELECT protein_id FROM want)
-          AND h.source IN ('hhsearch_pfam', 'hhsearch_pdb')
+          AND h.source IN ('hhsearch_pfam', 'hhsearch_pdb', 'hhblits_pdb')
           AND h.probability >= min_probability AND h.aligned_cols >= min_cols
     ),
     cdd AS (
@@ -501,7 +501,7 @@ CREATE OR REPLACE TEMP MACRO resembles_proteins(targets, min_probability := 90, 
         FROM spec s
         JOIN family_annotations h ON h.hit_accession = s.key OR h.hit_name = s.key
         JOIN protein_families f ON f.family_id = h.family_id AND f.clustering_run = h.clustering_run
-        WHERE h.source IN ('hhsearch_pfam', 'hhsearch_pdb')
+        WHERE h.source IN ('hhsearch_pfam', 'hhsearch_pdb', 'hhblits_pdb')
           AND h.probability >= min_probability AND h.aligned_cols >= min_cols
     ),
     cdd AS (
