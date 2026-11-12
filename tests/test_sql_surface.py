@@ -335,3 +335,30 @@ def test_reverify_sql_triples_see_the_surface(tmp_path):
     (ds / "exploration" / "findings.jsonl").write_text(json.dumps(finding) + "\n")
     report = reverify([ds], workers=1)
     assert [r.replay.status for r in report.results] == ["OK"], report.results[0].replay
+
+
+def test_layer_macros_wait_for_their_layers_and_core_macros_keep_resembles(db):
+    from sharur.sql import object_layers
+
+    layered = object_layers(parse_prelude().objects)
+    assert {"family_proteins", "family_presence", "families_of", "resembles_of", "resembles_proteins",
+            "resembles_presence", "family_annotations_via"} <= set(layered)
+    assert layered["family_annotations_via"] == {"protein families", "remote homology"}
+    assert not {"protein_summary", "neighbors", "slot", "slot_tally", "feature_proteins"} & set(layered)
+
+    plain = duckdb.connect(str(db), read_only=True)
+    try:
+        report = install_prelude(plain)
+        assert report.ok
+        # DuckDB 1.3+ leaves the layer macros out on a database without the layers; older
+        # releases install them and fail only on use.
+        assert {u["name"] for u in report.unavailable} <= set(layered)
+        assert set(layered) <= set(report.installed) | {u["name"] for u in report.unavailable}
+        for macro, query in (("protein_summary", "FROM protein_summary('p2')"),
+                             ("neighbors", "FROM neighbors('p2', k := 1)"),
+                             ("slot", "FROM slot('K90001')")):
+            cur = plain.execute(query)
+            assert "resembles" in [d[0] for d in cur.description], macro
+            assert all(not row[[d[0] for d in cur.description].index("resembles")] for row in cur.fetchall())
+    finally:
+        plain.close()
