@@ -2,7 +2,7 @@
 
 A small, closed-genome test set for a first ingest and for checking an installation against
 known biology. All 16 are GenBank assemblies at level "Complete Genome"; every one of their 27
-replicons is circular in its NCBI record. Together they hold 39.4 Mb, about 37,000 proteins.
+replicons is circular in its NCBI record. Together they hold 39.4 Mb; Prodigal calls 38,554 proteins on them.
 
 | Genome | Assembly | Size (Mb) | Replicons | Why it is here |
 |---|---|---:|---:|---|
