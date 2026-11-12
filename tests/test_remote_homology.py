@@ -721,3 +721,36 @@ def test_cdd_with_rpsblast_finds_the_synthetic_profile(dataset, tmp_path):
                                        "JOIN cdd_models m USING (pssm_id) ORDER BY 1")
     assert (_md5(seqs["s2"]), "cdT0001", "SynthA") in hits
     assert all(r[1] == "cdT0001" for r in hits)
+
+
+def test_family_hits_carry_to_the_same_representative_in_another_run(staged, tmp_path):
+    """A second clustering in which a singleton joins a searched family (as fragment rescue does)."""
+    _, families, _ = _dataset()
+    rescued = {rep: list(members) for rep, members in families.items() if rep != "s1"}
+    rescued["fa_g1"].append("s1")
+    tsv = tmp_path / "rescued.tsv"
+    tsv.write_text("".join(f"{rep}\t{m}\n" for rep, members in rescued.items() for m in members))
+    second = tmp_path / "second.duckdb"
+    tag2 = pf.import_clustering(staged["source_db"], tsv, second, name="synthetic-rescued", level="permissive",
+                                parameters="synthetic", log=lambda _m: None)["tag"]
+    con = store.connect(staged["db"])
+    try:
+        store.load_staging(con, [staged["staging"]], families_staging=staged["families"], log=lambda _m: None)
+        pf.load_staging(con, second, log=lambda _m: None)
+    finally:
+        con.close()
+    from sharur.sql import connect as sql_connect
+
+    con = sql_connect(staged["db"])
+    try:
+        rows = con.execute("""SELECT DISTINCT family_id, source_family_id, source_members, target_members
+                              FROM family_annotations_via('synthetic-rescued') ORDER BY 1""").fetchall()
+        n_rule = con.execute("""SELECT COUNT(*) FROM family_annotations_via('synthetic-rescued')
+                                WHERE source IN ('hhsearch_pfam', 'hhsearch_pdb') AND probability >= 90
+                                  AND aligned_cols >= 30""").fetchone()[0]
+        n_source = con.execute("SELECT COUNT(*) FROM family_resemblance").fetchone()[0]
+    finally:
+        con.close()
+    tag = staged["tag"]
+    assert rows == [(f"fam:{tag2}:fa_g1", f"fam:{tag}:fa_g1", 5, 6), (f"fam:{tag2}:fd_0", f"fam:{tag}:fd_0", 8, 8)]
+    assert n_rule == n_source

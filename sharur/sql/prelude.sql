@@ -534,3 +534,16 @@ CREATE OR REPLACE TEMP MACRO resembles_presence(targets, min_probability := 90, 
            g.domain, g.phylum, g.class, g."order", g.family, g.genus, g.species
     FROM g CROSS JOIN f
     LEFT JOIN hit h ON h.bin_id = g.bin_id AND h.feature = f.feature;
+
+
+-- @object family_annotations_via table_macro: family-tier hits of other clustering runs carried to the families of target_run that share the searched family's representative (family_stats.rep_protein_id): family_id and clustering_run of the target family, source_run, source_family_id, source_members, target_members, then source, db_name, db_version, msa_kind, hit columns, unknown_function and evidence 'resembles'; meaningful when target_run only adds members to the searched families (verify with docs/guides/remote-homology.md); needs the remote-homology layer
+CREATE OR REPLACE TEMP MACRO family_annotations_via(target_run) AS TABLE
+    SELECT t.family_id, t.clustering_run, h.clustering_run AS source_run, h.family_id AS source_family_id,
+           s.n_members AS source_members, t.n_members AS target_members,
+           h.source, h.db_name, h.db_version, h.msa_kind, h.hit_rank, h.hit_accession, h.hit_name,
+           h.hit_description, h.probability, h.evalue, h.aligned_cols, h.q_start, h.q_end, h.t_start, h.t_end,
+           h.unknown_function, 'resembles' AS evidence
+    FROM family_annotations h
+    JOIN family_stats s ON s.family_id = h.family_id AND s.clustering_run = h.clustering_run
+    JOIN family_stats t ON t.rep_protein_id = s.rep_protein_id AND t.clustering_run = target_run
+    WHERE h.clustering_run <> target_run;

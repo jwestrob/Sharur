@@ -80,6 +80,7 @@ similarity to a profile and name nothing.
 | `protein_summary(ids)`, `anchor_proteins(anchor)` | the building blocks above |
 | `family_proteins(families)`, `family_presence(families, min_completeness := 0, max_contamination := 100)`, `families_of(ids)` | protein families in the `feature_proteins` / `feature_presence` shapes, and each protein's family in every clustering run; need the family layer ([Protein families](protein-families.md)) |
 | `resembles_of(ids, min_probability := 90, min_cols := 30)`, `resembles_proteins(targets, ...)`, `resembles_presence(targets, ..., min_completeness := 0, max_contamination := 100)` | what proteins resemble (their families' Pfam and PDB hits at the rule, their own CDD hits), proteins resembling targets in the `feature_proteins` shape, and the genome × target grid; `evidence` = `resembles`; need the remote-homology layer ([Remote homology](remote-homology.md)) |
+| `family_annotations_via(target_run)` | family-tier hits of other clustering runs on the families of `target_run` that share the searched family's representative |
 | `strand_sign(s)`, `id_list(x)`, `rank_of(taxonomy, rank)` | scalar helpers |
 | `write_fasta(path, ids)` | Python connections only: writes FASTA, returns `{path, n_sequences, n_requested, n_missing}` |
 

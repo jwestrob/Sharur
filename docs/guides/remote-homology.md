@@ -237,6 +237,42 @@ An unqualified spec (`PF00004`, `AAA`) matches the curated sources only; CDD row
 the spec names `cdd:`. `protein_summary`, `neighbors` and `slot` list CDD hits in their own
 `resembles` column, outside `other` and `n_annotations`.
 
+### Hits under another clustering run
+
+Family-tier hits belong to the clustering run that was searched. A later run that only adds
+members to existing families (for example one that moves fragments out of very small families
+into larger ones) keeps each searched family's representative, so its hits carry over through the
+shared representative:
+
+```sql
+-- hits of every searched run, on the families of TARGET_RUN that share the searched family's representative
+FROM family_annotations_via('TARGET_RUN');
+-- the same join for a client without the SQL surface
+SELECT t.family_id, h.family_id AS source_family_id, h.source, h.hit_accession, h.probability, h.aligned_cols
+FROM family_annotations h
+JOIN family_stats s ON s.family_id = h.family_id AND s.clustering_run = h.clustering_run
+JOIN family_stats t ON t.rep_protein_id = s.rep_protein_id AND t.clustering_run = 'TARGET_RUN';
+```
+
+`source_members` and `target_members` show how much a family grew. Check the premise before
+relying on the join: every member of a searched family should sit in its target counterpart.
+
+```sql
+WITH src AS (
+  SELECT f.protein_id, f.family_id, s.rep_protein_id
+  FROM protein_families f JOIN family_stats s USING (clustering_run, family_id)
+  WHERE f.clustering_run = 'SOURCE_RUN'
+    AND f.family_id IN (SELECT family_id FROM family_annotation_status WHERE status = 'ok'))
+SELECT COUNT(DISTINCT src.family_id) FILTER (WHERE t.family_id IS NULL) AS no_counterpart,
+       COUNT(DISTINCT src.family_id) FILTER (WHERE m.family_id <> t.family_id) AS members_elsewhere
+FROM src
+LEFT JOIN family_stats t ON t.rep_protein_id = src.rep_protein_id AND t.clustering_run = 'TARGET_RUN'
+JOIN protein_families m ON m.protein_id = src.protein_id AND m.clustering_run = 'TARGET_RUN';
+```
+
+Families of the target run that enter a scope only through added members have no searched
+counterpart; search them under the target run when they matter.
+
 Families of unknown function stay distinguishable:
 
 ```sql
