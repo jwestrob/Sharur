@@ -26,19 +26,19 @@ reads the assembly:
 
    | Convention | Circular | Linear |
    |---|---|---|
-   | `srvp` (SR-VP PacBio sets, renamed contigs) | `..._C`, `..._RC` | `..._L` |
+   | `upper_c_rc_l` (renamed contigs, uppercase suffixes) | `..._C`, `..._RC` | `..._L` |
    | `metamdbg` | `ctg<N>_<cov>x_c`, `..._rc` | `ctg<N>_<cov>x_l` |
    | `hifiasm` (hifiasm-meta) | `[sp]tg<N>c` | `[sp]tg<N>l` |
 
 3. A curated `circular` token in the name (`Genome_2_circular_FINAL`; `noncircular` reads as linear).
 
 With no convention recorded, a name ending in `_C` or `_L` says nothing about topology. Record the
-conventions when building (`sharur-ingest --contig-name-topology srvp`; a `--force` rebuild keeps what
+conventions when building (`sharur-ingest --contig-name-topology upper_c_rc_l`; a `--force` rebuild keeps what
 the replaced database recorded) or on an existing database:
 
 ```bash
 sharur contig-name-topology --db data/my_dataset/sharur.duckdb             # report matches per convention
-sharur contig-name-topology --db data/my_dataset/sharur.duckdb --set srvp  # record
+sharur contig-name-topology --db data/my_dataset/sharur.duckdb --set upper_c_rc_l  # record
 sharur seal --db data/my_dataset/sharur.duckdb --force
 ```
 

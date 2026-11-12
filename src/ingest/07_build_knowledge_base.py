@@ -1546,7 +1546,7 @@ def main(
         "--contig-name-topology",
         help=(
             "Contig-name suffix conventions that mark circular/linear contigs in this dataset "
-            "(comma-separated: srvp, metamdbg, hifiasm; or none), recorded in the database. "
+            "(comma-separated: upper_c_rc_l, metamdbg, hifiasm; or none), recorded in the database. "
             "Default: what the database being replaced records, else none"
         ),
     ),

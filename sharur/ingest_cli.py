@@ -813,7 +813,7 @@ def run(
         typer.Option(
             "--contig-name-topology",
             help="Contig-name suffix conventions that mark circular/linear contigs in this "
-                 "dataset (comma-separated: srvp, metamdbg, hifiasm; or none); Stage 07 records "
+                 "dataset (comma-separated: upper_c_rc_l, metamdbg, hifiasm; or none); Stage 07 records "
                  "them in the database. Default: what the database being replaced records, else none",
         ),
     ] = None,

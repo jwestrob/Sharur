@@ -30,6 +30,7 @@ from __future__ import annotations
 import gzip
 import json
 import re
+import warnings
 from collections.abc import Iterable, Iterator
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -53,9 +54,9 @@ NAME_TOPOLOGY_KEY = "contig_name_topology"
 NAME_TOPOLOGY_CONVENTIONS: dict[str, re.Pattern[str]] = {
     # metaMDBG: ctg<N>_<cov>x_c|rc|l
     "metamdbg": re.compile(r"_\d+x_(rc|c|l)$"),
-    # SR-VP PacBio sets, renamed to ..._<N>_C|RC|L (_RC contigs match _C contigs
-    # in length and completeness)
-    "srvp": re.compile(r"_(RC|C|L)$"),
+    # Renamed contigs ending in uppercase _C|_RC|_L (..._<N>_C; _RC contigs match _C
+    # contigs in length and completeness)
+    "upper_c_rc_l": re.compile(r"_(RC|C|L)$"),
     # hifiasm(-meta): [sp]tg<digits>c|l
     "hifiasm": re.compile(r"(?:^|\.)[a-z]?tg\d+([cl])$"),
 }
@@ -99,7 +100,7 @@ def _open_text(path: Path):
 def parse_name_conventions(value: str | Iterable[str] | None) -> tuple[str, ...]:
     """Validated convention names in canonical order; ``none``, empty or None give ().
 
-    Accepts a comma-separated string (``"srvp"``, ``"srvp,hifiasm"``) or names.
+    Accepts a comma-separated string (``"upper_c_rc_l"``, ``"upper_c_rc_l,hifiasm"``) or names.
     """
     if value is None:
         return ()
@@ -113,10 +114,22 @@ def parse_name_conventions(value: str | Iterable[str] | None) -> tuple[str, ...]
 
 
 def recorded_name_conventions(conn) -> tuple[str, ...]:
-    """The contig-name topology conventions a database records (read-only safe)."""
+    """The contig-name topology conventions a database records (read-only safe).
+
+    A recorded name this version does not know (a renamed or retired convention) is skipped
+    with a warning, so the database stays readable; ``sharur contig-name-topology --set``
+    records current names. Stored ``is_circular`` values are unaffected.
+    """
     from sharur.storage.dataset_meta import get_dataset_meta  # noqa: PLC0415
 
-    return parse_name_conventions(get_dataset_meta(conn, NAME_TOPOLOGY_KEY))
+    value = get_dataset_meta(conn, NAME_TOPOLOGY_KEY)
+    names = {name.strip().lower() for name in (value or "").split(",")} - {"", "none"}
+    unknown = names - set(NAME_TOPOLOGY_CONVENTIONS)
+    if unknown:
+        warnings.warn(f"Skipping recorded contig-name topology convention(s) this version does not know: "
+                      f"{', '.join(sorted(unknown))}; known: {', '.join(NAME_TOPOLOGY_CONVENTIONS)}. "
+                      f"Record current names with `sharur contig-name-topology --set`.", stacklevel=2)
+    return tuple(name for name in NAME_TOPOLOGY_CONVENTIONS if name in names)
 
 
 def record_name_conventions(conn, conventions: str | Iterable[str] | None) -> tuple[str, ...]:

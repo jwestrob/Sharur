@@ -126,9 +126,9 @@ def test_fasta_and_header_parsing(tmp_path):
 
 ALL_CONVENTIONS = tuple(NAME_TOPOLOGY_CONVENTIONS)
 SUFFIXED = [  # (record, its convention, circular)
-    ("SR-VP_A1_90cm_PACBIO-HIFI_METAMDBG_641824_C", "srvp", True),
-    ("SR-VP_A1_115cm_PACBIO-HIFI_METAMDBG_409162_RC", "srvp", True),
-    ("SR-VP_A1_115cm_PACBIO-HIFI_METAMDBG_409130_L", "srvp", False),
+    ("sampleA_hifi_metamdbg_641824_C", "upper_c_rc_l", True),
+    ("sampleB_hifi_metamdbg_409162_RC", "upper_c_rc_l", True),
+    ("sampleB_hifi_metamdbg_409130_L", "upper_c_rc_l", False),
     ("ctg409162_11x_rc", "metamdbg", True),
     ("ctg402616_2x_l", "metamdbg", False),
     ("s1.ctg000001c", "hifiasm", True),
@@ -146,7 +146,7 @@ def test_contig_name_suffix_marks_topology_only_under_its_recorded_convention(re
 
 
 @pytest.mark.parametrize("record", ["MAG12_scaffold_3_C", "sample7_k141_88_L", "bin4_contig_12_RC"])
-def test_other_datasets_names_ending_like_srvp_stay_unmarked(record):
+def test_other_datasets_names_ending_like_upper_c_rc_l_stay_unmarked(record):
     assert contig_circularity(record) is None
 
 
@@ -157,7 +157,7 @@ def test_other_datasets_names_ending_like_srvp_stay_unmarked(record):
     ("NZ_CP000001.1", "Escherichia coli [topology=circular]", True),
     ("Genome_2_circular_FINAL", "", True),
     ("Genome_2_noncircular", "", False),
-    ("SR-VP_9_9_2021_81_5A_scaffold_27", "", None),
+    ("sampleC_2021_scaffold_27", "", None),
     ("bin1_contig1", "", None),
 ])
 def test_contig_circularity_marks(record, description, expected):
@@ -167,9 +167,9 @@ def test_contig_circularity_marks(record, description, expected):
 def test_parse_name_conventions():
     assert parse_name_conventions(None) == ()
     assert parse_name_conventions("none") == ()
-    assert parse_name_conventions(" HIFIASM , srvp ") == ("srvp", "hifiasm")
+    assert parse_name_conventions(" HIFIASM , upper_c_rc_l ") == ("upper_c_rc_l", "hifiasm")
     with pytest.raises(ValueError, match="Unknown contig-name topology convention"):
-        parse_name_conventions("srvp,spades")
+        parse_name_conventions("upper_c_rc_l,spades")
 
 
 def test_backfill_applies_only_recorded_name_conventions(tmp_path):
@@ -185,12 +185,17 @@ def test_backfill_applies_only_recorded_name_conventions(tmp_path):
     assert conn.execute("SELECT contig_id, is_circular FROM contigs ORDER BY 1").fetchall() == [
         ("ctg1_C", False), ("ctg9", False)]
 
-    assert record_name_conventions(conn, "srvp") == ("srvp",)
+    assert record_name_conventions(conn, "upper_c_rc_l") == ("upper_c_rc_l",)
     stats = backfill_contig_context(conn, assemblies={"bin1": fasta})
     assert stats["contigs_circular"] == 1
     assert conn.execute("SELECT contig_id, is_circular FROM contigs ORDER BY 1").fetchall() == [
         ("ctg1_C", True), ("ctg9", False)]
-    assert conn.execute("SELECT key, value FROM dataset_meta").fetchall() == [("contig_name_topology", "srvp")]
+    assert conn.execute("SELECT key, value FROM dataset_meta").fetchall() == [("contig_name_topology", "upper_c_rc_l")]
+
+    # A recorded name this version does not know is skipped with a warning; the rest still apply.
+    conn.execute("UPDATE dataset_meta SET value = 'retired_name,hifiasm' WHERE key = 'contig_name_topology'")
+    with pytest.warns(UserWarning, match="retired_name"):
+        assert recorded_name_conventions(conn) == ("hifiasm",)
 
 
 def _legacy_db(path: Path):
@@ -320,7 +325,7 @@ def _stage07_dataset(tmp_path: Path, contig: str):
 
 
 def test_stage07_applies_and_keeps_the_recorded_name_convention(tmp_path):
-    module, outputs, db = _stage07_dataset(tmp_path, "SR-VP_07_25_2022_A1_100cm_PACBIO-HIFI_METAMDBG_7_C")
+    module, outputs, db = _stage07_dataset(tmp_path, "sampleD_hifi_metamdbg_7_C")
 
     def build(**options):
         module.KnowledgeBaseBuilder(outputs, db, force=True, threads=1, **options).build()
@@ -331,8 +336,8 @@ def test_stage07_applies_and_keeps_the_recorded_name_convention(tmp_path):
             conn.close()
 
     assert build() == (False, ())                                  # no convention recorded
-    assert build(contig_name_topology="srvp") == (True, ("srvp",))
-    assert build() == (True, ("srvp",))                            # a --force rebuild keeps it
+    assert build(contig_name_topology="upper_c_rc_l") == (True, ("upper_c_rc_l",))
+    assert build() == (True, ("upper_c_rc_l",))                            # a --force rebuild keeps it
     assert build(contig_name_topology="none") == (False, ())
 
 
@@ -354,16 +359,16 @@ def test_contig_name_topology_command_reports_and_records(tmp_path):
     report = runner.invoke(app, ["contig-name-topology", "--db", str(db)])
     assert report.exit_code == 0, report.output
     assert "Recorded contig-name topology conventions: none" in report.output
-    assert ("srvp (not recorded): 3 contig IDs match (2 circular, 1 linear); "
+    assert ("upper_c_rc_l (not recorded): 3 contig IDs match (2 circular, 1 linear); "
             "stored is_circular differs for 1") in report.output
     assert "sharur seal --force" not in report.output
 
-    recorded = runner.invoke(app, ["contig-name-topology", "--db", str(db), "--set", "srvp"])
+    recorded = runner.invoke(app, ["contig-name-topology", "--db", str(db), "--set", "upper_c_rc_l"])
     assert recorded.exit_code == 0, recorded.output
-    assert "Recorded contig-name topology conventions: srvp" in recorded.output
+    assert "Recorded contig-name topology conventions: upper_c_rc_l" in recorded.output
     assert "sharur seal --force" in recorded.output
     conn = duckdb.connect(str(db), read_only=True)
-    assert recorded_name_conventions(conn) == ("srvp",)
+    assert recorded_name_conventions(conn) == ("upper_c_rc_l",)
     assert conn.execute("SELECT COUNT(*) FROM contigs WHERE is_circular").fetchone()[0] == 1  # stored values kept
     conn.close()
 

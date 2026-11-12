@@ -1232,11 +1232,11 @@ def contig_name_topology_command(
     set_conventions: str | None = typer.Option(
         None, "--set",
         help="Record the conventions this dataset's contig IDs follow (comma-separated: "
-             "srvp, metamdbg, hifiasm), or 'none' to clear. Without --set, only report."),
+             "upper_c_rc_l, metamdbg, hifiasm), or 'none' to clear. Without --set, only report."),
 ):
     """Show or record which contig-name suffixes mark circular and linear contigs in a dataset.
 
-    Suffix conventions belong to one assembler's or project's naming: srvp (`..._C`/`_RC`
+    Suffix conventions belong to one assembler's or project's naming: upper_c_rc_l (`..._C`/`_RC`
     circular, `..._L` linear), metamdbg (`ctg<N>_<cov>x_c|rc|l`), hifiasm (`[sp]tg<N>c|l`).
     Stage 07 and `sharur backfill-contig-context` apply only the conventions a database records,
     after assembly header marks. Recording leaves stored `is_circular` values as they are; the

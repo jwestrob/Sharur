@@ -184,8 +184,8 @@ def test_contig_name_topology_reaches_stage07(tmp_path):
         return next(command for command in plan or [] if command[0].endswith("07_build_knowledge_base.py"))
 
     assert "--contig-name-topology" not in stage07()
-    builder = stage07(contig_name_topology="SRVP")
-    assert builder[builder.index("--contig-name-topology") + 1] == "srvp"
+    builder = stage07(contig_name_topology="UPPER_C_RC_L")
+    assert builder[builder.index("--contig-name-topology") + 1] == "upper_c_rc_l"
     result = CliRunner().invoke(app, ["--input-dir", "dummy_dataset", "--data-dir", str(tmp_path / "d"),
                                       "--contig-name-topology", "spades", "--dry-run"],
                                 terminal_width=400)
