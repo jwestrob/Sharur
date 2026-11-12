@@ -8,7 +8,7 @@ behind each lost ``supported`` verdict go to stderr.
 
 Usage:
     python scripts/compare_hydrogenase_neighborhood.py --old-rev REV \\
-        --db data/A/sharur.duckdb --db data/B/sharur.duckdb > IMPACT_hydrogenase.tsv
+        --db data/dataset_a/sharur.duckdb --db data/dataset_b/sharur.duckdb > neighborhood_impact.tsv
 """
 
 from __future__ import annotations
