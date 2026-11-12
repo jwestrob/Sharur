@@ -53,3 +53,20 @@ def test_only_a_finished_search_writes_the_loadable_hits_file(search_env, monkey
     assert (results_dir / "DefenseFinder_hits_df.tsv").exists() == (status == "success")
     if status == "partial":
         assert "after 1 of 3 genomes" in result["error_message"]
+
+
+def test_stage_exits_nonzero_when_a_database_fails(search_env, monkeypatch, tmp_path):
+    proteins, out, cli = search_env
+    stage03 = tmp_path / "stage03"
+    (stage03 / "genomes").mkdir(parents=True)
+    (stage03 / "genomes" / "all_protein_symlinks").symlink_to(proteins)
+    (stage03 / "processing_manifest.json").write_text("{}")
+    monkeypatch.setattr(stage04, "resolve_cli", lambda: cli)
+    monkeypatch.setenv("FAKE_EXIT", "1")
+
+    with pytest.raises(stage04.typer.Exit) as exit_info:
+        stage04.run_astra_scan(input_dir=stage03, output_dir=out, threads=1, databases=["PFAM"],
+                               use_cutoffs=True, force=False)
+
+    assert exit_info.value.exit_code == 1
+    assert (out / "processing_manifest.json").is_file()

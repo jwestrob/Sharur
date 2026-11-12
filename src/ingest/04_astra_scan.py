@@ -401,11 +401,20 @@ def run_astra_scan(
             console.print(f"[red]• {result['database']}: {result.get('error_message', 'Unknown error')}[/red]")
     
     # Success message
-    if successful_results:
+    if successful_results and not failed_results:
         console.print(f"\n[bold green]✓ Stage 4 completed successfully![/bold green]")
         console.print(f"Annotation results available in: {output_dir}/*/")
         
     logger.info(f"Stage 4 completed: {len(successful_results)} successful, {len(failed_results)} failed")
+    if failed_results:
+        # A database that failed would be missing from the dataset without a trace in Stage 07;
+        # stop the pipeline here, with the manifest written, so the fix and a rerun come first.
+        console.print(
+            f"\n[bold red]Stage 4 failed for {len(failed_results)} of {len(databases)} databases "
+            f"({', '.join(r['database'] for r in failed_results)}); fix them and rerun, or drop them "
+            "with repeated -d flags.[/bold red]"
+        )
+        raise typer.Exit(1)
 
 
 def main():
