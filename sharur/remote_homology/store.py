@@ -132,6 +132,7 @@ DDL = {
     PRIMARY KEY (clustering_run, family_id, source, msa_kind, hit_rank)
 )""",
     CDD_HITS: f"""CREATE TABLE IF NOT EXISTS {CDD_HITS} (
+    hit_id BIGINT NOT NULL,
     sequence_md5 VARCHAR NOT NULL,
     pssm_id INTEGER NOT NULL,
     evalue FLOAT NOT NULL,
@@ -139,7 +140,8 @@ DDL = {
     start_aa INTEGER,
     end_aa INTEGER,
     model_start INTEGER,
-    model_end INTEGER
+    model_end INTEGER,
+    best_in_region BOOLEAN NOT NULL
 )""",
     CDD_MODELS: f"""CREATE TABLE IF NOT EXISTS {CDD_MODELS} (
     pssm_id INTEGER PRIMARY KEY,
@@ -160,6 +162,9 @@ DDL = {
     proteins BIGINT NOT NULL,
     hit_rows BIGINT NOT NULL,
     sequences_with_hits BIGINT NOT NULL,
+    best_rows BIGINT NOT NULL,
+    region_rule VARCHAR NOT NULL,
+    max_overlap DOUBLE NOT NULL,
     export_digest VARCHAR NOT NULL,
     source_db VARCHAR,
     details JSON
@@ -617,6 +622,76 @@ def load_families(
     return result
 
 
+# Which CDD hits activation writes to ``annotations``.
+CDD_ROWS_BEST = "best_per_region"
+CDD_ROWS_ALL = "all"
+CDD_ROW_CHOICES = (CDD_ROWS_BEST, CDD_ROWS_ALL)
+# Same overlap measure and default as sharur.architecture.resolve (tests keep the defaults equal);
+# defined here so this module imports without the rest of Sharur on cluster nodes.
+MAX_OVERLAP = 0.5
+REGION_RULE = ("greedy by bit score (ties: lower E-value, then lower model id): a hit is kept when its query "
+               "range shares at most max_overlap of the shorter of the two ranges with every hit kept before "
+               "it (the overlap measure of sharur.architecture.resolve)")
+
+
+def best_per_region(hits: Sequence[tuple[float, float, int, int, int]], max_overlap: float = MAX_OVERLAP
+                    ) -> list[bool]:
+    """Which hits of one sequence are the best model of their region.
+
+    ``hits`` are ``(bit score, E-value, model id, start, end)``. Hits are taken by bit score
+    (ties: lower E-value, then lower model id); a hit is kept when, against every hit kept
+    before it, the residues both query ranges share are at most ``max_overlap`` times the
+    length of the shorter range. The best-scoring hit is always kept, so a sequence with any
+    hit keeps at least one.
+    """
+    order = sorted(range(len(hits)), key=lambda i: (-(hits[i][0] or 0.0), hits[i][1], hits[i][2]))
+    kept: list[tuple[int, int]] = []
+    flags = [False] * len(hits)
+    for i in order:
+        start, end = hits[i][3], hits[i][4]
+        length = end - start + 1
+        if all(min(end, e) - max(start, s) + 1 <= max_overlap * min(length, e - s + 1) for s, e in kept):
+            kept.append((start, end))
+            flags[i] = True
+    return flags
+
+
+def _mark_best_per_region(con, max_overlap: float, log: Callable[[str], None]) -> int:
+    """Set ``cdd_hits.best_in_region`` with :func:`best_per_region`, sequence by sequence; return the kept count."""
+    started = time.time()
+    cur = con.execute(f"""SELECT hit_id, sequence_md5, score, evalue, pssm_id, start_aa, end_aa FROM {CDD_HITS}
+                          ORDER BY sequence_md5, hit_id""")
+    keep: list[int] = []
+    current, ids, hits = None, [], []
+
+    def flush() -> None:
+        for hit_id, flag in zip(ids, best_per_region(hits, max_overlap), strict=True):
+            if flag:
+                keep.append(hit_id)
+
+    while True:
+        batch = cur.fetchmany(500_000)
+        if not batch:
+            break
+        for hit_id, md5, score, evalue, pssm, start, end in batch:
+            if md5 != current:
+                if ids:
+                    flush()
+                current, ids, hits = md5, [], []
+            ids.append(hit_id)
+            hits.append((score, evalue, pssm, start, end))
+    if ids:
+        flush()
+    import pandas as pd  # noqa: PLC0415
+
+    con.register("_rh_keep_df", pd.DataFrame({"hit_id": keep}, dtype="int64"))
+    con.execute(f"UPDATE {CDD_HITS} SET best_in_region = hit_id IN (SELECT hit_id FROM _rh_keep_df)")
+    con.unregister("_rh_keep_df")
+    log(f"best model per region: {len(keep):,} hits kept (max overlap {max_overlap:g}, "
+        f"{time.time() - started:.0f} s)")
+    return len(keep)
+
+
 _CDD_TYPES = ("VARCHAR", "VARCHAR", "INTEGER", "INTEGER", "INTEGER", "INTEGER", "INTEGER", "INTEGER", "DOUBLE",
               "DOUBLE", "VARCHAR")
 _CDD_COLUMNS = ", ".join(f"'{c}': '{t}'" for c, t in zip(runner.CDD_COLUMNS, _CDD_TYPES, strict=True))
@@ -700,12 +775,17 @@ def load_cdd(
     config: Path | str,
     *,
     max_evalue: float = CDD_MAX_EVALUE,
+    max_overlap: float = MAX_OVERLAP,
     allow_partial: bool = False,
     threads: int = 4,
     memory_limit: str = "8GB",
     log: Callable[[str], None] = print,
 ) -> dict[str, Any]:
     """Load the CDD hits of ``work/cdd`` into ``staging``: ``cdd_hits`` per unique sequence, ``cdd_models``.
+
+    Every hit at ``max_evalue`` or below is kept in the staging file; ``best_in_region`` marks the
+    best model of each region of each sequence (:func:`best_per_region` with ``max_overlap``),
+    the rows activation writes to ``annotations`` by default.
 
     Uses ``work/cdd/compact`` (from :func:`compact_cdd`), compacting the raw tables first when
     they are present and the compact files are not. Hits stay keyed by sequence MD5; activation
@@ -730,14 +810,17 @@ def load_cdd(
     staging = Path(staging).expanduser().resolve()
     staging.parent.mkdir(parents=True, exist_ok=True)
     cdd_run = "cdd-" + _sha({"db": [cdd["name"], cdd["version"]], "evalue": max_evalue,
-                             "export": manifest["export_digest"]})[:10]
+                             "export": manifest["export_digest"], "max_overlap": max_overlap})[:10]
     con = connect(staging, threads=threads, memory_limit=memory_limit)
     try:
         con.execute("BEGIN TRANSACTION")
         for table in (CDD_HITS, CDD_MODELS, CDD_RUNS):
             con.execute(f"DROP TABLE IF EXISTS {table}")
             con.execute(DDL[table])
-        con.execute(f"INSERT INTO {CDD_HITS} SELECT * FROM read_parquet({_q(compact / 'hits.parquet')})")
+        con.execute(f"""INSERT INTO {CDD_HITS}
+            SELECT row_number() OVER (ORDER BY sequence_md5, start_aa, pssm_id, end_aa, score DESC) AS hit_id,
+                   sequence_md5, pssm_id, evalue, score, start_aa, end_aa, model_start, model_end, false
+            FROM read_parquet({_q(compact / 'hits.parquet')})""")
         con.execute(f"INSERT INTO {CDD_MODELS} SELECT * FROM read_parquet({_q(compact / 'models.parquet')})")
         rows, seqs = con.execute(f"SELECT COUNT(*), COUNT(DISTINCT sequence_md5) FROM {CDD_HITS}").fetchone()
         orphans = con.execute(f"SELECT COUNT(*) FROM (SELECT DISTINCT pssm_id FROM {CDD_HITS}) "
@@ -745,10 +828,12 @@ def load_cdd(
         if rows != info["rows"] or orphans:
             raise RemoteHomologyError(f"compact files are inconsistent ({rows:,} rows vs {info['rows']:,} recorded, "
                                       f"{orphans} models missing)")
-        con.execute(f"INSERT INTO {CDD_RUNS} VALUES (?, ?::TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        best = _mark_best_per_region(con, max_overlap, log)
+        con.execute(f"INSERT INTO {CDD_RUNS} VALUES (?, ?::TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     [cdd_run, _now(), cdd["name"], cdd["version"], cdd["prefix"], float(max_evalue),
                      "; ".join(info.get("rpsblast") or []) or None, manifest["unique_sequences"],
-                     manifest["proteins"], rows, seqs, manifest["export_digest"], manifest.get("source_db"),
+                     manifest["proteins"], rows, seqs, best, REGION_RULE, float(max_overlap),
+                     manifest["export_digest"], manifest.get("source_db"),
                      json.dumps({**{k: info[k] for k in ("chunks", "chunks_done", "raw_rows", "search_evalue")},
                                  "work_dir": str(work), "config_path": cfg["_path"]})])
         con.execute("COMMIT")
@@ -761,7 +846,8 @@ def load_cdd(
     finally:
         con.close()
     result = {"cdd_run": cdd_run, "chunks": info["chunks"], "chunks_done": info["chunks_done"],
-              "raw_rows": info["raw_rows"], "hit_rows": rows, "sequences_with_hits": seqs,
+              "raw_rows": info["raw_rows"], "hit_rows": rows, "best_in_region_rows": best,
+              "max_overlap": max_overlap, "sequences_with_hits": seqs,
               "unique_sequences": manifest["unique_sequences"], "proteins": manifest["proteins"],
               "staging": str(staging)}
     log(f"{cdd_run}: {rows:,} CDD hits on {seqs:,} of {manifest['unique_sequences']:,} unique sequences")
@@ -780,7 +866,7 @@ def _attach_staging(con, path: Path, alias: str) -> set[str]:
 
 def load_staging(con: duckdb.DuckDBPyConnection, staging: Sequence[Path | str], *,
                  families_staging: Path | str | None = None, verify_digest: bool = True,
-                 log: Callable[[str], None] = print) -> dict[str, Any]:
+                 cdd_rows: str = CDD_ROWS_BEST, log: Callable[[str], None] = print) -> dict[str, Any]:
     """Copy the remote-homology rows of ``staging`` file(s) into the database open on ``con``.
 
     Family tier: the clustering run of every staged search must exist in the database (or in
@@ -788,7 +874,10 @@ def load_staging(con: duckdb.DuckDBPyConnection, staging: Sequence[Path | str], 
     search recorded, and every staged family must exist in it; rows of the same clustering run
     and source are replaced. CDD: every staged protein must exist with the sequence the hit was
     computed for (MD5); ``annotations`` rows with ``source = 'cdd'`` are replaced and the
-    database name and version are recorded in ``annotation_source_versions``.
+    database name and version are recorded in ``annotation_source_versions``. ``cdd_rows``
+    chooses the CDD rows written: ``best_per_region`` (default; the best model of each region,
+    ``cdd_hits.best_in_region``) or ``all``. The full per-sequence table stays in the staging
+    file either way.
     """
     from sharur.defensefinder.selection import _SOURCE_VERSIONS_SQL  # noqa: PLC0415
 
@@ -815,7 +904,8 @@ def load_staging(con: duckdb.DuckDBPyConnection, staging: Sequence[Path | str], 
                 summary["family_tier"] = _load_family_tier(con, alias, path)
                 log(f"family tier: {summary['family_tier']}")
             if {CDD_HITS, CDD_MODELS, CDD_RUNS} <= tables:
-                summary["cdd"] = _load_cdd_rows(con, alias, path, verify_digest, _SOURCE_VERSIONS_SQL, log)
+                summary["cdd"] = _load_cdd_rows(con, alias, path, verify_digest, _SOURCE_VERSIONS_SQL, log,
+                                                cdd_rows=cdd_rows)
                 log(f"cdd: {summary['cdd']}")
             if not ({RUNS, STATUS, HITS} <= tables or {CDD_HITS, CDD_MODELS, CDD_RUNS} <= tables):
                 raise RemoteHomologyError(f"{path} holds no remote-homology tables")
@@ -878,7 +968,9 @@ def _load_family_tier(con, alias: str, path: Path) -> dict[str, Any]:
 
 
 def _load_cdd_rows(con, alias: str, path: Path, verify_digest: bool, source_versions_sql: str,
-                   log: Callable[[str], None]) -> dict[str, Any]:
+                   log: Callable[[str], None], *, cdd_rows: str = CDD_ROWS_BEST) -> dict[str, Any]:
+    if cdd_rows not in CDD_ROW_CHOICES:
+        raise RemoteHomologyError(f"cdd_rows must be one of {', '.join(CDD_ROW_CHOICES)}, not {cdd_rows!r}")
     run = con.execute(f"SELECT * FROM {alias}.{CDD_RUNS}").fetchdf()
     if len(run) != 1:
         raise RemoteHomologyError(f"{path}: expected one CDD run record, found {len(run)}")
@@ -896,36 +988,44 @@ def _load_cdd_rows(con, alias: str, path: Path, verify_digest: bool, source_vers
         removed = con.execute("SELECT COUNT(*) FROM annotations WHERE source = ?", [CDD_SOURCE]).fetchone()[0]
         con.execute("DELETE FROM annotations WHERE source = ?", [CDD_SOURCE])
         base = con.execute("SELECT COALESCE(MAX(annotation_id), 0) FROM annotations").fetchone()[0]
+        con.execute(f"""CREATE OR REPLACE TEMP TABLE _rh_pmd5 AS
+            SELECT protein_id, md5(rtrim(sequence, '*')) AS sequence_md5 FROM proteins WHERE {_HAS_SEQ}""")
+        all_rows = con.execute(f"""SELECT COALESCE(SUM(h.n), 0) FROM _rh_pmd5 p JOIN
+            (SELECT sequence_md5, COUNT(*) AS n FROM {alias}.{CDD_HITS} GROUP BY 1) h USING (sequence_md5)""").fetchone()[0]
+        where = "WHERE h.best_in_region" if cdd_rows == CDD_ROWS_BEST else ""
         con.execute(f"""
             INSERT INTO annotations (annotation_id, protein_id, source, accession, name, description, evalue,
                                      score, start_aa, end_aa)
-            WITH p AS (SELECT protein_id, md5(rtrim(sequence, '*')) AS sequence_md5 FROM proteins
-                       WHERE {_HAS_SEQ})
             SELECT ? + row_number() OVER (ORDER BY p.protein_id, h.start_aa, m.accession, h.evalue), p.protein_id,
                    '{CDD_SOURCE}', m.accession, m.name, m.description, h.evalue, h.score, h.start_aa, h.end_aa
-            FROM {alias}.{CDD_HITS} h JOIN {alias}.{CDD_MODELS} m USING (pssm_id) JOIN p USING (sequence_md5)""",
-                    [int(base)])
+            FROM {alias}.{CDD_HITS} h JOIN {alias}.{CDD_MODELS} m USING (pssm_id) JOIN _rh_pmd5 p USING (sequence_md5)
+            {where}""", [int(base)])
         loaded, proteins = con.execute("SELECT COUNT(*), COUNT(DISTINCT protein_id) FROM annotations "
                                        "WHERE source = ?", [CDD_SOURCE]).fetchone()
+        rule = (f"rpsblast E <= {float(run['max_evalue']):g}; "
+                + (f"best model per region (max overlap {float(run['max_overlap']):g}); "
+                   if cdd_rows == CDD_ROWS_BEST else "every hit; ")
+                + "unique sequences expanded to proteins")
         params = {"cdd_run": run["cdd_run"], "max_evalue": float(run["max_evalue"]), "db_prefix": run["db_prefix"],
                   "tool_version": run["tool_version"], "unique_sequences": int(run["unique_sequences"]),
-                  "sequence_hits": int(run["hit_rows"]), "export_digest": run["export_digest"],
-                  "evidence": "resembles"}
+                  "rows_stored": cdd_rows, "region_rule": run["region_rule"], "max_overlap": float(run["max_overlap"]),
+                  "sequence_hits": int(run["hit_rows"]), "sequence_best_hits": int(run["best_rows"]),
+                  "protein_rows_all": int(all_rows), "protein_rows_stored": int(loaded),
+                  "proteins_with_hits": int(proteins), "full_table": f"cdd_hits and cdd_models in {path}",
+                  "export_digest": run["export_digest"], "evidence": "resembles"}
         con.execute(f"DELETE FROM {SOURCE_VERSIONS} WHERE source = ?", [CDD_SOURCE])
         con.execute(f"""INSERT INTO {SOURCE_VERSIONS} (source, model_set, model_version, profiles_path, selection_rule,
                                     parameters, hits_path, raw_rows, selected_rows, loaded_rows, loaded_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::TIMESTAMP)""",
-                    [CDD_SOURCE, run["db_name"], run["db_version"], run["db_prefix"],
-                     f"rpsblast E <= {float(run['max_evalue']):g}, every HSP, unique sequences expanded to proteins",
-                     json.dumps(params, sort_keys=True), str(path),
-                     int(json.loads(run["details"] or "{}").get("raw_rows") or 0), int(run["hit_rows"]), loaded,
-                     _now()])
+                    [CDD_SOURCE, run["db_name"], run["db_version"], run["db_prefix"], rule,
+                     json.dumps(params, sort_keys=True), str(path), int(all_rows), int(loaded), int(loaded), _now()])
+        con.execute("DROP TABLE IF EXISTS _rh_pmd5")
         con.execute("COMMIT")
     except Exception:
         con.execute("ROLLBACK")
         raise
-    return {"staging": str(path), "rows_removed": removed, "rows_loaded": loaded, "proteins_with_hits": proteins,
-            "db": f"{run['db_name']} {run['db_version']}"}
+    return {"staging": str(path), "rows_removed": removed, "rows_loaded": loaded, "rows_all": int(all_rows),
+            "rows_stored": cdd_rows, "proteins_with_hits": proteins, "db": f"{run['db_name']} {run['db_version']}"}
 
 
 def status(con) -> dict[str, Any]:
@@ -957,10 +1057,15 @@ def status(con) -> dict[str, Any]:
         n, proteins = con.execute("SELECT COUNT(*), COUNT(DISTINCT protein_id) FROM annotations WHERE source = ?",
                                   [CDD_SOURCE]).fetchone()
         if n:
-            version = None
+            version, params = None, {}
             if _has_tables(con, [SOURCE_VERSIONS]):
-                row = con.execute(f"SELECT model_set, model_version FROM {SOURCE_VERSIONS} WHERE source = ?",
-                                  [CDD_SOURCE]).fetchone()
-                version = f"{row[0]} {row[1]}" if row else None
-            out["cdd"] = {"rows": n, "proteins": proteins, "database": version}
+                row = con.execute(f"SELECT model_set, model_version, parameters FROM {SOURCE_VERSIONS} "
+                                  "WHERE source = ?", [CDD_SOURCE]).fetchone()
+                if row:
+                    version = f"{row[0]} {row[1]}"
+                    params = json.loads(row[2] or "{}")
+            out["cdd"] = {"rows": n, "proteins": proteins, "database": version,
+                          "rows_stored": params.get("rows_stored"), "rows_all_hits": params.get("protein_rows_all"),
+                          "max_overlap": params.get("max_overlap"), "sequence_hits": params.get("sequence_hits"),
+                          "full_table": params.get("full_table")}
     return out

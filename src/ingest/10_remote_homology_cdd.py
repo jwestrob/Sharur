@@ -5,7 +5,9 @@ Stage 10 (optional): CDD per protein with RPS-BLAST ("resembles" rows).
 Reads every protein of the Stage 07 database (read-only), writes each unique sequence once
 (named by its MD5), runs RPS-BLAST against the CDD database of ``--config`` with every
 allocated CPU (workers of four threads), and expands hits at E <= ``--max-evalue`` (default
-0.01) to every protein carrying that sequence.
+0.01) to every protein carrying that sequence. The staging file keeps every hit and marks the
+best model of each region (``--max-overlap``); activation writes those best rows to
+``annotations`` by default (``--cdd-rows all`` writes every hit).
 
 Outputs in ``stage10_cdd/``:
 
@@ -40,6 +42,8 @@ def main() -> int:
     parser.add_argument("--config", type=Path, required=True, help="Remote-homology configuration (JSON)")
     parser.add_argument("--threads", type=int, default=None, help="Default: $SLURM_CPUS_ON_NODE or all CPUs")
     parser.add_argument("--max-evalue", type=float, default=0.01)
+    parser.add_argument("--max-overlap", type=float, default=0.5,
+                        help="Best model per region: overlap fraction of the shorter range that makes one region")
     parser.add_argument("--chunk-size", type=int, default=2000)
     parser.add_argument("--keep-chunks", action="store_true", help="Keep the exported sequence chunks")
     parser.add_argument("--force", action="store_true", help="Replace an existing stage directory")
@@ -62,7 +66,8 @@ def main() -> int:
             print(f"Stage 10 failed: RPS-BLAST reported errors (see {args.out_dir}/logs)", file=sys.stderr)
             return 1
         staging = args.out_dir / "remote_homology_cdd.duckdb"
-        result = load_cdd(args.out_dir, staging, args.config, max_evalue=args.max_evalue, threads=min(threads, 8))
+        result = load_cdd(args.out_dir, staging, args.config, max_evalue=args.max_evalue,
+                          max_overlap=args.max_overlap, threads=min(threads, 8))
     except (RemoteHomologyError, runner.ConfigError, FileNotFoundError) as exc:
         print(f"Stage 10 failed: {exc}", file=sys.stderr)
         return 1

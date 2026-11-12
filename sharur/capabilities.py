@@ -939,7 +939,10 @@ def _remote_homology_check(store: DuckDBStore) -> Capability:
                                                            "families_error", "families_pending")}
                                        for s in family["searches"]]
     if cdd:
-        parts.append(f"CDD hits on {cdd['proteins']:,} proteins ({cdd['database'] or 'version unrecorded'})")
+        stored = (f"{cdd['rows']:,} rows stored ({cdd['rows_stored'] or 'all'}) of {cdd['rows_all_hits']:,} hits"
+                  if cdd.get("rows_all_hits") is not None else f"{cdd['rows']:,} rows")
+        parts.append(f"CDD hits on {cdd['proteins']:,} proteins, {stored} "
+                     f"({cdd['database'] or 'version unrecorded'}; full table: {cdd.get('full_table') or 'staging file'})")
         evidence["cdd"] = cdd
     return Capability(
         "remote_homology", CapabilityState.available,

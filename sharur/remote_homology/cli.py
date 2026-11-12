@@ -164,14 +164,17 @@ def load_cdd_command(
     config: Path = typer.Option(..., "--config", "-c"),
     staging: Path = typer.Option(..., "--staging", "-s", help="Staging DuckDB (created when absent)."),
     max_evalue: float = typer.Option(0.01, "--max-evalue"),
+    max_overlap: float = typer.Option(0.5, "--max-overlap",
+                                      help="Best model per region: hits sharing more than this fraction of the "
+                                           "shorter range belong to one region (best bit score kept)."),
     allow_partial: bool = typer.Option(False, "--allow-partial"),
 ):
     """Load the CDD hits (per unique sequence) and models into a staging file; compacts first if needed."""
     from sharur.remote_homology import store  # noqa: PLC0415
 
     try:
-        _echo_json(store.load_cdd(work, staging, config, max_evalue=max_evalue, allow_partial=allow_partial,
-                                  log=lambda m: typer.echo(m, err=True)))
+        _echo_json(store.load_cdd(work, staging, config, max_evalue=max_evalue, max_overlap=max_overlap,
+                                  allow_partial=allow_partial, log=lambda m: typer.echo(m, err=True)))
     except store.RemoteHomologyError as exc:
         _fail("load-cdd", exc)
 
@@ -188,6 +191,9 @@ def activate_command(
                                             help="Directory for the staged clone (default: beside DB)."),
     do_publish: bool = typer.Option(False, "--publish", help="Publish the staged copy when the load succeeds."),
     verify_digest: bool = typer.Option(True, "--verify-digest/--no-verify-digest"),
+    cdd_rows: str = typer.Option("best_per_region", "--cdd-rows",
+                                 help="CDD rows written to annotations: best_per_region (the best model of each "
+                                      "region) or all. The full hit table stays in the staging file."),
 ):
     """Stage DB, load the remote-homology rows into the clone, diff, and (with --publish) swap it in.
 
@@ -198,6 +204,9 @@ def activate_command(
     from sharur.protein_families.cli import _staged  # noqa: PLC0415
     from sharur.remote_homology import store  # noqa: PLC0415
 
+    if cdd_rows not in store.CDD_ROW_CHOICES:
+        raise typer.BadParameter(f"--cdd-rows must be one of {', '.join(store.CDD_ROW_CHOICES)}")
+
     paths = [p.expanduser().resolve() for p in staging]
     fam = families_staging.expanduser().resolve() if families_staging else None
 
@@ -205,7 +214,7 @@ def activate_command(
         con = store.connect(path)
         try:
             return store.load_staging(con, paths, families_staging=fam, verify_digest=verify_digest,
-                                      log=lambda m: typer.echo(m, err=True))
+                                      cdd_rows=cdd_rows, log=lambda m: typer.echo(m, err=True))
         finally:
             con.close()
 

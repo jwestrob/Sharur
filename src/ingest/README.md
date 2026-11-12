@@ -536,7 +536,8 @@ Schema, identifiers, incremental assignment and the threshold evidence: `docs/gu
 Optional "resembles" rows, opt-in with `--with-cdd` and `--with-family-homology`; both need
 `--remote-homology-config rh.json` (tools and databases with names and versions; template in
 `config/remote_homology.example.json`). Stage 10 runs RPS-BLAST of every unique protein
-sequence against CDD and keeps hits at E <= 0.01 (`stage10_cdd/remote_homology_cdd.duckdb`).
+sequence against CDD and keeps hits at E <= 0.01 (`stage10_cdd/remote_homology_cdd.duckdb`, every
+hit; activation writes the best model of each region to `annotations`).
 Stage 11 needs Stage 09: it selects the Pfam-dark families of three or more genomes, aligns up
 to 250 unique members per family with MAFFT and runs HHsearch against Pfam and PDB, after
 HHblits enrichment against UniRef30 when the configuration lists `enriched`

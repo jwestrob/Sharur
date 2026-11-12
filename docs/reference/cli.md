@@ -1492,7 +1492,8 @@ $ sharur remote-homology [OPTIONS] COMMAND [ARGS]...
 * `export-cdd`: Write every unique protein sequence (named...
 * `search`: Run the searches on this host (the Slurm...
 * `load-families`: Parse the family-tier results into...
-* `load-cdd`: Expand the CDD hits of unique sequences to...
+* `compact-cdd`: Reduce the raw RPS-BLAST tables to...
+* `load-cdd`: Load the CDD hits (per unique sequence)...
 * `activate`: Stage DB, load the remote-homology rows...
 * `status`: Searches loaded, families resembling...
 
@@ -1597,9 +1598,27 @@ $ sharur remote-homology load-families [OPTIONS]
 * `--allow-partial`: Load although some families are pending or failed.
 * `--help`: Show this message and exit.
 
+#### `sharur remote-homology compact-cdd`
+
+Reduce the raw RPS-BLAST tables to work/cdd/compact/*.parquet (run beside them, on the cluster).
+
+**Usage**:
+
+```console
+$ sharur remote-homology compact-cdd [OPTIONS]
+```
+
+**Options**:
+
+* `-w, --work PATH`: [required]
+* `--max-evalue FLOAT`: [default: 0.01]
+* `--allow-partial`
+* `-t, --threads INTEGER`: Default: $SLURM_CPUS_ON_NODE or 4.
+* `--help`: Show this message and exit.
+
 #### `sharur remote-homology load-cdd`
 
-Expand the CDD hits of unique sequences to proteins (staging file).
+Load the CDD hits (per unique sequence) and models into a staging file; compacts first if needed.
 
 **Usage**:
 
@@ -1611,9 +1630,9 @@ $ sharur remote-homology load-cdd [OPTIONS]
 
 * `-w, --work PATH`: [required]
 * `-c, --config PATH`: [required]
-* `-d, --db PATH`: Dataset sharur.duckdb. Opened read-only (MD5 -> protein ids).  [required]
 * `-s, --staging PATH`: Staging DuckDB (created when absent).  [required]
 * `--max-evalue FLOAT`: [default: 0.01]
+* `--max-overlap FLOAT`: Best model per region: hits sharing more than this fraction of the shorter range belong to one region (best bit score kept).  [default: 0.5]
 * `--allow-partial`
 * `--help`: Show this message and exit.
 
@@ -1640,6 +1659,7 @@ $ sharur remote-homology activate [OPTIONS]
 * `--work-dir PATH`: Directory for the staged clone (default: beside DB).
 * `--publish`: Publish the staged copy when the load succeeds.
 * `--verify-digest / --no-verify-digest`: [default: verify-digest]
+* `--cdd-rows TEXT`: CDD rows written to annotations: best_per_region (the best model of each region) or all. The full hit table stays in the staging file.  [default: best_per_region]
 * `--help`: Show this message and exit.
 
 #### `sharur remote-homology status`

@@ -7,7 +7,7 @@ optional layers:
 
 | Layer | Unit | Search | Stored in |
 |---|---|---|---|
-| CDD per protein | every unique protein sequence | RPS-BLAST against CDD, hits at E ≤ 0.01 | `annotations` with `source = 'cdd'` |
+| CDD per protein | every unique protein sequence | RPS-BLAST against CDD, hits at E ≤ 0.01 | the best model of each region in `annotations` (`source = 'cdd'`); every hit in the stage's staging file |
 | Family tier | one profile per protein family | MAFFT alignment of up to 250 unique members (representative first), optional HHblits enrichment against UniRef30, HHsearch against Pfam and PDB profile databases | `family_annotations` |
 
 Both layers are **observed similarity**. A row says that a protein, or the family it belongs
@@ -132,13 +132,33 @@ sharur remote-homology load-cdd --work work/ --config rh.json --staging work/rem
 
 Each unique sequence is searched once (named by its MD5). `compact-cdd` reduces the raw
 RPS-BLAST tables to two Parquet files (hits at E ≤ 0.01 per sequence, sorted by MD5, and the
-CDD models hit), so on a cluster only `work/cdd/compact/` needs to travel. The staging file
-keeps hits per sequence (`cdd_hits`, `cdd_models`); activation expands them to every protein
-with that sequence. CDD bundles models from several collections (NCBI-curated `cd` models,
-Pfam, SMART, COG, PRK, TIGRFAMs and others), so one domain often hits several models; every hit
-at E ≤ 0.01 is stored with its query range (`start_aa`, `end_aa`). Expect several hits per
-annotated protein: at the protein level the `annotations` table can grow by a large multiple of
-its Pfam rows.
+CDD models hit), so on a cluster only `work/cdd/compact/` needs to travel.
+
+CDD bundles models from several collections (NCBI-curated `cd` models, Pfam, SMART, COG, PRK,
+TIGRFAMs and others), so one domain region usually hits several models. Two tiers keep this
+manageable:
+
+- **The staging file holds every hit** at E ≤ 0.01, per unique sequence (`cdd_hits`,
+  `cdd_models`), with its query and model ranges.
+- **Activation writes the best model of each region** to `annotations`. Per sequence, hits are
+  taken by bit score (ties: lower E-value, then lower model id); a hit is kept when, against
+  every hit kept before it, the two query ranges share at most `--max-overlap` (default 0.5) of
+  the shorter range. This is the overlap measure `sharur architecture` uses for Pfam domains.
+  The best-scoring hit always stays, so every protein with a CDD hit keeps at least one row.
+  `load-cdd --max-overlap` sets the rule (`cdd_hits.best_in_region`); `activate --cdd-rows all`
+  writes every hit instead.
+
+The full table stays queryable by attaching the staging file read-only:
+
+```sql
+ATTACH 'stage10_cdd/remote_homology_cdd.duckdb' AS cdd (READ_ONLY);
+SELECT p.protein_id, m.accession, m.name, h.evalue, h.score, h.start_aa, h.end_aa, h.best_in_region
+FROM cdd.cdd_hits h
+JOIN cdd.cdd_models m USING (pssm_id)
+JOIN proteins p ON md5(rtrim(p.sequence, '*')) = h.sequence_md5
+WHERE p.protein_id = 'PROTEIN_ID'
+ORDER BY h.score DESC;
+```
 
 ## During ingest
 
@@ -172,14 +192,17 @@ copy waits for `sharur stage publish` or `sharur stage discard`.
   database that already holds those runs needs no family file. Every searched run must exist with
   the clustering input digest the search recorded, and every searched family must exist in it.
 - Family rows of the same clustering run and source are replaced; other runs stay.
-- CDD rows replace every `annotations` row with `source = 'cdd'`. Before that, the
-  database's set of unique protein sequences must hash to the digest recorded when they were
-  exported for the search; a database with added, removed or changed proteins needs a new CDD
-  run. `annotation_source_versions` records the database name and version, the E-value cutoff
-  and the counts.
+- CDD rows replace every `annotations` row with `source = 'cdd'`: the best model of each
+  region by default, every hit with `--cdd-rows all`. Before that, the database's set of unique
+  protein sequences must hash to the digest recorded when they were exported for the search; a
+  database with added, removed or changed proteins needs a new CDD run.
+  `annotation_source_versions` records the database name and version, the E-value cutoff, the
+  region rule, the rows stored and the protein-level count of every hit, and the staging file
+  that holds the full table.
 
 `sharur remote-homology status --db ...` and `sharur preflight` (the `remote_homology`
-capability) report the searches, how many families meet the rule, and CDD coverage.
+capability) report the searches, how many families meet the rule, and CDD coverage: the rows
+stored in `annotations` and the protein-level count of every hit in the staging file.
 
 ## Tables
 
@@ -189,8 +212,8 @@ capability) report the searches, how many families meet the rule, and CDD covera
 | `family_annotation_status` | searched family | `status` (`ok`, `error`, `pending`), member, genome and sequence counts, representative, `n_hits`, `verified` (query length matched), `seconds`, `steps` |
 | `family_annotation_runs` | search | `search_run`, `clustering_run`, selection rule, `msa_kinds`, `targets`, `databases` (names, versions, paths), parameters, tool versions, family counts, export and configuration digests |
 | `family_resemblance` (view) | hit meeting the rule | the hit columns plus `hit_class` (`characterized`, `unknown_function`) and `evidence` = `resembles` |
-| `annotations` (`source = 'cdd'`) | CDD hit and protein | `accession` (model, e.g. `cd00009`), `name`, `description`, `evalue`, `score` (bits), `start_aa`, `end_aa` |
-| `cdd_hits`, `cdd_models`, `cdd_runs` (staging file) | hit per unique sequence; model; search | `sequence_md5`, `pssm_id`, E-value, bits, ranges; accession, name, description, length; database name and version, E-value cutoff, counts, export digest |
+| `annotations` (`source = 'cdd'`) | best CDD model per region and protein (default) | `accession` (model, e.g. `cd00009`), `name`, `description`, `evalue`, `score` (bits), `start_aa`, `end_aa` |
+| `cdd_hits`, `cdd_models`, `cdd_runs` (staging file) | every hit per unique sequence; model; search | `hit_id`, `sequence_md5`, `pssm_id`, E-value, bits, ranges, `best_in_region`; accession, name, description, length; database name and version, E-value cutoff, region rule and `max_overlap`, counts, export digest |
 
 Query coordinates (`q_start`, `q_end`) refer to the family representative's sequence, which
 leads every family alignment.

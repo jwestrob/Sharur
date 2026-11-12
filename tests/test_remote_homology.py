@@ -428,6 +428,26 @@ def test_staging_tables_carry_database_names_versions_and_the_rule(staged):
     assert _rows(s, "SELECT pssm_id, model_length FROM cdd_models ORDER BY 1") == [(990001, 120), (990002, 60)]
     compact = json.loads((staged["cddwork"] / "cdd" / "compact" / "compact.json").read_text())
     assert (compact["raw_rows"], compact["rows"]) == (4, 3)
+    # s2's DUF9999 hit lies inside its higher-scoring SynthA hit: one region, SynthA kept
+    assert _rows(s, "SELECT m.accession, h.best_in_region FROM cdd_hits h JOIN cdd_models m USING (pssm_id) "
+                    "ORDER BY h.score DESC") == [("cdT0001", True), ("cdT0001", True), ("cdT0002", False)]
+    assert _rows(s, "SELECT hit_rows, best_rows, max_overlap FROM cdd_runs") == [(3, 2, 0.5)]
+    assert staged["cdd"]["best_in_region_rows"] == 2
+
+
+def test_best_per_region_keeps_the_top_bit_score_of_each_region():
+    from sharur.architecture import MAX_OVERLAP
+
+    assert store.MAX_OVERLAP == MAX_OVERLAP  # one overlap default across Pfam architectures and CDD regions
+    hits = [(150.0, 1e-40, 3, 3, 118),   # SynthA over the whole protein
+            (30.0, 5e-3, 2, 40, 90),     # inside it
+            (80.0, 1e-20, 1, 130, 200),  # a second region
+            (80.0, 1e-25, 4, 140, 205),  # same region, same bits, lower E-value -> wins the tie
+            (20.0, 1e-3, 5, 100, 135)]   # shares 19 of its 36 residues with the first region
+    assert store.best_per_region(hits) == [True, False, False, True, False]
+    assert store.best_per_region(hits, max_overlap=0.6) == [True, False, False, True, True]
+    assert store.best_per_region([(10.0, 1.0, 9, 5, 50)]) == [True]
+    assert store.best_per_region([]) == []
 
 
 def test_activation_needs_the_clustering_run(staged):
@@ -448,13 +468,15 @@ def test_activation_loads_rows_and_the_sql_surface_reads_resembles(staged):
     finally:
         con.close()
     assert out["family_tier"]["hit_rows"] == again["family_tier"]["hit_rows"] == 64
-    assert again["cdd"]["rows_removed"] == again["cdd"]["rows_loaded"] == 4
+    assert again["cdd"]["rows_removed"] == again["cdd"]["rows_loaded"] == 3 and again["cdd"]["rows_all"] == 4
     db = staged["db"]
     assert _rows(db, "SELECT COUNT(*) FROM family_annotations") == [(64,)]
     assert _rows(db, "SELECT model_set, model_version FROM annotation_source_versions WHERE source = 'cdd'") == [
         ("CDD", "9.99")]
-    assert _rows(db, "SELECT COUNT(*), COUNT(DISTINCT protein_id) FROM annotations WHERE source = 'cdd'") == [(4, 3)]
-    assert _rows(db, "SELECT COUNT(DISTINCT annotation_id) FROM annotations") == [(6,)]
+    # best model per region by default: s2 keeps SynthA, the shared sequence of fa_g4 and fa_g4b its one hit
+    assert _rows(db, "SELECT COUNT(*), COUNT(DISTINCT protein_id) FROM annotations WHERE source = 'cdd'") == [(3, 3)]
+    assert _rows(db, "SELECT COUNT(DISTINCT annotation_id) FROM annotations") == [(5,)]
+    assert status_cdd(db) == {"rows": 3, "rows_stored": "best_per_region", "rows_all_hits": 4, "max_overlap": 0.5}
     status = again["status"]
     assert status["family_tier"]["families_resembling_characterized"] == 2 and status["cdd"]["proteins"] == 3
     assert status["family_tier"]["families_resembling_unknown_function_only"] == 0
@@ -469,14 +491,14 @@ def test_activation_loads_rows_and_the_sql_surface_reads_resembles(staged):
         assert q("SELECT COUNT(*) FROM feature_proteins('SynthA')") == [(0,)]  # unqualified: curated sources only
         assert q("SELECT DISTINCT evidence FROM feature_proteins('DomA')") == [("observed",)]
         summary = q("SELECT pfam, other, n_annotations, resembles FROM protein_summary('s2')")
-        assert summary == [([], [], 0, ["cdd:cdT0001", "cdd:cdT0002"])]
+        assert summary == [([], [], 0, ["cdd:cdT0001"])]
         tag = staged["tag"]
         rows = q("SELECT tier, family_id, source, hit_accession, hit_class, evidence FROM resembles_of('fa_g2')")
         assert {r[3] for r in rows} == {"PF90001", "PF90003", "9zzz_A", "9yyy_B"}
         assert {r[1] for r in rows} == {f"fam:{tag}:fa_g1"} and {r[5] for r in rows} == {"resembles"}
         cdd_rows = q("SELECT tier, db_name, db_version, hit_accession, unknown_function FROM resembles_of('s2') "
                      "ORDER BY hit_accession")
-        assert cdd_rows == [("protein", "CDD", "9.99", "cdT0001", False), ("protein", "CDD", "9.99", "cdT0002", True)]
+        assert cdd_rows == [("protein", "CDD", "9.99", "cdT0001", False)]
         strict = q("SELECT COUNT(*) FROM resembles_of('fa_g2', min_probability := 99)")
         assert strict == [(2,)]  # PF90001 at 99.6, once per MSA kind
         members = q("SELECT DISTINCT protein_id FROM resembles_proteins('PF90001') ORDER BY 1")
@@ -485,9 +507,39 @@ def test_activation_loads_rows_and_the_sql_surface_reads_resembles(staged):
         grid = q("SELECT bin_id, present, n_proteins FROM resembles_presence('cdT0001') ORDER BY bin_id")
         assert grid == [("g1", False, 0), ("g2", False, 0), ("g3", False, 0), ("g4", True, 2), ("g5", True, 1)]
         nb = q("SELECT resembles FROM neighbors('s2', k := 0)")
-        assert nb == [(["cdd:cdT0001", "cdd:cdT0002"],)]
+        assert nb == [(["cdd:cdT0001"],)]
     finally:
         con.close()
+
+
+def status_cdd(db: Path) -> dict:
+    con = store.connect(db, read_only=True)
+    try:
+        info = store.status(con)["cdd"]
+    finally:
+        con.close()
+    return {k: info[k] for k in ("rows", "rows_stored", "rows_all_hits", "max_overlap")}
+
+
+def test_activation_can_store_every_cdd_hit(staged):
+    con = store.connect(staged["db"])
+    try:
+        out = store.load_staging(con, [staged["staging"]], families_staging=staged["families"], cdd_rows="all",
+                                 log=lambda _m: None)
+        with pytest.raises(store.RemoteHomologyError, match="cdd_rows must be one of"):
+            store.load_staging(con, [staged["staging"]], cdd_rows="some", log=lambda _m: None)
+    finally:
+        con.close()
+    assert out["cdd"]["rows_loaded"] == out["cdd"]["rows_all"] == 4
+    assert status_cdd(staged["db"]) == {"rows": 4, "rows_stored": "all", "rows_all_hits": 4, "max_overlap": 0.5}
+    from sharur.sql import connect as sql_connect
+
+    con = sql_connect(staged["db"])
+    try:
+        rows = con.execute("SELECT hit_accession, unknown_function FROM resembles_of('s2') ORDER BY 1").fetchall()
+    finally:
+        con.close()
+    assert rows == [("cdT0001", False), ("cdT0002", True)]
 
 
 def test_activation_refuses_changed_sequences(staged, tmp_path):
@@ -521,7 +573,8 @@ def test_activate_command_stages_publishes_and_reports(staged):
     assert list(db.parent.glob("sharur.duckdb.pre-remote-homology-*"))
     result = CliRunner().invoke(app, ["remote-homology", "status", "--db", str(db)])
     info = json.loads(result.stdout)
-    assert info["cdd"]["rows"] == 4 and info["family_tier"]["families_resembling_any"] == 2
+    assert info["cdd"]["rows"] == 3 and info["cdd"]["rows_all_hits"] == 4
+    assert info["family_tier"]["families_resembling_any"] == 2
 
     from sharur.capabilities import _remote_homology_check
     from sharur.storage.duckdb_store import DuckDBStore as Store
