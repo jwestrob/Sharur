@@ -653,6 +653,17 @@ def _emit_slurm_bundle(
             submit_path.chmod(0o755)
             return submit_path
 
+        # The run ledger is SQLite in WAL mode, which processes on different hosts must not
+        # share at once (WAL needs one host's shared memory; on a network filesystem the
+        # concurrent open fails with "locking protocol" or worse). The bundle therefore runs the
+        # inline stages first, then submits the Slurm stages as one chain: a stage waits for its
+        # dependencies to succeed (afterok) and for the previous job to end (afterany).
+        local_ids = {node.stage_id for node in active if node.resource.executor == "local"}
+        inline_first = [
+            node for node in active
+            if node.stage_id in local_ids and set(node.dependencies) & active_ids <= local_ids
+        ]
+        active = inline_first + [node for node in active if node not in inline_first]
         script_paths: dict[str, Path] = {}
         for index, node in enumerate(active):
             runner = stage_runner_command(
@@ -672,6 +683,7 @@ def _emit_slurm_bundle(
             script_paths[node.stage_id] = script_path
 
         lines = ["#!/usr/bin/env bash", "set -euo pipefail"]
+        previous_job: str | None = None
         for node in active:
             path = script_paths[node.stage_id]
             if node.resource.executor == "local":
@@ -682,9 +694,11 @@ def _emit_slurm_bundle(
                 for dependency in node.dependencies
                 if dependency in active_ids and dag.nodes[dependency].resource.executor == "slurm"
             ]
-            dependency_arg = (
-                f"--dependency=afterok:{':'.join(dependency_vars)} " if dependency_vars else ""
-            )
+            conditions = [f"afterok:{':'.join(dependency_vars)}"] if dependency_vars else []
+            if previous_job is not None and f"${{jid_{previous_job}}}" not in dependency_vars:
+                conditions.append(f"afterany:${{jid_{previous_job}}}")
+            previous_job = node.stage_id
+            dependency_arg = f"--dependency={','.join(conditions)} " if conditions else ""
             lines.append(
                 f"jid_{node.stage_id}=$(sbatch --parsable {dependency_arg}{shlex.quote(str(path))})"
             )

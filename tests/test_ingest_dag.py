@@ -253,6 +253,17 @@ def test_slurm_bundle_preserves_dependencies_and_keeps_minced_local(tmp_path):
     assert "bash" in submit_text
     assert "05c.local.sh" in submit_text
     assert "afterok:${jid_03}" in submit_text
+    # The SQLite run ledger is never shared by two hosts at once: inline stages first, then one
+    # chain of Slurm jobs (dependencies afterok, the previous job afterany).
+    lines = submit_text.splitlines()
+    first_sbatch = next(i for i, line in enumerate(lines) if "sbatch" in line)
+    assert all("sbatch" not in line for line in lines[:first_sbatch])
+    assert max(i for i, line in enumerate(lines) if line.startswith("bash ")) < first_sbatch
+    jobs = [line for line in lines if "sbatch --parsable" in line]
+    assert "--dependency" not in jobs[0]
+    for previous, line in zip(jobs, jobs[1:]):
+        previous_id = previous.split("=", 1)[0].removeprefix("jid_")
+        assert f"${{jid_{previous_id}}}" in line, line
     assert "--scheduler-managed" in (data_dir / "slurm" / "05c.local.sh").read_text()
     assert "--scheduler-managed" in astra_script
 
