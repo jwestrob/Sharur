@@ -67,6 +67,7 @@ TOOLS: tuple[ToolSpec, ...] = (
     ToolSpec("run_dbcan", ("run_dbcan",), ("--version",), False, "CAZyme annotation"),
     ToolSpec("foldseek", ("foldseek",), ("version",), False, "structural homology search"),
     ToolSpec("coverm", ("coverm",), ("--version",), False, "per-sample read coverage (stage 08)"),
+    ToolSpec("mmseqs", ("mmseqs",), ("version",), False, "protein families (stage 09)"),
     ToolSpec("rpsblast", ("rpsblast",), ("-version",), False, "CDD per protein (remote homology, stage 10)"),
     ToolSpec("hhsearch", ("hhsearch",), ("-h",), False, "HHsearch per family (remote homology, stage 11)"),
     ToolSpec("hhblits", ("hhblits",), ("-h",), False, "HHblits enrichment (remote homology, stage 11)"),
@@ -242,6 +243,14 @@ def check_hmm_search() -> list[Check]:
             status = WARN if installed else MISSING
             detail += f"; Astra-only: {', '.join(unadopted)} (run `sharur adopt-astra-hmms`)"
     checks.append(Check(f"{cli} registry", status, detail, True, purpose))
+    missing = [name for name in hmm_search.STANDARD_DATABASES if not installed.get(name)]
+    if missing:
+        fix = "; ".join(f"{cli} initialize --hmms {name}" for name in missing)
+        checks.append(Check("stage 04 databases", MISSING, f"not installed: {', '.join(missing)} ({fix})",
+                            True, "databases a default stage 04 run searches"))
+    else:
+        checks.append(Check("stage 04 databases", OK, ", ".join(hmm_search.STANDARD_DATABASES), True,
+                            "databases a default stage 04 run searches"))
     return checks
 
 

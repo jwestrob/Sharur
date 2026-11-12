@@ -24,7 +24,7 @@ from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress
 
-from sharur.hmm_search import build_search_command, registration_problem, resolve_cli
+from sharur.hmm_search import STANDARD_DATABASES, build_search_command, registration_problem, resolve_cli
 
 console = Console()
 logger = logging.getLogger(__name__)
@@ -203,7 +203,7 @@ def run_astra_scan(
         help="Number of threads to use"
     ),
     databases: List[str] = typer.Option(
-        ["PFAM", "KOFAM", "HydDB", "DefenseFinder", "dbCAN"],
+        list(STANDARD_DATABASES),
         "--databases", "-d",
         help="Databases to scan against (PFAM, KOFAM, HydDB, DefenseFinder, dbCAN, VOGdb, etc.)"
     ),

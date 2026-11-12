@@ -145,13 +145,28 @@ def test_doctor_flags_missing_runtime_and_astra_only_databases(tmp_path, registr
 
 def test_doctor_accepts_legacy_astra_with_a_warning(tmp_path, registries, monkeypatch):
     aksha, astra = registries
-    _registry(astra, {"PFAM": str(tmp_path)})
+    _registry(astra, {name: str(tmp_path) for name in hmm_search.STANDARD_DATABASES})
     monkeypatch.setattr(hmm_search, "resolve_cli", lambda: ("astra", "/bin/astra"))
 
     checks = diagnostics.check_hmm_search()
 
-    assert [c.status for c in checks] == [diagnostics.WARN, diagnostics.OK]
+    assert [c.status for c in checks] == [diagnostics.WARN, diagnostics.OK, diagnostics.OK]
     assert not diagnostics.has_core_failure(checks)
+
+
+def test_doctor_names_each_standard_database_still_to_install(tmp_path, registries, monkeypatch):
+    aksha, _ = registries
+    _registry(aksha, {"PFAM": str(tmp_path), "HydDB": str(tmp_path), "KOFAM": None})
+    monkeypatch.setattr(hmm_search, "resolve_cli", lambda: ("aksha", "/bin/aksha"))
+    monkeypatch.setattr(diagnostics, "find_spec", lambda name: object())
+
+    checks = _labels(diagnostics.check_hmm_search())
+
+    assert checks["aksha registry"].status == diagnostics.OK
+    databases = checks["stage 04 databases"]
+    assert databases.status == diagnostics.MISSING and databases.core
+    assert "KOFAM, DefenseFinder, dbCAN" in databases.detail
+    assert "aksha initialize --hmms KOFAM" in databases.detail
 
 
 def test_pfam_names_come_from_the_installed_hmm_file(tmp_path, registries):

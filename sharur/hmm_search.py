@@ -32,6 +32,8 @@ CLIS = ("aksha", "astra")
 LEGACY_DB_DIR = Path.home() / ".config" / "Astra"
 REGISTRY_FILE = "hmm_databases.json"
 
+# The databases a default Stage 04 run searches (04_astra_scan.py --databases).
+STANDARD_DATABASES = ("PFAM", "KOFAM", "HydDB", "DefenseFinder", "dbCAN")
 # Databases whose profiles all carry GA thresholds.
 GA_DATABASES = {"PFAM", "HYDDB", "DEFENSEFINDER"}
 # Databases whose hits feed MacSyFinder --previous-run co-location validation.
