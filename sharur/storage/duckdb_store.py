@@ -27,14 +27,22 @@ KNOWN_BAD_DUCKDB = {
     "1.2.1": "multithreaded window queries mixing ordered and whole-partition aggregates "
              "return NULL/wrong values (fixed in 1.2.2)",
 }
+# The newest major release Sharur runs on. DuckDB 2.0 refuses a statement while an earlier
+# result on the connection is unconsumed, rejects the `x -> expr` lambda syntax of the SQL
+# prelude and drops the duckdb.typing module the Python UDFs use.
+SUPPORTED_DUCKDB_MAJOR = 1
 _warned_bad_duckdb = False
 
 
 def duckdb_version_problem(version: str | None = None) -> str | None:
     """Why the installed DuckDB is unsafe for Sharur, or None when it is fine."""
     version = version or duckdb.__version__
+    major = version.split(".", 1)[0]
+    if major.isdigit() and int(major) > SUPPORTED_DUCKDB_MAJOR:
+        return (f"DuckDB {version}: Sharur runs on DuckDB {SUPPORTED_DUCKDB_MAJOR}.x (2.0 changed the "
+                f"Python result API and lambda syntax); install it with `pip install \"duckdb<2\"`")
     problem = KNOWN_BAD_DUCKDB.get(version)
-    return f"DuckDB {version}: {problem}; upgrade with `pip install -U duckdb`" if problem else None
+    return f"DuckDB {version}: {problem}; upgrade with `pip install -U \"duckdb<2\"`" if problem else None
 
 
 def _warn_if_bad_duckdb() -> None:

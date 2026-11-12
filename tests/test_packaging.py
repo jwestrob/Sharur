@@ -63,3 +63,17 @@ def test_stage07_finds_reference_maps_beside_the_dataset(tmp_path, monkeypatch):
     override.mkdir()
     monkeypatch.setenv("SHARUR_REFERENCE_DIR", str(override))
     assert module.reference_dirs(tmp_path / "data" / "my_dataset")[0] == override
+
+
+def test_the_all_extra_covers_every_runtime_extra():
+    # environment.yml installs ".[all,dev]"; a requirement only in a focused extra breaks that install.
+    extras = PYPROJECT["project"]["optional-dependencies"]
+
+    def names(requirements):
+        return {re.split(r"[<>=!~;\[ ]", requirement, maxsplit=1)[0].lower() for requirement in requirements}
+
+    covered = names(extras["all"])
+    for extra, requirements in extras.items():
+        if extra in {"all", "dev", "docs"}:
+            continue
+        assert names(requirements) <= covered, (extra, names(requirements) - covered)

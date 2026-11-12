@@ -37,9 +37,16 @@ def test_multithreaded_window_results_match_single_thread():
 
 def test_known_bad_release_is_reported():
     assert duckdb_version_problem("1.2.1").startswith("DuckDB 1.2.1:")
-    assert "pip install -U duckdb" in duckdb_version_problem("1.2.1")
+    assert 'pip install -U "duckdb<2"' in duckdb_version_problem("1.2.1")
     assert duckdb_version_problem("1.2.2") is None
     assert duckdb_version_problem("1.1.3") is None
+    assert duckdb_version_problem("1.5.6") is None
+
+
+def test_unsupported_major_release_is_reported():
+    problem = duckdb_version_problem("2.0.0")
+    assert problem.startswith("DuckDB 2.0.0:") and 'pip install "duckdb<2"' in problem
+    assert duckdb_version_problem("2.1.0.dev2610310630") is not None
 
 
 def test_doctor_fails_the_core_check_on_a_bad_release(monkeypatch):
@@ -68,3 +75,4 @@ def test_dependency_pin_excludes_bad_releases():
     text = (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text()
     pin = next(line for line in text.splitlines() if line.strip().startswith('"duckdb'))
     assert all(f"!={version}" in pin for version in KNOWN_BAD_DUCKDB)
+    assert "<2" in pin
