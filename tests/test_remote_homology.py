@@ -535,6 +535,22 @@ def test_predicates_leave_cdd_rows_out():
     assert "unannotated" in ids and not any("cdT0001" in i or "cdd" in i for i in ids)
 
 
+def test_ingest_dag_adds_stages_10_and_11(tmp_path):
+    from sharur.ingest_cli import app
+
+    cfg = tmp_path / "rh.json"
+    cfg.write_text("{}")
+    args = ["--input-dir", str(tmp_path), "--data-dir", str(tmp_path / "d"), "--dry-run"]
+    result = CliRunner().invoke(app, [*args, "--with-families", "--with-cdd", "--with-family-homology",
+                                      "--remote-homology-config", str(cfg), "--family-homology-run", "runX"])
+    assert result.exit_code == 0, result.output
+    assert "10_remote_homology_cdd.py" in result.output and "11_remote_homology_families.py" in result.output
+    assert "runX" in result.output
+    assert CliRunner().invoke(app, [*args, "--with-cdd"]).exit_code != 0
+    assert CliRunner().invoke(app, [*args, "--with-family-homology", "--remote-homology-config",
+                                    str(cfg)]).exit_code != 0
+
+
 # --------------------------------------------------------------------------- #
 # Real tools (skipped when not installed)
 # --------------------------------------------------------------------------- #

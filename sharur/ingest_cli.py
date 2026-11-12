@@ -117,6 +117,7 @@ def _build_tools_dag(
     pipeline_depth: int = 2,
     contig_name_topology: str | None = None,
     families: tuple[float, float] | None = None,
+    remote_homology: dict | None = None,
 ) -> IngestDAG:
     """Build the selected stage graph and its concrete resource-tuned commands."""
     stage_dir = _stage_script_dir()
@@ -418,6 +419,38 @@ def _build_tools_dag(
             dependencies=("07",),
             outputs=(stage09 / "processing_manifest.json", stage09 / "protein_families.duckdb"),
         )
+
+    if remote_homology is not None:
+        # Optional Stages 10 (CDD per protein) and 11 (HHsearch per family): "resembles"
+        # rows into staging DuckDBs; activation is a separate staged write.
+        config = str(Path(remote_homology["config"]).expanduser().resolve())
+        if remote_homology.get("cdd"):
+            request = profile.request("10")
+            stage10 = data_dir / "stage10_cdd"
+            add(
+                "10",
+                "CDD per protein (RPS-BLAST)",
+                [str(stage_dir / "10_remote_homology_cdd.py"), "--db", str(output), "--out-dir", str(stage10),
+                 "--config", config, "--threads", profile.threads(request.cpus), "--force"],
+                dependencies=("07",),
+                outputs=(stage10 / "processing_manifest.json", stage10 / "remote_homology_cdd.duckdb"),
+            )
+        if remote_homology.get("families"):
+            request = profile.request("11")
+            stage11 = data_dir / "stage11_family_homology"
+            command = [str(stage_dir / "11_remote_homology_families.py"), "--db", str(output),
+                       "--families", str(data_dir / "stage09_families" / "protein_families.duckdb"),
+                       "--out-dir", str(stage11), "--config", config,
+                       "--threads", profile.threads(request.cpus), "--force"]
+            if remote_homology.get("run"):
+                command += ["--run", str(remote_homology["run"])]
+            add(
+                "11",
+                "Remote homology per protein family (HHsearch)",
+                command,
+                dependencies=("09",),
+                outputs=(stage11 / "processing_manifest.json", stage11 / "remote_homology_families.duckdb"),
+            )
 
     dag = IngestDAG(nodes)
     dag.compute_signatures(profile)
@@ -797,6 +830,30 @@ def run(
         float,
         typer.Option("--family-min-seq-id", help="Stage 09 family identity threshold"),
     ] = FAMILY_MIN_SEQ_ID,
+    with_cdd: Annotated[
+        bool,
+        typer.Option(
+            "--with-cdd/--skip-cdd",
+            help="Run optional Stage 10: RPS-BLAST of every unique protein against CDD into "
+                 "stage10_cdd/remote_homology_cdd.duckdb (needs --remote-homology-config)",
+        ),
+    ] = False,
+    with_family_homology: Annotated[
+        bool,
+        typer.Option(
+            "--with-family-homology/--skip-family-homology",
+            help="Run optional Stage 11: HHsearch of Pfam-dark families (>= 3 genomes) against Pfam and PDB "
+                 "into stage11_family_homology/ (needs --with-families and --remote-homology-config)",
+        ),
+    ] = False,
+    remote_homology_config: Annotated[
+        Path | None,
+        typer.Option("--remote-homology-config", help="Stages 10/11 configuration: tools and databases (JSON)"),
+    ] = None,
+    family_homology_run: Annotated[
+        str | None,
+        typer.Option("--family-homology-run", help="Stage 11 clustering run (default: the default family run)"),
+    ] = None,
     subfamily_min_seq_id: Annotated[
         float,
         typer.Option("--subfamily-min-seq-id", help="Stage 09 subfamily identity threshold"),
@@ -866,6 +923,10 @@ def run(
         raise typer.BadParameter("--submit-slurm requires --profile slurm")
     if with_families and not 0 < family_min_seq_id < subfamily_min_seq_id <= 1:
         raise typer.BadParameter("Stage 09 needs 0 < --family-min-seq-id < --subfamily-min-seq-id <= 1")
+    if (with_cdd or with_family_homology) and remote_homology_config is None:
+        raise typer.BadParameter("--with-cdd and --with-family-homology need --remote-homology-config")
+    if with_family_homology and not with_families:
+        raise typer.BadParameter("--with-family-homology needs --with-families (Stage 11 searches Stage 09 families)")
     if contig_name_topology is not None:
         from sharur.contig_context import parse_name_conventions  # noqa: PLC0415
 
@@ -949,6 +1010,9 @@ def run(
             pipeline_depth=pipeline_depth,
             contig_name_topology=contig_name_topology,
             families=(subfamily_min_seq_id, family_min_seq_id) if with_families else None,
+            remote_homology=({"config": remote_homology_config, "cdd": with_cdd, "families": with_family_homology,
+                              "run": family_homology_run}
+                             if (with_cdd or with_family_homology) else None),
         )
     else:
         raise typer.BadParameter("mode must be 'tools' or 'fast'")

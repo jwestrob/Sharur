@@ -16,9 +16,9 @@ sharur-ingest \
 If `sharur-ingest` is missing, refresh the editable install with
 `pip install -e ".[embeddings]"`.
 
-The default plan runs the core stages and skips optional QUAST, DFAST, GECCO, protein families
-and the deprecated legacy dbCAN helper. Opt in with `--with-quast`, `--with-dfast`,
-`--with-gecco`, `--with-families` or `--with-legacy-dbcan`. The separate Stage 07 dbCAN three-tool
+The default plan runs the core stages and skips optional QUAST, DFAST, GECCO, protein families,
+remote homology and the deprecated legacy dbCAN helper. Opt in with `--with-quast`, `--with-dfast`,
+`--with-gecco`, `--with-families`, `--with-cdd`, `--with-family-homology` or `--with-legacy-dbcan`. The separate Stage 07 dbCAN three-tool
 consensus classifier is opt-in with `--enable-cazymes`. For assemblies whose contig names
 mark topology (for example the SR-VP PacBio sets' `_C`/`_RC`/`_L` suffixes), pass
 `--contig-name-topology srvp` (or `metamdbg`, `hifiasm`); Stage 07 records it in the
@@ -151,7 +151,7 @@ Stage 06i Persistent index        (CPU FAISS + stable protein-ID map)
 **Primary CLI path:** `sharur-ingest`
 **Standard pipeline stages:** 00, 03, 04, 05c, 07, 06, 06i
 **Post-pipeline (standard):** 06 (embeddings) then 06i (persistent similarity index)
-**Optional/deprecated:** 01 (QUAST QC), 02 (DFAST QC), 05a (GECCO BGC), 05b (dbCAN legacy), 08 (read coverage), 09 (protein families)
+**Optional/deprecated:** 01 (QUAST QC), 02 (DFAST QC), 05a (GECCO BGC), 05b (dbCAN legacy), 08 (read coverage), 09 (protein families), 10 (CDD per protein), 11 (HHsearch per family)
 
 ---
 
@@ -172,6 +172,8 @@ Stage 06i Persistent index        (CPU FAISS + stable protein-ID map)
 | 07 | `07_build_knowledge_base.py` | **Standard** | Build DuckDB knowledge base |
 | 08 | `08_coverage.py` | Optional | Per-sample read coverage (`--reads`) |
 | 09 | `09_protein_families.py` | Optional | MMseqs2 protein families and subfamilies (`--with-families`) |
+| 10 | `10_remote_homology_cdd.py` | Optional | CDD per protein with RPS-BLAST (`--with-cdd`) |
+| 11 | `11_remote_homology_families.py` | Optional | HHsearch of family profiles against Pfam and PDB (`--with-family-homology`) |
 
 Stages 01, 02, 05a, and 05b exist as scripts but are not required for a standard pipeline run. Stage 07 gracefully handles their absence.
 
@@ -528,6 +530,29 @@ On a Slurm cluster, give the job the CPUs MMseqs2 scales to and exclude nodes wh
 instruction sets the MMseqs2 binary needs, for example
 `SHARUR_SLURM_QOS=QOS SHARUR_SLURM_EXCLUDE=NODES sharur-ingest ... --profile slurm --slurm-cpus 64 --with-families`.
 Schema, identifiers, incremental assignment and the threshold evidence: `docs/guides/protein-families.md`.
+
+### Stages 10 and 11: Remote homology (`10_remote_homology_cdd.py`, `11_remote_homology_families.py`)
+
+Optional "resembles" rows, opt-in with `--with-cdd` and `--with-family-homology`; both need
+`--remote-homology-config rh.json` (tools and databases with names and versions; template in
+`config/remote_homology.example.json`). Stage 10 runs RPS-BLAST of every unique protein
+sequence against CDD and keeps hits at E <= 0.01 (`stage10_cdd/remote_homology_cdd.duckdb`).
+Stage 11 needs Stage 09: it selects the Pfam-dark families of three or more genomes, aligns up
+to 250 unique members per family with MAFFT and runs HHsearch against Pfam and PDB, after
+HHblits enrichment against UniRef30 when the configuration lists `enriched`
+(`stage11_family_homology/remote_homology_families.duckdb`; `--family-homology-run` picks the
+clustering run). Both use every allocated CPU in workers of four threads and leave the dataset
+database unchanged; load with
+
+```bash
+sharur remote-homology activate --db data/DATASET/sharur.duckdb \
+    --staging data/DATASET/stage10_cdd/remote_homology_cdd.duckdb \
+    --staging data/DATASET/stage11_family_homology/remote_homology_families.duckdb \
+    --families-staging data/DATASET/stage09_families/protein_families.duckdb --publish
+```
+
+For a large dataset run the family tier as a Slurm array (`scripts/submit_remote_homology_shards.sh`)
+after a timed pilot. Rules, tables and SQL: `docs/guides/remote-homology.md`.
 
 ### Stage 06: ESM2 Embeddings (`06_esm2_embeddings.py`)
 
