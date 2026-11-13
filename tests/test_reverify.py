@@ -21,6 +21,7 @@ from sharur.reverify import (
     classify,
     match,
     memory_bytes,
+    judge,
     plan_workers,
     reverify,
 )
@@ -105,6 +106,16 @@ def test_match_rules():
     assert match({"a": 1, "b": 2}, {"a": 1}) == "FAIL"
     assert match(True, 1) == "FAIL"
     assert match("7", 7) == "OK"
+
+
+def test_one_row_result_matches_a_recorded_row():
+    """SQL returns [[row]]; findings record the row. 2026-11-02: 195 of 198 'FAIL on both' were this."""
+    assert match([[908, 714, 2490, 134]], [908, 714, 2490, 134]) == "FAIL"
+    assert judge([[908, 714, 2490, 134]], [908, 714, 2490, 134]) == "OK"
+    assert judge([[908, 718, 2608, 135]], [908, 714, 2490, 134]) == "FAIL"
+    assert judge([[1, 2], [3, 4]], [1, 2]) == "FAIL"  # two rows are a table, never a row
+    assert judge([[[1, 2], 5]], [[1, 2], 5]) == "FAIL"  # nested expected compares exactly
+    assert judge([[25, 44]], [[25, 44]]) == "OK"
 
 
 def test_replays_every_form(repo: Path):

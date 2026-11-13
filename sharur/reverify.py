@@ -880,7 +880,7 @@ def _run_one(triple: Triple, shim_cfg: str, timeout: float) -> Outcome:
                 observed = normalize_rows(con.execute(query).fetchall())
             finally:
                 con.close()
-        return Outcome(match(to_plain(observed), triple.expected), to_plain(observed),
+        return Outcome(judge(to_plain(observed), triple.expected), to_plain(observed),
                        seconds=time.time() - start)
     except subprocess.TimeoutExpired:
         return Outcome("ERROR", error=f"timeout after {timeout:.0f}s", seconds=time.time() - start)
@@ -1028,6 +1028,22 @@ def match(observed: Any, expected: Any) -> str:
         except (json.JSONDecodeError, ValueError):
             return "FAIL"
     return "OK" if observed == expected else "FAIL"
+
+
+def judge(observed: Any, expected: Any) -> str:
+    """Status of one replayed triple: ``match``, plus the single-row rule.
+
+    A SQL query returns rows, so a one-row result arrives as ``[[a, b, c]]`` while findings
+    record the row itself, ``[a, b, c]``. When the whole result fails, is exactly one row, and
+    ``expected`` is a flat list, the row is compared on its own. The rule applies only at the
+    top level, so nested values compare exactly.
+    """
+    status = match(observed, expected)
+    if (status == "FAIL" and isinstance(observed, list) and len(observed) == 1
+            and isinstance(observed[0], list) and isinstance(expected, list)
+            and not any(isinstance(e, list) for e in expected)):
+        status = match(observed[0], expected)
+    return status
 
 
 def _canonical(value: Any) -> str:
