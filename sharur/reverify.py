@@ -29,14 +29,21 @@ recorded) and once under the replay substitutions, and reports every triple
 whose result changes. A staged refresh, or a backup taken before a publish, can then
 be checked against the live database before anyone reads the new numbers.
 
-Status per triple: ``OK``, ``FAIL`` (result differs from ``expected``) or
-``ERROR`` (the replay raised). Integers, strings, booleans and lists compare
-exactly; a float matches when the observed value, rounded to the precision
-written in ``expected``, equals it.
+Status per triple: ``OK``, ``FAIL`` (result differs from ``expected``),
+``ERROR`` (the replay raised) or ``NARRATIVE`` (the recorded query is a note,
+such as a methods reference or a command annotated with the file its value was
+read from, and is reported without being run). Integers, strings, booleans and
+lists compare exactly; a float matches when the observed value, rounded to the
+precision written in ``expected``, equals it.
+
+Replays are read-only for files too: Python code a replay runs may not write
+inside the repository (an audit hook refuses it), and on macOS shell triples run
+under ``sandbox-exec`` with writes inside the repository denied.
 """
 
 from __future__ import annotations
 
+import ast
 import concurrent.futures as cf
 import contextlib
 import decimal
@@ -45,6 +52,7 @@ import logging
 import multiprocessing
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -57,7 +65,7 @@ from decimal import ROUND_HALF_EVEN, ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-STATUSES = ("OK", "FAIL", "ERROR")
+STATUSES = ("OK", "FAIL", "ERROR", "NARRATIVE")
 logger = logging.getLogger(__name__)
 _SQL_START = re.compile(r"(?is)^\s*(?:--[^\n]*\n\s*)*\(?\s*(select|with|from|pragma|describe|summarize|show|values)\b")
 _PY_CMD = re.compile(r"^\s*(?:\S*/)?python3?\s+(-c|-m|\S+\.py)\b")
@@ -88,6 +96,11 @@ class Triple:
     # statistical checks (sharur/stat_checks.py): per-value tolerances and the recorded claim
     tolerance: dict | None = None
     stat: dict | None = None
+    # what a replay runs (the query without its form prefix or annotation), the JSON key it
+    # reads from a command's output, and why a narrative triple is not replayed
+    command: str = ""
+    select: str | None = None
+    note: str | None = None
 
     @property
     def key(self) -> str:
@@ -119,20 +132,150 @@ class TripleResult:
             self.replay.status, _canonical(self.replay.observed))
 
 
-def classify(query: str, attach: dict | None = None) -> str:
-    """``sql``, ``python`` or ``shell`` for a recorded query string."""
+@dataclass
+class Reading:
+    """How a replay treats one recorded query."""
+
+    kind: str  # sql, python, shell or narrative
+    command: str  # what runs: the query without its form prefix or annotation
+    select: str | None = None  # JSON key read from a command's output
+    note: str | None = None  # why a narrative query is not run
+
+
+# "Label: text" where the label is not one of the replayable prefixes (``shell:``, ``python:``).
+_LABEL = re.compile(r"^(?P<label>[A-Za-z][\w/ ().-]{0,40}?)\s*:\s+(?P<body>.+)$", re.S)
+# A command annotated with what it prints: "(prints JSON)", "(prints JSON; key 'K')".
+_PRINTS_JSON = re.compile(
+    r"\s*\(\s*prints JSON\s*(?:;\s*(?:key\s+'(?P<key>[^']+)'|then index\s+(?P<index>[^\s)]+)))?\s*\)?\s*$")
+# Commands a replay runs without a ``shell:`` prefix: interpreters and read-only text tools.
+_TEXT_TOOLS = frozenset({
+    "awk", "bc", "cat", "column", "comm", "cut", "echo", "egrep", "expr", "grep", "gunzip", "gzip",
+    "head", "jq", "join", "paste", "printf", "sed", "sort", "tail", "test", "tr", "true", "uniq", "wc",
+    "zcat", "zgrep"})
+_PY_EXE = re.compile(r"^(?:\S*/)?python(?:3(?:\.\d+)?)?$")
+_ASSIGN = re.compile(r"^[A-Za-z_]\w*=")
+_SEPARATORS = frozenset({";", "&&", "||", "|"})
+_SHELL_PUNCT = set("();<>|&")
+
+
+def _shell_tokens(text: str) -> list[str]:
+    """Shell words and operators; quoted words keep their quotes (``'>'`` is not a redirect)."""
+    lex = shlex.shlex(text, posix=False, punctuation_chars=True)
+    lex.whitespace_split = True
+    lex.commenters = ""
+    return list(lex)
+
+
+def _redirect_targets(tokens: Sequence[str]) -> list[str]:
+    """Files an output redirection writes (``>``, ``>>``, ``&>``); fd copies and /dev/null excluded."""
+    out = []
+    for i, tok in enumerate(tokens):
+        if set(tok) <= _SHELL_PUNCT and ">" in tok:
+            target = tokens[i + 1].strip("'\"") if i + 1 < len(tokens) else ""
+            if (tok.endswith("&") and target.isdigit()) or target == "/dev/null":
+                continue
+            out.append(target)
+    return out
+
+
+def _command_problem(text: str) -> str | None:
+    """``None`` when ``text`` is a plain command line a replay may run without a ``shell:`` prefix.
+
+    Such a line chains (``;``, ``&&``, ``||``, ``|``) ``cd``, Python interpreters and read-only
+    text tools, and writes no file. Anything else (parenthesized remarks, ``#`` comments,
+    ``-> file`` arrows, which the shell reads as redirections, other programs) marks a note.
+    """
+    try:
+        tokens = _shell_tokens(text)
+    except ValueError as exc:
+        return f"unbalanced quoting ({exc})"
+    if not tokens:
+        return "empty"
+    if any(tok.startswith("#") for tok in tokens):
+        return "a remark follows the command (#)"
+    targets = _redirect_targets(tokens)
+    if targets:
+        return f"it names an output file ({targets[0]})"
+    start = True
+    for tok in tokens:
+        if set(tok) <= _SHELL_PUNCT:
+            if "(" in tok or ")" in tok:
+                return "a parenthesized remark follows the command"
+            if tok in _SEPARATORS:
+                start = True
+            elif not ("<" in tok or ">" in tok):
+                return f"unsupported shell operator {tok!r}"
+            continue
+        if start:
+            if _ASSIGN.match(tok):
+                continue
+            word = tok.strip("'\"")
+            if not (word == "cd" or os.path.basename(word) in _TEXT_TOOLS or _PY_EXE.match(word)):
+                return f"{word[:40]!r} is not an interpreter or a read-only text tool"
+            start = False
+    return None
+
+
+_PARSER: Any = None
+
+
+def _parses_as_sql(query: str) -> bool:
+    global _PARSER
+    import duckdb  # noqa: PLC0415
+
+    if _PARSER is None:
+        _PARSER = duckdb.connect(":memory:")
+    try:
+        return bool(_PARSER.extract_statements(query))
+    except Exception:  # noqa: BLE001 - any parser error means "not SQL"
+        return False
+
+
+def interpret(query: str, attach: dict | None = None, check: str | None = None) -> Reading:
+    """The replay form of a recorded query, or ``narrative`` for a note.
+
+    Order: an explicit ``check: "narrative"``; the ``shell:`` and ``python:`` prefixes; a Python
+    command line; SQL (``attach``, or a leading SQL keyword); Python opening ``Sharur(...)``;
+    a labelled note (``Python: ...``), run when its text is a plain command line, optionally
+    annotated ``(prints JSON; key 'K')``; text DuckDB parses as SQL; a plain command line of
+    text tools. Everything else is a note.
+    """
     q = query.strip()
+    if check == "narrative":
+        return Reading("narrative", q, note="recorded as narrative (check: narrative)")
     if q.startswith("shell:"):
-        return "shell"
+        return Reading("shell", q[len("shell:"):].strip())
     if q.startswith("python:"):
-        return "python"
+        return Reading("python", q[len("python:"):].strip())
     if _PY_CMD.match(q):
-        return "shell"
+        problem = _command_problem(q)
+        return Reading("shell", q) if problem is None else Reading("narrative", q, note=f"command note: {problem}")
     if attach or _SQL_START.match(q):
-        return "sql"
+        return Reading("sql", q)
     if "Sharur(" in q or "__import__" in q:
-        return "python"
-    return "sql"
+        return Reading("python", q)
+    label = _LABEL.match(q)
+    if label:
+        body, select = label.group("body").strip(), None
+        annotated = _PRINTS_JSON.search(body)
+        if annotated:
+            body = body[:annotated.start()].strip()
+            select = annotated.group("key") or annotated.group("index")
+        problem = _command_problem(body)
+        if problem is None:
+            return Reading("shell", body, select=select)
+        return Reading("narrative", q, note=f"labelled note ({label.group('label')}:): {problem}")
+    if _parses_as_sql(q):
+        return Reading("sql", q)
+    problem = _command_problem(q)
+    if problem is None:
+        return Reading("shell", q)
+    return Reading("narrative", q, note=f"note: neither SQL nor a command line ({problem})")
+
+
+def classify(query: str, attach: dict | None = None) -> str:
+    """``sql``, ``python``, ``shell`` or ``narrative`` for a recorded query string."""
+    return interpret(query, attach).kind
 
 
 def find_root(path: Path) -> Path:
@@ -191,14 +334,16 @@ def load_triples(findings: Sequence[Path], root: Path, db: Path | None = None) -
                     if not isinstance(item, dict) or not isinstance(item.get("query"), str):
                         continue
                     attach = item.get("attach") or None
+                    reading = interpret(item["query"], attach, item.get("check"))
                     triples.append(Triple(
                         source=source, line=line_no,
                         finding_id=str(record.get("id") or record.get("finding_id") or ""),
                         title=str(record.get("title") or ""), index=index,
                         claim=str(item.get("claim") or ""), query=item["query"],
                         expected=item.get("expected"), attach=attach, default_db=default_db,
-                        kind=classify(item["query"], attach),
+                        kind=reading.kind,
                         tolerance=item.get("tolerance"), stat=item.get("statistical_claim"),
+                        command=reading.command, select=reading.select, note=reading.note,
                     ))
     return triples
 
@@ -316,8 +461,42 @@ class Substitution:
 # --------------------------------------------------------------------------- #
 _SHIM = r'''
 """sharur reverify: read-only, limited DuckDB connections for replayed commands."""
-import json as _json, os as _os, re as _re
+import json as _json, os as _os, re as _re, sys as _sys
 _cfg = _json.loads(_os.environ.get("SHARUR_REVERIFY_SHIM") or "{}")
+if _cfg.get("guard") and not getattr(_sys, "_sharur_reverify_guard", None):
+    # Replays are read-only for files too: refuse Python-level writes inside the guarded paths.
+    _sys.dont_write_bytecode = True
+    _guard = tuple({f(p) for p in _cfg["guard"] for f in (_os.path.abspath, _os.path.realpath)})
+    _WFLAGS = _os.O_WRONLY | _os.O_RDWR | _os.O_CREAT | _os.O_TRUNC | _os.O_APPEND
+    _TARGETS = {"os.remove": (0,), "os.rmdir": (0,), "os.mkdir": (0,), "os.truncate": (0,),
+                "os.rename": (0, 1), "os.symlink": (1,), "os.link": (1,), "shutil.rmtree": (0,),
+                "shutil.copyfile": (1,), "shutil.copytree": (1,), "shutil.move": (0, 1)}
+
+    def _guarded(p):
+        if not isinstance(p, (str, bytes, _os.PathLike)):
+            return None
+        try:
+            p = _os.path.abspath(_os.fsdecode(p))
+        except (TypeError, ValueError):
+            return None
+        return p if any(p == g or p.startswith(g.rstrip(_os.sep) + _os.sep) for g in _guard) else None
+
+    def _reverify_guard(event, args):
+        if event == "open":
+            path, mode, flags = (tuple(args) + (None, None, None))[:3]
+            if (isinstance(mode, str) and any(c in mode for c in "wax+")) or (
+                    isinstance(flags, int) and flags & _WFLAGS):
+                hit = _guarded(path)
+                if hit:
+                    raise PermissionError(13, "sharur reverify: replays are read-only; refused to write", hit)
+        elif event in _TARGETS:
+            for i in _TARGETS[event]:
+                hit = _guarded(args[i]) if i < len(args) else None
+                if hit:
+                    raise PermissionError(13, f"sharur reverify: replays are read-only; refused {event}", hit)
+
+    _sys.addaudithook(_reverify_guard)
+    _sys._sharur_reverify_guard = _guard
 if _cfg:
     try:
         import duckdb as _duckdb
@@ -343,6 +522,9 @@ if _cfg:
             p = _os.path.realpath(p)
             return _map.get(p, raw), True
 
+        # The wrapper's frame sits between the caller and DuckDB, so the connection scans every
+        # frame for Python objects named in a query (a DataFrame ``df`` in ``FROM df``), and the
+        # wrapper's own locals carry names no query uses.
         class _Conn:
             def __init__(self, con):
                 object.__setattr__(self, "_con", con)
@@ -350,16 +532,16 @@ if _cfg:
             def _wrap(self, r):
                 return self if r is self._con else r
 
-            def execute(self, q, *a, **k):
-                return self._wrap(self._con.execute(_rw(q), *a, **k))
+            def execute(self, _sharur_q, *_sharur_a, **_sharur_k):
+                return self._wrap(self._con.execute(_rw(_sharur_q), *_sharur_a, **_sharur_k))
 
-            def sql(self, q, *a, **k):
-                return self._con.sql(_rw(q), *a, **k)
+            def sql(self, _sharur_q, *_sharur_a, **_sharur_k):
+                return self._con.sql(_rw(_sharur_q), *_sharur_a, **_sharur_k)
 
             query = sql
 
-            def executemany(self, q, *a, **k):
-                return self._wrap(self._con.executemany(_rw(q), *a, **k))
+            def executemany(self, _sharur_q, *_sharur_a, **_sharur_k):
+                return self._wrap(self._con.executemany(_rw(_sharur_q), *_sharur_a, **_sharur_k))
 
             def __getattr__(self, name):
                 return getattr(self._con, name)
@@ -384,17 +566,47 @@ if _cfg:
             con.execute(f"SET memory_limit = '{_cfg.get('memory_limit', '4GB')}'")
             if _cfg.get("temp_directory"):
                 con.execute(f"SET temp_directory = '{_cfg['temp_directory']}'")
-            return _Conn(con) if _variants else con
+            if not _variants:
+                return con
+            try:
+                con.execute("SET python_scan_all_frames = true")
+            except Exception:  # noqa: BLE001 - a DuckDB without the setting scans the calling frame
+                pass
+            return _Conn(con)
 
         connect._sharur_reverify = True
         _duckdb.connect = connect
 '''
 
 
-def _shim_config(sub: Substitution, threads: int, memory_limit: str, temp_dir: str) -> str:
+def _shim_config(sub: Substitution, threads: int, memory_limit: str, temp_dir: str,
+                 guard: Sequence[str] = ()) -> str:
     cfg = json.loads(sub.env())
-    cfg.update({"threads": threads, "memory_limit": memory_limit, "temp_directory": temp_dir})
+    cfg.update({"threads": threads, "memory_limit": memory_limit, "temp_directory": temp_dir,
+                "guard": list(guard)})
     return json.dumps(cfg)
+
+
+def _sbpl(path: str) -> str:
+    return path.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def sandbox_prefix(paths: Sequence[str]) -> list[str] | None:
+    """``sandbox-exec`` argv that denies file writes under ``paths`` (macOS), or ``None``.
+
+    Probed once: where the profile cannot be applied (no ``sandbox-exec``, or a parent sandbox
+    forbids it), shell triples run without it and the Python audit hook alone guards writes.
+    """
+    exe = shutil.which("sandbox-exec") if sys.platform == "darwin" else None
+    if not exe:
+        return None
+    rules = "".join(f'(deny file-write* (subpath "{_sbpl(os.path.realpath(p))}"))' for p in paths)
+    argv = [exe, "-p", "(version 1)(allow default)" + rules]
+    try:
+        ok = subprocess.run([*argv, "/usr/bin/true"], capture_output=True, timeout=30).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        ok = False
+    return argv if ok else None
 
 
 # --------------------------------------------------------------------------- #
@@ -509,9 +721,9 @@ def _watch_parent(parent_pid: int) -> None:
 
 
 def _worker_init(root: str, shim_dir: str, threads: int, memory_limit: str, temp_dir: str,
-                 parent_pid: int | None = None) -> None:
+                 parent_pid: int | None = None, sandbox: list[str] | None = None) -> None:
     _WORKER.update(root=root, shim_dir=shim_dir, threads=threads,
-                   memory_limit=memory_limit, temp_dir=temp_dir)
+                   memory_limit=memory_limit, temp_dir=temp_dir, sandbox=sandbox)
     # A worker lives only as long as the reverify process: SIGTERM from the pool, or the
     # parent's death by any signal, ends the worker and the shell triple it is running.
     signal.signal(signal.SIGTERM, _exit_worker)
@@ -594,7 +806,7 @@ def _run_one(triple: Triple, shim_cfg: str, timeout: float) -> Outcome:
         sub = Substitution([(k, v) for k, v in sub_cfg["map"].items()], root)
     _install(shim_cfg)
     start = time.time()
-    query = sub.text(triple.query.strip())
+    query = sub.text(triple.command or triple.query.strip())
     saved_path = list(sys.path)
     saved_modules = set(sys.modules)
     cwd = os.getcwd()
@@ -602,12 +814,16 @@ def _run_one(triple: Triple, shim_cfg: str, timeout: float) -> Outcome:
         os.chdir(root)
         if triple.kind == "shell":
             command = query[len("shell:"):] if query.startswith("shell:") else query
+            written = _writes_inside(command, root, sub_cfg.get("guard") or [str(root)])
+            if written:
+                raise PermissionError(f"refused: the command writes {written}; replays are read-only")
             env = dict(os.environ)
             env["PYTHONPATH"] = os.pathsep.join(filter(None, [_WORKER["shim_dir"], env.get("PYTHONPATH")]))
+            env["PYTHONDONTWRITEBYTECODE"] = "1"
             # Its own session, so a timeout or the worker's exit kills every process the
             # command starts, not only /bin/sh.
-            proc = subprocess.Popen(command, shell=True, cwd=root, stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE, text=True, executable="/bin/sh", env=env,
+            proc = subprocess.Popen([*(_WORKER.get("sandbox") or []), "/bin/sh", "-c", command], cwd=root,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
                                     start_new_session=True)
             _WORKER["shell"] = proc
             try:
@@ -625,10 +841,9 @@ def _run_one(triple: Triple, shim_cfg: str, timeout: float) -> Outcome:
             out = stdout.strip()
             if proc.returncode != 0 and not out:
                 raise RuntimeError(f"exit {proc.returncode}: {stderr.strip()[-300:]}")
-            try:
-                observed = json.loads(out)
-            except (json.JSONDecodeError, ValueError):
-                observed = out
+            observed = read_output(out, triple.expected)
+            if triple.select is not None:
+                observed = select_key(observed, triple.select)
         elif triple.kind == "python":
             import math  # noqa: PLC0415
 
@@ -684,6 +899,60 @@ def _run_one(triple: Triple, shim_cfg: str, timeout: float) -> Outcome:
 
 def _sql_quote(value: str) -> str:
     return value.replace("'", "''")
+
+
+def _writes_inside(command: str, root: Path, guard: Sequence[str]) -> str | None:
+    """The first file inside ``guard`` that ``command`` redirects output to, if any."""
+    try:
+        targets = _redirect_targets(_shell_tokens(command))
+    except ValueError:
+        return None
+    roots = [os.path.realpath(g) for g in guard]
+    for target in targets:
+        path = os.path.realpath(target if os.path.isabs(target) else os.path.join(root, target))
+        if any(path == g or path.startswith(g + os.sep) for g in roots):
+            return target
+    return None
+
+
+_NP_SCALAR = re.compile(r"\bnp\.(?:float|int|uint|bool_?|str_)\d*\(([^()]*)\)")
+
+
+def read_output(text: str, expected: Any) -> Any:
+    """A command's stdout as a value.
+
+    JSON when it parses. Otherwise, when ``expected`` is not a string (so the raw text could
+    never match it): a Python literal such as a printed dict or list, with numpy scalar wrappers
+    (``np.float64(0.5)``) read as their numbers, or two or more whitespace-separated numbers as
+    a list. Anything else stays text.
+    """
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        pass
+    if isinstance(expected, str):
+        return text
+    with contextlib.suppress(ValueError, SyntaxError, TypeError, MemoryError, RecursionError):
+        return ast.literal_eval(_NP_SCALAR.sub(r"\1", text))
+    numbers = []
+    for token in text.split():
+        try:
+            value = json.loads(token)
+        except (json.JSONDecodeError, ValueError):
+            return text
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return text
+        numbers.append(value)
+    return numbers if len(numbers) > 1 else text
+
+
+def select_key(observed: Any, key: str) -> Any:
+    """``observed[key]`` for a command annotated ``(prints JSON; key 'K')``."""
+    if not isinstance(observed, dict):
+        raise TypeError(f"output is not a JSON object, so key {key!r} cannot be read")
+    if key not in observed:
+        raise KeyError(f"output has no key {key!r}")
+    return observed[key]
 
 
 def _install_sql_prelude(con: Any) -> None:
@@ -811,7 +1080,7 @@ class ReverifyReport:
     def attention(self) -> list[TripleResult]:
         if self.compare:
             return self.changed()
-        return [r for r in self.results if r.replay.status != "OK"]
+        return [r for r in self.results if r.replay.status not in ("OK", "NARRATIVE")]
 
     def to_dict(self) -> dict[str, Any]:
         def row(r: TripleResult) -> dict[str, Any]:
@@ -846,14 +1115,17 @@ class ReverifyReport:
                 f"`{k}` → `{v}`" for k, v in self.baseline_substitutions.items()))
         if self.substitutions:
             lines.append("Substitutions: " + "; ".join(f"`{k}` → `{v}`" for k, v in self.substitutions.items()))
+        def tally(c: dict[str, int]) -> str:
+            return f"{c['OK']} OK, {c['FAIL']} FAIL, {c['ERROR']} ERROR, {c['NARRATIVE']} NARRATIVE"
+
         if self.compare:
-            rc, pc = self.counts("baseline"), self.counts("replay")
-            lines.append(f"Baseline: {rc['OK']} OK, {rc['FAIL']} FAIL, {rc['ERROR']} ERROR. "
-                         f"Replay: {pc['OK']} OK, {pc['FAIL']} FAIL, {pc['ERROR']} ERROR. "
+            lines.append(f"Baseline: {tally(self.counts('baseline'))}. Replay: {tally(self.counts('replay'))}. "
                          f"**{len(self.changed())} triples change.**")
         else:
-            c = self.counts()
-            lines.append(f"{c['OK']} OK, {c['FAIL']} FAIL, {c['ERROR']} ERROR.")
+            lines.append(f"{tally(self.counts())}.")
+        if self.counts()["NARRATIVE"]:
+            lines.append("NARRATIVE triples record a note (a methods reference, or a command annotated "
+                         "with the file its value was read from) and are reported without being run.")
         lines.append("")
         by_finding: dict[tuple[str, str], list[TripleResult]] = {}
         for r in self.attention():
@@ -891,8 +1163,8 @@ def _short(value: Any, n: int = 120) -> str:
 def _outcome_text(outcome: Outcome | None) -> str:
     if outcome is None:
         return "-"
-    if outcome.status == "ERROR":
-        return f"ERROR {outcome.error or ''}"[:200]
+    if outcome.status in ("ERROR", "NARRATIVE"):
+        return f"{outcome.status} {outcome.error or ''}"[:200]
     return f"{outcome.status} {_short(outcome.observed)}"
 
 
@@ -992,12 +1264,20 @@ def reverify(
     (shim_dir / "sitecustomize.py").write_text(_SHIM)
     spill = tmp / "spill"
     spill.mkdir()
-    plain_cfg = _shim_config(base, threads, memory_limit, str(spill))
-    sub_cfg = _shim_config(sub, threads, memory_limit, str(spill))
+    # nothing a replay runs may write inside the repository or to a substituted database
+    guard = [str(root), *sub.map.values(), *base.map.values()]
+    plain_cfg = _shim_config(base, threads, memory_limit, str(spill), guard)
+    sub_cfg = _shim_config(sub, threads, memory_limit, str(spill), guard)
+    sandbox = sandbox_prefix(guard) if any(t.kind == "shell" for t in triples) else None
 
     results = [TripleResult(t, flags_for(t) + _statistical_flags(t, root)) for t in triples]
     jobs: list[tuple[int, str, str]] = []
-    for i, _ in enumerate(results):
+    for i, result in enumerate(results):
+        if result.triple.kind == "narrative":  # a note: reported, never run
+            result.replay = Outcome("NARRATIVE", error=result.triple.note)
+            if compare:
+                result.baseline = Outcome("NARRATIVE", error=result.triple.note)
+            continue
         if compare:
             jobs.append((i, "baseline", plain_cfg))
         jobs.append((i, "replay", sub_cfg))
@@ -1020,7 +1300,7 @@ def reverify(
         # hangs. Each task drops the helper modules it imported, which gives the same isolation.
         pool = cf.ProcessPoolExecutor(
             max_workers=n_workers, mp_context=ctx, initializer=_worker_init,
-            initargs=(str(root), str(shim_dir), threads, memory_limit, str(spill), os.getpid()))
+            initargs=(str(root), str(shim_dir), threads, memory_limit, str(spill), os.getpid(), sandbox))
         futures = {pool.submit(_run_one, results[i].triple, cfg, timeout): (i, slot)
                    for i, slot, cfg in jobs}
         done = 0

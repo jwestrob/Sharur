@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -189,6 +190,113 @@ def test_substitution_text_is_idempotent_and_whole_path(tmp_path: Path):
     assert once.count("sharur.duckdb.pre-x") == 1 and "sharur.duckdb.wal" in once
     assert sub.text(once) == once
     assert sub.text(f"'{root}/data/ds/sharur.duckdb'") == f"'{root}/data/ds/sharur.duckdb.pre-x'"
+
+
+# --------------------------------------------------------------------------- #
+# Notes, labelled commands, command output and read-only files
+# --------------------------------------------------------------------------- #
+def test_interpret_tells_notes_from_statements():
+    from sharur.reverify import interpret
+
+    def kind(q, **kw):
+        return interpret(q, **kw).kind
+
+    # notes: methods references, prose, tool provenance, commands annotated with their output file
+    assert kind("Python: see the methods section for the neighborhood scan") == "narrative"
+    assert kind("see reports/methods.md") == "narrative"
+    assert kind("blastn -query a.fna -db b") == "narrative"
+    assert kind("python a.py -> tables/out.json") == "narrative"  # sh would truncate out.json
+    assert kind("python a.py  # then read out.json key n") == "narrative"
+    assert kind("python a.py (table out.tsv, column n)") == "narrative"
+    assert kind("SELECT 1", check="narrative") == "narrative"
+    # statements, including a labelled command that says what it prints
+    assert kind("SELECT 1") == "sql" and kind("CALL pragma_version()") == "sql"
+    assert kind("grep -c '>' x.faa | head -1") == "shell"  # a quoted '>' is no redirect
+    assert kind("python a.py > /dev/null 2>&1 && python a.py --summary") == "shell"
+    reading = interpret("Python: cd lane && python facts.py n_units  (prints JSON; key 'n_units')")
+    assert (reading.kind, reading.command, reading.select) == ("shell", "cd lane && python facts.py n_units", "n_units")
+    assert interpret("Python/shell (not SQL): python f.py (prints JSON)").select is None
+    assert kind("shell: echo $(date)") == "shell" and kind("echo $(date)") == "narrative"
+
+
+def test_read_output_reads_printed_python_values_and_number_lists():
+    from sharur.reverify import read_output
+
+    assert read_output('{"a": 1}', {"a": 1}) == {"a": 1}
+    assert read_output("{'a': np.float64(0.25), 'b': [1, 2]}", {"a": 0.25}) == {"a": 0.25, "b": [1, 2]}
+    assert read_output("12 7", [12, 7]) == [12, 7]
+    assert read_output("True", "True") == "True"  # a string expectation keeps the text
+    assert read_output("12 genomes", [12]) == "12 genomes"
+    assert match(read_output("{'H': 5.5, 'p': 0.01}", {"H": 5.5, "p": 0.01}), {"H": 5.5, "p": 0.01}) == "OK"
+
+
+def _write_findings(repo: Path, items: list[dict]) -> Path:
+    path = repo / "data" / "ds" / "exploration" / "findings.jsonl"
+    path.write_text(json.dumps({"id": "N", "title": "notes", "verification": items}) + "\n")
+    return path
+
+
+def test_narrative_triples_are_reported_and_never_run(repo: Path):
+    lane = repo / "data" / "ds" / "exploration" / "lane"
+    (lane / "facts.py").write_text("import json, sys\nprint(json.dumps({'n_units': 9, 'other': 1}))\n")
+    findings = _write_findings(repo, [
+        {"claim": "methods", "query": "Python: see the methods section", "expected": 36},
+        {"claim": "arrow", "query": f"{sys.executable} data/ds/exploration/lane/facts.py -> data/ds/out.json",
+         "expected": 9},
+        {"claim": "labelled", "expected": 9,
+         "query": f"Python: cd data/ds/exploration/lane && {sys.executable} facts.py  (prints JSON; key 'n_units')"},
+        {"claim": "explicit", "query": "SELECT 1", "expected": 1, "check": "narrative"},
+    ])
+    report = reverify([findings], workers=1)
+    status = [r.replay.status for r in report.results]
+    assert status == ["NARRATIVE", "NARRATIVE", "OK", "NARRATIVE"]
+    assert not (repo / "data" / "ds" / "out.json").exists()
+    assert report.counts()["NARRATIVE"] == 3 and len(report.attention()) == 0
+    assert "1 OK, 0 FAIL, 0 ERROR, 3 NARRATIVE" in report.to_markdown()
+    assert "output file" in report.results[1].replay.error
+
+
+def test_replays_refuse_to_write_files(repo: Path):
+    findings = _write_findings(repo, [
+        {"claim": "python write", "expected": 1, "query": "python: open('data/ds/a.txt', 'w').write('x')"},
+        {"claim": "child write", "expected": 1,
+         "query": f"shell: {sys.executable} -c \"open('data/ds/b.txt', 'w'); print(1)\""},
+        {"claim": "redirect", "expected": 1, "query": "shell: echo 1 > data/ds/c.txt"},
+        {"claim": "outside", "expected": 1, "query": "python: len(open(__import__('os').devnull).read()) + 1"},
+    ])
+    report = reverify([findings], workers=1)
+    status = [r.replay.status for r in report.results]
+    assert status == ["ERROR", "ERROR", "ERROR", "OK"]
+    assert "read-only" in report.results[0].replay.error and "read-only" in report.results[2].replay.error
+    assert not any((repo / "data" / "ds" / name).exists() for name in ("a.txt", "b.txt", "c.txt"))
+
+
+@pytest.mark.skipif(sys.platform != "darwin" or not shutil.which("sandbox-exec"), reason="macOS sandbox")
+def test_shell_triples_run_in_a_write_denying_sandbox(repo: Path):
+    findings = _write_findings(repo, [
+        {"claim": "native write", "expected": 1, "query": "shell: touch data/ds/d.txt; echo 1"}])
+    report = reverify([findings], workers=1)
+    if report.results[0].replay.status == "OK":  # the sandbox applied: touch failed, echo ran
+        assert not (repo / "data" / "ds" / "d.txt").exists()
+
+
+def test_compare_baseline_keeps_dataframe_scans_in_helper_scripts(repo: Path, tmp_path: Path):
+    """A helper that queries a pandas frame by name (FROM df) works under a substitution too."""
+    lane = repo / "data" / "ds" / "exploration" / "lane"
+    (lane / "frame.py").write_text(
+        "import duckdb, json\nimport pandas as pd\n"
+        "con = duckdb.connect('data/ds/sharur.duckdb', read_only=True)\n"
+        "df = pd.DataFrame({'x': [1, 2, 3]})\n"
+        "n = con.execute('SELECT COUNT(*) FROM df').fetchone()[0]\n"
+        "print(json.dumps(n + con.execute('SELECT COUNT(*) FROM defense_systems').fetchone()[0]))\n")
+    findings = _write_findings(repo, [
+        {"claim": "frame + systems", "expected": 13,
+         "query": f"shell: {sys.executable} data/ds/exploration/lane/frame.py"}])
+    report = reverify([findings], workers=1, compare=True,
+                      baseline_substitutions=[("data/ds/sharur.duckdb", str(tmp_path / "staged.duckdb"))])
+    result = report.results[0]
+    assert (result.baseline.status, result.baseline.observed) == ("FAIL", 15), result.baseline.error
+    assert (result.replay.status, result.replay.observed) == ("OK", 13)
 
 
 # --------------------------------------------------------------------------- #

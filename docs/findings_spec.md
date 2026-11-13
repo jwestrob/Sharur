@@ -359,7 +359,8 @@ Queries can be:
 - SQL against `sharur.duckdb` (preferred)
 - Shell commands
 - Python one-liners
-- References to a concrete methods section when the logic is too large to inline
+- References to a concrete methods section when the logic is too large to inline. Mark such a
+  triple `"check": "narrative"`: `sharur reverify` reports it as `NARRATIVE` and leaves it unrun.
 
 **If you cannot write a verification query for a number, do not include that number in the finding.**
 
@@ -379,6 +380,30 @@ Write queries in a form it can replay:
   parses, so print a JSON number or list.
 - A float matches when the observed value, rounded to the precision written in `expected`,
   equals it; write `expected` with the precision the claim states.
+- A command's stdout that is not JSON is read, for a non-string `expected`, as a printed Python
+  value (`{'a': np.float64(0.5)}` reads as `{"a": 0.5}`) or as a list of two or more
+  whitespace-separated numbers (`12 7` reads as `[12, 7]`). Any other text stays text.
+- A check prints its value and writes nothing. Replays are read-only for files as well as
+  databases: Python code a replay runs may not write inside the repository or to a substituted
+  database (an audit hook refuses it), a `shell:` command that redirects output into the
+  repository is refused unrun, and on macOS every shell triple runs under `sandbox-exec` with those
+  writes denied. A helper that regenerates working files is provenance; read its saved output in
+  the check instead (`python: json.load(open('…/facts.json'))['n']`).
+
+Status per triple: `OK`, `FAIL` (the value differs from `expected`), `ERROR` (the replay raised)
+or `NARRATIVE`. A narrative triple records a note and is reported, counted and never run:
+
+- `"check": "narrative"` marks one explicitly; use it for new findings.
+- Recorded queries are also recognized as notes: text that DuckDB cannot parse and that is not a
+  plain command line (`see methods.md`, `blastn -query …`), a labelled note (`Python: …`), and a
+  command followed by a remark: a parenthesized aside, a `#` comment, or an arrow to the file its
+  value was read from (`python a.py -> out.json`, which the shell would read as a redirection).
+- A plain command line chains (`;`, `&&`, `||`, `|`) `cd`, Python interpreters and read-only text
+  tools (`grep`, `cut`, `awk`, `wc`, `jq`, …) and writes no file; it replays without a `shell:`
+  prefix. Anything else needs `shell:`.
+- A labelled note whose text is a plain command line, optionally annotated `(prints JSON)` or
+  `(prints JSON; key 'K')`, replays as that command; the key selects one value of the printed
+  JSON object.
 
 ```bash
 # every triple of one dataset
