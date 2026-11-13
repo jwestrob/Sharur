@@ -1,13 +1,14 @@
 # Sharur dependency versions verified together on 2026-11-12: a clean `conda env create -f
 # environment.yml` on Linux x86-64 (Python 3.12.16), followed by the INSTALL.md quick start, the
-# full test suite and an ingest of examples/complete_genomes.
+# full test suite and an ingest of examples/complete_genomes. pandas 3.1.1 with Aksha 0.2.2: the
+# full test suite and Stage 04 on three of those genomes (same day).
 # Reference only: install with environment.yml (or `pip install -e ".[all,dev]"`), which resolves
 # current releases within the ranges in pyproject.toml. To reproduce this exact set:
 #   pip install -r requirements-lock.txt
 
 # Core
 duckdb==1.5.6          # pyproject.toml: !=1.2.1 (wrong window results), <2 (2.0 unsupported)
-pandas==2.3.3          # environment.yml: <3 (Aksha 0.2.1's KOFAM installer fails on pandas 3)
+pandas==3.1.1
 numpy==2.5.4
 pyarrow==26.0.1
 pydantic==2.14.3
@@ -17,7 +18,7 @@ rich==15.0.0
 requests==2.34.2
 
 # HMM search (Stage 04; Linux x86-64 wheels)
-aksha==0.2.1
+aksha==0.2.2           # environment.yml: >=0.2.2 (KOFAM install on pandas 3, CCTyper)
 aksha-runtime==0.1.1
 MacSyFinder==2.1.4
 

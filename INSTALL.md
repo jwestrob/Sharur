@@ -28,14 +28,8 @@ cd Sharur
 conda env create -f environment.yml
 conda activate sharur
 
-# Stage 04 HMM databases (about 2.5 GB to download; KOFAM is the largest). The dbCAN address
-# in Aksha 0.2.1's catalog moved, so point the catalog at the current dbCAN release first.
-aksha initialize --show_available > /dev/null      # writes Aksha's catalog on first use
-sed -i 's#https://bcb.unl.edu/dbCAN2/download/Databases/dbCAN-old@UGA/dbCAN-fam-HMMs.txt.v11#https://pro.unl.edu/dbCAN2/download/Databases/V14/dbCAN-HMMdb-V14.txt#' \
-  "${XDG_CONFIG_HOME:-$HOME/.config}/Aksha/hmm_databases.json"
+# Stage 04 HMM databases (about 2.5 GB to download; KOFAM is the largest)
 for db in PFAM KOFAM HydDB DefenseFinder dbCAN; do aksha initialize --hmms "$db"; done
-# Aksha 0.2.1 records KOFAM in the legacy Astra registry; register it for Aksha too
-sharur adopt-astra-hmms
 
 # DefenseFinder system models for Stage 07's defense-system caller (~/.macsyfinder/models)
 macsydata install --user --org mdmparis defense-finder-models
@@ -133,8 +127,8 @@ Aksha's registry of installed databases lives in its own config directory
 (`~/.config/Aksha/hmm_databases.json` on Linux). The standard pipeline (Stage 04) defaults to
 PFAM, KOFAM, HydDB, DefenseFinder, and dbCAN.
 
-**Moving from Astra.** Databases installed through Astra are already on disk; register them
-with Aksha instead of downloading them again:
+**Moving from Astra.** Databases installed through Astra (or KOFAM installed by Aksha 0.2.1) are
+already on disk; register them with Aksha instead of downloading them again:
 
 ```bash
 aksha initialize --show_available     # creates Aksha's registry on first run

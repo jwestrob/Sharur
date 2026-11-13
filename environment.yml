@@ -11,7 +11,7 @@ dependencies:
   # Compiled scientific libs (conda-forge)
   - numpy
   - scipy
-  - pandas<3             # Aksha 0.2.1's KOFAM installer fails on pandas 3
+  - pandas
   - pyarrow
   - h5py
   - matplotlib
@@ -36,7 +36,7 @@ dependencies:
   - pip:
       - -e ".[all,dev]"
       # Aksha runs Stage 04's HMM searches; its compiled runtime ships for Linux x86-64 only.
-      - aksha; sys_platform == "linux" and platform_machine == "x86_64"
+      - aksha>=0.2.2; sys_platform == "linux" and platform_machine == "x86_64"
       # MacSyFinder's `macsydata` downloads the DefenseFinder models that Stage 07's
       # defense-system caller reads (see INSTALL.md).
       - macsyfinder==2.1.4
